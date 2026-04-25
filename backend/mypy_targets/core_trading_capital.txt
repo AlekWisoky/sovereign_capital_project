@@ -1,0 +1,15 @@
+backend/victor_ai_bot/decision_engine.py
+backend/victor_ai_bot/portfolio_optimizer.py
+backend/victor_ai_bot/profitability_state.py
+backend/victor_ai_bot/execution.py
+backend/victor_ai_bot/execution_capture/route_execution_plan.py
+backend/victor_ai_bot/runtime_services/opportunity_service.py
+backend/victor_ai_bot/runtime_services/capital_admission_service.py
+backend/victor_ai_bot/runtime_services/execution_service.py
+backend/victor_ai_bot/runtime_services/receipt_service.py
+backend/victor_ai_bot/runtime_services/auxiliary_state_service.py
+backend/victor_ai_bot/runtime_services/state_service.py
+backend/victor_ai_bot/runtime_services/state_summary_service.py
+backend/victor_ai_bot/runtime_services/operator_summary_service.py
+backend/victor_ai_bot/treasury/ledger.py
+backend/victor_ai_bot/treasury/journal.py

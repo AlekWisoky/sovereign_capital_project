@@ -1,0 +1,18 @@
+services:
+  victor-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Point to a chain config. You can mount custom configs via volumes.
+      - VICTOR_CONFIG=/app/backend/config/ethereum.yaml
+      - VICTOR_VALIDATE_CONTRACT=1
+      # Structured logs recommended for production.
+      - VICTOR_LOG_JSON=1
+      # Optional: set admin key to lock down mutating endpoints.
+      - VICTOR_ADMIN_KEY=
+    volumes:
+      - ./backend/config:/app/backend/config:ro
+      - ./backend/data:/app/backend/data

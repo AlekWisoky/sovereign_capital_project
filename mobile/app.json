@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "x∆v",
+    "slug": "xdv-sovereign-capital",
+    "version": "0.8.1",
+    "orientation": "portrait",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "sdkVersion": "50.0.0",
+    "userInterfaceStyle": "dark",
+    "scheme": "xdv",
+    "android": {
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "xdv"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
+      "package": "com.xdv.sovereigncapital",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#070A12"
+      }
+    },
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#070A12"
+    },
+    "ios": {
+      "bundleIdentifier": "com.xdv.sovereigncapital",
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png",
+      "backgroundColor": "#070A12",
+      "themeColor": "#070A12"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

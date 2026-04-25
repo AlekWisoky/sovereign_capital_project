@@ -1,0 +1,8 @@
+{
+  "filter_paths": "lib|node_modules|out",
+  "exclude": [
+    "naming-convention",
+    "solc-version"
+  ],
+  "solc_disable_warnings": true
+}

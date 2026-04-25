@@ -1,0 +1,91 @@
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = """
+(
+  ^/backend/tests/
+ |^/backend/scripts/
+ |^/backend/victor_ai_bot/(agents|alpha_marketplace|alpha_platform|analytics|aqe|backtest|behaveagent|caq_kds|cross_chain|funding_arb|liquidations|llm_inl|market_making|mev|research_pipeline|simulator|stat_arb|superstructure)/
+ |^/backend/victor_ai_bot/fioa/(audit|runtime)\\.py
+ |^/backend/victor_ai_bot/abi_utils.py
+)
+"""
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["backend"]
+extend-exclude = ["backend/tests","backend/scripts","backend/victor_ai_bot/agents","backend/victor_ai_bot/alpha_marketplace","backend/victor_ai_bot/alpha_platform","backend/victor_ai_bot/analytics","backend/victor_ai_bot/aqe","backend/victor_ai_bot/backtest","backend/victor_ai_bot/behaveagent","backend/victor_ai_bot/caq_kds","backend/victor_ai_bot/cross_chain","backend/victor_ai_bot/fioa/audit.py","backend/victor_ai_bot/fioa/runtime.py","backend/victor_ai_bot/funding_arb","backend/victor_ai_bot/liquidations","backend/victor_ai_bot/llm_inl","backend/victor_ai_bot/market_making","backend/victor_ai_bot/mev","backend/victor_ai_bot/research_pipeline","backend/victor_ai_bot/simulator","backend/victor_ai_bot/stat_arb","backend/victor_ai_bot/superstructure","backend/victor_ai_bot/abi_utils.py"]
+
+[tool.ruff.lint]
+extend-select = ["E", "F", "I", "B"]
+ignore = ["E501", "E402", "E401", "E701", "E702", "I001", "B008", "F401", "B904", "B009", "B010", "B012", "B023", "B905", "E741", "F811", "F821", "F841"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_ignores = false
+no_implicit_optional = false
+follow_imports = "skip"
+
+
+[tool.static_analysis_coverage]
+slices = [
+  "backend/mypy_targets/base_api_runtime.txt",
+  "backend/mypy_targets/core_trading_capital.txt",
+  "backend/mypy_targets/governance_reporting.txt",
+  "backend/mypy_targets/auxiliary_dashboard_readiness.txt",
+  "backend/mypy_targets/dashboard_auxiliary_capital_lifecycle.txt",
+        "backend/mypy_targets/optional_family_aux_reads.txt",
+]
+core_paths = [
+  "backend/victor_ai_bot/decision_engine.py",
+  "backend/victor_ai_bot/portfolio_optimizer.py",
+  "backend/victor_ai_bot/profitability_state.py",
+  "backend/victor_ai_bot/execution.py",
+  "backend/victor_ai_bot/execution_capture/route_execution_plan.py",
+  "backend/victor_ai_bot/runtime_services/opportunity_service.py",
+  "backend/victor_ai_bot/runtime_services/capital_admission_service.py",
+  "backend/victor_ai_bot/runtime_services/execution_service.py",
+  "backend/victor_ai_bot/runtime_services/receipt_service.py",
+  "backend/victor_ai_bot/runtime_services/auxiliary_state_service.py",
+  "backend/victor_ai_bot/runtime_services/state_service.py",
+  "backend/victor_ai_bot/runtime_services/state_summary_service.py",
+  "backend/victor_ai_bot/runtime_services/operator_summary_service.py",
+  "backend/victor_ai_bot/treasury/ledger.py",
+  "backend/victor_ai_bot/treasury/journal.py",
+  "backend/victor_ai_bot/runtime_services/runtime_control_service.py",
+  "backend/victor_ai_bot/runtime_services/command_center_service.py",
+  "backend/victor_ai_bot/runtime_services/capital_explanation_service.py",
+  "backend/victor_ai_bot/command_center_overlay.py",
+  "backend/victor_ai_bot/runtime_legacy_subsystem_controls.py",
+  "backend/victor_ai_bot/runtime_legacy_single_chain_views.py",
+  "backend/victor_ai_bot/fioa/runtime.py",
+  "backend/victor_ai_bot/analytics/quicksight/datasets.py",
+  "backend/victor_ai_bot/analytics/quicksight/dashboards.py",
+  "backend/victor_ai_bot/analytics/quicksight/runtime.py",
+  "backend/victor_ai_bot/runtime_services/summary_read_contract.py",
+  "backend/victor_ai_bot/runtime_services/telemetry_service.py",
+  "backend/victor_ai_bot/runtime_services/cio_service.py",
+  "backend/victor_ai_bot/runtime_services/analytics_service.py",
+  "backend/victor_ai_bot/runtime_services/runtime_state_facade.py",
+  "backend/victor_ai_bot/runtime_services/runtime_operator_facade.py",
+  "backend/victor_ai_bot/runtime_services/runtime_multiruntime_state_facade.py",
+  "backend/victor_ai_bot/runtime_services/launch_service.py",
+  "backend/victor_ai_bot/runtime_services/capital_truth_service.py",
+  "backend/victor_ai_bot/api_routes/telemetry.py",
+  "backend/victor_ai_bot/api_routes/risk_routes.py",
+  "backend/victor_ai_bot/api_routes/frontend_routes.py",
+  "backend/victor_ai_bot/api_routes/multichain_routes.py",
+  "backend/victor_ai_bot/api_routes/_route_helpers.py",
+        "backend/victor_ai_bot/runtime_services/runtime_capital_facade.py",
+        "backend/victor_ai_bot/api_routes/superstructure_routes.py",
+        "backend/victor_ai_bot/api_routes/runtime_routes.py",
+        "backend/victor_ai_bot/api_routes/ops_routes.py",
+        "backend/victor_ai_bot/api_routes/overlay_routes.py",
+        "backend/victor_ai_bot/api_routes/intelligence_routes.py",
+        "backend/victor_ai_bot/api_routes/governance_routes.py",
+        "backend/victor_ai_bot/api_routes/engine_routes.py",
+        "backend/victor_ai_bot/api_routes/advanced.py",
+]

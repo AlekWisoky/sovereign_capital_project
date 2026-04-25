@@ -1,0 +1,36 @@
+services:
+  victor-backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    # Bind backend to loopback only; expose through Caddy.
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - VICTOR_CONFIG=/app/backend/config/ethereum.yaml
+      - VICTOR_LOG_JSON=1
+      - VICTOR_ADMIN_KEY=
+      - VICTOR_AUTOSTART=1
+      - VICTOR_DEPLOYMENT_MODE=private
+      - VICTOR_CORS_ALLOW_ORIGINS=https://your-netlify-site.netlify.app
+    volumes:
+      - ../backend/config:/app/backend/config:ro
+      - ../backend/data:/app/backend/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    depends_on:
+      - victor-backend
+
+volumes:
+  caddy_data:
+  caddy_config:

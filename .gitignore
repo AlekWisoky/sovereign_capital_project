@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite
+*.sqlite3
+
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local runtime data
+backend/data/
+data/
+*.log
+
+# Additional cleanup hygiene
+backend/backend/
+backend/data/**/*.sqlite3
+backend/data/**/*.sqlite
+backend/__pycache__/
+backend/.pytest_cache/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+*.swp
+*~

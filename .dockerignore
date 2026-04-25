@@ -1,0 +1,14 @@
+
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+mobile/node_modules
+mobile/dist
+mobile/.expo
+backend/backend
+backend/data/**/*.sqlite3
+backend/data/**/*.sqlite

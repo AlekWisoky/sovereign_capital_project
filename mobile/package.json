@@ -1,0 +1,62 @@
+{
+  "name": "xdv-mobile",
+  "version": "0.8.1",
+  "main": "node_modules/expo/AppEntry.js",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "dev:web": "expo start --web",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:ci": "tsc -p tsconfig.ci.json --outDir .ci-build",
+    "test:unit": "node --test .ci-build/tests/amounts.test.js .ci-build/tests/launch-utils.test.js .ci-build/tests/launch-store.test.js .ci-build/tests/execution-summary.test.js .ci-build/tests/explain-summary.test.js .ci-build/tests/wealth-goal-summary.test.js .ci-build/tests/offramp-status.test.js .ci-build/tests/capital-truth-health.test.js .ci-build/tests/command-utils.test.js .ci-build/tests/fund-utils.test.js .ci-build/tests/projection-compatibility.test.js",
+    "ci:test": "npm run typecheck:ci && npm run test:unit",
+    "export:web": "expo export --platform web --output-dir dist",
+    "build:web": "npm run export:web",
+    "serve:web": "npx serve dist",
+    "netlify:build": "npm run build:web",
+    "build:android:apk": "eas build --platform android --profile production",
+    "build:ios": "eas build --platform ios --profile production",
+    "verify:install": "npm install --package-lock-only --ignore-scripts --no-fund --no-audit --legacy-peer-deps && npm run typecheck && npm run ci:test"
+  },
+  "dependencies": {
+    "expo": "~50.0.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-native": "0.73.6",
+    "react-native-web": "~0.19.10",
+    "@expo/metro-runtime": "~3.1.3",
+    "@react-navigation/native": "6.1.9",
+    "@react-navigation/native-stack": "6.9.17",
+    "@react-navigation/stack": "6.3.29",
+    "@react-navigation/bottom-tabs": "6.5.11",
+    "react-native-safe-area-context": "4.8.2",
+    "react-native-screens": "3.29.0",
+    "react-native-gesture-handler": "~2.14.0",
+    "@react-native-async-storage/async-storage": "1.21.0",
+    "react-native-get-random-values": "1.11.0",
+    "@walletconnect/modal-react-native": "1.1.0",
+    "expo-secure-store": "~15.0.8",
+    "expo-linear-gradient": "~12.7.2",
+    "react-native-svg": "14.1.0",
+    "expo-status-bar": "~1.11.1",
+    "@walletconnect/react-native-compat": "2.23.8"
+  },
+  "devDependencies": {
+    "typescript": "5.3.3",
+    "@types/node": "22.10.1",
+    "@types/react": "~18.2.45"
+  },
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "overrides": {
+    "@walletconnect/sign-client": "2.23.8",
+    "@walletconnect/universal-provider": "2.23.8",
+    "@xmldom/xmldom": "0.8.11"
+  }
+}

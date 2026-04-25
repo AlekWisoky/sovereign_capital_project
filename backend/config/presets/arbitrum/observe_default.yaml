@@ -1,0 +1,74 @@
+chain:
+  name: arbitrum
+  chain_id: 42161
+  rpc_read:
+  - https://arbitrum-one-rpc.publicnode.com
+  - https://arb1.arbitrum.io/rpc
+  - https://arb-one.api.pocket.network
+  rpc_send:
+  - https://arbitrum-one-rpc.publicnode.com
+  - https://arb1.arbitrum.io/rpc
+  - https://arb-one.api.pocket.network
+  ws:
+  - wss://example.invalid/arbitrum/ws
+  weth: ''
+  univ3_quoter_v2: ''
+  univ3_factory: ''
+  univ3_swap_router: ''
+  aave_v3_pool: ''
+  balancer_vault: ''
+  token_universe: []
+  discovery_interval_blocks: 80
+  discovery_max_calls: 16
+  rpc_private: []
+v3_pairs:
+- token_in: '0x0000000000000000000000000000000000000000'
+  token_out: '0x0000000000000000000000000000000000000000'
+  fee: 3000
+  amount_in: '0'
+curve_pools: []
+balancer_pools: []
+safety:
+  minProfitAbs: '0'
+  minProfitBps: 0
+  slippage_bps: 50
+  max_borrow_amount: '0'
+  require_estimate_gas: true
+  require_simulation: false
+flags:
+  enable_two_leg_loops: true
+  enable_curve_autogen: true
+  enable_balancer_autogen: true
+  enable_three_leg_loops: false
+  enable_v3_triangular: false
+  enable_discovery: false
+execution:
+  dry_run: true
+  auto_trading: false
+  auto_reinvest_enabled: false
+  reinvest_rate: 0
+  base_borrow_amount: '0'
+  send_mode: public
+  gas_mode: standard
+  redact_routes_when_private: true
+  gas_limit: 900000
+  private_key_env: VICTOR_PRIVATE_KEY
+  from_address: ''
+  executor_address: ''
+  profit_to: ''
+  withdraw_mode: txdata
+  withdraw_allowlist: []
+  withdraw_tokens: []
+  flash_provider: aave
+  flashloan_fee_bps: 9
+  gas_presets:
+    standard_max_fee_gwei: 25
+    standard_priority_fee_gwei: 2
+    fast_max_fee_gwei: 40
+    fast_priority_fee_gwei: 3
+    instant_max_fee_gwei: 80
+    instant_priority_fee_gwei: 5
+__strategy__:
+  name: observe_default
+  tier: basic
+  description: Observe-only baseline preset.

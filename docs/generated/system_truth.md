@@ -1,0 +1,249 @@
+# System Truth
+
+- generated_at: 2026-04-10T23:45:52.213000Z
+- generated_at_ms: 1775864752213
+- generated_at_iso: 2026-04-10T23:45:52.213000Z
+- thin_shell_runtime_py_lines: 47
+- thin_shell_api_py_lines: 21
+- backend_test_file_count: 323
+- mobile_test_file_count: 11
+- route_count: 162
+- route_count_basis: app_routes
+- http_route_count: 158
+- http_route_count_basis: http_methods_excluding_head_options
+- application_route_count: 154
+- framework_route_count: 4
+- app_route_count: 162
+- websocket_route_count: 4
+- runtime_legacy_lines: 243
+- api_legacy_lines: 83
+- runtime_bundle_definition_count: 1
+- runtime_legacy_broad_except_count: 0
+- api_legacy_broad_except_count: 0
+- legacy_broad_except_count: 0
+- backend_broad_except_count: 1
+- canonical_data_root: backend/data
+- duplicate_route_count: 0
+- duplicate_route_policy: deduplicated_mount_surface
+- contract_validation_command: ./scripts/verify_contracts.sh
+
+## Broad exception sites
+- backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py:45 except Exception as e:
+
+## Runtime services
+- admission_service
+- agent_service
+- analytics_service
+- auxiliary_state_service
+- capital_admission_service
+- capital_explanation_service
+- capital_state_projection
+- capital_truth_dependency_reads
+- capital_truth_derived_state
+- capital_truth_health_contract
+- capital_truth_projection
+- capital_truth_read_context
+- capital_truth_reconciliation
+- capital_truth_runtime_state_adapters
+- capital_truth_service
+- capital_truth_service_adapters
+- capital_truth_service_shell
+- capital_truth_source_snapshot
+- capital_truth_summary_assembly
+- capital_truth_summary_coordination
+- capital_truth_summary_finalization
+- capital_write_service
+- cio_service
+- command_center_service
+- control_state
+- decision_service
+- engine_service
+- execution_lifecycle_projection
+- execution_service
+- family_hardening_service
+- fund_service
+- launch_service
+- lifecycle_service
+- operator_summary_service
+- opportunity_service
+- profitability_truth
+- receipt_service
+- replay_service
+- route_runtime_truth
+- runtime_after_tick_facade
+- runtime_agent_consensus_facade
+- runtime_auto_queue_facade
+- runtime_blockspace_facade
+- runtime_budget_facade
+- runtime_can_execute_facade
+- runtime_capital_facade
+- runtime_caq_kds_facade
+- runtime_constructor_facade
+- runtime_context
+- runtime_control_service
+- runtime_decision_facade
+- runtime_decision_finalize_facade
+- runtime_engine_facade
+- runtime_execute_dispatch_facade
+- runtime_execute_entry_facade
+- runtime_execute_wrapper_facade
+- runtime_execution_capture_init
+- runtime_execution_support_init
+- runtime_feature_bus_facade
+- runtime_institutional_init
+- runtime_lifecycle_facade
+- runtime_loop_entry_facade
+- runtime_loop_tail_facade
+- runtime_market_facade
+- runtime_multiruntime_lifecycle_facade
+- runtime_multiruntime_meta_facade
+- runtime_multiruntime_state_facade
+- runtime_operator_facade
+- runtime_optional_family_init
+- runtime_optional_overlay_init
+- runtime_overlay_facade
+- runtime_post_tick_facade
+- runtime_postdecision_state_facade
+- runtime_predecision_state_facade
+- runtime_primary_scan_facade
+- runtime_receipt_facade
+- runtime_replay_facade
+- runtime_routes_service
+- runtime_score_overlay_facade
+- runtime_spread_facade
+- runtime_state_facade
+- runtime_tick_iteration_facade
+- runtime_tick_prepare_facade
+- runtime_tick_scan_facade
+- runtime_treasury_guidance_facade
+- runtime_treasury_overlay_facade
+- runtime_unit_econ_facade
+- state_service
+- state_summary_service
+- summary_read_contract
+- telemetry_service
+- treasury_governance_truth
+- treasury_service
+- wealth_goal_service
+- withdraw_all_service
+- withdraw_control_contract
+- withdraw_ledger_service
+
+## API route modules
+- admin_routes
+- advanced
+- agents
+- analytics_routes
+- command_center_routes
+- engine_routes
+- evolution
+- frontend_routes
+- fund_routes
+- governance_routes
+- intelligence_routes
+- launch_routes
+- multichain_routes
+- operator_command_routes
+- ops_routes
+- overlay_routes
+- rft
+- risk_routes
+- runtime_routes
+- strategies
+- superstructure_routes
+- system_routes
+- telemetry
+- treasury_extra
+- wealth
+- withdraw_all_routes
+- withdraw_routes
+
+## Launch modes
+- V1_ONLY
+- V1_PLUS_STABLE_ALPHA
+- STAGED_MULTI_STRATEGY
+- FULL_MULTI_STRATEGY
+
+## Health states
+- live
+- degraded
+- observe_only
+- capped_live
+- disabled
+- quarantined
+
+## Families
+- cex_cex_arb: promotion=capped_live, stages=pilot_capital, friends_family, private_fund
+- cex_dex_arb: promotion=capped_live, stages=internal_capital, pilot_capital, private_fund
+- flash_arb: promotion=production, stages=internal_capital, pilot_capital, private_fund, institutional_scale
+- funding_arb: promotion=production, stages=pilot_capital, friends_family, private_fund, institutional_scale
+- liquidation_capture: promotion=shadow_live, stages=internal_capital, pilot_capital
+- mev_search: promotion=shadow_live, stages=internal_capital, pilot_capital
+- stat_arb: promotion=paper, stages=pilot_capital, friends_family, private_fund
+- treasury_yield: promotion=production, stages=internal_capital, pilot_capital, friends_family, private_fund, institutional_scale
+- volatility_market_making: promotion=paper, stages=pilot_capital, friends_family
+
+## Duplicate routes
+- none
+
+## Routes
+- GET /admin (victor_ai_bot.api_routes.frontend_routes.admin_page)
+- GET /api/admin/capabilities (victor_ai_bot.api_routes.admin_routes.admin_capabilities)
+- GET /api/admin/state (victor_ai_bot.api_routes.ops_routes.admin_state)
+- GET /api/agenthub/state (victor_ai_bot.api_routes.system_routes.agent_hub_state)
+- GET /api/agents/attribution (victor_ai_bot.api_routes.agents.agents_attribution)
+- GET /api/agents/catalog (victor_ai_bot.api_routes.agents.agents_catalog)
+- GET /api/agents/state (victor_ai_bot.api_routes.agents.agents_state)
+- POST /api/analytics/ask (victor_ai_bot.api_routes.analytics_routes.analytics_ask)
+- GET /api/analytics/dashboards (victor_ai_bot.api_routes.analytics_routes.analytics_dashboards)
+- GET /api/analytics/datasets/{name} (victor_ai_bot.api_routes.analytics_routes.analytics_dataset)
+- POST /api/analytics/scenario (victor_ai_bot.api_routes.analytics_routes.analytics_scenario)
+- GET /api/analytics/state (victor_ai_bot.api_routes.analytics_routes.analytics_state)
+- POST /api/arbitrage/start (victor_ai_bot.api_routes.ops_routes.arbitrage_start)
+- GET /api/arbitrage/state (victor_ai_bot.api_routes.ops_routes.arbitrage_state)
+- POST /api/arbitrage/stop (victor_ai_bot.api_routes.ops_routes.arbitrage_stop)
+- GET /api/behaveagent/state (victor_ai_bot.api_routes.system_routes.behaveagent_state)
+- GET /api/blockspace/state (victor_ai_bot.api_routes.system_routes.blockspace_state)
+- GET /api/brain/state (victor_ai_bot.api_routes.runtime_routes.brain_state)
+- POST /api/command/approve (victor_ai_bot.api_routes.operator_command_routes.command_approve)
+- POST /api/command/directive (victor_ai_bot.api_routes.operator_command_routes.command_set_directive)
+- POST /api/command/exploration_cap (victor_ai_bot.api_routes.operator_command_routes.command_set_exploration_cap)
+- POST /api/command/force_safe_mode (victor_ai_bot.api_routes.operator_command_routes.command_force_safe_mode)
+- POST /api/command/risk_multiplier (victor_ai_bot.api_routes.operator_command_routes.command_set_risk_multiplier)
+- GET /api/command/state (victor_ai_bot.api_routes.operator_command_routes.command_state)
+- GET /api/commandcenter/audit/tail (victor_ai_bot.api_routes.command_center_routes.commandcenter_audit_tail)
+- POST /api/commandcenter/control (victor_ai_bot.api_routes.command_center_routes.commandcenter_control)
+- GET /api/commandcenter/explain (victor_ai_bot.api_routes.command_center_routes.commandcenter_explain)
+- GET /api/commandcenter/snapshot (victor_ai_bot.api_routes.command_center_routes.commandcenter_snapshot)
+- GET /api/consensus/state (victor_ai_bot.api_routes.system_routes.consensus_state)
+- GET /api/deploy/info (victor_ai_bot.api_routes.runtime_routes.deploy_info)
+- GET /api/engines/state (victor_ai_bot.api_routes.engine_routes.engine_state)
+- GET /api/evolution/state (victor_ai_bot.api_routes.evolution.evolution_state)
+- GET /api/execution/calibration (victor_ai_bot.api_routes.telemetry.execution_calibration)
+- POST /api/fioa/agent/restrict (victor_ai_bot.api_routes.overlay_routes.fioa_restrict)
+- POST /api/fioa/agent/resume (victor_ai_bot.api_routes.overlay_routes.fioa_resume)
+- GET /api/fioa/audit (victor_ai_bot.api_routes.overlay_routes.fioa_audit)
+- GET /api/fioa/report (victor_ai_bot.api_routes.overlay_routes.fioa_report)
+- POST /api/fioa/safe_mode (victor_ai_bot.api_routes.overlay_routes.fioa_safe_mode)
+- GET /api/fioa/state (victor_ai_bot.api_routes.overlay_routes.fioa_state)
+- GET /api/fund/capital-truth (victor_ai_bot.api_routes.fund_routes.fund_capital_truth)
+- GET /api/fund/doctrine (victor_ai_bot.api_routes.fund_routes.fund_doctrine)
+- GET /api/fund/family-hardening (victor_ai_bot.api_routes.fund_routes.fund_family_hardening)
+- GET /api/fund/internal-prime (victor_ai_bot.api_routes.fund_routes.fund_internal_prime)
+- GET /api/fund/ledger (victor_ai_bot.api_routes.fund_routes.fund_ledger)
+- GET /api/fund/research/candidates (victor_ai_bot.api_routes.fund_routes.fund_candidates)
+- POST /api/fund/research/candidates (victor_ai_bot.api_routes.fund_routes.create_candidate)
+- POST /api/fund/research/promote (victor_ai_bot.api_routes.fund_routes.promote_candidate)
+- GET /api/fund/summary (victor_ai_bot.api_routes.fund_routes.fund_summary)
+- GET /api/gas/presets (victor_ai_bot.api_routes.ops_routes.gas_presets)
+- GET /api/governance/health (victor_ai_bot.api_routes.superstructure_routes.governance_health)
+- GET /api/governance/intent/{intent_id} (victor_ai_bot.api_routes.governance_routes.view_intent)
+- POST /api/governance/intent/{intent_id}/approve (victor_ai_bot.api_routes.governance_routes.approve_intent)
+- POST /api/governance/intent/{intent_id}/reject (victor_ai_bot.api_routes.governance_routes.reject_intent)
+- GET /api/governance/state (victor_ai_bot.api_routes.system_routes.governance_state)
+- GET /api/governance/state_legacy (victor_ai_bot.api_routes.superstructure_routes.governance_state_legacy)
+- GET /api/governance/threat_status (victor_ai_bot.api_routes.governance_routes.threat_status)
+- GET /api/inl/daily_digest (victor_ai_bot.api_routes.intelligence_routes.inl_daily_digest)
+- GET /api/inl/explain/opportunity/{opp_id} (victor_ai_bot.api_routes.intelligence_routes.inl_explain_opportunity)
+- POST /api/inl/scenario_sweep (victor_ai_bot.api_routes.intelligence_routes.inl_scenario_sweep)
+- GET /api/kds/multichain/state (victor_ai_bot.api_routes.intelligence_routes.kds_state_multichain)

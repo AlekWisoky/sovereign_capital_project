@@ -1,0 +1,846 @@
+{
+  "classificationEngine": "automatic_runtime_reachability_v3",
+  "contractVersion": "optional_family_status_v2",
+  "evidencePolicy": "status derives only from mounted routes, runtime initialization, import reachability, and gating conditions; tests and docs are supplemental evidence only",
+  "families": [
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
+        ],
+        "importReachability": [
+          "backend/tests/test_fund_os_upgrade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_fund_os_upgrade.py"
+        ]
+      },
+      "family": "alpha_marketplace",
+      "path": "backend/victor_ai_bot/alpha_marketplace",
+      "primaryEvidenceCount": 4,
+      "pythonFileCount": 4,
+      "referenceCount": 5,
+      "status": "staged",
+      "statusInputs": {
+        "gatingConditions": 1,
+        "importReachability": 2,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 1,
+      "why": "Runtime or server reachability exists, but only behind explicit gating or optional initialization."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_fund_os_upgrade.py",
+          "backend/tests/test_multistrategy_fund_upgrade.py",
+          "backend/victor_ai_bot/fund_os/master_orchestrator.py",
+          "backend/victor_ai_bot/runtime_services/fund_service.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/fund_service.py"
+        ],
+        "tests": [
+          "backend/tests/test_fund_os_upgrade.py",
+          "backend/tests/test_multistrategy_fund_upgrade.py"
+        ]
+      },
+      "family": "alpha_platform",
+      "path": "backend/victor_ai_bot/alpha_platform",
+      "primaryEvidenceCount": 5,
+      "pythonFileCount": 7,
+      "referenceCount": 7,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 4,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 2,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_95plus_realism.py",
+          "backend/tests/test_adaptation_maintenance.py",
+          "backend/tests/test_agent_hub_maintenance.py",
+          "backend/tests/test_agents_system.py",
+          "backend/tests/test_aqe_core_actions.py",
+          "backend/tests/test_aqe_import_boundary.py",
+          "backend/tests/test_arbitrage_adapters_hardening.py",
+          "backend/tests/test_arbitrage_runtime_hardening.py",
+          "backend/tests/test_arbitrage_screener_helper.py",
+          "backend/tests/test_consensus_engine_persistence.py",
+          "backend/tests/test_decision_engine_hardening.py",
+          "backend/tests/test_engine_upgrades.py",
+          "backend/tests/test_investment_agents_maintenance.py",
+          "backend/tests/test_meta_memory_persistence_hardening.py",
+          "backend/tests/test_mev_guard_helper.py",
+          "backend/tests/test_mev_mempool_hardening.py",
+          "backend/tests/test_mev_runtime_hardening.py",
+          "backend/tests/test_profitability_projection_auxiliary_sync.py",
+          "backend/tests/test_smmae_engine.py",
+          "backend/tests/test_spread_engine_hardening.py",
+          "backend/tests/test_spread_formulas.py",
+          "backend/tests/test_stage27_ccxt_connector_hardening.py",
+          "backend/tests/test_stage33_meta_runtime_hardening.py",
+          "backend/tests/test_stage85_dex_adapters_hardening.py",
+          "backend/tests/test_stage88_exchange_adapter_hardening.py",
+          "backend/tests/test_unified_state_maintenance.py",
+          "backend/victor_ai_bot/decision_engine.py",
+          "backend/victor_ai_bot/execution.py",
+          "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/runtime_services/engine_service.py",
+          "backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py",
+          "backend/victor_ai_bot/runtime_services/runtime_optional_family_init.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/engine_service.py",
+          "backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py",
+          "backend/victor_ai_bot/runtime_services/runtime_optional_family_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_95plus_realism.py",
+          "backend/tests/test_adaptation_maintenance.py",
+          "backend/tests/test_agent_hub_maintenance.py",
+          "backend/tests/test_agents_system.py",
+          "backend/tests/test_aqe_core_actions.py",
+          "backend/tests/test_aqe_import_boundary.py",
+          "backend/tests/test_arbitrage_adapters_hardening.py",
+          "backend/tests/test_arbitrage_runtime_hardening.py",
+          "backend/tests/test_arbitrage_screener_helper.py",
+          "backend/tests/test_consensus_engine_persistence.py",
+          "backend/tests/test_decision_engine_hardening.py",
+          "backend/tests/test_engine_upgrades.py",
+          "backend/tests/test_investment_agents_maintenance.py",
+          "backend/tests/test_meta_memory_persistence_hardening.py",
+          "backend/tests/test_mev_guard_helper.py",
+          "backend/tests/test_mev_mempool_hardening.py",
+          "backend/tests/test_mev_runtime_hardening.py",
+          "backend/tests/test_profitability_projection_auxiliary_sync.py",
+          "backend/tests/test_smmae_engine.py",
+          "backend/tests/test_spread_engine_hardening.py",
+          "backend/tests/test_spread_formulas.py",
+          "backend/tests/test_stage27_ccxt_connector_hardening.py",
+          "backend/tests/test_stage33_meta_runtime_hardening.py",
+          "backend/tests/test_stage85_dex_adapters_hardening.py",
+          "backend/tests/test_stage88_exchange_adapter_hardening.py",
+          "backend/tests/test_unified_state_maintenance.py"
+        ]
+      },
+      "family": "aqe",
+      "path": "backend/victor_ai_bot/aqe",
+      "primaryEvidenceCount": 35,
+      "pythonFileCount": 86,
+      "referenceCount": 61,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 32,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 3
+      },
+      "supplementalReferenceCount": 26,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_backtest_replay_maintenance.py",
+          "backend/tests/test_profitability_truth_selection_sync.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_backtest_replay_maintenance.py",
+          "backend/tests/test_profitability_truth_selection_sync.py"
+        ]
+      },
+      "family": "backtest",
+      "path": "backend/victor_ai_bot/backtest",
+      "primaryEvidenceCount": 2,
+      "pythonFileCount": 2,
+      "referenceCount": 4,
+      "status": "shadow",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 2,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 2,
+      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_behaveagent_runtime_maintenance.py",
+          "backend/victor_ai_bot/config.py",
+          "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_behaveagent_runtime_maintenance.py"
+        ]
+      },
+      "family": "behaveagent",
+      "path": "backend/victor_ai_bot/behaveagent",
+      "primaryEvidenceCount": 5,
+      "pythonFileCount": 8,
+      "referenceCount": 6,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 4,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 1,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_caq_kds_intelligence_maintenance.py",
+          "backend/tests/test_caq_kds_self_evolution_maintenance.py",
+          "backend/tests/test_gmao_governance_maintenance.py",
+          "backend/tests/test_stage22_rag_context_hardening.py",
+          "backend/tests/test_stage24_multimodal_context_hardening.py",
+          "backend/victor_ai_bot/api_routes/intelligence_routes.py",
+          "backend/victor_ai_bot/aqe/arbitrage/runtime.py",
+          "backend/victor_ai_bot/aqe/coordination/feature_bus.py",
+          "backend/victor_ai_bot/aqe/core/smmae_engine.py",
+          "backend/victor_ai_bot/aqe/mev/runtime.py",
+          "backend/victor_ai_bot/decision_engine.py",
+          "backend/victor_ai_bot/runtime_legacy.py",
+          "backend/victor_ai_bot/runtime_services/execution_service.py",
+          "backend/victor_ai_bot/runtime_services/receipt_service.py",
+          "backend/victor_ai_bot/runtime_services/runtime_agent_consensus_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_caq_kds_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_feature_bus_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_market_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_post_tick_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_predecision_state_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_spread_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_treasury_guidance_facade.py",
+          "backend/victor_ai_bot/superstructure/capital.py",
+          "backend/victor_ai_bot/superstructure/command_center.py",
+          "backend/victor_ai_bot/superstructure/gmao_governance.py",
+          "backend/victor_ai_bot/superstructure/negotiation.py",
+          "backend/victor_ai_bot/superstructure/path_planning.py",
+          "backend/victor_ai_bot/superstructure/registry.py",
+          "backend/victor_ai_bot/superstructure/runtime.py",
+          "backend/victor_ai_bot/superstructure/stability.py"
+        ],
+        "mountedRoutes": [
+          "backend/victor_ai_bot/api_routes/intelligence_routes.py"
+        ],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/execution_service.py",
+          "backend/victor_ai_bot/runtime_services/receipt_service.py",
+          "backend/victor_ai_bot/runtime_services/runtime_agent_consensus_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_caq_kds_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_feature_bus_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_market_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_post_tick_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_predecision_state_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_spread_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_treasury_guidance_facade.py"
+        ],
+        "tests": [
+          "backend/tests/test_caq_kds_intelligence_maintenance.py",
+          "backend/tests/test_caq_kds_self_evolution_maintenance.py",
+          "backend/tests/test_gmao_governance_maintenance.py",
+          "backend/tests/test_stage22_rag_context_hardening.py",
+          "backend/tests/test_stage24_multimodal_context_hardening.py"
+        ]
+      },
+      "family": "caq_kds",
+      "path": "backend/victor_ai_bot/caq_kds",
+      "primaryEvidenceCount": 41,
+      "pythonFileCount": 8,
+      "referenceCount": 46,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 30,
+        "mountedRoutes": 1,
+        "runtimeInitialization": 10
+      },
+      "supplementalReferenceCount": 5,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "cex_connectors",
+      "path": "backend/victor_ai_bot/cex_connectors",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 4,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "desk_runtime",
+      "path": "backend/victor_ai_bot/desk_runtime",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 3,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_evolution_lifecycle.py",
+          "backend/victor_ai_bot/api_routes/__init__.py",
+          "backend/victor_ai_bot/aqe/meta/runtime.py"
+        ],
+        "mountedRoutes": [
+          "backend/victor_ai_bot/api_routes/evolution.py"
+        ],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_evolution_lifecycle.py"
+        ]
+      },
+      "family": "evolution",
+      "path": "backend/victor_ai_bot/evolution",
+      "primaryEvidenceCount": 4,
+      "pythonFileCount": 7,
+      "referenceCount": 5,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 3,
+        "mountedRoutes": 1,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 1,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_fioa_audit_maintenance.py",
+          "backend/tests/test_fioa_runtime_maintenance.py",
+          "backend/victor_ai_bot/config.py",
+          "backend/victor_ai_bot/llm_inl/runtime.py",
+          "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/runtime_services/runtime_optional_overlay_init.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/runtime_optional_overlay_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_fioa_audit_maintenance.py",
+          "backend/tests/test_fioa_runtime_maintenance.py"
+        ]
+      },
+      "family": "fioa",
+      "path": "backend/victor_ai_bot/fioa",
+      "primaryEvidenceCount": 7,
+      "pythonFileCount": 4,
+      "referenceCount": 9,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 6,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 2,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "funding_arb",
+      "path": "backend/victor_ai_bot/funding_arb",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 6,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "liquidations",
+      "path": "backend/victor_ai_bot/liquidations",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 8,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_fioa_audit_maintenance.py",
+          "backend/tests/test_llm_inl_runtime_maintenance.py",
+          "backend/tests/test_profitability_projection_auxiliary_sync.py",
+          "backend/victor_ai_bot/config.py",
+          "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/runtime_services/runtime_optional_overlay_init.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/runtime_optional_overlay_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_fioa_audit_maintenance.py",
+          "backend/tests/test_llm_inl_runtime_maintenance.py",
+          "backend/tests/test_profitability_projection_auxiliary_sync.py"
+        ]
+      },
+      "family": "llm_inl",
+      "path": "backend/victor_ai_bot/llm_inl",
+      "primaryEvidenceCount": 7,
+      "pythonFileCount": 3,
+      "referenceCount": 10,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 6,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 3,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_multistrategy_fund_upgrade.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_multistrategy_fund_upgrade.py"
+        ]
+      },
+      "family": "market_making",
+      "path": "backend/victor_ai_bot/market_making",
+      "primaryEvidenceCount": 1,
+      "pythonFileCount": 5,
+      "referenceCount": 2,
+      "status": "shadow",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 1,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 1,
+      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "mev",
+      "path": "backend/victor_ai_bot/mev",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 6,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [
+          "backend/victor_ai_bot/server.py"
+        ],
+        "importReachability": [
+          "backend/tests/test_omar_runtime.py",
+          "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/server.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/server.py"
+        ],
+        "tests": [
+          "backend/tests/test_omar_runtime.py"
+        ]
+      },
+      "family": "omar",
+      "path": "backend/victor_ai_bot/omar",
+      "primaryEvidenceCount": 5,
+      "pythonFileCount": 11,
+      "referenceCount": 6,
+      "status": "staged",
+      "statusInputs": {
+        "gatingConditions": 1,
+        "importReachability": 3,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 1,
+      "why": "Runtime or server reachability exists, but only behind explicit gating or optional initialization."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "pod_runtime",
+      "path": "backend/victor_ai_bot/pod_runtime",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 3,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_fund_os_upgrade.py",
+          "backend/tests/test_fund_research_routes_maintenance.py",
+          "backend/tests/test_research_workspace.py",
+          "backend/victor_ai_bot/api_routes/fund_routes.py",
+          "backend/victor_ai_bot/runtime_services/fund_service.py",
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
+        ],
+        "mountedRoutes": [
+          "backend/victor_ai_bot/api_routes/fund_routes.py"
+        ],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/fund_service.py",
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_fund_os_upgrade.py",
+          "backend/tests/test_fund_research_routes_maintenance.py",
+          "backend/tests/test_research_workspace.py"
+        ]
+      },
+      "family": "research_pipeline",
+      "path": "backend/victor_ai_bot/research_pipeline",
+      "primaryEvidenceCount": 9,
+      "pythonFileCount": 8,
+      "referenceCount": 12,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 6,
+        "mountedRoutes": 1,
+        "runtimeInitialization": 2
+      },
+      "supplementalReferenceCount": 3,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_api_rft_and_wealth.py",
+          "backend/tests/test_rft_graders.py",
+          "backend/tests/test_rft_ids.py",
+          "backend/tests/test_rft_routes_hardening_maintenance.py",
+          "backend/tests/test_rft_schema.py",
+          "backend/victor_ai_bot/api_routes/__init__.py",
+          "backend/victor_ai_bot/api_routes/rft.py",
+          "backend/victor_ai_bot/runtime_subsystems/replay_store.py"
+        ],
+        "mountedRoutes": [
+          "backend/victor_ai_bot/api_routes/rft.py"
+        ],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_subsystems/replay_store.py"
+        ],
+        "tests": [
+          "backend/tests/test_api_rft_and_wealth.py",
+          "backend/tests/test_rft_graders.py",
+          "backend/tests/test_rft_ids.py",
+          "backend/tests/test_rft_routes_hardening_maintenance.py",
+          "backend/tests/test_rft_schema.py"
+        ]
+      },
+      "family": "rft",
+      "path": "backend/victor_ai_bot/rft",
+      "primaryEvidenceCount": 10,
+      "pythonFileCount": 17,
+      "referenceCount": 15,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 8,
+        "mountedRoutes": 1,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 5,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_multistrategy_fund_upgrade.py",
+          "backend/tests/test_risk_reward_upgrades.py",
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py",
+          "backend/victor_ai_bot/runtime_subsystems/reward_trace.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py",
+          "backend/victor_ai_bot/runtime_subsystems/reward_trace.py"
+        ],
+        "tests": [
+          "backend/tests/test_multistrategy_fund_upgrade.py",
+          "backend/tests/test_risk_reward_upgrades.py"
+        ]
+      },
+      "family": "rl_training",
+      "path": "backend/victor_ai_bot/rl_training",
+      "primaryEvidenceCount": 6,
+      "pythonFileCount": 6,
+      "referenceCount": 8,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 4,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 2
+      },
+      "supplementalReferenceCount": 2,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": []
+      },
+      "family": "simulator",
+      "path": "backend/victor_ai_bot/simulator",
+      "primaryEvidenceCount": 0,
+      "pythonFileCount": 4,
+      "referenceCount": 0,
+      "status": "dead",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 0,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 0,
+      "why": "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_multistrategy_fund_upgrade.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_multistrategy_fund_upgrade.py"
+        ]
+      },
+      "family": "stat_arb",
+      "path": "backend/victor_ai_bot/stat_arb",
+      "primaryEvidenceCount": 1,
+      "pythonFileCount": 5,
+      "referenceCount": 2,
+      "status": "shadow",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 1,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 1,
+      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_capital_maintenance.py",
+          "backend/tests/test_gmao_governance_maintenance.py",
+          "backend/tests/test_negotiation_maintenance.py",
+          "backend/tests/test_path_planning_maintenance.py",
+          "backend/tests/test_profitability_projection_auxiliary_sync.py",
+          "backend/tests/test_registry_maintenance.py",
+          "backend/tests/test_stability_maintenance.py",
+          "backend/tests/test_superstructure_command_center_maintenance.py",
+          "backend/tests/test_superstructure_runtime_maintenance.py",
+          "backend/tests/test_superstructure_types.py",
+          "backend/victor_ai_bot/config.py",
+          "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/runtime_services/runtime_optional_overlay_init.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/runtime_optional_overlay_init.py"
+        ],
+        "tests": [
+          "backend/tests/test_capital_maintenance.py",
+          "backend/tests/test_gmao_governance_maintenance.py",
+          "backend/tests/test_negotiation_maintenance.py",
+          "backend/tests/test_path_planning_maintenance.py",
+          "backend/tests/test_profitability_projection_auxiliary_sync.py",
+          "backend/tests/test_registry_maintenance.py",
+          "backend/tests/test_stability_maintenance.py",
+          "backend/tests/test_superstructure_command_center_maintenance.py",
+          "backend/tests/test_superstructure_runtime_maintenance.py",
+          "backend/tests/test_superstructure_types.py"
+        ]
+      },
+      "family": "superstructure",
+      "path": "backend/victor_ai_bot/superstructure",
+      "primaryEvidenceCount": 14,
+      "pythonFileCount": 13,
+      "referenceCount": 24,
+      "status": "live",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 13,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 1
+      },
+      "supplementalReferenceCount": 10,
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    }
+  ],
+  "statusDerivation": [
+    "mountedRoutes",
+    "runtimeInitialization",
+    "importReachability",
+    "gatingConditions"
+  ],
+  "summary": {
+    "familyCount": 23,
+    "statusCounts": {
+      "dead": 7,
+      "live": 11,
+      "shadow": 3,
+      "staged": 2
+    }
+  }
+}

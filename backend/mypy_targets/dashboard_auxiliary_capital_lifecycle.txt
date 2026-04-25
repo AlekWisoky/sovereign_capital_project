@@ -1,0 +1,9 @@
+backend/victor_ai_bot/api_routes/_route_helpers.py
+backend/victor_ai_bot/api_routes/system_routes.py
+backend/victor_ai_bot/api_routes/treasury_extra.py
+backend/victor_ai_bot/api_routes/wealth.py
+backend/victor_ai_bot/api_routes/analytics_routes.py
+backend/victor_ai_bot/api_routes/agents.py
+backend/victor_ai_bot/api_routes/strategies.py
+backend/victor_ai_bot/api_routes/risk_routes.py
+backend/victor_ai_bot/runtime_services/withdraw_all_service.py
