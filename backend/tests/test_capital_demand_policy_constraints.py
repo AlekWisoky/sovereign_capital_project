@@ -1,15 +1,15 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pytest
 
-from victor_ai_bot.capital_demand import CapitalDemandError, ConversionEvidence, Money, apply_aggressiveness_cap, apply_goal_cap, live_eligible_family, selector_scalar
+from victor_ai_bot.capital_demand import Capacity, CapitalDemandError, ConversionEvidence, Money, apply_aggressiveness_cap, apply_goal_cap, live_eligible_family
 from test_capital_demand_contract import NOW, demand
 
 
 def test_conversion_exact_fractional_rounding_and_direction():
     evidence = ConversionEvidence("oracle:v1", NOW, 60, "ETH", "USD", 2, 3)
-    source = Money(3, "ETH", 18, "ETH")
-    assert evidence.convert(source, target_asset="USD", target_decimals=2, now=NOW, rounding="floor").amount == 2
+    source = Money(2, "ETH", 18, "ETH")
+    assert evidence.convert(source, target_asset="USD", target_decimals=2, now=NOW, rounding="floor").amount == 1
     assert evidence.convert(source, target_asset="USD", target_decimals=2, now=NOW, rounding="ceil").amount == 2
     with pytest.raises(CapitalDemandError):
         evidence.convert(Money(1, "USDC", 6, "USDC"), target_asset="USD", target_decimals=2, now=NOW)
@@ -29,7 +29,10 @@ def test_conversion_stale_invalid_ratio_and_zero_denominator_fail_closed():
 
 def test_demand_freshness_and_provider_capacity_are_independent_constraints():
     assert demand().validate(now=NOW) == demand().status
-    assert demand(provider_capacity_requirement=__import__("victor_ai_bot.capital_demand", fromlist=["Capacity"]).Capacity(9_000_000, "USDC", "aave", NOW, NOW + timedelta(minutes=5))).validate(now=NOW).value == "invalid"
+    low_capacity = Capacity(9_000_000, "USDC", "aave", NOW, NOW + timedelta(minutes=5))
+    assert demand(provider_capacity_requirement=low_capacity).validate(now=NOW).value == "invalid"
+    expired_capacity = Capacity(12_000_000, "USDC", "aave", NOW - timedelta(minutes=10), NOW - timedelta(minutes=1))
+    assert demand(provider_capacity_requirement=expired_capacity).validate(now=NOW).value == "stale"
     assert demand(demand_expires_at=NOW - timedelta(seconds=1)).validate(now=NOW).value == "stale"
 
 

@@ -17,7 +17,7 @@ def demand(**overrides):
         fee_reserve=Money(10, "USD", 2, "USD"), provider_capacity_requirement=Capacity(12_000_000, "USDC", "aave", NOW, NOW + timedelta(minutes=5)),
         worst_case_exposure=Money(60, "USD", 2, "USD"), strategy_budget_consumption=Money(60, "USD", 2, "USD"),
         provenance=provenance, demand_generated_at=NOW, demand_expires_at=NOW + timedelta(minutes=5),
-        max_worst_case_exposure=Money(100, "USD", 2, "USD"),
+        max_worst_case_exposure=Money(100, "USD", 2, "USD"), execution_plan_id="plan-1",
     )
     base.update(overrides)
     return CapitalDemand(**base)
@@ -44,6 +44,8 @@ def test_money_identity_and_provenance_are_explicit():
         Money(1, "", 6, "USDC")
     with pytest.raises(CapitalDemandError):
         demand(provenance=Provenance("test", "v1", "source", "event", NOW, "other-trade", "inputs"))
+    with pytest.raises(CapitalDemandError):
+        demand(provenance=Provenance("", "v1", "source", "event", NOW, "trade-1", "inputs"))
 
 
 def test_conflicting_authoritative_sources_fail_closed():
