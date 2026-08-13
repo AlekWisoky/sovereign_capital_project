@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from enum import Enum
 from typing import Iterable
@@ -21,12 +21,6 @@ class CapitalDemandError(ValueError):
 
 @dataclass(frozen=True)
 class Money:
-    """Integer quantity with explicit asset, decimals, and denomination.
-
-    `amount` is base units of `asset`; it is never implicitly USD or wei.
-    `denomination` identifies the accounting unit used for comparison.
-    """
-
     amount: int
     asset: str
     decimals: int
@@ -46,8 +40,6 @@ class Money:
 
 @dataclass(frozen=True)
 class Capacity:
-    """Provider constraint, intentionally not treasury capital."""
-
     amount: int
     unit: str
     provider: str
@@ -146,6 +138,7 @@ class CapitalDemand:
     gas_solvency_required: bool = True
     max_worst_case_exposure: Money | None = None
     corroborating_sources: tuple[DemandSource, ...] = ()
+    execution_plan_id: str = ""
     status: DemandStatus = DemandStatus.VALID
 
     def __post_init__(self) -> None:
@@ -154,7 +147,7 @@ class CapitalDemand:
         except ValueError as exc:
             raise CapitalDemandError("unknown demand status") from exc
         object.__setattr__(self, "status", status)
-        if any(not str(value).strip() for value in (self.correlation_id, self.strategy_family, self.capital_source, self.execution_asset, self.treasury_denomination)):
+        if any(not str(value).strip() for value in (self.correlation_id, self.strategy_family, self.capital_source, self.execution_asset, self.treasury_denomination, self.execution_plan_id)):
             raise CapitalDemandError("demand identity is incomplete")
         if self.provenance.correlation_id != self.correlation_id:
             raise CapitalDemandError("provenance correlation mismatch")
@@ -204,7 +197,6 @@ def project_strategy_budget(demand: CapitalDemand, *, now: datetime) -> Money:
 
 
 def selector_scalar(demand: CapitalDemand, *, now: datetime) -> int:
-    """Only strategy-budget consumption, expressed in declared treasury base units."""
     return project_strategy_budget(demand, now=now).amount
 
 
@@ -213,11 +205,14 @@ def require_same_treasury_denomination(budget: Money, demand: CapitalDemand) -> 
         raise CapitalDemandError("treasury budget and demand are not comparable")
 
 
+def matches_execution_plan(demand: CapitalDemand, *, execution_plan_id: str, execution_notional: Money, now: datetime) -> bool:
+    return demand.execution_plan_id == execution_plan_id and demand.execution_notional.compatible_with(execution_notional) and demand.execution_notional.amount == execution_notional.amount and demand.validate(now=now) == DemandStatus.VALID
+
+
 def apply_goal_cap(*, demand: CapitalDemand, cap: int, accepted: bool, now: datetime) -> CapitalDemand:
     if not accepted or cap < 0 or demand.validate(now=now) != DemandStatus.VALID:
         raise CapitalDemandError("goal cannot authorize or rescue invalid demand")
-    reduced = min(demand.strategy_budget_consumption.amount, cap)
-    return _replace_budget(demand, reduced)
+    return _replace_budget(demand, min(demand.strategy_budget_consumption.amount, cap))
 
 
 def apply_aggressiveness_cap(*, demand: CapitalDemand, multiplier: int, safety_approved: bool, now: datetime) -> CapitalDemand:
@@ -228,11 +223,7 @@ def apply_aggressiveness_cap(*, demand: CapitalDemand, multiplier: int, safety_a
 
 def live_eligible_family(*, family: str, mode: str = "phase_a", selected: Iterable[str] = (), ready: bool = False, governed: bool = False) -> bool:
     selected_set = {str(item) for item in selected}
-    if mode == "ai_managed":
-        return family in selected_set and ready and governed and family == "flash_arb"
-    if mode == "single":
-        return family in selected_set and ready and governed and family == "flash_arb"
-    if mode == "multi":
+    if mode in {"single", "multi", "ai_managed"}:
         return family in selected_set and ready and governed and family == "flash_arb"
     return family == "flash_arb" and ready and governed
 
