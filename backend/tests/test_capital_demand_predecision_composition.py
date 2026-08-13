@@ -1,31 +1,27 @@
-from dataclasses import dataclass
+from dataclasses import replace
 
 import pytest
 
 from victor_ai_bot.capital_demand import CapitalDemandError, Money, selector_scalar
-from test_capital_demand_contract import demand
+from test_capital_demand_contract import NOW, demand
 
 
-@dataclass
-class Composition:
-    composed_before_decision: bool = False
-
-    def compose(self, opportunity, *, final_size, treasury_state, provider_state):
-        assert opportunity["id"] and final_size > 0
-        assert treasury_state["denomination"] == "USDC"
-        assert provider_state["capacity"] >= final_size
-        self.composed_before_decision = True
-        return demand(execution_notional=Money(final_size, "USDC", 6, "USDC"))
+def test_composition_contract_requires_final_inputs_before_selection():
+    value = demand()
+    assert value.provenance.source_event == "opp-1"
+    assert selector_scalar(value, now=NOW) == value.strategy_budget_consumption.amount
 
 
-def test_demand_composition_requires_real_upstream_inputs_before_decision():
-    composer = Composition()
-    result = composer.compose({"id": "opp-1"}, final_size=1_000, treasury_state={"denomination": "USDC"}, provider_state={"capacity": 1_000})
-    assert composer.composed_before_decision is True
-    assert selector_scalar(result) == result.strategy_budget_consumption.amount
+def test_size_borrow_requote_capacity_and_gas_changes_invalidate_old_demand():
+    value = demand()
+    changed_size = replace(value, execution_notional=Money(11_000_000, "USDC", 6, "USDC"))
+    assert changed_size.validate(now=NOW) is not value.validate(now=NOW)
+    changed_provider = replace(value, provider_capacity_requirement=replace(value.provider_capacity_requirement, amount=10_000_000))
+    assert changed_provider.validate(now=NOW) is not value.validate(now=NOW)
+    changed_gas = replace(value, gas_reserve=Money(0, "USD", 2, "USD"))
+    assert changed_gas.validate(now=NOW).value == "invalid"
 
 
-def test_missing_upstream_truth_fails_closed_instead_of_guessing():
-    composer = Composition()
-    with pytest.raises(AssertionError):
-        composer.compose({"id": "opp-1"}, final_size=0, treasury_state={}, provider_state={})
+def test_missing_or_ambiguous_upstream_truth_fails_closed():
+    with pytest.raises(CapitalDemandError):
+        demand(source_identity="")
