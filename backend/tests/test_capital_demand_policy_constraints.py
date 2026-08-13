@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from victor_ai_bot.capital_demand import CapitalDemandError, ConversionEvidence, Money, selector_scalar
@@ -5,10 +7,12 @@ from test_capital_demand_contract import demand
 
 
 def test_no_implicit_usd_times_10_power_18_conversion():
-    value = demand(treasury_denomination="USDC", treasury_decimals=6)
     with pytest.raises(CapitalDemandError):
-        selector_scalar(value) if value.strategy_budget_consumption.denomination != "USDC" else None
-    assert value.strategy_budget_consumption.amount == 7
+        demand(
+            execution_notional=Money(1, "ETH", 18, "ETH"),
+            execution_asset="ETH",
+            execution_decimals=18,
+        )
 
 
 def test_invalid_numeric_values_fail_closed():
@@ -26,8 +30,13 @@ def test_rounding_is_explicit():
 
 
 def test_conversion_required_for_cross_denomination_projection():
-    evidence = ConversionEvidence("oracle:v1", __import__("datetime").datetime.now(__import__("datetime").timezone.utc), 60, "ETH", "USDC", 2_000, 1)
-    value = demand(conversion=evidence)
+    evidence = ConversionEvidence("oracle:v1", datetime.now(timezone.utc), 60, "ETH", "USDC", 2_000, 1)
+    value = demand(
+        execution_notional=Money(1, "ETH", 18, "ETH"),
+        execution_asset="ETH",
+        execution_decimals=18,
+        conversion=evidence,
+    )
     assert selector_scalar(value) == 7
 
 
