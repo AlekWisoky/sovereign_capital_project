@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING
 from enum import Enum
-from typing import Any, Mapping
 
 
 class DemandStatus(str, Enum):
@@ -27,7 +26,7 @@ class Money:
     denomination: str
 
     def __post_init__(self) -> None:
-        if isinstance(self.amount, bool) or int(self.amount) < 0:
+        if isinstance(self.amount, bool) or not isinstance(self.amount, int) or self.amount < 0:
             raise CapitalDemandError("money amount must be a non-negative integer")
         if not str(self.asset).strip() or not str(self.denomination).strip():
             raise CapitalDemandError("money asset and denomination are required")
@@ -81,25 +80,27 @@ class CapitalDemand:
     status: DemandStatus = DemandStatus.VALID
 
     def __post_init__(self) -> None:
-        required = {
-            "correlation_id": self.correlation_id,
-            "strategy_family": self.strategy_family,
-            "capital_source": self.capital_source,
-            "execution_asset": self.execution_asset,
-            "treasury_denomination": self.treasury_denomination,
-            "provenance": self.provenance,
-            "source_identity": self.source_identity,
-        }
-        if any(not str(value).strip() for value in required.values()):
+        try:
+            status = self.status if isinstance(self.status, DemandStatus) else DemandStatus(str(self.status))
+        except ValueError as exc:
+            raise CapitalDemandError("unknown demand status") from exc
+        object.__setattr__(self, "status", status)
+        required = (self.correlation_id, self.strategy_family, self.capital_source, self.execution_asset, self.treasury_denomination, self.provenance, self.source_identity)
+        if any(not str(value).strip() for value in required):
             raise CapitalDemandError("CapitalDemand identity and provenance are required")
-        if not 0 <= self.execution_decimals <= 255 or not 0 <= self.treasury_decimals <= 255:
+        if not isinstance(self.execution_decimals, int) or not 0 <= self.execution_decimals <= 255 or not isinstance(self.treasury_decimals, int) or not 0 <= self.treasury_decimals <= 255:
             raise CapitalDemandError("CapitalDemand decimals are invalid")
-        if self.strategy_budget_consumption.denomination != self.treasury_denomination:
-            raise CapitalDemandError("strategy budget must use treasury denomination")
+        if self.strategy_budget_consumption.denomination != self.treasury_denomination or self.strategy_budget_consumption.decimals != self.treasury_decimals:
+            raise CapitalDemandError("strategy budget must use treasury denomination and decimals")
         for value in (self.internal_capital_commitment, self.gas_reserve, self.fee_reserve, self.provider_capacity_requirement, self.worst_case_exposure):
-            if value.denomination != self.treasury_denomination:
-                raise CapitalDemandError("all treasury exposure fields must share treasury denomination")
-        if self.status == DemandStatus.VALID and self.conversion is not None and not self.conversion.fresh():
+            if value.denomination != self.treasury_denomination or value.decimals != self.treasury_decimals:
+                raise CapitalDemandError("treasury exposure fields must share treasury denomination and decimals")
+        if self.execution_notional.denomination != self.treasury_denomination:
+            if self.conversion is None:
+                raise CapitalDemandError("conversion evidence required for cross-denomination demand")
+            if self.conversion.from_denomination != self.execution_notional.denomination or self.conversion.to_denomination != self.treasury_denomination:
+                raise CapitalDemandError("conversion evidence does not match demand denominations")
+        if status == DemandStatus.VALID and self.conversion is not None and not self.conversion.fresh():
             raise CapitalDemandError("stale conversion evidence")
 
     @property
@@ -110,7 +111,6 @@ class CapitalDemand:
         if self.status != DemandStatus.VALID:
             return self.status
         if self.is_flash_loan and self.execution_notional.amount > 0 and self.internal_capital_commitment.amount == 0:
-            # Zero principal commitment is valid, but zero total exposure is not.
             if self.worst_case_exposure.amount == 0 or self.strategy_budget_consumption.amount == 0:
                 return DemandStatus.INVALID
         if self.conversion is not None and not self.conversion.fresh(now=now):
@@ -123,8 +123,10 @@ def project_strategy_budget(demand: CapitalDemand, *, now: datetime | None = Non
     if status != DemandStatus.VALID:
         raise CapitalDemandError(f"cannot project demand with status={status.value}")
     value = demand.strategy_budget_consumption
-    if value.denomination != demand.treasury_denomination:
+    if value.denomination != demand.treasury_denomination or value.decimals != demand.treasury_decimals:
         raise CapitalDemandError("projection denomination mismatch")
+    if value.amount <= 0:
+        raise CapitalDemandError("strategy budget consumption is unknown or zero")
     return value
 
 
@@ -139,6 +141,6 @@ def require_same_treasury_denomination(budget: Money, demand: CapitalDemand) -> 
 
 
 def ceil_ratio(amount: int, numerator: int, denominator: int) -> int:
-    if min(amount, numerator, denominator) < 0 or denominator == 0:
+    if not all(isinstance(value, int) and value >= 0 for value in (amount, numerator, denominator)) or denominator == 0:
         raise CapitalDemandError("invalid rounding inputs")
     return int((Decimal(amount) * Decimal(numerator) / Decimal(denominator)).to_integral_value(rounding=ROUND_CEILING))
