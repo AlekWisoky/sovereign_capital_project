@@ -10,35 +10,37 @@ A new Codex instance must not assume conversational memory exists. The repositor
 4. Read `docs/SOVEREIGN_OS_DECISIONS.md`.
 5. Read `docs/SOVEREIGN_OS_CHANGELOG.md`.
 6. Read `docs/AUTHORITY_DECISION_PACKET.md` if present on the current branch; if absent, treat that as a checkpoint discrepancy and recover the external decision artifact before implementation.
-7. Inspect the current branch and HEAD.
-8. Inspect the latest checkpoint commit.
-9. Verify that repository state matches this checkpoint.
-10. Only then continue work.
+7. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` when the current task concerns lifecycle identity.
+8. Inspect the current branch and HEAD.
+9. Inspect the latest checkpoint commit.
+10. Verify that repository state matches this checkpoint.
+11. Only then continue work.
 
 Never infer approval from chat, workspace memory, code existence, or a candidate design.
 
 ## CHECKPOINT ID
 
-`CHECKPOINT-2026-08-14-AUTHORITY-WORKSHOP`
+`CHECKPOINT-2026-08-14-ECONOMIC-IDENTITY-DESIGN`
 
 ## DATE/TIME
 
-2026-08-14, recovery checkpoint recorded after the authority decision workshop. Exact commit timestamp is authoritative once this file is committed.
+2026-08-14, after completion of the design-only economic identity milestone. Exact commit timestamp is authoritative once this file is committed.
 
 ## PROJECT IDENTITY
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
 - Branch: `architecture-c-contract-tests`
-- HEAD BEFORE: `4a002db3a77e6e9affe02b69f73047a5ec7bd162`
-- HEAD AFTER: populated by the commit that adds this checkpoint
+- HEAD BEFORE: `18fb9eaead974cbf3488e401f391caeaa0917ab4`
+- HEAD AFTER: populated by the commit that updates this checkpoint
+- Previous checkpoint: `7ffd3574e14bce6d220a092e1fa24b13a8b852b8`
 - Default branch baseline: `main@52d9669bda8c44d3ed74ab3df8bb5f572ff72fb2`
 
 This checkpoint reconstructs operational context from repository evidence, Git history, and checked-in documentation. It does not rely on conversational memory and does not authorize runtime or trading behavior.
 
 ## MILESTONE COMPLETED
 
-Workspace recovery, architecture synthesis, and authority decision packet preparation. The seven authority decisions remain unresolved. This checkpoint is the first concise operational resume point for future Codex workspaces.
+Design-only economic identity architecture documented. The candidate hierarchy, parent-child lineage, retry/replacement/restart/reorg behavior, settlement linkage, replay linkage, invariants, unresolved policy questions, and implementation no-go boundary are recorded in `docs/ECONOMIC_IDENTITY_DESIGN.md`.
 
 ## CURRENT ARCHITECTURE PHASE
 
@@ -46,7 +48,7 @@ Architecture C tests-only characterization and Phase-A policy-lock checkpoint. P
 
 ## CURRENT PRODUCTION-READINESS CLASSIFICATION
 
-`PARTIALLY_PROVEN` overall. Component boundaries exist, but the durable economic loop is not proven. CapitalDemand composition is `UNWIRED`; settlement authority, generic reservation, universal identity, pending recovery, deterministic replay, and live readiness are not proven.
+`PARTIALLY_PROVEN` overall. Component boundaries exist, but the durable economic loop is not proven. CapitalDemand composition is `UNWIRED`; durable identity, settlement authority, generic reservation, pending recovery, deterministic replay, and live readiness are not proven.
 
 ## PROVEN COMPONENTS
 
@@ -67,7 +69,7 @@ Architecture C tests-only characterization and Phase-A policy-lock checkpoint. P
 
 - Production `CapitalDemandComposer` and `DecisionSnapshot` assembly.
 - Generic durable reservation and concurrency safety.
-- Universal economic identity.
+- Universal economic identity and child lineage.
 - Restart, dropped-transaction, replacement, confirmation-depth, and reorg recovery.
 - Authoritative receipt-derived settlement.
 - Deterministic replay.
@@ -114,7 +116,7 @@ Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. These decis
 6. Durable economic/trade correlation identity origin and persistence.
 7. Opportunity freshness and empirical latency horizons.
 
-Candidate designs and owner-review analysis are recorded in the `AUTHORITY_DECISION_PACKET.md` decision artifact. At this HEAD, verify whether that file has been committed; an external artifact existed during recovery, but its repository presence was not established here.
+`docs/ECONOMIC_IDENTITY_DESIGN.md` records an identity hierarchy as a **candidate design**, not an approved policy. Exact intent creation boundary, multiple-fill semantics, cross-chain scope, replacement/cancellation, finality, reorg, privacy, retention, and disputed-state ownership remain unresolved.
 
 ## CURRENT IMPLEMENTATION BLOCKERS
 
@@ -141,22 +143,19 @@ Candidate designs and owner-review analysis are recorded in the `AUTHORITY_DECIS
 - No DecisionEngine integration.
 - No CapitalDemandComposer wiring.
 - No reservation writes.
+- Economic identity design is documentation only; no models, migrations, or persistence were added.
 
 ## FILES CHANGED IN LATEST MILESTONE
 
-Latest verified pre-checkpoint commit `4a002db3a77e6e9affe02b69f73047a5ec7bd162` changed only:
-
-- `backend/tests/test_authority_snapshot_contracts.py`
-
-This checkpoint commit changes only:
-
+- `docs/ECONOMIC_IDENTITY_DESIGN.md`
 - `docs/WORKSPACE_CHECKPOINT.md`
 
-No runtime files are changed.
+The immediately preceding checkpoint commit changed only `docs/WORKSPACE_CHECKPOINT.md`. No runtime files are changed.
 
 ## TESTS RUN AND RESULTS
 
-- Tests run for this checkpoint: none. This is a documentation-only checkpoint.
+- Tests run for this milestone: none. This is a documentation-only milestone.
+- Static validation: repository file contents and commit scope inspected; no executable test result established.
 - Latest milestone test execution: not established by repository history.
 - Do not claim branch-green status without executing and recording the relevant suite.
 
@@ -166,11 +165,11 @@ The canonical auto path can perform ordered hold, family, route/capture, flash-l
 
 ## CURRENT TASK
 
-Preserve the recovered engineering context and convert the seven unresolved authorities into an owner-review decision packet without silently resolving policy.
+Preserve and review the candidate economic identity architecture without implementing it. The seven authority decisions remain unresolved.
 
 ## NEXT TASK
 
-After owner review and explicit approval of policy boundaries: define read-only production authority snapshot schemas and adapters with contract tests, while keeping runtime behavior unchanged.
+Owner review of the identity design and seven authority decisions. After explicit policy approval: define read-only production authority snapshot schemas and adapters with contract tests, while keeping runtime behavior unchanged.
 
 ## TASKS EXPLICITLY FORBIDDEN
 
@@ -178,7 +177,7 @@ Until separately authorized and all required evidence exists:
 
 - Do not implement or wire `CapitalDemandComposer`.
 - Do not modify `DecisionEngine` integration.
-- Do not create generic reservation writes.
+- Do not create generic reservation writes or production identity persistence.
 - Do not change settlement/PnL semantics.
 - Do not modify Stage 1 characterization behavior.
 - Do not modify Solidity or ABI behavior.
@@ -199,6 +198,7 @@ Until separately authorized and all required evidence exists:
 - `docs/GOLDEN_PATH_TEST_PLAN.md`
 - `docs/PHASE_2_ARCHITECTURE_PLAN.md`
 - `docs/AUTHORITY_DECISION_PACKET.md` when committed; otherwise recover the external artifact and reconcile it before work.
+- `docs/ECONOMIC_IDENTITY_DESIGN.md`
 
 ## RELEVANT TESTS AND SOURCE
 
@@ -229,12 +229,13 @@ Until separately authorized and all required evidence exists:
 1. Read this file first.
 2. Read the four Sovereign OS documents listed above.
 3. Read `docs/AUTHORITY_DECISION_PACKET.md` if present; if absent, recover and reconcile the external artifact before implementation.
-4. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
-5. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
-6. Confirm the seven unresolved decisions have not been silently upgraded.
-7. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
-8. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
-9. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
+4. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` for identity architecture context.
+5. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
+6. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
+7. Confirm the seven unresolved decisions have not been silently upgraded.
+8. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
+9. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
+10. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
 
 ## CHECKPOINT PROTOCOL
 
