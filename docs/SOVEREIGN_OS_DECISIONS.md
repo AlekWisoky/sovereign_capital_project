@@ -101,3 +101,14 @@ Append-only. Do not rewrite a prior decision silently. Supersede with a new ADR 
 - DO NOT REGRESS: Update state/changelog after meaningful authorized milestones; never claim documentation authorizes trading.
 - DEPENDENCIES: Repository review discipline and actual test records.
 - EVIDENCE: This four-file memory layer, branch `architecture-c-contract-tests`, source baseline `314382c`.
+
+## ADR-011
+- DATE: 2026-08-13
+- DECISION: Durable trade correlation identity is distinct from transaction hash, capital commitment, execution-plan, and replay identities; CapitalDemand freshness requires explicit revisioned authoritative inputs rather than silent clock/default inference.
+- STATUS: DESIGN-APPROVED POLICY BOUNDARY; CONTRACT/TESTS-ONLY; RUNTIME UNWIRED
+- RATIONALE: Lifecycle identity must survive retry, replacement, and reorg, while freshness must bind demand to the authoritative revisions that produced it. These boundaries prevent ambiguous lineage and stale composition without inventing runtime authorities.
+- ALTERNATIVES REJECTED: Reusing a transaction or commit ID as universal trade identity; silently defaulting missing revisions; inventing numerical TTLs or latency horizons.
+- DO NOT REGRESS: Keep identities distinct and fail closed when required authoritative revisions are missing, stale, contradictory, or mismatched.
+- DEPENDENCIES: Durable `trade_correlation_id` origin and persistence, authoritative quote/profitability/treasury/provider-capacity/conversion/execution-plan revisions, and explicit opportunity-age/freshness and empirical latency horizons.
+- UNRESOLVED: Correlation-ID origin/persistence and all numerical freshness/latency horizons remain unresolved. This decision does not choose treasury denomination/reservation authority, conversion authority/decimal source, provider-capacity units/live authority, worst-case exposure formula, strategy-budget formula, or reservation lifecycle.
+- EVIDENCE: Tests-only milestones `7238f8a` and `d24f4cc`; supersedes only ADR-007's stale “latest state branch `314382c`” wording. Current policy-lock checkpoint is `d24f4cc`; no test-execution result is established.

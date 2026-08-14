@@ -29,3 +29,18 @@ Append-only. Test results reflect actual execution. Synthetic fixtures never pro
 6. Never bypass PnL authority, governance, readiness, risk, rollout, or execution gates.
 7. Never enable live trading without explicit authorization.
 8. Make small changes, run relevant tests, record actual results, update state/changelog, and leave a resume point.
+
+## 2026-08-13 - Phase-A CapitalDemand characterization and policy-lock reconciliation
+- DATE: 2026-08-13
+- PHASE: Architecture C tests-only characterization and policy-lock checkpoint
+- BRANCH: `architecture-c-contract-tests`
+- COMMIT: `d24f4cc56979e2b9bf227c127848b885e2a60f6d`
+- MILESTONES: `b60548c` pre-decision composition characterization; `7238f8a` Phase-A policy-readiness audit; `d24f4cc` Phase-A policy lock.
+- FILES CHANGED BY MILESTONES: `backend/tests/test_predecision_capital_demand_composition_characterization.py`, `backend/tests/test_phase_a_capital_demand_policy_readiness.py`, `backend/tests/test_phase_a_capital_demand_policy_lock.py`
+- TESTS RUN: Not established by repository history; none executed during this read-only reconciliation audit.
+- TEST RESULT: UNKNOWN. No test-pass claim.
+- ARCHITECTURAL STATUS: Architecture C remains contract/policy only; CapitalDemandComposer and DecisionEngine runtime composition remain unwired.
+- UNRESOLVED: Treasury denomination/reservation authority, conversion authority/decimals, provider-capacity units/live authority, worst-case exposure formula, strategy-budget reservation semantics, durable trade-correlation origin/persistence, and opportunity-age/freshness horizons.
+- SAFETY STATUS: Fail-closed behavior preserved; Stage 1 untouched; settlement/PnL unchanged; live trading disabled; Phase A remains `flash_arb` only when all gates pass.
+- LATENCY STATUS: First-class economic requirement; revisioned freshness inputs are locked at test-policy level, but empirical TTLs and latency horizons remain unresolved and decision authority remains unwired.
+- NEXT AUTHORIZED ACTION: Read-only policy investigation or separately authorized tests-only work; no runtime composer implementation until explicit authority decisions exist.

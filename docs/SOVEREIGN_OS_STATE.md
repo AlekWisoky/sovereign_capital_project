@@ -3,16 +3,16 @@
 Last reviewed: 2026-08-13. Repository: https://github.com/AlekWisoky/sovereign_capital_project
 
 ## Git and phase
-- CURRENT_PHASE: Architecture C contract checkpoint; runtime composition not started
+- CURRENT_PHASE: Architecture C tests-only characterization and Phase-A policy-lock checkpoint; runtime composition not started
 - CURRENT_BRANCH: `architecture-c-contract-tests`
-- CURRENT_COMMIT: `314382c8ef545322416d7d809c887f29d1afbfb0`
+- CURRENT_COMMIT: `d24f4cc56979e2b9bf227c127848b885e2a60f6d`
 - CURRENT_BASELINE: `main@52d9669`; audit `e7c9ba2`; Phase 2 plan `fe1550c`; corrected Stage 1 `24aea2b`
 - LIVE_TRADING: DISABLED
-- TEST EXECUTION STATUS: NOT EXECUTED during this read-only rehydration; branch-green status UNKNOWN
+- TEST EXECUTION STATUS: NOT ESTABLISHED by repository history for milestones `b60548c`, `7238f8a`, or `d24f4cc`; NOT EXECUTED during this read-only reconciliation; branch-green status UNKNOWN
 
 ## Proof matrix
 ### PROVEN
-Focused repository evidence exists for quote/scanner components, normalization, slippage, route/calldata components, mocked gas, event decoding, canonical auto-admission ordering, atomic settlement component writes, and Architecture C contract semantics including typed money, distinct exposure dimensions, freshness, capacity, conversion, provenance, conflict detection, selector projection, plan matching, Phase A eligibility, and settlement-authority invariants. This does not prove live deployment.
+Focused repository evidence exists for quote/scanner components, normalization, slippage, route/calldata components, mocked gas, event decoding, canonical auto-admission ordering, atomic settlement component writes, and Architecture C contract semantics including typed money, distinct exposure dimensions, freshness, capacity, conversion, provenance, conflict detection, selector projection, plan matching, Phase A eligibility, and settlement-authority invariants. Tests-only characterization, readiness-audit, and policy-lock files exist at `b60548c`, `7238f8a`, and `d24f4cc`. This proves repository evidence exists; it does not establish test execution or live deployment.
 
 ### PARTIALLY PROVEN
 Profitability and terminal execution checks; flashloan sizing; capital and treasury admission; family readiness; Wealth Goal surfaces; receipt/PnL/ledger/bankroll/treasury integration; replay persistence; learning; operator/mobile projections; latency spans, quote batching, execution spans, rolling p50/p90/p99, and receipt timing; Stage 1 characterization.
@@ -21,7 +21,7 @@ Profitability and terminal execution checks; flashloan sizing; capital and treas
 No authoritative pre-decision CapitalDemand composer; legacy scalar inference remains in portfolio construction; production treasury denomination/conversion authority, provider-capacity and exposure composition, durable reservation protocol, universal correlation, final-plan recomputation, mandatory goal linkage, and next-allocation proof are missing.
 
 ### NOT PROVEN
-One real closed capital loop; authoritative PnL-driven settlement; durable pending lifecycle; restart recovery; nonce/replacement lineage; confirmation depth/reorg handling; deterministic replay; latency-aware admission/profitability; sealed admission for every live-capable caller; authoritative operator reconstruction; live end-to-end trading.
+One real closed capital loop; authoritative PnL-driven settlement; durable pending lifecycle; restart recovery; nonce/replacement lineage; confirmation depth/reorg handling; deterministic replay; latency-aware admission/profitability; sealed admission for every live-capable caller; authoritative operator reconstruction; live end-to-end trading; test execution for the `b60548c`, `7238f8a`, and `d24f4cc` milestones.
 
 ### UNKNOWN
 Actual test-suite result for this checkpoint, live provider/RPC behavior, production deployment readiness, empirical latency budgets, and whether every manual/API path is covered by equivalent admission controls.
@@ -61,9 +61,9 @@ Any runtime Architecture C wiring, live trading, additional strategy-family elig
 - DISABLED_STRATEGIES: Every family lacking explicit readiness and governance; all non-flash families for Phase A live eligibility
 
 ## Active work and resume point
-- LAST_COMPLETED: Architecture C contract tests, latest `314382c`
-- AUTHORIZED_NEXT_STEP: Tests-only expected-fail characterization at the real pre-decision boundary. A scanner-produced Phase A opportunity must require fresh authoritative CapitalDemand before portfolio selection; selector uses only strategy-budget consumption in explicit treasury denomination; missing/stale/conflicting/unconvertible/capacity-invalid/provenance-invalid/plan-mismatched demand yields no trade; no signing/submission; no fake legacy metadata.
-- EXACT_RESUME_ACTION: inspect current branch, read the four Sovereign OS documents, then add only the focused characterization test after separate authorization.
+- LAST_COMPLETED: Tests-only pre-decision characterization `b60548c`, Phase-A readiness audit `7238f8a`, and policy lock `d24f4cc`; execution status unknown
+- AUTHORIZED_NEXT_STEP: Read-only policy investigation or separately authorized tests-only work. Do not implement runtime composition until treasury denomination/reservation, conversion, provider-capacity, exposure, strategy-budget reservation, durable correlation identity, and freshness/latency policies receive explicit resolution.
+- EXACT_RESUME_ACTION: inspect current branch and HEAD, read the four Sovereign OS documents, preserve the tests-only policy lock, and stop before production composition or any unresolved authority choice.
 - VERIFICATION COMMANDS: `git status --short`; `git log --oneline --decorate -n 20`; `pytest -q backend/tests/test_capital_demand_*.py backend/tests/test_settlement_authoritative_pnl_contract.py` (run only in an appropriately configured environment; record actual result)
 
 ## Forbidden next steps
@@ -71,8 +71,8 @@ No production edits, runtime wiring, Stage 1 repair, live-trading enablement, ex
 
 ## Durable checkpoints
 - CHECKPOINT-ARCHITECTURE: `fe1550c`, phase-2 plan, documented design; gaps remain; preserve as history.
-- CHECKPOINT-CONTRACT: `314382c`, architecture-c contract branch, contract ready/unwired; next safe action is tests-only composition characterization.
-- CHECKPOINT-COMPOSITION: NOT ESTABLISHED; blocked by missing production composer.
+- CHECKPOINT-CONTRACT: `d24f4cc`, architecture-c contract branch, tests-only characterization/readiness/policy lock present; contract/policy ready, runtime unwired, execution status unknown.
+- CHECKPOINT-COMPOSITION: NOT ESTABLISHED; blocked by missing production composer and unresolved authorities.
 - CHECKPOINT-EXECUTION: PARTIALLY PROVEN; canonical admission and execution components exist, sealed boundary/lifecycle absent.
 - CHECKPOINT-SETTLEMENT: BLOCKED; authority invariant unwired.
 - CHECKPOINT-LEDGER: PARTIALLY PROVEN at component level; lifecycle/correlation/reorg gaps remain.
