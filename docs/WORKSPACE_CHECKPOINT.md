@@ -9,7 +9,7 @@ A new Codex instance must not assume conversational memory exists. The repositor
 3. Read `docs/SOVEREIGN_OS_STATE.md`.
 4. Read `docs/SOVEREIGN_OS_DECISIONS.md`.
 5. Read `docs/SOVEREIGN_OS_CHANGELOG.md`.
-6. Read `docs/AUTHORITY_DECISION_PACKET.md` if present on the current branch; if absent, treat that as a checkpoint discrepancy and recover the external decision artifact before implementation.
+6. Read `docs/AUTHORITY_DECISION_PACKET.md`.
 7. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` when the current task concerns lifecycle identity.
 8. Read `docs/AUTHORITY_SOURCE_MAP.md` for the current read-side authority inventory.
 9. Inspect the current branch and HEAD.
@@ -21,27 +21,27 @@ Never infer approval from chat, workspace memory, code existence, or a candidate
 
 ## CHECKPOINT ID
 
-`CHECKPOINT-2026-08-14-READ-ONLY-AUTHORITY-FOUNDATION`
+`CHECKPOINT-2026-08-14-CANONICAL-AUTHORITY-PACKET`
 
 ## DATE/TIME
 
-2026-08-14, after the Phase 3 read-only authority foundation inventory. Exact commit timestamp is authoritative once this file is committed.
+2026-08-14, after committing the canonical authority decision packet. Exact commit timestamp is authoritative once this file is committed.
 
 ## PROJECT IDENTITY
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
 - Branch: `architecture-c-contract-tests`
-- HEAD BEFORE: `391edde317dde81021d76352314b5e1c592d3d55`
+- HEAD BEFORE: `7cd1e3841eb2cbaa743984fa275c927d2422eb42`
 - HEAD AFTER: populated by the commit that updates this checkpoint
-- Previous checkpoint: `b70c572c5c36b927f3395365d3e57d2cf9567e31`
+- Previous checkpoint: `a59d34377da4ffabd8a8cdb2d2f76dda586868a6`
 - Default branch baseline: `main@52d9669bda8c44d3ed74ab3df8bb5f572ff72fb2`
 
 This checkpoint reconstructs operational context from repository evidence, Git history, and checked-in documentation. It does not rely on conversational memory and does not authorize runtime or trading behavior.
 
 ## MILESTONE COMPLETED
 
-Phase 3 read-only authority foundation inventory. `docs/AUTHORITY_SOURCE_MAP.md` records current treasury, asset/decimal, conversion, provider, risk, governance, goal, execution-plan, opportunity, freshness/latency, and identity sources with units, persistence, revision evidence, classifications, conflicts, and read-only safety. No production snapshot types were added because no approved production location exists that would avoid silently selecting unresolved policy or wiring runtime behavior.
+Phase 3A documentation consolidation and recovery hardening. `docs/AUTHORITY_DECISION_PACKET.md` is now committed in Git as the canonical owner-review index for all seven unresolved authority decisions. Detailed evidence remains in the checkpoint, source map, identity design, and Sovereign OS documents.
 
 ## CURRENT ARCHITECTURE PHASE
 
@@ -49,7 +49,7 @@ Phase 3 read-only authority foundation, with Architecture C runtime composition 
 
 ## CURRENT PRODUCTION-READINESS CLASSIFICATION
 
-`PARTIALLY_PROVEN` overall. The authority inventory is documentation evidence only. CapitalDemand composition is `UNWIRED`; durable identity, generic reservation, pending recovery, settlement authority, deterministic replay, and live readiness remain unproven.
+`PARTIALLY_PROVEN` overall. The canonical decision packet is documentation evidence only. CapitalDemand composition is `UNWIRED`; durable identity, generic reservation, pending recovery, settlement authority, deterministic replay, and live readiness remain unproven.
 
 ## PROVEN COMPONENTS
 
@@ -61,7 +61,8 @@ Phase 3 read-only authority foundation, with Architecture C runtime composition 
 - Canonical auto-admission ordering.
 - Atomic settlement component writes and duplicate receipt checks.
 - Architecture C and authority snapshot semantics at contract/test level.
-- Static authority-source inventory recorded in `docs/AUTHORITY_SOURCE_MAP.md`.
+- Static authority-source inventory in `docs/AUTHORITY_SOURCE_MAP.md`.
+- Canonical owner-review authority packet in `docs/AUTHORITY_DECISION_PACKET.md`.
 
 ## PARTIALLY-PROVEN COMPONENTS
 
@@ -107,7 +108,7 @@ Approved at policy or contract level, not necessarily runtime-wired:
 - Durable correlation identity must remain distinct from tx hash, capital commit, execution plan, and replay identities.
 - Documentation is durable memory, never runtime authorization.
 
-Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. These decisions do not approve implementation or live trading.
+Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. The authority packet adds no new policy approvals.
 
 ## UNRESOLVED DECISIONS
 
@@ -119,7 +120,7 @@ Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. These decis
 6. Durable economic/trade correlation identity origin and persistence.
 7. Opportunity freshness and empirical latency horizons.
 
-The source map and prior design documents record only candidate adapter boundaries and candidate identity architecture. They do not resolve policy.
+Additional unresolved lifecycle questions remain: finality, replacement/cancellation, reorg handling, retention/privacy, and multi-fill semantics.
 
 ## CURRENT IMPLEMENTATION BLOCKERS
 
@@ -151,15 +152,15 @@ The source map and prior design documents record only candidate adapter boundari
 
 ## FILES CHANGED IN LATEST MILESTONE
 
-- `docs/AUTHORITY_SOURCE_MAP.md`
+- `docs/AUTHORITY_DECISION_PACKET.md`
 - `docs/WORKSPACE_CHECKPOINT.md`
 
 No runtime files, tests, models, migrations, or configuration files were changed.
 
 ## TESTS RUN AND RESULTS
 
-- Tests run for this milestone: none. Documentation/static inventory only.
-- Static validation performed: repository source/document paths and latest checkpoint scope inspected; no executable test result established.
+- Tests run for this milestone: none. Documentation/static validation only.
+- Static validation performed: packet content, cross-references, branch scope, and commit scope inspected; no executable test result established.
 - Latest milestone test execution: not established by repository history.
 - Do not claim branch-green status without executing and recording the relevant suite.
 
@@ -169,11 +170,11 @@ The canonical auto path can perform ordered hold, family, route/capture, flash-l
 
 ## CURRENT TASK
 
-Preserve and review the read-only authority inventory. The seven authority decisions remain unresolved, and no production snapshot implementation has been introduced.
+Preserve the canonical authority decision packet and keep all seven authority decisions explicitly unresolved.
 
 ## NEXT TASK
 
-Owner review of the authority source map and policy packet. After explicit policy approval: define production snapshot contracts and read-only adapters with contract tests, while keeping runtime behavior unchanged.
+Owner review of the canonical packet. After explicit policy approval: define production snapshot contracts and read-only adapters with contract tests, while keeping runtime behavior unchanged.
 
 ## TASKS EXPLICITLY FORBIDDEN
 
@@ -201,7 +202,7 @@ Until separately authorized and all required evidence exists:
 - `docs/GOLDEN_PATH_GAPS.md`
 - `docs/GOLDEN_PATH_TEST_PLAN.md`
 - `docs/PHASE_2_ARCHITECTURE_PLAN.md`
-- `docs/AUTHORITY_DECISION_PACKET.md` when committed; otherwise recover the external artifact and reconcile it before work.
+- `docs/AUTHORITY_DECISION_PACKET.md`
 - `docs/ECONOMIC_IDENTITY_DESIGN.md`
 - `docs/AUTHORITY_SOURCE_MAP.md`
 
@@ -233,7 +234,7 @@ Until separately authorized and all required evidence exists:
 
 1. Read this file first.
 2. Read the four Sovereign OS documents listed above.
-3. Read `docs/AUTHORITY_DECISION_PACKET.md` if present; if absent, recover and reconcile the external artifact before implementation.
+3. Read `docs/AUTHORITY_DECISION_PACKET.md`.
 4. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` for identity architecture context.
 5. Read `docs/AUTHORITY_SOURCE_MAP.md` for the read-only source inventory.
 6. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
@@ -252,7 +253,6 @@ Every meaningful milestone must update this document or a clearly linked success
 - branch;
 - HEAD before and after;
 - milestone completed;
-- what and why changed;
 - files changed;
 - tests and actual results;
 - decisions and discoveries;
