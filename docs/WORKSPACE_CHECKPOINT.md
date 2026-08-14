@@ -21,52 +21,55 @@ Never infer approval from chat, workspace memory, code existence, or a candidate
 
 ## CHECKPOINT ID
 
-`CHECKPOINT-2026-08-14-IMMUTABLE-AUTHORITY-CONTRACTS`
+`CHECKPOINT-2026-08-14-AUTHORITY-CONTRACT-VALIDATION`
 
 ## DATE/TIME
 
-2026-08-14, after the Phase 4 immutable read-only authority contract milestone. Exact commit timestamp is authoritative once this file is committed.
+2026-08-14, after Phase 4A execution-environment and semantic validation review. Exact commit timestamp is authoritative once this file is committed.
 
 ## PROJECT IDENTITY
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
 - Branch: `architecture-c-contract-tests`
-- HEAD BEFORE: `89803aee377bdaab942bcf903b4ad835cffde294`
+- HEAD BEFORE: `ee2d538b1b63b47c8b49045da27a67673d4add5f`
 - HEAD AFTER: populated by the commit that updates this checkpoint
-- Previous checkpoint: `909db12de34d7dbc0db40f91ff649c35cbe8dd62`
+- Previous checkpoint: `ee2d538b1b63b47c8b49045da27a67673d4add5f`
 - Default branch baseline: `main@52d9669bda8c44d3ed74ab3df8bb5f572ff72fb2`
 
 This checkpoint reconstructs operational context from repository evidence, Git history, and checked-in documentation. It does not rely on conversational memory and does not authorize runtime or trading behavior.
 
 ## MILESTONE COMPLETED
 
-Phase 4 immutable read-only authority contracts. Added `backend/victor_ai_bot/authority_contracts.py` with side-effect-free frozen evidence contracts, explicit authority classifications, snapshot states, source-specific revisions, provenance, explicit-now freshness evaluation, units/decimals, conflict representation, execution-plan identity, DecisionSnapshot validation, and a marker base for future read-only adapters. Added focused contract tests in `backend/tests/test_authority_contracts.py`.
-
-The contracts intentionally preserve unresolved policy as `UNRESOLVED`, `POLICY_UNRESOLVED`, missing, or conflict states. No runtime consumer imports or uses them.
+Phase 4A execution-environment and semantic validation review. The sandbox was inspected, but no writable repository checkout was available and `pytest` was not installed. The Phase 4 contract code and tests were reviewed statically only. No adapter milestone is authorized.
 
 ## CURRENT ARCHITECTURE PHASE
 
-Phase 4 immutable read-only authority contracts, with Architecture C runtime composition still unwired.
+Phase 4 immutable read-only authority contracts, blocked pending executable contract-test validation and semantic fixes.
 
 ## CURRENT PRODUCTION-READINESS CLASSIFICATION
 
-`PARTIALLY_PROVEN` overall. The new contracts are production-shaped read-side types but do not prove production authority. CapitalDemand composition is `UNWIRED`; adapters, reservations, durable identity, pending recovery, settlement authority, deterministic replay, and live readiness remain unproven.
+`PARTIALLY_PROVEN` overall. Phase 4 contracts remain unproven until executed. The semantic review found contract-hardening issues that must be resolved before adapters: nested mappings are not deeply immutable, and execution-plan identity is not enforced against all material plan fields.
 
 ## PROVEN COMPONENTS
 
 - Existing mocked quote/scanner, normalization, slippage, route/calldata, mocked gas, event decoding, canonical auto-admission, and atomic settlement component boundaries.
-- Architecture C and synthetic authority snapshot semantics at contract/test level.
-- Static source inventory and canonical authority decision packet.
-- Phase 4 contract semantics are covered by focused tests in `backend/tests/test_authority_contracts.py`, but repository execution status is not yet established.
+- Architecture C and prior synthetic authority snapshot semantics at contract/test level.
+- Static authority source inventory and canonical authority packet.
+- Phase 4 contract structure exists in `backend/victor_ai_bot/authority_contracts.py`.
 
 ## PARTIALLY-PROVEN COMPONENTS
 
 - RPC/market data, profitability, flash-loan sizing, capital/treasury admission, risk/governance coverage, receipt/PnL/ledger integration, Wealth Goals, replay persistence, telemetry/latency, operator/mobile projections, and Stage 1 characterization.
+- Phase 4 contract semantics by static inspection only; no execution result exists.
 
 ## UNPROVEN COMPONENTS
 
-- Production authority acquisition and adapter correctness.
+- Executed Phase 4 authority contract tests.
+- Executed existing synthetic authority snapshot tests.
+- Deep immutability of nested snapshot state.
+- Complete execution-plan content identity enforcement.
+- Production authority acquisition/adapters.
 - Production `CapitalDemandComposer` and `DecisionSnapshot` assembly.
 - Generic durable reservation and concurrency safety.
 - Universal economic identity and child lineage.
@@ -104,7 +107,7 @@ Approved at policy or contract level, not necessarily runtime-wired:
 - Durable correlation identity must remain distinct from tx hash, capital commit, execution plan, and replay identities.
 - Documentation is durable memory, never runtime authorization.
 
-Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. Phase 4 adds contracts only and no policy approvals.
+Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. Phase 4A adds no policy approvals.
 
 ## UNRESOLVED DECISIONS
 
@@ -120,6 +123,10 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 
 ## CURRENT IMPLEMENTATION BLOCKERS
 
+- No executable checkout or pytest runner was available in the validation sandbox.
+- Focused Phase 4 tests are therefore `NOT EXECUTED`.
+- Nested `dict`/`Mapping` fields in frozen contracts remain potentially mutable through aliases; deep immutability is not yet proven.
+- `ExecutionPlanSnapshot` accepts a caller-provided `execution_plan_id` but does not verify it against a canonical hash of all economically material fields.
 - No authoritative pre-decision CapitalDemand composer.
 - Legacy scalar capital inference remains in the decision path.
 - Read-only adapters are not implemented.
@@ -131,7 +138,6 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 - Replay is forensic, not deterministic.
 - Freshness is instrumented but not decision-authoritative.
 - Manual/API/direct execution bypass equivalence is unproven.
-- Focused Phase 4 tests have been added but not executed in this environment.
 
 ## CURRENT SAFETY STATE
 
@@ -148,30 +154,46 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 
 ## FILES CHANGED IN LATEST MILESTONE
 
-- `backend/victor_ai_bot/authority_contracts.py`
-- `backend/tests/test_authority_contracts.py`
 - `docs/WORKSPACE_CHECKPOINT.md`
 
-No runtime consumer, configuration, Solidity, ABI, settlement, PnL, or persistence files were changed.
+No code or test files were changed during Phase 4A. The prior Phase 4 contracts/tests remain unchanged.
 
 ## TESTS RUN AND RESULTS
 
-- Tests created: `backend/tests/test_authority_contracts.py`.
-- Tests run for this milestone: none; remote repository execution was not available in this session.
-- Test result: **NOT EXECUTED**, not a pass claim.
-- Static safety review: the contract module contains no RPC, database, filesystem, environment, signing, submission, reservation, allocation, settlement, or PnL calls; this is source inspection, not executable proof.
+- Environment probe: executed successfully in an offline sandbox.
+- Python available: `Python 3.12.13`.
+- Pytest available: **No** (`pytest: command not found`).
+- Writable repository checkout: **No**; no `.git` checkout was available.
+- `backend/tests/test_authority_contracts.py`: **NOT EXECUTED**.
+- `backend/tests/test_authority_snapshot_contracts.py`: **NOT EXECUTED**.
+- Architecture C subset: **NOT EXECUTED**.
+- No pass/fail/skip/error counts or runtime can honestly be reported.
 
-## LAST KNOWN RUNTIME BEHAVIOR
+## SEMANTIC REVIEW
 
-The canonical auto path can perform ordered hold, family, route/capture, flash-loan, treasury, and governance checks before lower-level execution. Discovery, execution, receipt, settlement, replay, and operator surfaces exist in components. Pending and receipt context remain primarily in memory, settlement accounting is partially connected, and live execution is not proven or enabled by checked-in defaults.
+Static findings:
 
-## CURRENT TASK
+1. Frozen dataclasses protect top-level assignment, but `PolicySnapshot.state` is typed as `Mapping` and may receive a mutable dict; `Evidence.conflicts` is a tuple, while nested mapping aliases are not defensively frozen. Deep immutability is not proven.
+2. `Revision` compatibility is deterministic and source-specific; it does not invent a universal ordering. This is correct for the unresolved policy boundary.
+3. Provenance requires a source but correctly permits unavailable source ID, block, hash, timestamp, or revision to remain explicit rather than synthesized.
+4. Freshness uses supplied `now`, does not call the system clock, and returns `POLICY_UNRESOLVED` when no horizon exists.
+5. Conflict and unresolved statuses fail closed in evidence and decision validation.
+6. Units distinguish asset, denomination, and decimals, but the contracts do not provide conversion; this is correct until ConversionSnapshot evidence and policy exist.
+7. `ExecutionPlanSnapshot.content_id()` is a generic helper; `validate()` does not enforce that `execution_plan_id` equals a canonical content identity containing every material field. Plan identity is therefore insufficiently enforced.
+8. Correlation identity is a distinct explicit field in `DecisionSnapshot`, but lifecycle persistence is not implemented.
+9. Decision validation is side-effect-free by source inspection and uses explicit `now`; no runtime consumer imports the new module.
 
-Preserve and review immutable read-only authority contracts without wiring them into runtime or silently resolving policy.
+## POLICY-SAFETY REVIEW
+
+No silent selection of treasury denomination, conversion authority, provider capacity/fee authority, exposure formula, reservation semantics, identity origin, freshness TTL, finality, replacement, reorg, retention/privacy, or multi-fill policy was found in the new contract layer. The provider/fee and treasury fields preserve unresolved values rather than selecting repository heuristics as authority.
+
+## COMPATIBILITY REVIEW
+
+The new production-shaped module is not imported by `models.py`, `DecisionEngine`, runtime services, PnL, settlement, treasury, replay, or Solidity code. Existing `capital_demand.py`, `Opportunity`, `Route`, `TradeDecision`, replay, and synthetic test contracts remain unchanged and separate. No runtime compatibility behavior can be claimed because no integration exists.
 
 ## NEXT TASK
 
-Execute the focused Phase 4 contract test file in an appropriately configured checkout, then owner-review any failures. After that, implement read-only authority adapters only after explicit policy boundaries remain intact.
+Do not design adapters yet. First establish a writable checkout with Python test dependencies, execute both focused contract suites, classify any failures, and harden only clearly identified contract defects without resolving policy.
 
 ## TASKS EXPLICITLY FORBIDDEN
 
@@ -241,9 +263,11 @@ Until separately authorized and all required evidence exists:
 8. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
 9. Confirm the seven unresolved decisions have not been silently upgraded.
 10. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
-11. Execute the focused contract tests in an appropriately configured checkout; record the actual result.
-12. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
-13. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
+11. Establish a writable checkout with Python test dependencies before attempting test execution.
+12. Execute `backend/tests/test_authority_contracts.py` and `backend/tests/test_authority_snapshot_contracts.py`; record exact counts.
+13. Classify failures before changing code. Do not weaken tests or resolve policy to make them pass.
+14. Do not implement adapters until focused tests execute and semantic defects are resolved.
+15. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
 
 ## CHECKPOINT PROTOCOL
 
