@@ -21,48 +21,44 @@ Never infer approval from chat, workspace memory, code existence, or a candidate
 
 ## CHECKPOINT ID
 
-`CHECKPOINT-2026-08-14-CANONICAL-AUTHORITY-PACKET`
+`CHECKPOINT-2026-08-14-IMMUTABLE-AUTHORITY-CONTRACTS`
 
 ## DATE/TIME
 
-2026-08-14, after committing the canonical authority decision packet. Exact commit timestamp is authoritative once this file is committed.
+2026-08-14, after the Phase 4 immutable read-only authority contract milestone. Exact commit timestamp is authoritative once this file is committed.
 
 ## PROJECT IDENTITY
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
 - Branch: `architecture-c-contract-tests`
-- HEAD BEFORE: `7cd1e3841eb2cbaa743984fa275c927d2422eb42`
+- HEAD BEFORE: `89803aee377bdaab942bcf903b4ad835cffde294`
 - HEAD AFTER: populated by the commit that updates this checkpoint
-- Previous checkpoint: `a59d34377da4ffabd8a8cdb2d2f76dda586868a6`
+- Previous checkpoint: `909db12de34d7dbc0db40f91ff649c35cbe8dd62`
 - Default branch baseline: `main@52d9669bda8c44d3ed74ab3df8bb5f572ff72fb2`
 
 This checkpoint reconstructs operational context from repository evidence, Git history, and checked-in documentation. It does not rely on conversational memory and does not authorize runtime or trading behavior.
 
 ## MILESTONE COMPLETED
 
-Phase 3A documentation consolidation and recovery hardening. `docs/AUTHORITY_DECISION_PACKET.md` is now committed in Git as the canonical owner-review index for all seven unresolved authority decisions. Detailed evidence remains in the checkpoint, source map, identity design, and Sovereign OS documents.
+Phase 4 immutable read-only authority contracts. Added `backend/victor_ai_bot/authority_contracts.py` with side-effect-free frozen evidence contracts, explicit authority classifications, snapshot states, source-specific revisions, provenance, explicit-now freshness evaluation, units/decimals, conflict representation, execution-plan identity, DecisionSnapshot validation, and a marker base for future read-only adapters. Added focused contract tests in `backend/tests/test_authority_contracts.py`.
+
+The contracts intentionally preserve unresolved policy as `UNRESOLVED`, `POLICY_UNRESOLVED`, missing, or conflict states. No runtime consumer imports or uses them.
 
 ## CURRENT ARCHITECTURE PHASE
 
-Phase 3 read-only authority foundation, with Architecture C runtime composition still unwired.
+Phase 4 immutable read-only authority contracts, with Architecture C runtime composition still unwired.
 
 ## CURRENT PRODUCTION-READINESS CLASSIFICATION
 
-`PARTIALLY_PROVEN` overall. The canonical decision packet is documentation evidence only. CapitalDemand composition is `UNWIRED`; durable identity, generic reservation, pending recovery, settlement authority, deterministic replay, and live readiness remain unproven.
+`PARTIALLY_PROVEN` overall. The new contracts are production-shaped read-side types but do not prove production authority. CapitalDemand composition is `UNWIRED`; adapters, reservations, durable identity, pending recovery, settlement authority, deterministic replay, and live readiness remain unproven.
 
 ## PROVEN COMPONENTS
 
-- Mocked quote and scanner components.
-- Opportunity, route, and leg normalization.
-- Slippage/min-out arithmetic with fixtures.
-- Route construction and ABI v2 calldata components.
-- Mocked gas and event decoding.
-- Canonical auto-admission ordering.
-- Atomic settlement component writes and duplicate receipt checks.
-- Architecture C and authority snapshot semantics at contract/test level.
-- Static authority-source inventory in `docs/AUTHORITY_SOURCE_MAP.md`.
-- Canonical owner-review authority packet in `docs/AUTHORITY_DECISION_PACKET.md`.
+- Existing mocked quote/scanner, normalization, slippage, route/calldata, mocked gas, event decoding, canonical auto-admission, and atomic settlement component boundaries.
+- Architecture C and synthetic authority snapshot semantics at contract/test level.
+- Static source inventory and canonical authority decision packet.
+- Phase 4 contract semantics are covered by focused tests in `backend/tests/test_authority_contracts.py`, but repository execution status is not yet established.
 
 ## PARTIALLY-PROVEN COMPONENTS
 
@@ -70,8 +66,8 @@ Phase 3 read-only authority foundation, with Architecture C runtime composition 
 
 ## UNPROVEN COMPONENTS
 
+- Production authority acquisition and adapter correctness.
 - Production `CapitalDemandComposer` and `DecisionSnapshot` assembly.
-- Production read-only snapshot types and adapters.
 - Generic durable reservation and concurrency safety.
 - Universal economic identity and child lineage.
 - Restart, dropped-transaction, replacement, confirmation-depth, and reorg recovery.
@@ -108,7 +104,7 @@ Approved at policy or contract level, not necessarily runtime-wired:
 - Durable correlation identity must remain distinct from tx hash, capital commit, execution plan, and replay identities.
 - Documentation is durable memory, never runtime authorization.
 
-Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. The authority packet adds no new policy approvals.
+Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. Phase 4 adds contracts only and no policy approvals.
 
 ## UNRESOLVED DECISIONS
 
@@ -126,7 +122,7 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 
 - No authoritative pre-decision CapitalDemand composer.
 - Legacy scalar capital inference remains in the decision path.
-- No approved production snapshot module or adapters.
+- Read-only adapters are not implemented.
 - No generic durable reservation protocol.
 - No universal lifecycle identity across opportunity, decision, reservation, attempts, receipt, ledger, replay, and capital events.
 - Pending state is primarily in memory.
@@ -135,7 +131,7 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 - Replay is forensic, not deterministic.
 - Freshness is instrumented but not decision-authoritative.
 - Manual/API/direct execution bypass equivalence is unproven.
-- Tests for latest milestones are not recorded as executed in repository history.
+- Focused Phase 4 tests have been added but not executed in this environment.
 
 ## CURRENT SAFETY STATE
 
@@ -148,21 +144,22 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 - No DecisionEngine integration.
 - No CapitalDemandComposer wiring.
 - No reservation writes.
-- No production snapshot persistence.
+- No production persistence or database changes.
 
 ## FILES CHANGED IN LATEST MILESTONE
 
-- `docs/AUTHORITY_DECISION_PACKET.md`
+- `backend/victor_ai_bot/authority_contracts.py`
+- `backend/tests/test_authority_contracts.py`
 - `docs/WORKSPACE_CHECKPOINT.md`
 
-No runtime files, tests, models, migrations, or configuration files were changed.
+No runtime consumer, configuration, Solidity, ABI, settlement, PnL, or persistence files were changed.
 
 ## TESTS RUN AND RESULTS
 
-- Tests run for this milestone: none. Documentation/static validation only.
-- Static validation performed: packet content, cross-references, branch scope, and commit scope inspected; no executable test result established.
-- Latest milestone test execution: not established by repository history.
-- Do not claim branch-green status without executing and recording the relevant suite.
+- Tests created: `backend/tests/test_authority_contracts.py`.
+- Tests run for this milestone: none; remote repository execution was not available in this session.
+- Test result: **NOT EXECUTED**, not a pass claim.
+- Static safety review: the contract module contains no RPC, database, filesystem, environment, signing, submission, reservation, allocation, settlement, or PnL calls; this is source inspection, not executable proof.
 
 ## LAST KNOWN RUNTIME BEHAVIOR
 
@@ -170,11 +167,11 @@ The canonical auto path can perform ordered hold, family, route/capture, flash-l
 
 ## CURRENT TASK
 
-Preserve the canonical authority decision packet and keep all seven authority decisions explicitly unresolved.
+Preserve and review immutable read-only authority contracts without wiring them into runtime or silently resolving policy.
 
 ## NEXT TASK
 
-Owner review of the canonical packet. After explicit policy approval: define production snapshot contracts and read-only adapters with contract tests, while keeping runtime behavior unchanged.
+Execute the focused Phase 4 contract test file in an appropriately configured checkout, then owner-review any failures. After that, implement read-only authority adapters only after explicit policy boundaries remain intact.
 
 ## TASKS EXPLICITLY FORBIDDEN
 
@@ -208,6 +205,7 @@ Until separately authorized and all required evidence exists:
 
 ## RELEVANT TESTS AND SOURCE
 
+- `backend/tests/test_authority_contracts.py`
 - `backend/tests/test_authority_snapshot_contracts.py`
 - `backend/tests/test_capital_demand_contract.py`
 - `backend/tests/test_capital_demand_policy_constraints.py`
@@ -215,6 +213,7 @@ Until separately authorized and all required evidence exists:
 - `backend/tests/test_capital_demand_projection.py`
 - `backend/tests/test_settlement_authoritative_pnl_contract.py`
 - `backend/tests/test_current_golden_path_closed_loop.py`
+- `backend/victor_ai_bot/authority_contracts.py`
 - `backend/victor_ai_bot/capital_demand.py`
 - `backend/victor_ai_bot/decision_engine.py`
 - `backend/victor_ai_bot/runtime.py`
@@ -237,12 +236,14 @@ Until separately authorized and all required evidence exists:
 3. Read `docs/AUTHORITY_DECISION_PACKET.md`.
 4. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` for identity architecture context.
 5. Read `docs/AUTHORITY_SOURCE_MAP.md` for the read-only source inventory.
-6. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
-7. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
-8. Confirm the seven unresolved decisions have not been silently upgraded.
-9. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
-10. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
-11. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
+6. Read `backend/victor_ai_bot/authority_contracts.py` and `backend/tests/test_authority_contracts.py`.
+7. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
+8. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
+9. Confirm the seven unresolved decisions have not been silently upgraded.
+10. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
+11. Execute the focused contract tests in an appropriately configured checkout; record the actual result.
+12. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
+13. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
 
 ## CHECKPOINT PROTOCOL
 
