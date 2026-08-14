@@ -11,44 +11,45 @@ A new Codex instance must not assume conversational memory exists. The repositor
 5. Read `docs/SOVEREIGN_OS_CHANGELOG.md`.
 6. Read `docs/AUTHORITY_DECISION_PACKET.md` if present on the current branch; if absent, treat that as a checkpoint discrepancy and recover the external decision artifact before implementation.
 7. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` when the current task concerns lifecycle identity.
-8. Inspect the current branch and HEAD.
-9. Inspect the latest checkpoint commit.
-10. Verify that repository state matches this checkpoint.
-11. Only then continue work.
+8. Read `docs/AUTHORITY_SOURCE_MAP.md` for the current read-side authority inventory.
+9. Inspect the current branch and HEAD.
+10. Inspect the latest checkpoint commit.
+11. Verify that repository state matches this checkpoint.
+12. Only then continue work.
 
 Never infer approval from chat, workspace memory, code existence, or a candidate design.
 
 ## CHECKPOINT ID
 
-`CHECKPOINT-2026-08-14-ECONOMIC-IDENTITY-DESIGN`
+`CHECKPOINT-2026-08-14-READ-ONLY-AUTHORITY-FOUNDATION`
 
 ## DATE/TIME
 
-2026-08-14, after completion of the design-only economic identity milestone. Exact commit timestamp is authoritative once this file is committed.
+2026-08-14, after the Phase 3 read-only authority foundation inventory. Exact commit timestamp is authoritative once this file is committed.
 
 ## PROJECT IDENTITY
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
 - Branch: `architecture-c-contract-tests`
-- HEAD BEFORE: `18fb9eaead974cbf3488e401f391caeaa0917ab4`
+- HEAD BEFORE: `391edde317dde81021d76352314b5e1c592d3d55`
 - HEAD AFTER: populated by the commit that updates this checkpoint
-- Previous checkpoint: `7ffd3574e14bce6d220a092e1fa24b13a8b852b8`
+- Previous checkpoint: `b70c572c5c36b927f3395365d3e57d2cf9567e31`
 - Default branch baseline: `main@52d9669bda8c44d3ed74ab3df8bb5f572ff72fb2`
 
 This checkpoint reconstructs operational context from repository evidence, Git history, and checked-in documentation. It does not rely on conversational memory and does not authorize runtime or trading behavior.
 
 ## MILESTONE COMPLETED
 
-Design-only economic identity architecture documented. The candidate hierarchy, parent-child lineage, retry/replacement/restart/reorg behavior, settlement linkage, replay linkage, invariants, unresolved policy questions, and implementation no-go boundary are recorded in `docs/ECONOMIC_IDENTITY_DESIGN.md`.
+Phase 3 read-only authority foundation inventory. `docs/AUTHORITY_SOURCE_MAP.md` records current treasury, asset/decimal, conversion, provider, risk, governance, goal, execution-plan, opportunity, freshness/latency, and identity sources with units, persistence, revision evidence, classifications, conflicts, and read-only safety. No production snapshot types were added because no approved production location exists that would avoid silently selecting unresolved policy or wiring runtime behavior.
 
 ## CURRENT ARCHITECTURE PHASE
 
-Architecture C tests-only characterization and Phase-A policy-lock checkpoint. Production runtime composition has not started.
+Phase 3 read-only authority foundation, with Architecture C runtime composition still unwired.
 
 ## CURRENT PRODUCTION-READINESS CLASSIFICATION
 
-`PARTIALLY_PROVEN` overall. Component boundaries exist, but the durable economic loop is not proven. CapitalDemand composition is `UNWIRED`; durable identity, settlement authority, generic reservation, pending recovery, deterministic replay, and live readiness are not proven.
+`PARTIALLY_PROVEN` overall. The authority inventory is documentation evidence only. CapitalDemand composition is `UNWIRED`; durable identity, generic reservation, pending recovery, settlement authority, deterministic replay, and live readiness remain unproven.
 
 ## PROVEN COMPONENTS
 
@@ -60,6 +61,7 @@ Architecture C tests-only characterization and Phase-A policy-lock checkpoint. P
 - Canonical auto-admission ordering.
 - Atomic settlement component writes and duplicate receipt checks.
 - Architecture C and authority snapshot semantics at contract/test level.
+- Static authority-source inventory recorded in `docs/AUTHORITY_SOURCE_MAP.md`.
 
 ## PARTIALLY-PROVEN COMPONENTS
 
@@ -68,6 +70,7 @@ Architecture C tests-only characterization and Phase-A policy-lock checkpoint. P
 ## UNPROVEN COMPONENTS
 
 - Production `CapitalDemandComposer` and `DecisionSnapshot` assembly.
+- Production read-only snapshot types and adapters.
 - Generic durable reservation and concurrency safety.
 - Universal economic identity and child lineage.
 - Restart, dropped-transaction, replacement, confirmation-depth, and reorg recovery.
@@ -116,12 +119,13 @@ Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. These decis
 6. Durable economic/trade correlation identity origin and persistence.
 7. Opportunity freshness and empirical latency horizons.
 
-`docs/ECONOMIC_IDENTITY_DESIGN.md` records an identity hierarchy as a **candidate design**, not an approved policy. Exact intent creation boundary, multiple-fill semantics, cross-chain scope, replacement/cancellation, finality, reorg, privacy, retention, and disputed-state ownership remain unresolved.
+The source map and prior design documents record only candidate adapter boundaries and candidate identity architecture. They do not resolve policy.
 
 ## CURRENT IMPLEMENTATION BLOCKERS
 
 - No authoritative pre-decision CapitalDemand composer.
 - Legacy scalar capital inference remains in the decision path.
+- No approved production snapshot module or adapters.
 - No generic durable reservation protocol.
 - No universal lifecycle identity across opportunity, decision, reservation, attempts, receipt, ledger, replay, and capital events.
 - Pending state is primarily in memory.
@@ -143,19 +147,19 @@ Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. These decis
 - No DecisionEngine integration.
 - No CapitalDemandComposer wiring.
 - No reservation writes.
-- Economic identity design is documentation only; no models, migrations, or persistence were added.
+- No production snapshot persistence.
 
 ## FILES CHANGED IN LATEST MILESTONE
 
-- `docs/ECONOMIC_IDENTITY_DESIGN.md`
+- `docs/AUTHORITY_SOURCE_MAP.md`
 - `docs/WORKSPACE_CHECKPOINT.md`
 
-The immediately preceding checkpoint commit changed only `docs/WORKSPACE_CHECKPOINT.md`. No runtime files are changed.
+No runtime files, tests, models, migrations, or configuration files were changed.
 
 ## TESTS RUN AND RESULTS
 
-- Tests run for this milestone: none. This is a documentation-only milestone.
-- Static validation: repository file contents and commit scope inspected; no executable test result established.
+- Tests run for this milestone: none. Documentation/static inventory only.
+- Static validation performed: repository source/document paths and latest checkpoint scope inspected; no executable test result established.
 - Latest milestone test execution: not established by repository history.
 - Do not claim branch-green status without executing and recording the relevant suite.
 
@@ -165,11 +169,11 @@ The canonical auto path can perform ordered hold, family, route/capture, flash-l
 
 ## CURRENT TASK
 
-Preserve and review the candidate economic identity architecture without implementing it. The seven authority decisions remain unresolved.
+Preserve and review the read-only authority inventory. The seven authority decisions remain unresolved, and no production snapshot implementation has been introduced.
 
 ## NEXT TASK
 
-Owner review of the identity design and seven authority decisions. After explicit policy approval: define read-only production authority snapshot schemas and adapters with contract tests, while keeping runtime behavior unchanged.
+Owner review of the authority source map and policy packet. After explicit policy approval: define production snapshot contracts and read-only adapters with contract tests, while keeping runtime behavior unchanged.
 
 ## TASKS EXPLICITLY FORBIDDEN
 
@@ -199,6 +203,7 @@ Until separately authorized and all required evidence exists:
 - `docs/PHASE_2_ARCHITECTURE_PLAN.md`
 - `docs/AUTHORITY_DECISION_PACKET.md` when committed; otherwise recover the external artifact and reconcile it before work.
 - `docs/ECONOMIC_IDENTITY_DESIGN.md`
+- `docs/AUTHORITY_SOURCE_MAP.md`
 
 ## RELEVANT TESTS AND SOURCE
 
@@ -230,12 +235,13 @@ Until separately authorized and all required evidence exists:
 2. Read the four Sovereign OS documents listed above.
 3. Read `docs/AUTHORITY_DECISION_PACKET.md` if present; if absent, recover and reconcile the external artifact before implementation.
 4. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` for identity architecture context.
-5. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
-6. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
-7. Confirm the seven unresolved decisions have not been silently upgraded.
-8. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
-9. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
-10. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
+5. Read `docs/AUTHORITY_SOURCE_MAP.md` for the read-only source inventory.
+6. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
+7. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
+8. Confirm the seven unresolved decisions have not been silently upgraded.
+9. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
+10. Do not implement runtime behavior until owner approval and the next authorized milestone are explicit.
+11. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
 
 ## CHECKPOINT PROTOCOL
 
