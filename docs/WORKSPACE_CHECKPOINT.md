@@ -13,52 +13,51 @@ A new Codex instance must not assume conversational memory exists. The repositor
 7. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` when the current task concerns lifecycle identity.
 8. Read `docs/AUTHORITY_SOURCE_MAP.md` for the current read-side authority inventory.
 9. Read `docs/AUTHORITY_TEST_EXECUTION.md` for the canonical focused test environment and command.
-10. Inspect the current branch and HEAD.
-11. Inspect the latest checkpoint commit.
-12. Verify that repository state matches this checkpoint.
+10. Read `docs/PHASE5A_ADAPTER_READINESS.md` for the current static caller/source/bypass inventory.
+11. Inspect the current branch and HEAD.
+12. Inspect the latest checkpoint commit.
+13. Verify that repository state matches this checkpoint.
 
 Never infer approval from chat, workspace memory, code existence, or a candidate design.
 
 ## CHECKPOINT ID
 
-`CHECKPOINT-2026-08-14-REPRODUCIBLE-AUTHORITY-VALIDATION`
+`CHECKPOINT-2026-08-14-PHASE5A-ADAPTER-READINESS`
 
 ## DATE/TIME
 
-2026-08-14, after Phase 4C validation-environment inventory and semantic review. Exact commit timestamp is authoritative once this file is committed.
+2026-08-14, after Phase 5A static adapter-readiness and caller/bypass inventory. Exact commit timestamp is authoritative once this file is committed.
 
 ## PROJECT IDENTITY
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
 - Branch: `architecture-c-contract-tests`
-- HEAD BEFORE: `286c4311034d949ea2cd050b3393e80e29049cd5`
+- HEAD BEFORE: `d17df2d572b2d5c88dd9bb369b5f7390a56fe165`
 - HEAD AFTER: populated by the commit that updates this checkpoint
-- Previous checkpoint: `4f2da2df8704994beeea6c18fb58c04adfdefe7a`
+- Previous checkpoint: `636b6a58f91b1fffd20edf927e4c45d54a33a55c`
 - Default branch baseline: `main@52d9669bda8c44d3ed74ab3df8bb5f572ff72fb2`
 
 This checkpoint reconstructs operational context from repository evidence, Git history, and checked-in documentation. It does not rely on conversational memory and does not authorize runtime or trading behavior.
 
 ## MILESTONE COMPLETED
 
-Phase 4C established the repository-native reproducible validation instructions and attempted execution-environment discovery. The canonical dependency mechanism is the existing CI setup: Python 3.11, `backend/requirements-dev.txt`, pinned by `backend/constraints.txt`. The focused command is documented in `docs/AUTHORITY_TEST_EXECUTION.md`.
-
-The available sandbox had Python 3.12.13 but no writable checkout and no pytest executable, so tests remain **NOT EXECUTED**. No synthetic results were created.
+Phase 5A static adapter-readiness, CapitalDemand readiness, execution bypass, identity, pending/recovery, and replay inventory. Detailed findings are in `docs/PHASE5A_ADAPTER_READINESS.md`.
 
 ## CURRENT ARCHITECTURE PHASE
 
-Phase 4C reproducible authority validation, with read-only adapters blocked until focused suites execute and any contract defects are classified/resolved.
+Phase 5A static architecture preparation. Authority tests remain unexecuted; adapter implementation is blocked.
 
 ## CURRENT PRODUCTION-READINESS CLASSIFICATION
 
-`PARTIALLY_PROVEN` overall. Authority contracts are repaired by static review but remain unexecuted. Adapters, CapitalDemandComposer, reservations, durable identity, pending recovery, authoritative settlement, deterministic replay, and live readiness remain unproven.
+`PARTIALLY_PROVEN` overall. The inventory is documentation evidence only. Authority tests are not proven until executed in a real repository environment. CapitalDemand composition, adapters, reservations, durable identity, pending recovery, authoritative settlement, deterministic replay, and live readiness remain unproven.
 
 ## PROVEN COMPONENTS
 
 - Existing mocked quote/scanner, normalization, slippage, route/calldata, mocked gas, event decoding, canonical auto-admission, and atomic settlement component boundaries.
 - Architecture C and prior synthetic authority snapshot semantics at contract/test level.
-- Static authority source inventory and canonical authority packet.
-- Repository-native CI dependency and test command definition.
+- Static authority source inventory, canonical authority packet, and Phase 5A readiness inventory.
+- Repository-native CI dependency and focused test command definition.
 
 ## PARTIALLY-PROVEN COMPONENTS
 
@@ -106,7 +105,7 @@ Approved at policy or contract level, not necessarily runtime-wired:
 - Durable correlation identity must remain distinct from tx hash, capital commit, execution plan, and replay identities.
 - Documentation is durable memory, never runtime authorization.
 
-Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. Phase 4C adds no policy approvals.
+Source: `docs/SOVEREIGN_OS_DECISIONS.md` and related contract tests. Phase 5A adds no policy approvals.
 
 ## UNRESOLVED DECISIONS
 
@@ -122,8 +121,8 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 
 ## CURRENT IMPLEMENTATION BLOCKERS
 
+- Authority tests are not proven until executed in a real repository environment.
 - No writable checkout or pytest runner was available in the validation sandbox.
-- Focused authority suites remain **NOT EXECUTED**.
 - No approved production snapshot adapters.
 - No authoritative pre-decision CapitalDemand composer.
 - Legacy scalar capital inference remains in the decision path.
@@ -151,43 +150,38 @@ Additional unresolved lifecycle questions remain: finality, replacement/cancella
 
 ## FILES CHANGED IN LATEST MILESTONE
 
-- `docs/AUTHORITY_TEST_EXECUTION.md`
+- `docs/PHASE5A_ADAPTER_READINESS.md`
 - `docs/WORKSPACE_CHECKPOINT.md`
 
-No runtime files, authority contracts, tests, dependencies, CI workflows, or deployment files were changed.
+No runtime files, tests, dependencies, configuration, persistence, or contract code were changed.
 
 ## TESTS RUN AND RESULTS
 
-- Environment inventory: completed in offline sandbox.
-- Python available: `3.12.13`.
-- Writable checkout: unavailable.
-- `pytest`: unavailable.
-- Canonical environment documented from repository CI: Python `3.11`, `pip install -c backend/constraints.txt -r backend/requirements-dev.txt`.
-- Canonical focused command: `PYTHONPATH=backend pytest -q backend/tests/test_authority_contracts.py backend/tests/test_authority_snapshot_contracts.py`.
-- Authority contract tests: **NOT EXECUTED**.
-- Existing authority snapshot tests: **NOT EXECUTED**.
+- `backend/tests/test_authority_contracts.py`: **NOT EXECUTED**.
+- `backend/tests/test_authority_snapshot_contracts.py`: **NOT EXECUTED**.
 - Architecture C subset: **NOT EXECUTED**.
-- No pass/fail/skip/error counts or runtime are claimed.
+- Reason: connected interface cannot execute/observe GitHub Actions; local sandbox has no writable checkout and no pytest.
+- No test counts, pass/fail results, or runtime are claimed.
 
-## SEMANTIC REVIEW
+## STATIC ARCHITECTURAL FINDINGS
 
-Phase 4B repairs remain the current static conclusion: supported nested mappings/sequences/sets are recursively frozen, unsupported arbitrary mutable objects are rejected, and execution-plan IDs are bound to material plan content. Execution is still required to validate these claims.
+- DecisionEngine consumes mutable runtime/config/RL/command-center inputs and legacy capital scalars, not DecisionSnapshot or CapitalDemand.
+- Canonical auto admission is ordered and tested as a component but lower-level/manual/API/legacy paths are not proven to share one sealed artifact.
+- Pending map and receipt queue are in memory; nonce/replacement/finality/reorg/restart recovery are not durable.
+- Replay bundles are persistent forensic summaries but omit exact RPC/state/cache/nonce/clock/policy evidence needed for deterministic replay.
+- Proposed adapter interfaces are documented only; none are implemented.
 
-## POLICY-SAFETY REVIEW
+## SEMANTIC/POLICY SAFETY
 
-No unresolved treasury, conversion, provider, exposure, reservation, identity, freshness, finality, replacement, reorg, retention, privacy, or multi-fill policy was selected. Validation infrastructure only.
-
-## COMPATIBILITY REVIEW
-
-The canonical command exercises only the two authority contract suites and uses existing CI dependencies. No runtime consumer or production behavior is changed by the validation documentation.
+No unresolved treasury, conversion, provider, exposure, reservation, identity, freshness, finality, replacement, reorg, retention/privacy, or multi-fill policy was selected. All adapter interfaces are design-only.
 
 ## CI/RECOVERY STATUS
 
-`.github/workflows/ci.yml` already provides repository-native CI on Python 3.11 and installs the pinned backend development dependencies. No new CI workflow or dependency system was created. `docs/AUTHORITY_TEST_EXECUTION.md` is the durable recovery instruction for focused authority validation.
+`.github/workflows/ci.yml` remains the repository-native CI path using Python 3.11 and pinned backend dependencies. `docs/AUTHORITY_TEST_EXECUTION.md` remains the canonical focused test command. Authority tests are not proven until executed in a real repository environment. Repository Git history and CI results are the authoritative recovery mechanism.
 
 ## NEXT TASK
 
-Establish a writable checkout or run the documented command in the repository CI environment. Execute both focused suites, record exact counts/duration, classify failures, and remain blocked from adapters until evidence exists.
+Establish a real executable repository environment and execute the focused authority suites. Do not implement adapters until those results exist and any failures are classified.
 
 ## TASKS EXPLICITLY FORBIDDEN
 
@@ -219,6 +213,7 @@ Until separately authorized and all required evidence exists:
 - `docs/ECONOMIC_IDENTITY_DESIGN.md`
 - `docs/AUTHORITY_SOURCE_MAP.md`
 - `docs/AUTHORITY_TEST_EXECUTION.md`
+- `docs/PHASE5A_ADAPTER_READINESS.md`
 
 ## RELEVANT TESTS AND SOURCE
 
@@ -254,16 +249,17 @@ Until separately authorized and all required evidence exists:
 4. Read `docs/ECONOMIC_IDENTITY_DESIGN.md` for identity architecture context.
 5. Read `docs/AUTHORITY_SOURCE_MAP.md` for the read-only source inventory.
 6. Read `docs/AUTHORITY_TEST_EXECUTION.md` for dependency installation and the canonical command.
-7. Read `backend/victor_ai_bot/authority_contracts.py` and `backend/tests/test_authority_contracts.py`.
-8. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
-9. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
-10. Confirm the seven unresolved decisions have not been silently upgraded.
-11. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
-12. Establish a writable checkout using the existing CI dependency mechanism: Python 3.11, `backend/requirements-dev.txt`, constrained by `backend/constraints.txt`.
-13. Execute `PYTHONPATH=backend pytest -q backend/tests/test_authority_contracts.py backend/tests/test_authority_snapshot_contracts.py` and record exact counts/duration.
-14. Classify failures before changing code. Do not weaken tests or resolve policy to make them pass.
-15. Do not implement adapters until focused tests execute and semantic defects are resolved.
-16. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
+7. Read `docs/PHASE5A_ADAPTER_READINESS.md` for static source/caller/bypass findings.
+8. Read `backend/victor_ai_bot/authority_contracts.py` and `backend/tests/test_authority_contracts.py`.
+9. Inspect `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline --decorate -n 20`.
+10. Verify HEAD contains this checkpoint commit and that no unexpected files changed.
+11. Confirm the seven unresolved decisions have not been silently upgraded.
+12. Re-check `dry_run`, `auto_trading`, live-strategy eligibility, and protected boundaries.
+13. Establish a writable checkout using the existing CI dependency mechanism: Python 3.11, `backend/requirements-dev.txt`, constrained by `backend/constraints.txt`.
+14. Execute `PYTHONPATH=backend pytest -q backend/tests/test_authority_contracts.py backend/tests/test_authority_snapshot_contracts.py` and record exact counts/duration.
+15. Classify failures before changing code. Do not weaken tests or resolve policy to make them pass.
+16. Do not implement adapters until focused tests execute and semantic defects are resolved.
+17. If beginning the next milestone, update this checkpoint when the milestone is complete and commit it with a descriptive message.
 
 ## CHECKPOINT PROTOCOL
 
