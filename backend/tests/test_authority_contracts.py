@@ -8,7 +8,6 @@ import pytest
 from victor_ai_bot.authority_contracts import (
     AuthorityContractError,
     AuthorityStatus,
-    ConversionSnapshot,
     DecisionSnapshot,
     Evidence,
     ExecutionPlanSnapshot,
@@ -51,8 +50,35 @@ def treasury(status: AuthorityStatus = AuthorityStatus.PROVEN) -> TreasurySnapsh
     return TreasurySnapshot("scope", "test-chain", "account-1", unit(), 1000, 800, 100, 100, evidence(status), rev("treasury"))
 
 
-def plan() -> ExecutionPlanSnapshot:
-    return ExecutionPlanSnapshot("route-1", 100, unit(), rev("quote"), 100, (99,), "provider-unresolved", rev("fee"), (("gas_limit", "200000"),), 200, "simulated-test", rev("treasury"), rev("risk"), rev("governance"), rev("policy"), "plan-1", provenance("plan"))
+def plan_fields(**changes):
+    values = dict(
+        route_id="route-1",
+        amount=100,
+        amount_unit=unit(),
+        quote_revision=rev("quote"),
+        quote_block=100,
+        min_outs=(99,),
+        provider="provider-unresolved",
+        provider_fee_revision=rev("fee"),
+        gas_assumptions=(("gas_limit", "200000"),),
+        deadline=200,
+        simulation_state="simulated-test",
+        treasury_revision=rev("treasury"),
+        risk_revision=rev("risk"),
+        governance_revision=rev("governance"),
+        policy_revision=rev("policy"),
+    )
+    values.update(changes)
+    return values
+
+
+def plan(**changes) -> ExecutionPlanSnapshot:
+    values = plan_fields(**changes)
+    provisional = ExecutionPlanSnapshot.__new__(ExecutionPlanSnapshot)
+    for key, value in values.items():
+        object.__setattr__(provisional, key, value)
+    execution_plan_id = ExecutionPlanSnapshot.content_id(provisional.material_fields())
+    return ExecutionPlanSnapshot(**values, execution_plan_id=execution_plan_id, provenance=provenance("plan"))
 
 
 def decision(**changes) -> DecisionSnapshot:
@@ -85,6 +111,22 @@ def test_contracts_are_immutable_and_require_explicit_provenance():
         Provenance(source="", observed_at=NOW)
 
 
+def test_nested_policy_state_is_deeply_immutable():
+    source = {"outer": {"inner": ["value", {"leaf": True}]}}
+    policy = PolicySnapshot(rev("risk"), source, evidence())
+    with pytest.raises(TypeError):
+        policy.state["outer"]["inner"][1]["leaf"] = False  # type: ignore[index]
+    with pytest.raises(TypeError):
+        policy.state["outer"]["inner"] += ("new",)  # type: ignore[index]
+    source["outer"]["inner"][1]["leaf"] = "caller-mutated"
+    assert policy.state["outer"]["inner"][1]["leaf"] is True
+
+
+def test_unsupported_mutable_evidence_objects_are_rejected():
+    with pytest.raises(AuthorityContractError):
+        PolicySnapshot(rev("risk"), {"custom": object()}, evidence())
+
+
 def test_revision_compatibility_is_deterministic_and_source_specific():
     assert rev("x").compatible_with(rev("x"))
     assert not rev("x").compatible_with(rev("y"))
@@ -110,11 +152,31 @@ def test_units_and_missing_decimals_are_not_silently_compatible():
     assert TreasurySnapshot("scope", "chain", "acct", Unit("ASSET", "native", None), 1, 1, 0, 0, evidence(), rev("treasury")).validate(now=NOW) is SnapshotState.MISSING
 
 
-def test_execution_plan_has_independent_identity():
-    p = plan()
-    assert p.validate() is SnapshotState.VALID
-    assert p.execution_plan_id != p.route_id
-    assert ExecutionPlanSnapshot.content_id({"route": p.route_id, "amount": p.amount}) != ExecutionPlanSnapshot.content_id({"route": p.route_id, "amount": p.amount + 1})
+def test_execution_plan_identity_is_deterministic_and_material_fields_bound():
+    first = plan()
+    second = plan()
+    assert first.execution_plan_id == second.execution_plan_id
+    assert first.validate() is SnapshotState.VALID
+    material_changes = (
+        {"route_id": "route-2"},
+        {"amount": 101},
+        {"quote_revision": rev("quote", "r2")},
+        {"quote_block": 101},
+        {"min_outs": (98,)},
+        {"provider": "provider-2"},
+        {"provider_fee_revision": rev("fee", "r2")},
+        {"gas_assumptions": (("gas_limit", "300000"),)},
+        {"deadline": 201},
+        {"simulation_state": "reverted"},
+        {"treasury_revision": rev("treasury", "r2")},
+        {"risk_revision": rev("risk", "r2")},
+        {"governance_revision": rev("governance", "r2")},
+        {"policy_revision": rev("policy", "r2")},
+        {"amount_unit": unit(asset="ASSET_B")},
+    )
+    assert all(plan(**change).execution_plan_id != first.execution_plan_id for change in material_changes)
+    with pytest.raises(AuthorityContractError):
+        ExecutionPlanSnapshot(**plan_fields(), execution_plan_id="not-the-content-id", provenance=provenance("plan"))
 
 
 def test_provider_capacity_and_fee_contracts_require_explicit_units_and_fee_evidence():
