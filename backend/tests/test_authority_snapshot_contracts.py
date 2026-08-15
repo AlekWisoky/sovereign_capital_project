@@ -169,7 +169,9 @@ class ProviderSnapshot:
     def validate(self, *, now: datetime) -> SnapshotStatus:
         if not self.provider_identity or not self.asset_identity or self.asset_decimals is None:
             return SnapshotStatus.MISSING_AUTHORITY
-        if not self.capacity_units or self.capacity_amount < 0:
+        if not self.capacity_units:
+            return SnapshotStatus.MISSING_AUTHORITY
+        if self.capacity_amount < 0:
             return SnapshotStatus.INVALID
         if not self.provider_revision or not self.fee_schedule_revision:
             return SnapshotStatus.MISSING_AUTHORITY
@@ -405,10 +407,14 @@ def test_validation_is_deterministic_explicit_now_and_has_no_runtime_io_boundary
     assert decision.validate(now=NOW) == decision.validate(now=NOW)
     assert decision.validate(now=NOW + timedelta(minutes=1)) is SnapshotStatus.STALE
     source = open(__file__, encoding="utf-8").read()
-    assert "CapitalDemandComposer" not in source
-    assert "DecisionEngine" not in source
-    assert "JsonRpcClient" not in source
-    assert "sqlite" not in source.lower()
+    forbidden_name = "CapitalDemand" + "Composer"
+    assert forbidden_name not in source
+    decision_engine_name = "Decision" + "Engine"
+    assert decision_engine_name not in source
+    json_rpc_name = "JsonRpc" + "Client"
+    assert json_rpc_name not in source
+    forbidden_storage_name = "sql" + "ite"
+    assert forbidden_storage_name not in source.lower()
 
 
 def test_correlation_identity_remains_distinct_through_replacement_and_reorg():
