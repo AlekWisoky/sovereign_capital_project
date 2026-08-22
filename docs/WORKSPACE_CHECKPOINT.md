@@ -2,135 +2,159 @@
 
 ## NEW WORKSPACE RECOVERY PROCEDURE
 
-Repository Git history and CI results are the authoritative recovery mechanism. A new Codex instance must not assume conversational memory exists.
+Repository history and recorded execution evidence are the authoritative recovery mechanism. Do not infer tests or deployment success from source state alone.
 
-1. Read `docs/WORKSPACE_CHECKPOINT.md`.
-2. Read `docs/SOVEREIGN_OS_CONTEXT.md`, `docs/SOVEREIGN_OS_STATE.md`, `docs/SOVEREIGN_OS_DECISIONS.md`, and `docs/SOVEREIGN_OS_CHANGELOG.md`.
-3. Read `docs/AUTHORITY_DECISION_PACKET.md`, `docs/AUTHORITY_SOURCE_MAP.md`, `docs/ECONOMIC_IDENTITY_DESIGN.md`, `docs/AUTHORITY_TEST_EXECUTION.md`, and `docs/PHASE5A_ADAPTER_READINESS.md`.
-4. Inspect the current branch, HEAD, latest checkpoint commit, and working tree.
-5. Verify repository state matches this checkpoint before continuing.
+1. Read this checkpoint and the linked durable architecture documents.
+2. Inspect branch, HEAD, and working tree before changing anything.
+3. Verify repository state against this checkpoint.
+4. Preserve live-trading safeguards and do not weaken authority contracts.
 
 ## PROJECT / GIT STATE
 
 - Project: Sovereign Capital OS
 - Repository: `AlekWisoky/sovereign_capital_project`
-- Branch: `architecture-c-contract-tests`
-- Source HEAD inspected: `bbb89205059818862ddd3c904201d7ebc0803055`
-- Source commit: `test: align authority snapshot contract expectations`
-- Parent: `2d812bdd458814362d5c649673bc73a5b90f2862`
-- Checkpoint commit: the commit containing this file update
-- Runtime behavior changed by this checkpoint: **NO**
+- Primary branch: `architecture-c-contract-tests`
+- Starting remote HEAD for this repair: `b5d5d5a861a9da7baf37af4cb9a4180bcc8eee7a`
+- Previous functional commit: `bbb89205059818862ddd3c904201d7ebc0803055`
+- Validation branch: `codex/numpy-production-dependency-repair`
+- Repair commit: the commit containing this checkpoint and dependency update
+- Files changed: `backend/requirements.txt`, `docs/WORKSPACE_CHECKPOINT.md`
+- Runtime Python source changed: **NO**
+- Authority or safety behavior changed: **NO**
 - Checked-in live trading status: **DISABLED** (`dry_run: true`, `auto_trading: false`)
 
-## CURRENT PHASE / LATEST MILESTONE
+## CURRENT MILESTONE
 
-Recovery synchronization, authority test repair verification, and Render staging diagnostics. The `bbb8920` repair is present and must not be duplicated:
+A minimal production dependency repair has been prepared on an isolated validation branch so the Render service, which auto-deploys the primary branch, is not touched before CI validation.
 
-- empty provider `capacity_units` is classified as `MISSING_AUTHORITY`;
-- prohibited runtime identifiers in the source-inspection test are assembled indirectly to avoid self-reference.
+Exact dependency change:
+
+```text
+backend/requirements.txt
++numpy==2.1.3
+```
+
+No runtime Python, Docker, workflow, authority-contract, test, trading, credential, or Render setting was changed.
+
+## WHY THIS REPAIR EXISTS
+
+Render deployment `dep-da4k8ajtqb8s73859i4g` at commit `bbb89205059818862ddd3c904201d7ebc0803055` reached application startup and failed during import with:
+
+```text
+ModuleNotFoundError: No module named 'numpy'
+```
+
+Observed import path:
+
+```text
+victor_ai_bot.server
+-> api_routes
+-> api
+-> api_legacy
+-> runtime
+-> omar.runtime
+-> import numpy as np
+```
+
+The root `Dockerfile` uses `python:3.11-slim` and installs `backend/requirements.txt`. NumPy is imported directly by the current production server graph, so it is a production dependency rather than a development-only package.
+
+## EXISTING PYTHON 3.11 / LINUX VALIDATION PATH
+
+`.github/workflows/ci.yml` runs on `ubuntu-latest`, installs Python `3.11`, installs `backend/requirements-dev.txt` under `backend/constraints.txt`, then runs Ruff, Black, Mypy, and the full backend pytest suite. The dev requirements include `-r requirements.txt`, so the repair pin is installed by the existing CI path.
+
+Additional existing repository validation paths:
+
+- root `Dockerfile`: `python:3.11-slim`, production requirements, server start script;
+- `backend/Dockerfile`: `python:3.11-slim`, production requirements, server start script;
+- `make verify-backend` -> `scripts/verify_boot.sh`;
+- `scripts/verify_boot.sh`: server import, generated-file checks, full backend pytest, RPC sanity;
+- focused authority command recorded below.
+
+No tox, nox, or new CI system was introduced.
 
 ## TEST EVIDENCE
 
-### Last actually executed focused run
+### Verified pre-repair authority evidence from the recovered Termux checkout
 
-Reported from a real clean checkout at parent commit `2d812bdd458814362d5c649673bc73a5b90f2862`:
+The user actually executed this command at `bbb89205059818862ddd3c904201d7ebc0803055`:
 
 ```bash
-PYTHONPATH=backend pytest -q backend/tests/test_authority_contracts.py backend/tests/test_authority_snapshot_contracts.py
+PYTHONPATH=backend pytest -q \
+  backend/tests/test_authority_contracts.py \
+  backend/tests/test_authority_snapshot_contracts.py
 ```
 
-- Python: `3.13.3`
-- pytest: `9.1.1`
-- Total: `21`
-- Passed: `19`
-- Failed: `2`
-- Skipped: `0` reported
-- Errors: `0`
-- Failures: provider missing-capacity-unit classification and self-referential source inspection.
+Exact reported result:
 
-### Current source HEAD result
+```text
+..................... [100%]
+21 passed
+```
 
-The two repairs are committed at `bbb89205059818862ddd3c904201d7ebc0803055`, but the focused suites have **NOT BEEN EXECUTED at this exact HEAD by this workspace**. No green result is claimed. The canonical command remains the command above. Next validation must run it at the current branch tip in a real checkout and record exact duration/counts.
+This was user-provided Termux execution evidence. It was not run by this replacement workspace and it predates the dependency-file repair.
 
-## RENDER STAGING DIAGNOSTICS
+### Current repair validation status
+
+No local command has been claimed by this workspace. Its execution sandbox does not provide the repository checkout, internet package installation, Docker, or the target Python 3.11 runtime. The following evidence is therefore still required from GitHub Actions or another real Python 3.11/Linux checkout:
+
+```bash
+python -m pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+python -c "import numpy; print(numpy.__version__)"
+PYTHONPATH=backend python -c "import victor_ai_bot.server; print('server import OK')"
+PYTHONPATH=backend pytest -q \
+  backend/tests/test_authority_contracts.py \
+  backend/tests/test_authority_snapshot_contracts.py
+```
+
+If appropriate in the validating checkout:
+
+```bash
+make verify-backend
+```
+
+Do not mark these commands passed until their logs actually prove it.
+
+## CI GATE
+
+- Existing workflow: `.github/workflows/ci.yml`
+- Platform: `ubuntu-latest`
+- Python: `3.11`
+- Repair branch CI result: **PENDING**
+- Workflow/run URL: **PENDING**
+- Primary branch has not received this repair yet.
+- Render must not be triggered until the repair commit has passed the required Python 3.11/Linux validation.
+
+## RENDER STAGING
 
 - Workspace: `My Workspace`
 - Service: `sovereign_capital_project`
 - Service type: Docker web service
 - Region/plan: Virginia / free
 - Repository: `https://github.com/AlekWisoky/sovereign_capital_project`
-- Branch: `architecture-c-contract-tests`
+- Tracked branch: `architecture-c-contract-tests`
+- Dockerfile: `./Dockerfile`
 - Auto-deploy: enabled on commit
 - URL: `https://sovereign-capital-project.onrender.com`
-- Service status: not suspended, but latest deployment failed
-- Deployment ID: `dep-da4k8ajtqb8s73859i4g`
-- Deployment commit: `bbb89205059818862ddd3c904201d7ebc0803055`
-- Deployment status: `update_failed`
-- Started: `2026-08-22T06:39:38Z`
-- Finished: `2026-08-22T06:40:27Z`
-- Build: Docker image build and production dependency installation completed far enough to start Uvicorn
-- Runtime: failed during application import
-- Deployed commit matched inspected GitHub HEAD `bbb8920`: **YES**, but no healthy deployment was produced
+- Last inspected failed deployment: `dep-da4k8ajtqb8s73859i4g`
+- Failed deployment commit: `bbb89205059818862ddd3c904201d7ebc0803055`
+- Failed deployment status: `update_failed`
+- Current repair deployment: **NOT STARTED**
+- Render settings changed by this repair: **NO**
 
-### Render blocker: numpy
+## BLOCKERS
 
-`Dockerfile` uses `python:3.11-slim` and installs only `backend/requirements.txt`. That production file does not declare `numpy`. Importing `victor_ai_bot.server` reaches `runtime.py`, which imports `omar.runtime`; `backend/victor_ai_bot/omar/runtime.py` imports `numpy as np` unconditionally even though `OmarConfig.enabled` defaults to false. Render therefore exits with:
+1. Obtain and inspect actual GitHub Actions evidence for the repair commit.
+2. Establish explicit NumPy import, server import, and focused 21-test evidence under Python 3.11/Linux. Existing CI installs the dependency and runs the full backend suite, but its workflow does not contain the two explicit import commands or the focused command as separate steps.
+3. Do not merge/push the repair to the Render-tracked branch if required validation fails or remains unproven.
 
-```text
-ModuleNotFoundError: No module named 'numpy'
-```
+## EXACT NEXT MILESTONE
 
-Diagnosis: numpy is an import-time runtime dependency of the current server import graph but is absent from the canonical production dependency set installed by Docker. This is a real deployment dependency gap, not an authority-policy decision. No dependency repair was made in this milestone because the required repository test/build validation was not available through this workspace. Do not deploy a dependency change without running the canonical focused tests and at least a server import/start smoke test in a real checkout.
-
-## VERIFIED FACTS / ARCHITECTURAL STATUS
-
-- Authority contracts and regression tests exist.
-- The `bbb8920` test-only fix is present.
-- No adapters are implemented.
-- `CapitalDemandComposer` is not wired.
-- DecisionEngine still uses the legacy capital path.
-- Generic reservation, durable pending recovery, replacement/reorg handling, authoritative settlement, and deterministic replay remain unproven.
-- Render is an observation layer, not a substitute for repository tests.
-
-## UNRESOLVED DECISIONS
-
-1. Treasury denomination and reservation authority.
-2. Conversion and decimal authority.
-3. Provider capacity and fee authority.
-4. Worst-case exposure/liability formula.
-5. Strategy budget and concurrent reservation semantics.
-6. Durable economic/trade correlation identity origin and persistence.
-7. Opportunity freshness and empirical latency horizons.
-
-Additional unresolved lifecycle policies: finality, replacement/cancellation, reorg handling, retention/privacy, and multi-fill semantics.
-
-## FILES CHANGED / COMMITS
-
-- This milestone changes only `docs/WORKSPACE_CHECKPOINT.md`.
-- No runtime, dependency, configuration, test, settlement, PnL, execution, reservation, or Solidity files changed.
-- Commit created: the documentation checkpoint commit containing this update.
-
-## BLOCKED OPERATIONS
-
-Until explicit approval and executable evidence exist:
-
-- no authority adapters;
-- no CapitalDemandComposer implementation or wiring;
-- no DecisionEngine integration;
-- no reservation writes;
-- no settlement/PnL semantic changes;
-- no execution or Solidity/ABI changes;
-- no production/live-trading configuration changes;
-- no live signing/submission or strategy activation;
-- no silent resolution of financial/risk policy.
-
-## EXACT NEXT TASK
-
-1. In a real clean checkout at the current branch tip, install the repository-pinned test environment.
-2. Run the canonical focused authority command and record exact counts/duration.
-3. If green, run the narrow Architecture C contract subset already present.
-4. Separately prepare the smallest production dependency repair for numpy, then validate with focused tests plus a server import/start smoke test before allowing Render to redeploy.
-5. Update this checkpoint with actual evidence and exact commit/deployment SHAs.
+1. Wait for and inspect the existing CI run on `codex/numpy-production-dependency-repair`.
+2. If CI fails, stop and diagnose the exact log failure without changing the NumPy pin.
+3. If CI passes but explicit import/focused-suite evidence is absent, obtain that evidence from a real Python 3.11/Linux checkout before touching the Render-tracked branch.
+4. After all repository-side gates pass, merge the validated repair into `architecture-c-contract-tests` without force-push.
+5. Inspect the resulting Render auto-deployment, confirm the NumPy import error is gone, verify startup, and smoke-test the existing configured health endpoint `/api/system/services`.
+6. Update this checkpoint with exact commit, CI run, deployment ID/status, logs, response, blockers, and next milestone.
 
 ## IMPORTANT DURABLE DOCUMENTS
 
