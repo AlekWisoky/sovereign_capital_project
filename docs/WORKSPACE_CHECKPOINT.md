@@ -2,7 +2,7 @@
 
 ## NEW WORKSPACE RECOVERY PROCEDURE
 
-Repository history and recorded execution evidence are the authoritative recovery mechanism. Do not infer tests or deployment success from source state alone.
+Repository history and recorded execution evidence are authoritative. Do not infer tests or deployment success from source state alone.
 
 1. Read this checkpoint and the linked durable architecture documents.
 2. Inspect branch, HEAD, and working tree before changing anything.
@@ -17,15 +17,16 @@ Repository history and recorded execution evidence are the authoritative recover
 - Starting remote HEAD for this repair: `b5d5d5a861a9da7baf37af4cb9a4180bcc8eee7a`
 - Previous functional commit: `bbb89205059818862ddd3c904201d7ebc0803055`
 - Validation branch: `codex/numpy-production-dependency-repair`
-- Repair commit: the commit containing this checkpoint and dependency update
-- Files changed: `backend/requirements.txt`, `docs/WORKSPACE_CHECKPOINT.md`
+- Dependency repair commit: `4a3ff6ebcc73ea409dcec47a95475a61cd1c28bc`
+- Checkpoint-after-failed-gate commit: the commit containing this update
+- Files changed across this repair milestone: `backend/requirements.txt`, `docs/WORKSPACE_CHECKPOINT.md`
 - Runtime Python source changed: **NO**
 - Authority or safety behavior changed: **NO**
 - Checked-in live trading status: **DISABLED** (`dry_run: true`, `auto_trading: false`)
 
 ## CURRENT MILESTONE
 
-A minimal production dependency repair has been prepared on an isolated validation branch so the Render service, which auto-deploys the primary branch, is not touched before CI validation.
+A minimal production dependency repair was committed to an isolated validation branch so the Render-tracked primary branch remained untouched before CI validation.
 
 Exact dependency change:
 
@@ -38,7 +39,7 @@ No runtime Python, Docker, workflow, authority-contract, test, trading, credenti
 
 ## WHY THIS REPAIR EXISTS
 
-Render deployment `dep-da4k8ajtqb8s73859i4g` at commit `bbb89205059818862ddd3c904201d7ebc0803055` reached application startup and failed during import with:
+Render deployment `dep-da4k8ajtqb8s73859i4g` at commit `bbb89205059818862ddd3c904201d7ebc0803055` failed during application import with:
 
 ```text
 ModuleNotFoundError: No module named 'numpy'
@@ -56,13 +57,13 @@ victor_ai_bot.server
 -> import numpy as np
 ```
 
-The root `Dockerfile` uses `python:3.11-slim` and installs `backend/requirements.txt`. NumPy is imported directly by the current production server graph, so it is a production dependency rather than a development-only package.
+The root `Dockerfile` uses `python:3.11-slim` and installs `backend/requirements.txt`. NumPy is therefore a production dependency in the current server import graph.
 
 ## EXISTING PYTHON 3.11 / LINUX VALIDATION PATH
 
-`.github/workflows/ci.yml` runs on `ubuntu-latest`, installs Python `3.11`, installs `backend/requirements-dev.txt` under `backend/constraints.txt`, then runs Ruff, Black, Mypy, and the full backend pytest suite. The dev requirements include `-r requirements.txt`, so the repair pin is installed by the existing CI path.
+`.github/workflows/ci.yml` runs on `ubuntu-latest`, installs Python `3.11`, installs `backend/requirements-dev.txt` under `backend/constraints.txt`, then runs Ruff, Black, Mypy, and full backend pytest. The dev requirements include `-r requirements.txt`, so the repair pin is included in the existing CI install.
 
-Additional existing repository validation paths:
+Additional existing paths:
 
 - root `Dockerfile`: `python:3.11-slim`, production requirements, server start script;
 - `backend/Dockerfile`: `python:3.11-slim`, production requirements, server start script;
@@ -74,9 +75,9 @@ No tox, nox, or new CI system was introduced.
 
 ## TEST EVIDENCE
 
-### Verified pre-repair authority evidence from the recovered Termux checkout
+### Verified pre-repair authority evidence
 
-The user actually executed this command at `bbb89205059818862ddd3c904201d7ebc0803055`:
+The user actually executed this command in the recovered Termux checkout at `bbb89205059818862ddd3c904201d7ebc0803055`:
 
 ```bash
 PYTHONPATH=backend pytest -q \
@@ -91,11 +92,13 @@ Exact reported result:
 21 passed
 ```
 
-This was user-provided Termux execution evidence. It was not run by this replacement workspace and it predates the dependency-file repair.
+This was user-provided Termux evidence, not execution by this replacement workspace, and it predates the dependency-file repair.
 
-### Current repair validation status
+### Repair validation evidence
 
-No local command has been claimed by this workspace. Its execution sandbox does not provide the repository checkout, internet package installation, Docker, or the target Python 3.11 runtime. The following evidence is therefore still required from GitHub Actions or another real Python 3.11/Linux checkout:
+No repair validation command completed. GitHub Actions stopped the backend job during dependency installation, so NumPy import, server import, Ruff, Black, Mypy, and pytest were not executed for the repair commit.
+
+Required commands still lacking successful evidence:
 
 ```bash
 python -m pip install -c backend/constraints.txt -r backend/requirements-dev.txt
@@ -104,57 +107,57 @@ PYTHONPATH=backend python -c "import victor_ai_bot.server; print('server import 
 PYTHONPATH=backend pytest -q \
   backend/tests/test_authority_contracts.py \
   backend/tests/test_authority_snapshot_contracts.py
-```
-
-If appropriate in the validating checkout:
-
-```bash
 make verify-backend
 ```
 
-Do not mark these commands passed until their logs actually prove it.
-
 ## CI GATE
 
-- Existing workflow: `.github/workflows/ci.yml`
-- Platform: `ubuntu-latest`
-- Python: `3.11`
-- Repair branch CI result: **PENDING**
-- Workflow/run URL: **PENDING**
-- Primary branch has not received this repair yet.
-- Render must not be triggered until the repair commit has passed the required Python 3.11/Linux validation.
+- Workflow: `.github/workflows/ci.yml`
+- Run: `CI #43`
+- Run ID: `32574362625`
+- URL: `https://github.com/AlekWisoky/sovereign_capital_project/actions/runs/32574362625`
+- Commit: `4a3ff6ebcc73ea409dcec47a95475a61cd1c28bc`
+- Branch: `codex/numpy-production-dependency-repair`
+- Platform/Python: `ubuntu-latest` / Python `3.11`
+- Backend job: **FAILED**
+- Failed step: `Install deps`
+- Backend timing: started `2026-08-22T12:56:41Z`, completed `2026-08-22T12:56:49Z`
+- GitHub annotation: `Process completed with exit code 1.` at workflow line 16
+- Subsequent backend steps: Ruff, Black, Mypy, and Pytest **SKIPPED**
+- Contracts job: **FAILED** at `Forge tests`
+- Mobile job: still in progress at the last inspection; irrelevant to the already-failed backend gate
+- Raw dependency resolver output: not available through the public run/check API used by this workspace; exact package-level cause remains unproven
+
+Important baseline comparison: prior primary-branch run `CI #41` at starting HEAD `b5d5d5a861a9da7baf37af4cb9a4180bcc8eee7a` also failed its backend job at `Install deps`, before the NumPy repair existed. This proves the failing step is not newly unique to the NumPy commit, but it does not prove the exact cause.
+
+CI gate result: **FAILED / STOP**.
 
 ## RENDER STAGING
 
 - Workspace: `My Workspace`
 - Service: `sovereign_capital_project`
-- Service type: Docker web service
+- Type: Docker web service
 - Region/plan: Virginia / free
-- Repository: `https://github.com/AlekWisoky/sovereign_capital_project`
 - Tracked branch: `architecture-c-contract-tests`
 - Dockerfile: `./Dockerfile`
 - Auto-deploy: enabled on commit
 - URL: `https://sovereign-capital-project.onrender.com`
-- Last inspected failed deployment: `dep-da4k8ajtqb8s73859i4g`
-- Failed deployment commit: `bbb89205059818862ddd3c904201d7ebc0803055`
-- Failed deployment status: `update_failed`
+- Last known failed deployment: `dep-da4k8ajtqb8s73859i4g`
+- Failed deployment commit/status: `bbb89205059818862ddd3c904201d7ebc0803055` / `update_failed`
 - Current repair deployment: **NOT STARTED**
-- Render settings changed by this repair: **NO**
+- Repair merged to Render-tracked branch: **NO**
+- Render settings changed: **NO**
 
-## BLOCKERS
+## CURRENT BLOCKERS
 
-1. Obtain and inspect actual GitHub Actions evidence for the repair commit.
-2. Establish explicit NumPy import, server import, and focused 21-test evidence under Python 3.11/Linux. Existing CI installs the dependency and runs the full backend suite, but its workflow does not contain the two explicit import commands or the focused command as separate steps.
-3. Do not merge/push the repair to the Render-tracked branch if required validation fails or remains unproven.
+1. Obtain the raw `Install deps` log from GitHub Actions run `32574362625`, backend job `97034403505`, and identify the exact pip failure. The public API exposes only exit code 1, not resolver output.
+2. Fix or otherwise resolve only the proven install blocker. Do not silently change `numpy==2.1.3`.
+3. Rerun the Python 3.11/Linux gate and obtain explicit NumPy import, server import, and focused 21-test evidence.
+4. Do not merge to `architecture-c-contract-tests` and do not deploy Render while this gate is failed.
 
 ## EXACT NEXT MILESTONE
 
-1. Wait for and inspect the existing CI run on `codex/numpy-production-dependency-repair`.
-2. If CI fails, stop and diagnose the exact log failure without changing the NumPy pin.
-3. If CI passes but explicit import/focused-suite evidence is absent, obtain that evidence from a real Python 3.11/Linux checkout before touching the Render-tracked branch.
-4. After all repository-side gates pass, merge the validated repair into `architecture-c-contract-tests` without force-push.
-5. Inspect the resulting Render auto-deployment, confirm the NumPy import error is gone, verify startup, and smoke-test the existing configured health endpoint `/api/system/services`.
-6. Update this checkpoint with exact commit, CI run, deployment ID/status, logs, response, blockers, and next milestone.
+Inspect the authenticated backend job log for `CI #43`, capture the exact pip error, compare it with baseline `CI #41`, then decide the smallest evidence-based next action. If the NumPy pin itself fails under Python 3.11/Linux, stop and report that exact incompatibility. Otherwise repair the pre-existing CI install blocker separately and rerun validation before touching the Render-tracked branch.
 
 ## IMPORTANT DURABLE DOCUMENTS
 
