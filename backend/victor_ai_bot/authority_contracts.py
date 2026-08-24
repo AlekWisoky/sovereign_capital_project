@@ -46,7 +46,9 @@ def _freeze(value: Any) -> Any:
     evidence. This intentionally makes the contract conservative for arbitrary
     user-defined mutable objects.
     """
-    if value is None or isinstance(value, (str, bytes, int, float, bool, datetime, timedelta, Enum)):
+    if value is None or isinstance(
+        value, (str, bytes, int, float, bool, datetime, timedelta, Enum)
+    ):
         return value
     if isinstance(value, Mapping):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
@@ -86,7 +88,11 @@ class Revision:
             raise AuthorityContractError("revision source and value are required")
 
     def compatible_with(self, other: "Revision") -> bool:
-        return self.source == other.source and self.value == other.value and self.schema == other.schema
+        return (
+            self.source == other.source
+            and self.value == other.value
+            and self.schema == other.schema
+        )
 
 
 @dataclass(frozen=True)
@@ -133,7 +139,11 @@ class FreshnessSnapshot:
     def evaluate(self, *, now: datetime, revision: Revision | None = None) -> SnapshotState:
         if now.tzinfo is None:
             raise AuthorityContractError("now must be timezone-aware")
-        if self.policy_revision is not None and revision is not None and not self.policy_revision.compatible_with(revision):
+        if (
+            self.policy_revision is not None
+            and revision is not None
+            and not self.policy_revision.compatible_with(revision)
+        ):
             return SnapshotState.REVISION_CONFLICT
         if self.observed_at is None or self.horizon is None:
             return SnapshotState.POLICY_UNRESOLVED
@@ -156,7 +166,11 @@ class Unit:
             raise AuthorityContractError("decimals out of range")
 
     def compatible_with(self, other: "Unit") -> bool:
-        return self.asset == other.asset and self.denomination == other.denomination and self.decimals == other.decimals
+        return (
+            self.asset == other.asset
+            and self.denomination == other.denomination
+            and self.decimals == other.decimals
+        )
 
 
 @dataclass(frozen=True)
@@ -170,7 +184,11 @@ class Evidence:
 
     def validate(self, *, now: datetime) -> SnapshotState:
         if self.status in {AuthorityStatus.CONFLICTING, AuthorityStatus.UNRESOLVED}:
-            return SnapshotState.PROVENANCE_CONFLICT if self.status is AuthorityStatus.CONFLICTING else SnapshotState.POLICY_UNRESOLVED
+            return (
+                SnapshotState.PROVENANCE_CONFLICT
+                if self.status is AuthorityStatus.CONFLICTING
+                else SnapshotState.POLICY_UNRESOLVED
+            )
         if self.conflicts:
             return SnapshotState.PROVENANCE_CONFLICT
         freshness_state = self.freshness.evaluate(now=now, revision=self.revision)
@@ -198,7 +216,15 @@ class TreasurySnapshot:
     def validate(self, *, now: datetime) -> SnapshotState:
         if not self.scope or not self.chain or not self.account:
             return SnapshotState.MISSING
-        if self.unit.decimals is None or any(v is not None and v < 0 for v in (self.settled_amount, self.available_amount, self.reserved_amount, self.encumbered_amount)):
+        if self.unit.decimals is None or any(
+            v is not None and v < 0
+            for v in (
+                self.settled_amount,
+                self.available_amount,
+                self.reserved_amount,
+                self.encumbered_amount,
+            )
+        ):
             return SnapshotState.MISSING if self.unit.decimals is None else SnapshotState.INVALID
         return self.evidence.validate(now=now)
 
@@ -217,7 +243,12 @@ class ConversionSnapshot:
     def validate(self, *, now: datetime) -> SnapshotState:
         if self.source.decimals is None or self.target.decimals is None:
             return SnapshotState.MISSING
-        if self.numerator is None or self.denominator is None or self.denominator <= 0 or self.numerator < 0:
+        if (
+            self.numerator is None
+            or self.denominator is None
+            or self.denominator <= 0
+            or self.numerator < 0
+        ):
             return SnapshotState.MISSING
         return self.evidence.validate(now=now)
 
@@ -252,7 +283,9 @@ class ProviderFeeSnapshot:
     def validate(self, *, now: datetime) -> SnapshotState:
         if not self.provider or self.unit.decimals is None:
             return SnapshotState.MISSING
-        if self.fee_amount is None and (self.fee_rate_numerator is None or not self.fee_rate_denominator):
+        if self.fee_amount is None and (
+            self.fee_rate_numerator is None or not self.fee_rate_denominator
+        ):
             return SnapshotState.MISSING
         return self.evidence.validate(now=now)
 
@@ -318,13 +351,17 @@ class ExecutionPlanSnapshot:
             "quote_block": self.quote_block,
             "min_outs": self.min_outs,
             "provider": self.provider,
-            "provider_fee_revision": asdict(self.provider_fee_revision) if self.provider_fee_revision else None,
+            "provider_fee_revision": (
+                asdict(self.provider_fee_revision) if self.provider_fee_revision else None
+            ),
             "gas_assumptions": self.gas_assumptions,
             "deadline": self.deadline,
             "simulation_state": self.simulation_state,
             "treasury_revision": asdict(self.treasury_revision) if self.treasury_revision else None,
             "risk_revision": asdict(self.risk_revision) if self.risk_revision else None,
-            "governance_revision": asdict(self.governance_revision) if self.governance_revision else None,
+            "governance_revision": (
+                asdict(self.governance_revision) if self.governance_revision else None
+            ),
             "policy_revision": asdict(self.policy_revision) if self.policy_revision else None,
         }
 
@@ -339,7 +376,13 @@ class ExecutionPlanSnapshot:
             raise AuthorityContractError("execution_plan_id does not match material plan content")
 
     def validate(self) -> SnapshotState:
-        if not self.route_id or self.amount <= 0 or self.amount_unit.decimals is None or not self.provider or not self.execution_plan_id:
+        if (
+            not self.route_id
+            or self.amount <= 0
+            or self.amount_unit.decimals is None
+            or not self.provider
+            or not self.execution_plan_id
+        ):
             return SnapshotState.MISSING
         if any(value < 0 for value in self.min_outs):
             return SnapshotState.INVALID
@@ -369,14 +412,27 @@ class DecisionSnapshot:
         if not self.opportunity_id or not self.economic_intent_id or not self.trade_correlation_id:
             return SnapshotState.MISSING
         if self.status in {AuthorityStatus.CONFLICTING, AuthorityStatus.UNRESOLVED}:
-            return SnapshotState.PROVENANCE_CONFLICT if self.status is AuthorityStatus.CONFLICTING else SnapshotState.POLICY_UNRESOLVED
+            return (
+                SnapshotState.PROVENANCE_CONFLICT
+                if self.status is AuthorityStatus.CONFLICTING
+                else SnapshotState.POLICY_UNRESOLVED
+            )
         plan_state = self.execution_plan.validate()
         if plan_state is not SnapshotState.VALID:
             return plan_state
         freshness_state = self.freshness.evaluate(now=now, revision=self.policy_revision)
         if freshness_state is not SnapshotState.VALID:
             return freshness_state
-        for snapshot in (self.treasury, self.conversion, self.provider_capacity, self.provider_fee, self.exposure, self.risk, self.governance, self.goal):
+        for snapshot in (
+            self.treasury,
+            self.conversion,
+            self.provider_capacity,
+            self.provider_fee,
+            self.exposure,
+            self.risk,
+            self.governance,
+            self.goal,
+        ):
             if snapshot is None:
                 continue
             state = snapshot.validate(now=now)

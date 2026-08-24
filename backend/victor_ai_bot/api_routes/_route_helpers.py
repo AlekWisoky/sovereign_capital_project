@@ -235,7 +235,9 @@ def auto_trade_route_projection(
     }
     if runtime is not None:
         try:
-            projection["capitalTruthHealth"] = build_capital_truth_read_context(runtime).capital_truth_health
+            projection["capitalTruthHealth"] = build_capital_truth_read_context(
+                runtime
+            ).capital_truth_health
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             projection["capitalTruthHealth"] = {}
     return projection
@@ -254,7 +256,9 @@ def attach_summary_contract(
     capital_policy: Mapping[str, Any] | None = None
     if runtime is not None:
         try:
-            context = build_capital_truth_read_context(runtime, auxiliary_state=AuxiliaryStateService())
+            context = build_capital_truth_read_context(
+                runtime, auxiliary_state=AuxiliaryStateService()
+            )
             capital_contract = dict(context.capital_contract or {})
             capital_policy = dict(context.capital_policy or {})
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError, OSError):

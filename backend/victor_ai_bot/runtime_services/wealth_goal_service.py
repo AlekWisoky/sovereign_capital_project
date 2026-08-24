@@ -363,7 +363,13 @@ class WealthGoalService:
             return unavailable_state(
                 "treasury_goal_unavailable",
                 include_error=True,
-                extra={"goal": None, "state": {}, "recommendation": {}, "explanation": {}, "history": []},
+                extra={
+                    "goal": None,
+                    "state": {},
+                    "recommendation": {},
+                    "explanation": {},
+                    "history": [],
+                },
             )
         meta = self._ensure_meta(goal)
         sig = build_wealth_goal_signals(runtime)
@@ -488,7 +494,12 @@ class WealthGoalService:
             )
         goal = getattr(getattr(treasury, "cfg", None), "goal", None)
         if goal is None:
-            return {"ok": False, "error": "goal_missing", "reason_code": "goal_missing", "goal": None}
+            return {
+                "ok": False,
+                "error": "goal_missing",
+                "reason_code": "goal_missing",
+                "goal": None,
+            }
         current_goal = self._goal_dict(runtime)
         resolved = resolve_goal_patch_payload(payload, current_goal=current_goal)
         changed = goal_patch_changes_state(resolved, current_goal=current_goal)

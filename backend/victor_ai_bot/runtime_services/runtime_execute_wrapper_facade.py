@@ -32,12 +32,12 @@ def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryE
     rpc_cls = JsonRpcClient
     execute_fn = try_execute_opportunity
     try:
-        runtime_legacy = importlib.import_module('victor_ai_bot.runtime_legacy')
+        runtime_legacy = importlib.import_module("victor_ai_bot.runtime_legacy")
     except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
         return rpc_cls, execute_fn
 
-    legacy_rpc = getattr(runtime_legacy, 'JsonRpcClient', _DEFAULT_JSON_RPC_CLIENT)
-    legacy_exec = getattr(runtime_legacy, 'try_execute_opportunity', _DEFAULT_TRY_EXECUTE)
+    legacy_rpc = getattr(runtime_legacy, "JsonRpcClient", _DEFAULT_JSON_RPC_CLIENT)
+    legacy_exec = getattr(runtime_legacy, "try_execute_opportunity", _DEFAULT_TRY_EXECUTE)
     if legacy_rpc is not _DEFAULT_JSON_RPC_CLIENT:
         rpc_cls = legacy_rpc
     if legacy_exec is not _DEFAULT_TRY_EXECUTE:

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from ._common import ensure_proposal, get_primary_opportunity, make_component, opportunity_after_costs_wei, opportunity_after_gas_usd_micro
+from ._common import (
+    ensure_proposal,
+    get_primary_opportunity,
+    make_component,
+    opportunity_after_costs_wei,
+    opportunity_after_gas_usd_micro,
+)
 
 
 def _estimated_cap_usd_micro(opp: dict) -> int:
@@ -35,8 +41,18 @@ def grade_capital(ctx, proposal):
         limit = min(limit, probation_cap)
     if int(p.notional_usd_micro) > int(limit):
         return make_component(
-            "capital", -250, False, "capital_deny_notional_above_cap", limit_usd_micro=int(limit), net_after_costs_wei=net_after_costs_wei
+            "capital",
+            -250,
+            False,
+            "capital_deny_notional_above_cap",
+            limit_usd_micro=int(limit),
+            net_after_costs_wei=net_after_costs_wei,
         )
     return make_component(
-        "capital", +250, True, "capital_would_approve", limit_usd_micro=int(limit), net_after_costs_wei=net_after_costs_wei
+        "capital",
+        +250,
+        True,
+        "capital_would_approve",
+        limit_usd_micro=int(limit),
+        net_after_costs_wei=net_after_costs_wei,
     )

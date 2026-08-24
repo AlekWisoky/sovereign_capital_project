@@ -28,7 +28,9 @@ def attach_runtime(app, runtime) -> RuntimeContainer:
     return container
 
 
-def _record_runtime_lifecycle(app: Any, *, phase: str, status: str, error: Exception | None = None) -> None:
+def _record_runtime_lifecycle(
+    app: Any, *, phase: str, status: str, error: Exception | None = None
+) -> None:
     payload: Dict[str, Any] = {"status": str(status)}
     if error is not None:
         payload["error_type"] = type(error).__name__
@@ -45,7 +47,9 @@ def make_runtime_lifespan():
     @asynccontextmanager
     async def lifespan(app):
         autostart_requested = (os.environ.get("VICTOR_AUTOSTART", "") or "").strip() == "1"
-        _record_runtime_lifecycle(app, phase="autostart", status="enabled" if autostart_requested else "disabled")
+        _record_runtime_lifecycle(
+            app, phase="autostart", status="enabled" if autostart_requested else "disabled"
+        )
         if autostart_requested:
             try:
                 app.state.runtime.start()  # type: ignore[attr-defined]

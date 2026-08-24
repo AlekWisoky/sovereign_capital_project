@@ -10,6 +10,7 @@ initialization helpers. The remaining responsibilities here are:
 The single broad process-boundary containment site lives outside this module in
 runtime_tick_iteration_facade, where it can be regression-tested explicitly.
 """
+
 from __future__ import annotations
 import asyncio, time, os
 from typing import List, Optional, Dict, Any
@@ -70,7 +71,9 @@ from .runtime_services.runtime_treasury_overlay_facade import RuntimeTreasuryOve
 from .runtime_services.runtime_can_execute_facade import RuntimeCanExecuteFacade
 from .runtime_services.runtime_multiruntime_meta_facade import RuntimeMultiruntimeMetaFacade
 from .runtime_services.runtime_multiruntime_state_facade import RuntimeMultiruntimeStateFacade
-from .runtime_services.runtime_multiruntime_lifecycle_facade import RuntimeMultiruntimeLifecycleFacade
+from .runtime_services.runtime_multiruntime_lifecycle_facade import (
+    RuntimeMultiruntimeLifecycleFacade,
+)
 from .runtime_services.runtime_optional_family_init import initialize_optional_family_runtimes
 from .runtime_services.runtime_optional_overlay_init import initialize_optional_overlay_runtimes
 from .runtime_services.runtime_execution_capture_init import initialize_execution_capture_stack
@@ -94,7 +97,11 @@ _SAFE_RUNTIME_EXCEPTIONS = (
 )
 
 
-class MultiRuntimeBundle(RuntimeMultiruntimeMetaFacade, RuntimeMultiruntimeStateFacade, RuntimeMultiruntimeLifecycleFacade):
+class MultiRuntimeBundle(
+    RuntimeMultiruntimeMetaFacade,
+    RuntimeMultiruntimeStateFacade,
+    RuntimeMultiruntimeLifecycleFacade,
+):
     """Compatibility-shell multiruntime wrapper.
 
     Run multiple RuntimeBundle instances safely.
@@ -148,8 +155,45 @@ class MultiRuntimeBundle(RuntimeMultiruntimeMetaFacade, RuntimeMultiruntimeState
     # --- API surface matching RuntimeBundle ---
 
 
-
-class RuntimeBundle(RuntimeOverlayFacade, RuntimeOperatorFacade, RuntimeReplayFacade, RuntimeCapitalFacade, RuntimeReceiptFacade, RuntimeLifecycleFacade, RuntimeMarketFacade, RuntimeBudgetFacade, RuntimeTreasuryGuidanceFacade, RuntimePrimaryScanFacade, RuntimeExecuteDispatchFacade, RuntimeExecuteWrapperFacade, RuntimeExecuteEntryFacade, RuntimePredecisionStateFacade, RuntimeDecisionFinalizeFacade, RuntimeTickScanFacade, RuntimeTickPrepareFacade, RuntimeTickIterationFacade, RuntimeLoopEntryFacade, RuntimeDecisionFacade, RuntimeAutoQueueFacade, RuntimeEngineFacade, RuntimePostTickFacade, RuntimeLoopTailFacade, RuntimeAfterTickFacade, RuntimeUnitEconFacade, RuntimePostdecisionStateFacade, RuntimeCaqKdsFacade, RuntimeFeatureBusFacade, RuntimeSpreadFacade, RuntimeBlockspaceFacade, RuntimeAgentConsensusFacade, RuntimeScoreOverlayFacade, RuntimeTreasuryOverlayFacade, RuntimeCanExecuteFacade, RuntimeConstructorFacade, RuntimeStateFacade):
+class RuntimeBundle(
+    RuntimeOverlayFacade,
+    RuntimeOperatorFacade,
+    RuntimeReplayFacade,
+    RuntimeCapitalFacade,
+    RuntimeReceiptFacade,
+    RuntimeLifecycleFacade,
+    RuntimeMarketFacade,
+    RuntimeBudgetFacade,
+    RuntimeTreasuryGuidanceFacade,
+    RuntimePrimaryScanFacade,
+    RuntimeExecuteDispatchFacade,
+    RuntimeExecuteWrapperFacade,
+    RuntimeExecuteEntryFacade,
+    RuntimePredecisionStateFacade,
+    RuntimeDecisionFinalizeFacade,
+    RuntimeTickScanFacade,
+    RuntimeTickPrepareFacade,
+    RuntimeTickIterationFacade,
+    RuntimeLoopEntryFacade,
+    RuntimeDecisionFacade,
+    RuntimeAutoQueueFacade,
+    RuntimeEngineFacade,
+    RuntimePostTickFacade,
+    RuntimeLoopTailFacade,
+    RuntimeAfterTickFacade,
+    RuntimeUnitEconFacade,
+    RuntimePostdecisionStateFacade,
+    RuntimeCaqKdsFacade,
+    RuntimeFeatureBusFacade,
+    RuntimeSpreadFacade,
+    RuntimeBlockspaceFacade,
+    RuntimeAgentConsensusFacade,
+    RuntimeScoreOverlayFacade,
+    RuntimeTreasuryOverlayFacade,
+    RuntimeCanExecuteFacade,
+    RuntimeConstructorFacade,
+    RuntimeStateFacade,
+):
     """Compatibility-shell runtime wrapper.
 
     This class deliberately keeps only constructor sequencing and the two outer
@@ -181,36 +225,7 @@ class RuntimeBundle(RuntimeOverlayFacade, RuntimeOperatorFacade, RuntimeReplayFa
         initialize_execution_support_stack(self, cfg=cfg, data_dir=data_dir)
         initialize_optional_family_runtimes(self, cfg=cfg, data_dir=data_dir)
 
-
-
-
-
-
-
-
-
-
-
-
     # --- Phase B8: addit...
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
