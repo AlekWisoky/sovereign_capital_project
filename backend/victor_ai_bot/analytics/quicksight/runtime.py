@@ -26,6 +26,7 @@ def _clip(x: float, lo: float, hi: float) -> float:
 _SAFE_RUNTIME_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError, RuntimeError)
 _SAFE_EXPORT_EXCEPTIONS = (OSError, TypeError, ValueError)
 
+
 def _coerce_mapping(value: Any) -> Dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -61,8 +62,8 @@ class QuickSightAnalyticsRuntime:
         self.dataset_status: Dict[str, Any] = {}
         self.dashboard_status: Dict[str, Any] = {}
 
-        export_dir = str(getattr(cfg, 'export_dir', '') or '')
-        if export_dir.startswith('backend/data'):
+        export_dir = str(getattr(cfg, "export_dir", "") or "")
+        if export_dir.startswith("backend/data"):
             cfg.export_dir = canonical_data_dir(export_dir)
         self._mark_export_dir_ready()
 
@@ -127,11 +128,15 @@ class QuickSightAnalyticsRuntime:
             self.dataset_status["TREASURY_METRICS"] = dict(status or {})
             self._append_rows("TREASURY_METRICS", [row])
         if "GOVERNANCE_METRICS" in self.datasets:
-            row, status = build_governance_metrics_row_with_status(ts=ts, governance_state=governance)
+            row, status = build_governance_metrics_row_with_status(
+                ts=ts, governance_state=governance
+            )
             self.dataset_status["GOVERNANCE_METRICS"] = dict(status or {})
             self._append_rows("GOVERNANCE_METRICS", [row])
         if "REGIME_CONTEXT" in self.datasets:
-            row, status = build_regime_context_row_with_status(ts=ts, behave_state=behave, market_state=market)
+            row, status = build_regime_context_row_with_status(
+                ts=ts, behave_state=behave, market_state=market
+            )
             self.dataset_status["REGIME_CONTEXT"] = dict(status or {})
             self._append_rows("REGIME_CONTEXT", [row])
 
@@ -148,7 +153,9 @@ class QuickSightAnalyticsRuntime:
         )
 
         # Alerting / report automation
-        self._check_triggers(ts=ts, pnl=pnl, treasury=treasury, governance=governance, behave=behave)
+        self._check_triggers(
+            ts=ts, pnl=pnl, treasury=treasury, governance=governance, behave=behave
+        )
 
         # Export (optional)
         if bool(self.cfg.export_on_tick):
@@ -222,7 +229,15 @@ class QuickSightAnalyticsRuntime:
     # -----------------
     # Triggers / reports
     # -----------------
-    def _check_triggers(self, *, ts: int, pnl: Dict[str, Any], treasury: Dict[str, Any], governance: Dict[str, Any], behave: Dict[str, Any]) -> None:
+    def _check_triggers(
+        self,
+        *,
+        ts: int,
+        pnl: Dict[str, Any],
+        treasury: Dict[str, Any],
+        governance: Dict[str, Any],
+        behave: Dict[str, Any],
+    ) -> None:
         if not bool(self.cfg.automation.enabled):
             return
 
@@ -233,7 +248,9 @@ class QuickSightAnalyticsRuntime:
         except (TypeError, ValueError):
             dd = 0.0
 
-        ag = str(((treasury or {}).get("aggressiveness") or {}).get("aggressiveness_level") or "LOW").upper()
+        ag = str(
+            ((treasury or {}).get("aggressiveness") or {}).get("aggressiveness_level") or "LOW"
+        ).upper()
         threat = (governance or {}).get("threat") or {}
         tscore = float((threat.get("score") if isinstance(threat, dict) else 0.0) or 0.0)
 
@@ -241,7 +258,10 @@ class QuickSightAnalyticsRuntime:
         if dd >= float(self.cfg.automation.drawdown_threshold):
             triggered.append({"type": "drawdown", "value": dd})
         # Aggressiveness escalation
-        if ag in {"HIGH", "MAXIMUM"} and self.cfg.automation.aggressiveness_escalation_level.upper() in {"HIGH", "MAXIMUM"}:
+        if ag in {
+            "HIGH",
+            "MAXIMUM",
+        } and self.cfg.automation.aggressiveness_escalation_level.upper() in {"HIGH", "MAXIMUM"}:
             triggered.append({"type": "aggressiveness", "value": ag})
         if tscore >= float(self.cfg.automation.threat_monitor_breach):
             triggered.append({"type": "threat_breach", "value": tscore})
@@ -295,7 +315,9 @@ class QuickSightAnalyticsRuntime:
             "last_report": dict(self.last_report or {}),
             "income": dict(self.income or {}),
             "dataset_status": {k: dict(v or {}) for k, v in (self.dataset_status or {}).items()},
-            "dashboard_status": {k: dict(v or {}) for k, v in (self.dashboard_status or {}).items()},
+            "dashboard_status": {
+                k: dict(v or {}) for k, v in (self.dashboard_status or {}).items()
+            },
             "export_status": {
                 "ok": bool(self.export_status.get("ok", True)),
                 "last_error": str(self.export_status.get("last_error") or ""),
@@ -312,7 +334,13 @@ class QuickSightAnalyticsRuntime:
     def ask(self, *, question: str, role: str, token: str = "") -> Dict[str, Any]:
         if not self.authorize(role=role, token=token, perm=PERM_ASK_ANALYTICS):
             return {"ok": False, "error": "forbidden"}
-        return self.query_engine.ask(question=question, role=role, datasets=self.datasets, dashboards=self.dashboards, income=self.income)
+        return self.query_engine.ask(
+            question=question,
+            role=role,
+            datasets=self.datasets,
+            dashboards=self.dashboards,
+            income=self.income,
+        )
 
     def scenario(self, *, params: Dict[str, Any], role: str, token: str = "") -> Dict[str, Any]:
         if not self.authorize(role=role, token=token, perm=PERM_TRIGGER_SIM):
@@ -322,7 +350,9 @@ class QuickSightAnalyticsRuntime:
         return simulate_scenario(
             base_metrics=base,
             income=self.income,
-            hypothetical_volatility_change=float(params.get("hypothetical_volatility_change", 0.0) or 0.0),
+            hypothetical_volatility_change=float(
+                params.get("hypothetical_volatility_change", 0.0) or 0.0
+            ),
             capital_shift=float(params.get("capital_shift", 0.0) or 0.0),
             funding_rate_spike=float(params.get("funding_rate_spike", 0.0) or 0.0),
             aggressiveness_adjustment=float(params.get("aggressiveness_adjustment", 0.0) or 0.0),
