@@ -171,9 +171,10 @@ async def test_actual_runtime_method_chain_reaches_auto_execution_dispatch(monke
         "loop_tail",
     ]
     assert runtime.metrics.last_block == 123
-    assert execute_calls == [
-        {"opp": opp, "bn": 123, "decision": pytest.approx(execute_calls[0]["decision"])},
-    ]
+    assert len(execute_calls) == 1
+    assert execute_calls[0]["opp"] is opp
+    assert execute_calls[0]["bn"] == 123
+    assert execute_calls[0]["decision"].opp_id == "opp-1"
 
 
 def test_runtime_bundle_uses_production_loop_and_tick_facades():
