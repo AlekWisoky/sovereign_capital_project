@@ -40,9 +40,7 @@ class UnifiedRolePolicy:
 
         d = self.state_dim + self.role_dim
         rng = np.random.default_rng(7)
-        self.W = rng.normal(
-            0, 0.02, size=(len(self.action_keys), d)
-        ).astype(np.float32)
+        self.W = rng.normal(0, 0.02, size=(len(self.action_keys), d)).astype(np.float32)
         self.b = np.zeros((len(self.action_keys),), dtype=np.float32)
         self.Wv = rng.normal(0, 0.02, size=(d,)).astype(np.float32)
         self.bv = np.float32(0.0)
@@ -52,9 +50,7 @@ class UnifiedRolePolicy:
             self.load()
 
     def forward(self, role_vec: np.ndarray, state_vec: np.ndarray) -> PolicyOutput:
-        x = np.concatenate(
-            [role_vec.astype(np.float32), state_vec.astype(np.float32)], axis=0
-        )
+        x = np.concatenate([role_vec.astype(np.float32), state_vec.astype(np.float32)], axis=0)
         logits = self.W @ x + self.b
         logits = logits - np.max(logits)
         probs = np.exp(logits) / (np.sum(np.exp(logits)) + 1e-9)
@@ -121,9 +117,7 @@ class UnifiedRolePolicy:
         idx = int(action_index)
         if idx < 0 or idx >= len(self.action_keys):
             return {"updated": 0.0, "reason": 0.0}
-        x = np.concatenate(
-            [role_vec.astype(np.float32), state_vec.astype(np.float32)], axis=0
-        )
+        x = np.concatenate([role_vec.astype(np.float32), state_vec.astype(np.float32)], axis=0)
         out = self.forward(role_vec, state_vec)
         old_p = float(out.action[self.action_keys[idx]])
         reward = float(np.clip(float(reward_scaled), -1_000_000.0, 1_000_000.0))
