@@ -34,13 +34,11 @@ class _ExecutionService:
         self.events.append(("fioa", runtime, opp, decision))
         return await core()
 
-    async def handle_post_execute_bookkeeping(
-        self, runtime, opp, result, *, bn, latency_ms, mode
-    ):
-        self.events.append(("bookkeeping", runtime, opp, result, bn, latency_ms, mode))
+    async def handle_post_execute_bookkeeping(self, runtime, opp, result, **kwargs):
+        self.events.append(("bookkeeping", runtime, opp, result, dict(kwargs)))
 
-    def restore_operator_overrides(self, runtime, *, old_gas_mode, old_send_mode):
-        self.events.append(("restore", old_gas_mode, old_send_mode))
+    def restore_operator_overrides(self, runtime, **kwargs):
+        self.events.append(("restore", dict(kwargs)))
 
 
 class _Runtime(RuntimeExecuteWrapperFacade):
@@ -87,15 +85,19 @@ async def test_prepared_auto_execution_uses_execution_service_lifecycle(monkeypa
         prep=prep,
     )
 
-    assert runtime._execution_service.events[0][0] == "fioa"
-    assert runtime._execution_service.events[0][2] is opp
-    assert runtime._execution_service.events[0][3] is decision
-    assert runtime._execution_service.events[1][0] == "bookkeeping"
-    assert runtime._execution_service.events[1][2] is opp
-    assert runtime._execution_service.events[1][3] is result
-    assert runtime._execution_service.events[1][4] == 123
-    assert runtime._execution_service.events[1][6] == "auto"
-    assert runtime._execution_service.events[2] == ("restore", "standard", "public")
+    events = runtime._execution_service.events
+    assert events[0][0] == "fioa"
+    assert events[0][2] is opp
+    assert events[0][3] is decision
+    assert events[1][0] == "bookkeeping"
+    assert events[1][2] is opp
+    assert events[1][3] is result
+    assert events[1][4]["bn"] == 123
+    assert events[1][4]["mode"] == "auto"
+    assert events[2] == (
+        "restore",
+        {"old_gas_mode": "standard", "old_send_mode": "public"},
+    )
     assert runtime._last_submitted_block == 17
 
 
