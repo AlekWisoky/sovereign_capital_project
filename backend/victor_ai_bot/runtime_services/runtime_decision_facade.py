@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, List, Optional
 
+from ..decision_engine import TradeDecision
+from ..features import build_features
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
@@ -35,16 +38,16 @@ def _coerce_nonnegative_int(value: Any, default: int | None = 0) -> int | None:
 class RuntimeDecisionFacade:
     """Execution-safety wrapper compatibility facade.
 
-    This isolates small, non-loop execution-adjacent wrappers away from
-    RuntimeBundle's orchestration monolith while preserving the existing
-    compatibility surface used by admission, auto-execution, and runtime tick
-    failure accounting.
+    OMAR is inserted here as the learning decision layer immediately before
+    governance/execution. It can only veto or shrink an already executable
+    opportunity; it cannot bypass governance or upsize capital.
     """
 
     cfg: Any
     metrics: Any
     _cb: Any
     _decision: Any
+    _omar: Any
     _errors: list[str]
     _opps: list[Opportunity]
     _pending: dict[str, Any]
@@ -67,11 +70,7 @@ class RuntimeDecisionFacade:
 
     @staticmethod
     def _empty_engine_snapshot() -> dict[str, Any]:
-        return {
-            "items": [],
-            "capabilities": {},
-            "summary": {"engines": []},
-        }
+        return {"items": [], "capabilities": {}, "summary": {"engines": []}}
 
     @staticmethod
     def _opp_is_exec_ready(opp: Opportunity) -> bool:
@@ -125,9 +124,7 @@ class RuntimeDecisionFacade:
         capital_budget_remaining_wei = None
         family_capital_remaining_wei: dict[str, int] = {}
         try:
-            capital_state = (
-                self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
-            )
+            capital_state = self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
             capital_engine = dict((capital_state or {}).get("capital_engine") or {})
             raw_capital_budget = capital_engine.get("deployable_bankroll_wei")
             if raw_capital_budget not in (None, ""):
@@ -169,7 +166,6 @@ class RuntimeDecisionFacade:
             max_pending = 1
         if max_pending > 0 and len(self._pending) >= max_pending:
             return None
-
         ready_candidates = [o for o in self._opps if self._opp_is_exec_ready(o)]
         if not ready_candidates:
             return None
@@ -180,10 +176,7 @@ class RuntimeDecisionFacade:
         chosen = None
         try:
             for oid in list(getattr(decision, "portfolio", []) or self._auto_queue):
-                cand = next(
-                    (o for o in self._opps if o.id == oid and self._opp_is_exec_ready(o)),
-                    None,
-                )
+                cand = next((o for o in self._opps if o.id == oid and self._opp_is_exec_ready(o)), None)
                 if cand is not None:
                     chosen = cand
                     break
@@ -195,6 +188,91 @@ class RuntimeDecisionFacade:
                 None,
             )
         return chosen
+
+    def _wealth_goal_learning_context(self) -> dict[str, Any]:
+        try:
+            service = getattr(self, "_wealth_goal_service", None)
+            if service is not None and hasattr(service, "state"):
+                state = service.state(self)
+                return dict(state.get("state") or {}) if isinstance(state, dict) else {}
+        except _SAFE_DECISION_EXCEPTIONS:
+            pass
+        return {}
+
+    def _omar_context(self, opp: Opportunity, *, p_success: float, ev_wei: int) -> dict[str, Any]:
+        feats = build_features(opp)
+        goal = self._wealth_goal_learning_context()
+        regime = getattr(self, "_market_regime", {})
+        return {
+            "margin_ratio": float(feats.margin_ratio),
+            "gas_ratio": float(feats.gas_ratio),
+            "p_success": float(p_success),
+            "drawdown_pct": float(goal.get("drawdownPct") or 0.0),
+            "execution_realism": float(goal.get("executionRealismScore") or 0.0),
+            "stability": float(goal.get("stabilityScore") or 0.0),
+            "goal_gap_pct": max(0.0, float(goal.get("targetReturnPct") or 0.0) - float(goal.get("currentReturnPct") or 0.0)),
+            "volatility": float(regime.get("volatility", 0.0) or 0.0) if isinstance(regime, dict) else 0.0,
+            "legs": int(feats.legs),
+            "ev_wei": int(ev_wei),
+            "route_id": str(getattr(opp, "route_id", "") or ""),
+            "strategy_family": str((getattr(opp, "meta", {}) or {}).get("strategy_family") or (getattr(opp, "meta", {}) or {}).get("route_family") or ""),
+        }
+
+    def _apply_omar_to_candidate(self, opp: Opportunity, decision: Any | None, *, current_block: int) -> tuple[Opportunity | None, Any | None]:
+        omar = getattr(self, "_omar", None)
+        if omar is None or not bool(getattr(omar, "enabled", False)):
+            return opp, decision
+        try:
+            bm = (getattr(opp, "meta", {}) or {}).get("brain") or {}
+            p_success = float(bm.get("p_success") or getattr(decision, "p_success", 0.0) or 0.0)
+            ev_wei = int(bm.get("ev_wei") or getattr(decision, "ev_wei", 0) or 0)
+            context = self._omar_context(opp, p_success=p_success, ev_wei=ev_wei)
+            rec = omar.recommend(context)
+            learning_action = str(rec.action) if str(rec.action) in {"WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE"} else "EXECUTE"
+            decision_id = f"omar-{getattr(self.cfg.chain, 'name', 'chain')}-{int(current_block)}-{str(getattr(opp, 'id', '') or '')}-{time.time_ns()}"
+            if isinstance(getattr(opp, "meta", None), dict):
+                brain = dict(opp.meta.get("brain") or {})
+                brain["omar_decision_id"] = decision_id
+                brain["omar_action"] = learning_action
+                brain["omar_state_key"] = rec.state_key
+                brain["omar_confidence"] = float(rec.confidence)
+                brain["omar_trained"] = bool(rec.trained)
+                brain["omar_observations"] = int(rec.observations)
+                brain["omar_reason"] = str(rec.reason)
+                opp.meta["brain"] = brain
+                opp.meta["omar"] = rec.to_dict()
+            if rec.veto:
+                omar.observe_decision(
+                    decision_id=decision_id, opportunity_id=str(getattr(opp, "id", "") or ""), route_id=str(getattr(opp, "route_id", "") or ""),
+                    action=learning_action, state_key=str(rec.state_key), context=context,
+                    metadata={"current_block": int(current_block), "ev_wei": int(ev_wei), "p_success": float(p_success), "recommendation": rec.to_dict()},
+                )
+                return None, decision
+            if decision is None:
+                decision = TradeDecision(
+                    action="trade", opp_id=str(getattr(opp, "id", "")), route_id=str(getattr(opp, "route_id", "")),
+                    size_mult=float(rec.size_mult), borrow_mult=1.0, gas_mode=str(rec.gas_mode),
+                    p_success=p_success, ev_wei=ev_wei, reason="omar_selected", rl_state="", rl_action_index=-1,
+                    portfolio=[str(getattr(opp, "id", ""))],
+                )
+            else:
+                decision.size_mult = min(float(getattr(decision, "size_mult", 1.0) or 1.0), float(rec.size_mult))
+                decision.borrow_mult = min(float(getattr(decision, "borrow_mult", 1.0) or 1.0), 1.0)
+                if str(rec.gas_mode) in {"standard", "fast", "instant"}:
+                    decision.gas_mode = str(rec.gas_mode)
+            if isinstance(getattr(opp, "meta", None), dict):
+                brain = dict(opp.meta.get("brain") or {})
+                brain["size_mult_omar"] = float(getattr(decision, "size_mult", 1.0) or 1.0)
+                brain["gas_mode_omar"] = str(getattr(decision, "gas_mode", "standard") or "standard")
+                opp.meta["brain"] = brain
+            omar.observe_decision(
+                decision_id=decision_id, opportunity_id=str(getattr(opp, "id", "") or ""), route_id=str(getattr(opp, "route_id", "") or ""),
+                action=learning_action, state_key=str(rec.state_key), context=context,
+                metadata={"current_block": int(current_block), "ev_wei": int(ev_wei), "p_success": float(p_success), "recommendation": rec.to_dict()},
+            )
+            return opp, decision
+        except _SAFE_DECISION_EXCEPTIONS:
+            return opp, decision
 
     def _maybe_dispatch_auto_trade(self, *, current_block: int, decision: Any = None) -> bool:
         if not self._auto_trading or not self._opps or not self._cb.allow_auto_trading():
@@ -208,13 +286,12 @@ class RuntimeDecisionFacade:
             chosen = self._simple_auto_trade_candidate()
         elif decision is not None and getattr(decision, "action", "skip") == "trade":
             chosen = self._decision_auto_trade_candidate(decision)
-
         if chosen is None:
             return False
 
-        self._exec_task = asyncio.create_task(
-            self._execute_auto(
-                chosen, int(current_block), decision=decision if brain_mode != "off" else None
-            )
-        )
+        chosen, decision = self._apply_omar_to_candidate(chosen, decision if brain_mode != "off" else None, current_block=int(current_block))
+        if chosen is None:
+            return False
+
+        self._exec_task = asyncio.create_task(self._execute_auto(chosen, int(current_block), decision=decision))
         return True
