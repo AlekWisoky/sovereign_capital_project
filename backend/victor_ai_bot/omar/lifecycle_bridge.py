@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import inspect
 import time
@@ -74,11 +75,26 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
     brain["correlation_id"] = correlation_id
     if isinstance(meta, dict):
         meta["brain"] = brain
-        meta["canonical_lineage"] = {"decision_id": decision_id, "correlation_id": correlation_id, "created_at_ms": int(time.time() * 1000)}
+        lineage = _dict(meta.get("canonical_lineage"))
+        lineage.setdefault("decision_id", decision_id)
+        lineage.setdefault("correlation_id", correlation_id)
+        lineage.setdefault("created_at_ms", int(time.time() * 1000))
+        if brain.get("operator_intent") and not lineage.get("operator_intent"):
+            lineage["operator_intent"] = copy.deepcopy(brain["operator_intent"])
+        if brain.get("intent_fingerprint") and not lineage.get("intent_fingerprint"):
+            lineage["intent_fingerprint"] = str(brain["intent_fingerprint"])
+        meta["canonical_lineage"] = lineage
     metadata = _dict(getattr(decision, "metadata", None))
     metadata["canonical_decision_id"] = decision_id
     metadata["correlation_id"] = correlation_id
     metadata["decision_lineage"] = {"decision_id": decision_id, "correlation_id": correlation_id}
+    if isinstance(meta, dict):
+        intent = _dict(meta.get("canonical_lineage")).get("operator_intent")
+        fingerprint = _dict(meta.get("canonical_lineage")).get("intent_fingerprint")
+        if intent and not metadata.get("operator_intent"):
+            metadata["operator_intent"] = copy.deepcopy(intent)
+        if fingerprint and not metadata.get("intent_fingerprint"):
+            metadata["intent_fingerprint"] = str(fingerprint)
     try:
         decision.metadata = metadata
     except _SAFE:
@@ -163,13 +179,29 @@ def _patch_settlement_learning() -> None:
                 return result
             meta = _dict(getattr(opp, "meta", None))
             brain = _dict(meta.get("brain"))
-            decision_id = _text(brain.get("canonical_decision_id") or brain.get("omar_decision_id"))
-            correlation_id = _text(brain.get("correlation_id"))
+            lineage = _dict(meta.get("canonical_lineage"))
+            decision_id = _text(brain.get("canonical_decision_id") or lineage.get("decision_id") or brain.get("omar_decision_id"))
+            correlation_id = _text(brain.get("correlation_id") or lineage.get("correlation_id"))
             if not decision_id or not correlation_id:
                 return result
             outcome = _canonical_settled_outcome(runtime, exec_result, opp)
             if outcome is None:
                 return result
+            pending = _dict(getattr(omar, "_pending_decisions", {}).get(str(decision_id)))
+            intent_snapshot = _dict(
+                pending.get("context", {}).get("operator_intent")
+                if isinstance(pending.get("context"), Mapping)
+                else None
+            )
+            if not intent_snapshot:
+                intent_snapshot = _dict(lineage.get("operator_intent") or brain.get("operator_intent"))
+            learning_metadata = {
+                "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
+                "source": "canonical_outcome_ledger",
+                "settlement": copy.deepcopy(outcome),
+                "operator_intent": copy.deepcopy(intent_snapshot),
+                "intent_fingerprint": _text(lineage.get("intent_fingerprint") or brain.get("intent_fingerprint")),
+            }
             omar.observe_outcome(
                 decision_id=decision_id,
                 ok=bool(outcome.get("ok", True)),
@@ -182,7 +214,7 @@ def _patch_settlement_learning() -> None:
                 route_id=_text(outcome.get("route_id") or getattr(opp, "route_id", "")),
                 tx_hash=_text(outcome.get("tx_hash") or outcome.get("txHash")),
                 outcome_truth_verified=bool(outcome.get("truth_verified", outcome.get("outcome_truth_verified", True))),
-                metadata={"canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id}, "source": "canonical_outcome_ledger", "settlement": dict(outcome)},
+                metadata=learning_metadata,
             )
         except _SAFE:
             pass
