@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
-from victor_ai_bot.decision_identity import ensure_decision_identity, lineage_from_opportunity
+from victor_ai_bot.decision_identity import lineage_from_opportunity
 from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 
@@ -54,11 +54,18 @@ def _runtime():
     runtime._cc = None
     runtime._execution_service = None
     runtime._last_submitted_block = 17
+    runtime._pending = {}
+    runtime._opps = []
+    runtime._auto_queue = []
+    runtime._auto_trading = True
+    runtime._exec_task = None
+    runtime._cb = SimpleNamespace(allow_auto_trading=lambda: True)
+    runtime._omar = None
     return runtime
 
 
 @pytest.mark.asyncio
-async def test_runtime_bundle_execute_auto_walks_production_method_chain(monkeypatch):
+async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(monkeypatch):
     runtime = _runtime()
     events = []
     execution_result = SimpleNamespace(ok=True, dry_run=False, submitted=True)
@@ -95,30 +102,24 @@ async def test_runtime_bundle_execute_auto_walks_production_method_chain(monkeyp
             "brain": {},
         },
     )
-    decision = SimpleNamespace(
-        metadata={
-            "canonical_decision_id": "decision-1",
-            "correlation_id": "corr-1",
-        }
-    )
-    ensure_decision_identity(opp, decision, chain_name="ethereum", current_block=99)
+    runtime._opps = [opp]
 
-    await runtime._execute_auto(opp, 123, decision=decision)
+    dispatched = runtime._maybe_dispatch_auto_trade(current_block=123)
+    assert dispatched is True
+    await runtime._exec_task
 
     assert events[0][0] == "execution"
     assert events[0][1:3] == ("read-rpc", "send-rpc")
     assert events[0][3] is opp
     assert events[0][4:6] == (123, 17)
-    assert events[0][6] is decision
+    assert events[0][6] is None
     assert events[1][0] == "record"
     assert events[1][1] is execution_result
     assert events[1][2] is opp
     assert events[1][4] == "auto"
     assert runtime._last_submitted_block == 123
-    assert lineage_from_opportunity(opp) == {
-        "decision_id": decision.metadata["canonical_decision_id"],
-        "correlation_id": decision.metadata["correlation_id"],
-    }
+    assert lineage_from_opportunity(opp)["decision_id"]
+    assert lineage_from_opportunity(opp)["correlation_id"]
 
 
 def test_production_lineage_bridge_is_installed_on_runtime_decision_boundary():
