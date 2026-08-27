@@ -40,7 +40,9 @@ class UnifiedRolePolicy:
 
         d = self.state_dim + self.role_dim
         rng = np.random.default_rng(7)
-        self.W = rng.normal(0, 0.02, size=(len(self.action_keys), d)).astype(np.float32)
+        self.W = rng.normal(
+            0, 0.02, size=(len(self.action_keys), d)
+        ).astype(np.float32)
         self.b = np.zeros((len(self.action_keys),), dtype=np.float32)
         self.Wv = rng.normal(0, 0.02, size=(d,)).astype(np.float32)
         self.bv = np.float32(0.0)
@@ -50,13 +52,19 @@ class UnifiedRolePolicy:
             self.load()
 
     def forward(self, role_vec: np.ndarray, state_vec: np.ndarray) -> PolicyOutput:
-        x = np.concatenate([role_vec.astype(np.float32), state_vec.astype(np.float32)], axis=0)
+        x = np.concatenate(
+            [role_vec.astype(np.float32), state_vec.astype(np.float32)], axis=0
+        )
         logits = self.W @ x + self.b
         logits = logits - np.max(logits)
         probs = np.exp(logits) / (np.sum(np.exp(logits)) + 1e-9)
         action = {k: float(p) for k, p in zip(self.action_keys, probs)}
         value = float(self.Wv @ x + self.bv)
-        return PolicyOutput(action=action, value=value, info={"probs": action, "value": value})
+        return PolicyOutput(
+            action=action,
+            value=value,
+            info={"probs": action, "value": value},
+        )
 
     def sample_action(self, out: PolicyOutput, rng: np.random.Generator) -> str:
         ps = np.array([out.action[k] for k in self.action_keys], dtype=np.float32)
@@ -128,7 +136,11 @@ class UnifiedRolePolicy:
             "OLD_P": np.asarray([old_p], dtype=np.float32),
             "RET": ret,
         }
-        stats = self.update_ppo(batch, lr=float(learning_rate), clip_eps=float(clip_epsilon))
+        stats = self.update_ppo(
+            batch,
+            lr=float(learning_rate),
+            clip_eps=float(clip_epsilon),
+        )
         stats["updated"] = 1.0
         stats["reward_scaled"] = reward
         return stats
