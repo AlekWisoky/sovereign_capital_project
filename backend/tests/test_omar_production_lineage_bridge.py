@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from victor_ai_bot.decision_identity import ensure_decision_identity, lineage_from_opportunity
 from victor_ai_bot.omar import production_lineage_bridge
+from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
 
 def test_identity_is_created_before_omar_and_preserved_on_decision_and_opportunity():
@@ -47,6 +48,28 @@ def test_identity_is_stable_when_the_same_decision_is_reentered():
     )
 
     assert second == first
+
+
+def test_runtime_decision_boundary_creates_identity_even_when_omar_is_disabled():
+    runtime = object.__new__(RuntimeDecisionFacade)
+    runtime.cfg = SimpleNamespace(chain=SimpleNamespace(name="ethereum"))
+    runtime._omar = None
+    opp = SimpleNamespace(id="opp-1", route_id="route-1", meta={})
+    decision = SimpleNamespace(metadata={})
+
+    chosen, returned_decision = runtime._apply_omar_to_candidate(
+        opp,
+        decision,
+        current_block=123,
+    )
+
+    assert chosen is opp
+    assert returned_decision is decision
+    lineage = lineage_from_opportunity(opp)
+    assert lineage["decision_id"]
+    assert lineage["correlation_id"]
+    assert decision.metadata["canonical_decision_id"] == lineage["decision_id"]
+    assert decision.metadata["correlation_id"] == lineage["correlation_id"]
 
 
 def test_settlement_guard_rejects_cross_trade_lineage():
