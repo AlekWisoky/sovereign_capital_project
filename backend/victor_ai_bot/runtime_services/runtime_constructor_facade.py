@@ -17,6 +17,8 @@ from ..pathing import canonical_data_dir
 from ..persistence.db import PersistenceDB
 from ..rpc_manager import RpcManager
 from ..security.audit import SecurityAuditStore
+from ..omar.config import OmarConfig
+from ..omar.runtime import OmarRuntime
 
 
 class RuntimeConstructorFacade:
@@ -67,6 +69,17 @@ class RuntimeConstructorFacade:
             data_dir=data_dir,
             brain_mode=str(getattr(cfg.execution, "brain_mode", "off") or "off"),
         )
+
+        # OMAR is always constructed so it is a first-class subsystem. It remains
+        # inert unless explicitly enabled, preserving existing safe defaults.
+        env_enabled = (os.environ.get("VICTOR_ENABLE_OMAR", "") or "").strip() == "1"
+        configured = getattr(getattr(cfg, "superstructure", None), "omar", None)
+        omar_cfg = configured if isinstance(configured, OmarConfig) else OmarConfig(enabled=env_enabled)
+        if env_enabled:
+            omar_cfg.enabled = True
+        self._omar = OmarRuntime(cfg=omar_cfg, chain_name=cfg.chain.name)
+        if bool(omar_cfg.enabled):
+            self._omar.start()
 
         self._discovery = DiscoveryManager(chain_name=cfg.chain.name, data_dir=data_dir)
         self._budget_day = time.strftime("%Y-%m-%d", time.gmtime())
