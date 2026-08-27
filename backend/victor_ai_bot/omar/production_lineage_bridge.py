@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
@@ -161,11 +162,78 @@ def _patch_settlement_resolution() -> None:
     lifecycle_bridge._canonical_settled_outcome = wrapped
 
 
+def _patch_learning_identity() -> None:
+    """Make decision->outcome learning identity survive restarts and deduplicate settlement."""
+    from victor_ai_bot.omar.learning_identity import DurableLearningIdentity
+    from victor_ai_bot.omar.runtime import OmarRuntime
+
+    original_decision = getattr(OmarRuntime, "observe_decision", None)
+    original_outcome = getattr(OmarRuntime, "observe_outcome", None)
+    if original_decision is None or original_outcome is None:
+        return
+    if getattr(original_decision, "_durable_identity_patched", False):
+        return
+
+    def store_for(runtime: Any) -> DurableLearningIdentity:
+        store = getattr(runtime, "_durable_learning_identity", None)
+        if store is not None:
+            return store
+        base = str(getattr(runtime, "data_dir", os.path.join("data", "superstructure")))
+        chain = _text(getattr(runtime, "chain_name", "default")) or "default"
+        store = DurableLearningIdentity(os.path.join(base, "omar_learning", f"identity_{chain}.json"))
+        runtime._durable_learning_identity = store
+        return store
+
+    def observe_decision(self: Any, **kwargs: Any) -> None:
+        original_decision(self, **kwargs)
+        decision_id = _text(kwargs.get("decision_id"))
+        if not decision_id:
+            return
+        store_for(self).remember_decision(
+            decision_id,
+            {
+                "correlation_id": _text(_dict(kwargs.get("metadata")).get("correlation_id")),
+                "opportunity_id": _text(kwargs.get("opportunity_id")),
+                "route_id": _text(kwargs.get("route_id")),
+                "action": _text(kwargs.get("action")),
+                "state_key": _text(kwargs.get("state_key")),
+                "metadata": _dict(kwargs.get("metadata")),
+            },
+        )
+
+    def observe_outcome(self: Any, **kwargs: Any):
+        decision_id = _text(kwargs.get("decision_id"))
+        store = store_for(self)
+        if decision_id and store.is_settled(decision_id):
+            return {"ok": True, "duplicate": True, "reason": "settled_outcome_already_learned", "decision_id": decision_id}
+
+        result = original_outcome(self, **kwargs)
+        if isinstance(result, Mapping) and result.get("ok") and decision_id:
+            pending = store.pending(decision_id)
+            store.mark_settled(
+                decision_id,
+                {
+                    "correlation_id": _text(_dict(kwargs.get("metadata")).get("canonical_lineage", {}).get("correlation_id"))
+                    or _text(pending.get("correlation_id")),
+                    "action": _text(pending.get("action")),
+                    "route_id": _text(kwargs.get("route_id") or pending.get("route_id")),
+                    "tx_hash": _text(kwargs.get("tx_hash")),
+                    "operator_intent_fingerprint": _text(_dict(kwargs.get("metadata")).get("operator_intent_fingerprint")),
+                },
+            )
+        return result
+
+    observe_decision._durable_identity_patched = True
+    OmarRuntime.observe_decision = observe_decision
+    OmarRuntime.observe_outcome = observe_outcome
+
+
 def install_production_lineage_bridge() -> None:
     try:
         _patch_omar_context()
         _patch_decision_identity()
         _patch_execution_identity()
         _patch_settlement_resolution()
+        _patch_learning_identity()
     except _SAFE:
         return
