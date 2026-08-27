@@ -14,6 +14,7 @@ from .metrics import compute_social_metrics, to_dict
 from .real_learning import OmarRealLearner, OmarRecommendation, ACTIONS
 from .learning_quality_runtime import live_influence_quality
 from .performance_promotion_runtime import live_performance_promotion
+from .oos_evidence import record_oos_evidence
 
 
 class OmarRuntime:
@@ -190,6 +191,10 @@ class OmarRuntime:
         tx_hash: str = "",
         outcome_truth_verified: bool = True,
         metadata: Mapping[str, Any] | None = None,
+        baseline_reward_usd: float | None = None,
+        evaluation_split: str | None = None,
+        outcome_id: str = "",
+        execution_id: str = "",
     ) -> Dict[str, Any]:
         if not self.enabled or self._real_learner is None or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
@@ -199,6 +204,8 @@ class OmarRuntime:
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
             return {"ok": False, "reason": "missing_decision_link", "decision_id": str(decision_id)}
+        pending_metadata = pending.get("metadata") if isinstance(pending.get("metadata"), Mapping) else {}
+        outcome_metadata = dict(metadata or {})
         reward = float(realized_net_usd) - 0.25 * max(0.0, float(expected_net_usd) - float(realized_net_usd))
         reward -= max(0.0, float(slippage_bps)) * 0.01
         reward -= max(0.0, float(latency_ms)) * 0.0001
@@ -213,13 +220,53 @@ class OmarRuntime:
             "expected_net_usd": float(expected_net_usd), "amount_in_wei": int(amount_in_wei),
             "gas_cost_usd": float(gas_cost_usd), "slippage_bps": float(slippage_bps),
             "latency_ms": int(latency_ms), "outcome_truth_verified": bool(outcome_truth_verified),
-            "metadata": dict(metadata or {}),
+            "metadata": outcome_metadata,
         }
         result = self._real_learner.observe(state_key=state_key, action=action, reward=reward, outcome=outcome)
+        if not result.get("ok"):
+            return result
+        lineage = {
+            "decision_id": str(decision_id),
+            "correlation_id": str(
+                pending_metadata.get("correlation_id")
+                or outcome_metadata.get("correlation_id")
+                or ""
+            ),
+            "opportunity_id": str(pending.get("opportunity_id") or ""),
+            "route_id": str(route_id or pending.get("route_id") or ""),
+            "execution_id": str(execution_id or outcome_metadata.get("execution_id") or ""),
+            "outcome_id": str(outcome_id or outcome_metadata.get("outcome_id") or ""),
+            "tx_hash": str(tx_hash),
+        }
+        oos_split = evaluation_split or pending_metadata.get("evaluation_split") or outcome_metadata.get("evaluation_split")
+        oos_baseline = baseline_reward_usd
+        if oos_baseline is None:
+            oos_baseline = pending_metadata.get("baseline_reward_usd", outcome_metadata.get("baseline_reward_usd"))
+        oos = record_oos_evidence(
+            self,
+            decision_id=str(decision_id),
+            correlation_id=lineage["correlation_id"],
+            opportunity_id=lineage["opportunity_id"],
+            route_id=lineage["route_id"],
+            state_key=state_key,
+            action=action,
+            candidate_reward_usd=float(realized_net_usd),
+            baseline_reward_usd=oos_baseline,
+            evaluation_split=str(oos_split or ""),
+            outcome_id=lineage["outcome_id"],
+            execution_id=lineage["execution_id"],
+            tx_hash=str(tx_hash),
+            metadata={"lineage": lineage, "outcome_truth_verified": bool(outcome_truth_verified)},
+        )
         with self._lock:
-            self.last_outcome = {**dict(result), "decision_id": str(decision_id), "action": action}
-        self._log({"event": "omar_real_learning_update", **dict(result), "outcome": outcome})
-        return result
+            self.last_outcome = {
+                **dict(result),
+                "decision_id": str(decision_id),
+                "action": action,
+                "oos_evidence": oos,
+            }
+        self._log({"event": "omar_real_learning_update", **dict(result), "outcome": outcome, "lineage": lineage, "oos_evidence": oos})
+        return {**dict(result), "oos_evidence": oos}
 
     def _load_learning_cursor(self) -> Dict[str, Any]:
         try:
