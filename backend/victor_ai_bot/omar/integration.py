@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from typing import Any, Dict
 
+from .autonomous_learning_gate import install_autonomous_learning_gate
 from .config import OmarConfig
 from .runtime import OmarRuntime
 
@@ -10,4 +12,5 @@ def make_omar_from_settings(settings: Dict[str, Any], chain_name: str) -> OmarRu
     cfg = OmarConfig(
         **{k: cfg_raw[k] for k in cfg_raw.keys() if k in OmarConfig.__dataclass_fields__}
     )
+    install_autonomous_learning_gate()
     return OmarRuntime(cfg=cfg, chain_name=chain_name)
