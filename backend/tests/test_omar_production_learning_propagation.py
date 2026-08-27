@@ -28,7 +28,7 @@ class _Telemetry:
 
 
 def test_receipt_finalize_hook_propagates_only_after_canonical_settlement(monkeypatch):
-    """Prove the real ordering: receipt finalize -> canonical ledger -> OMAR."""
+    """Prove the production ordering: receipt finalize -> canonical ledger -> OMAR."""
     install_canonical_settlement_interface()
 
     omar = OmarRuntime(
@@ -87,11 +87,8 @@ def test_receipt_finalize_hook_propagates_only_after_canonical_settlement(monkey
         "context": {"operator_intent": intent},
     }
 
-    async def unused():
-        return None
-
-    # The hook is tested against a narrow production-shaped receipt-finalize
-    # seam: the seam commits the canonical settlement before returning.
+    # Production-shaped seam: canonical settlement is committed before the
+    # receipt-finalize method returns, then the OMAR hook reads that ledger.
     def fake_finalize(self, service, **kwargs):
         pending_row = dict(kwargs["pending"])
         repo.rows.append(
@@ -168,6 +165,4 @@ def test_receipt_finalize_hook_propagates_only_after_canonical_settlement(monkey
     assert payload["tx_hash"] == tx_hash
     assert payload["action"] == "EXECUTE"
 
-    # A later operator-intent mutation is not allowed to rewrite the captured
-    # decision context used by the learner.
     assert omar._pending_decisions == {}
