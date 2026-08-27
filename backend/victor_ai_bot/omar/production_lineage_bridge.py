@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
+from ..operator_intent import resolve_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -37,11 +38,17 @@ def _patch_decision_identity() -> None:
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
+        intent = resolve_operator_intent(self)
         ensure_decision_identity(
             opp,
             decision,
-            chain_name=_text(getattr(getattr(self, "cfg", None), "chain", None).name if getattr(getattr(self, "cfg", None), "chain", None) is not None else "chain"),
+            chain_name=_text(
+                getattr(getattr(self, "cfg", None), "chain", None).name
+                if getattr(getattr(self, "cfg", None), "chain", None) is not None
+                else "chain"
+            ),
             current_block=int(current_block),
+            operator_intent=intent,
         )
         return original(self, opp, decision, current_block=current_block)
 
@@ -68,8 +75,13 @@ def _patch_execution_identity() -> None:
                 ensure_decision_identity(
                     opp,
                     decision,
-                    chain_name=_text(getattr(getattr(runtime, "cfg", None), "chain", None).name if getattr(getattr(runtime, "cfg", None), "chain", None) is not None else "chain"),
+                    chain_name=_text(
+                        getattr(getattr(runtime, "cfg", None), "chain", None).name
+                        if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
+                        else "chain"
+                    ),
                     current_block=int(bound.arguments.get("bn") or 0),
+                    operator_intent=resolve_operator_intent(runtime),
                 )
                 lineage = lineage_from_opportunity(opp)
                 if result is not None:
@@ -77,6 +89,7 @@ def _patch_execution_identity() -> None:
                     plan["canonical_lineage"] = dict(lineage)
                     plan["canonical_decision_id"] = lineage["decision_id"]
                     plan["correlation_id"] = lineage["correlation_id"]
+                    plan["operator_intent_fingerprint"] = lineage["operator_intent_fingerprint"]
                     result.plan = plan
             except _SAFE:
                 pass
@@ -105,6 +118,11 @@ def _patch_settlement_resolution() -> None:
             opportunity_id=_text(getattr(opp, "id", "")),
         ):
             return None
+        try:
+            if isinstance(outcome, dict):
+                outcome["operator_intent_fingerprint"] = lineage["operator_intent_fingerprint"]
+        except (AttributeError, TypeError):
+            pass
         return outcome
 
     wrapped._production_identity_patched = True
