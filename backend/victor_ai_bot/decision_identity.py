@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .operator_intent import intent_fingerprint
+
 
 @dataclass(frozen=True)
 class DecisionExecutionIdentity:
@@ -34,12 +36,12 @@ def ensure_decision_identity(
     *,
     chain_name: str,
     current_block: int,
+    operator_intent: Mapping[str, Any] | None = None,
 ) -> DecisionExecutionIdentity:
-    """Create/preserve one canonical identity and persist it on both objects.
+    """Create/preserve canonical identity and attach operator-intent attribution.
 
-    Identity creation is deliberately independent of OMAR. The decision,
-    execution, and settlement lifecycle must remain traceable even when the
-    OMAR learning policy is disabled.
+    Identity creation is independent of OMAR. Operator intent is metadata only:
+    it describes why the decision was made, but never grants execution authority.
     """
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
@@ -76,12 +78,25 @@ def ensure_decision_identity(
     if not correlation_id:
         correlation_id = _stable_id("corr", decision_id, chain_name)
 
+    intent = dict(operator_intent or decision_meta.get("operator_intent") or {})
+    intent_fp = _text(
+        brain.get("operator_intent_fingerprint")
+        or lineage.get("operator_intent_fingerprint")
+        or decision_meta.get("operator_intent_fingerprint")
+    )
+    if intent and not intent_fp:
+        intent_fp = intent_fingerprint(intent)
+
     brain["canonical_decision_id"] = decision_id
     brain["correlation_id"] = correlation_id
+    if intent:
+        brain["operator_intent"] = intent
+        brain["operator_intent_fingerprint"] = intent_fp
     meta["brain"] = brain
     meta["canonical_lineage"] = {
         "decision_id": decision_id,
         "correlation_id": correlation_id,
+        "operator_intent_fingerprint": intent_fp,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
 
@@ -92,6 +107,9 @@ def ensure_decision_identity(
             "decision_id": decision_id,
             "correlation_id": correlation_id,
         }
+        if intent:
+            decision_meta["operator_intent"] = intent
+            decision_meta["operator_intent_fingerprint"] = intent_fp
         try:
             decision.metadata = decision_meta
         except (AttributeError, TypeError):
@@ -107,4 +125,7 @@ def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     return {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
+        "operator_intent_fingerprint": _text(
+            brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint")
+        ),
     }
