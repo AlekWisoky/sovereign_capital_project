@@ -1,0 +1,33 @@
+name: OMAR Autonomous Learning Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  autonomous-learning-gate:
+    name: autonomous-learning-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+
+      - name: Run canonical production learning-path regression
+        run: |
+          cd backend
+          pytest -q \
+            tests/test_omar_production_learning_propagation.py \
+            tests/test_omar_phase7_autonomous_learning_gate.py
+
+      - name: Fail closed on gate implementation errors
+        run: |
+          python -m compileall -q backend/victor_ai_bot/omar
