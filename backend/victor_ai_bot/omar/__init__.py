@@ -5,6 +5,7 @@ bypasses governance, execution, or capital authority.
 """
 
 from .config import OmarConfig
+from .operator_intent import OperatorIntentSnapshot, capture_operator_intent
 from .real_learning import (
     ActionAttribution,
     CapitalAuthoritySnapshot,
@@ -24,4 +25,6 @@ __all__ = [
     "ExecutionLearningRecord",
     "SettledOutcomeRecord",
     "ActionAttribution",
+    "OperatorIntentSnapshot",
+    "capture_operator_intent",
 ]
