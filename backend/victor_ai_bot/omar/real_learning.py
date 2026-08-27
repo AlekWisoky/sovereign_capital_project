@@ -7,6 +7,8 @@ import time
 from typing import Any, Callable, Dict, Mapping, Optional
 import uuid
 
+from .operator_intent import OperatorIntentSnapshot
+
 _SAFE_EXCEPTIONS = (AttributeError, KeyError, OSError, TypeError, ValueError)
 
 
@@ -20,6 +22,7 @@ def _dict(value: Any) -> Dict[str, Any]:
 
 def canonical_id(prefix: str, payload: Mapping[str, Any]) -> str:
     import hashlib
+
     body = json.dumps(dict(payload), sort_keys=True, separators=(",", ":"), default=str)
     return f"{prefix}_{hashlib.sha256(body.encode('utf-8')).hexdigest()[:24]}"
 
@@ -51,6 +54,7 @@ class DecisionLearningRecord:
     capital_authority: CapitalAuthoritySnapshot = field(
         default_factory=lambda: CapitalAuthoritySnapshot(authority_id="unavailable")
     )
+    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
     metadata: Dict[str, Any] = field(default_factory=dict)
     ts_ms: int = 0
 
@@ -71,6 +75,7 @@ class ExecutionLearningRecord:
     slippage_bps: float = 0.0
     gas_wei: int = 0
     latency_ms: float = 0.0
+    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
     metadata: Dict[str, Any] = field(default_factory=dict)
     ts_ms: int = 0
 
@@ -91,6 +96,7 @@ class SettledOutcomeRecord:
     realized_gas_wei: int = 0
     risk_cost_wei: int = 0
     net_reward_wei: int = 0
+    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
     metadata: Dict[str, Any] = field(default_factory=dict)
     ts_ms: int = 0
 
@@ -109,6 +115,7 @@ class ActionAttribution:
     attribution_weight: float
     reward_wei: int
     eligible_for_learning: bool
+    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
     reason_codes: list[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -130,7 +137,9 @@ class OmarRealLearningLoop:
         self.chain_name = _text(chain_name) or "default"
         self.data_dir = str(data_dir or "data/superstructure")
         os.makedirs(self.data_dir, exist_ok=True)
-        self.audit_path = os.path.join(self.data_dir, f"omar_real_learning_{self.chain_name}.jsonl")
+        self.audit_path = os.path.join(
+            self.data_dir, f"omar_real_learning_{self.chain_name}.jsonl"
+        )
         self.policy_updater = policy_updater
         self.capital_authority_reader = capital_authority_reader
         self._decisions: Dict[str, DecisionLearningRecord] = {}
@@ -160,12 +169,25 @@ class OmarRealLearningLoop:
         family = _dict(raw.get("family_allocatable_wei", raw.get("familyAllocatableWei")))
         return CapitalAuthoritySnapshot(
             authority_id=_text(raw.get("authority_id") or raw.get("authorityId")) or "unknown",
-            available_wei=max(0, int(raw.get("available_wei", raw.get("availableWei", 0)) or 0)),
-            allocatable_wei=max(0, int(raw.get("allocatable_wei", raw.get("allocatableWei", 0)) or 0)),
-            family_allocatable_wei={_text(k): max(0, int(v or 0)) for k, v in family.items() if _text(k)},
+            available_wei=max(
+                0, int(raw.get("available_wei", raw.get("availableWei", 0)) or 0)
+            ),
+            allocatable_wei=max(
+                0, int(raw.get("allocatable_wei", raw.get("allocatableWei", 0)) or 0)
+            ),
+            family_allocatable_wei={
+                _text(k): max(0, int(v or 0)) for k, v in family.items() if _text(k)
+            },
             status=_text(raw.get("status")) or "unknown",
-            freshness_class=_text(raw.get("freshness_class", raw.get("freshnessClass"))) or "unknown",
-            reason_codes=[_text(x) for x in (raw.get("reason_codes", raw.get("reasonCodes")) or []) if _text(x)],
+            freshness_class=_text(
+                raw.get("freshness_class", raw.get("freshnessClass"))
+            )
+            or "unknown",
+            reason_codes=[
+                _text(x)
+                for x in (raw.get("reason_codes", raw.get("reasonCodes")) or [])
+                if _text(x)
+            ],
             source=_text(raw.get("source")) or "runtime",
         )
 
@@ -180,13 +202,21 @@ class OmarRealLearningLoop:
         policy_version: str = "",
         state: Optional[Mapping[str, Any]] = None,
         capital_authority: Optional[CapitalAuthoritySnapshot] = None,
+        operator_intent: Optional[OperatorIntentSnapshot] = None,
         metadata: Optional[Mapping[str, Any]] = None,
     ) -> DecisionLearningRecord:
         record = DecisionLearningRecord(
-            decision_id=_text(decision_id), correlation_id=_text(correlation_id), action=_text(action),
-            opp_id=_text(opp_id), route_id=_text(route_id), policy_version=_text(policy_version),
-            state=_dict(state), capital_authority=capital_authority or self.read_capital_authority(),
-            metadata=_dict(metadata), ts_ms=int(time.time() * 1000),
+            decision_id=_text(decision_id),
+            correlation_id=_text(correlation_id),
+            action=_text(action),
+            opp_id=_text(opp_id),
+            route_id=_text(route_id),
+            policy_version=_text(policy_version),
+            state=_dict(state),
+            capital_authority=capital_authority or self.read_capital_authority(),
+            operator_intent=operator_intent or OperatorIntentSnapshot(),
+            metadata=_dict(metadata),
+            ts_ms=int(time.time() * 1000),
         )
         if not record.decision_id or not record.correlation_id:
             raise ValueError("decision_id and correlation_id are required")
@@ -216,11 +246,20 @@ class OmarRealLearningLoop:
         if _text(correlation_id) != decision.correlation_id:
             raise ValueError("correlation_id_mismatch")
         record = ExecutionLearningRecord(
-            decision_id=decision_id, correlation_id=_text(correlation_id), execution_id=_text(execution_id),
-            status=_text(status), action=_text(action), tx_hash=_text(tx_hash),
-            fill_quantity=float(fill_quantity or 0.0), fill_price=float(fill_price or 0.0),
-            slippage_bps=float(slippage_bps or 0.0), gas_wei=max(0, int(gas_wei or 0)),
-            latency_ms=float(latency_ms or 0.0), metadata=_dict(metadata), ts_ms=int(time.time() * 1000),
+            decision_id=decision_id,
+            correlation_id=_text(correlation_id),
+            execution_id=_text(execution_id),
+            status=_text(status),
+            action=_text(action),
+            tx_hash=_text(tx_hash),
+            fill_quantity=float(fill_quantity or 0.0),
+            fill_price=float(fill_price or 0.0),
+            slippage_bps=float(slippage_bps or 0.0),
+            gas_wei=max(0, int(gas_wei or 0)),
+            latency_ms=float(latency_ms or 0.0),
+            operator_intent=decision.operator_intent,
+            metadata=_dict(metadata),
+            ts_ms=int(time.time() * 1000),
         )
         if not record.execution_id:
             raise ValueError("execution_id is required")
@@ -253,21 +292,35 @@ class OmarRealLearningLoop:
             raise ValueError("settlement_id is required")
         reward = int(realized_pnl_wei or 0) - int(realized_gas_wei or 0) - int(risk_cost_wei or 0)
         outcome = SettledOutcomeRecord(
-            decision_id=decision_id, correlation_id=correlation_id, execution_id=execution_id,
-            settlement_id=settlement_id, status=_text(status), realized_pnl_wei=int(realized_pnl_wei or 0),
+            decision_id=decision_id,
+            correlation_id=correlation_id,
+            execution_id=execution_id,
+            settlement_id=settlement_id,
+            status=_text(status),
+            realized_pnl_wei=int(realized_pnl_wei or 0),
             realized_pnl_usd_micro=int(realized_pnl_usd_micro or 0),
             realized_slippage_bps=float(realized_slippage_bps or 0.0),
-            realized_gas_wei=max(0, int(realized_gas_wei or 0)), risk_cost_wei=max(0, int(risk_cost_wei or 0)),
-            net_reward_wei=reward, metadata=_dict(metadata), ts_ms=int(time.time() * 1000),
+            realized_gas_wei=max(0, int(realized_gas_wei or 0)),
+            risk_cost_wei=max(0, int(risk_cost_wei or 0)),
+            net_reward_wei=reward,
+            operator_intent=execution.operator_intent,
+            metadata=_dict(metadata),
+            ts_ms=int(time.time() * 1000),
         )
         self._outcomes[settlement_id] = outcome
         self._log("settled_outcome", outcome.to_dict())
         eligible = outcome.status.lower() in {"settled", "closed", "complete", "completed"}
         attribution = ActionAttribution(
             learning_id=f"learning_{uuid.uuid4().hex}",
-            decision_id=decision_id, correlation_id=correlation_id, execution_id=execution_id,
-            settlement_id=settlement_id, action=execution.action, attribution_weight=1.0,
-            reward_wei=reward, eligible_for_learning=eligible,
+            decision_id=decision_id,
+            correlation_id=correlation_id,
+            execution_id=execution_id,
+            settlement_id=settlement_id,
+            action=execution.action,
+            attribution_weight=1.0,
+            reward_wei=reward,
+            eligible_for_learning=eligible,
+            operator_intent=execution.operator_intent,
             reason_codes=[] if eligible else ["outcome_not_settled"],
             metadata={"status": outcome.status},
         )
