@@ -5,6 +5,8 @@ import inspect
 import time
 from typing import Any, Mapping
 
+from ..operator_intent import intent_fingerprint
+
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
 
@@ -170,6 +172,15 @@ def _patch_settlement_learning() -> None:
             outcome = _canonical_settled_outcome(runtime, exec_result, opp)
             if outcome is None:
                 return result
+            operator_intent = _dict(meta.get("operator_intent"))
+            intent_fp = _text(operator_intent.get("fingerprint"))
+            if not intent_fp and operator_intent.get("intent"):
+                intent_fp = intent_fingerprint(_dict(operator_intent.get("intent")))
+            attribution = {
+                "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
+                "operator_intent_fingerprint": intent_fp,
+                "operator_intent": operator_intent.get("intent", {}),
+            }
             omar.observe_outcome(
                 decision_id=decision_id,
                 ok=bool(outcome.get("ok", True)),
@@ -182,7 +193,7 @@ def _patch_settlement_learning() -> None:
                 route_id=_text(outcome.get("route_id") or getattr(opp, "route_id", "")),
                 tx_hash=_text(outcome.get("tx_hash") or outcome.get("txHash")),
                 outcome_truth_verified=bool(outcome.get("truth_verified", outcome.get("outcome_truth_verified", True))),
-                metadata={"canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id}, "source": "canonical_outcome_ledger", "settlement": dict(outcome)},
+                metadata={**attribution, "source": "canonical_outcome_ledger", "settlement": dict(outcome)},
             )
         except _SAFE:
             pass
