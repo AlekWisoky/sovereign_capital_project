@@ -135,7 +135,8 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
     assert settled["decision_id"] == "decision-1"
     assert settled["correlation_id"] == "corr-1"
 
-    await execution_service.ExecutionService.handle_post_execute_bookkeeping(
+    service = object.__new__(execution_service.ExecutionService)
+    await service.handle_post_execute_bookkeeping(
         runtime=runtime,
         opp=opp,
         result=result,
