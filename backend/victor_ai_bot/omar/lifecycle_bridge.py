@@ -357,18 +357,19 @@ def _patch_receipt_settlement_learning() -> None:
                 or brain.get("correlation_id")
                 or lineage.get("correlation_id")
             )
-            outcome = _canonical_settled_outcome(
-                runtime,
-                SimpleNamespace(tx_hash=tx_hash),
-                SimpleNamespace(id=_text(pending.get("opportunity_id")), meta={"brain": brain, "canonical_lineage": lineage}),
-            )
-            if outcome is None and hasattr(runtime, "canonical_settled_outcome"):
-                outcome = runtime.canonical_settled_outcome(
+            if not decision_id or not correlation_id:
+                return result
+            outcome = getattr(runtime, "canonical_settled_outcome", None)
+            outcome = (
+                outcome(
                     tx_hash=tx_hash,
                     decision_id=decision_id,
                     correlation_id=correlation_id,
                     opportunity_id=_text(pending.get("opportunity_id")),
                 )
+                if callable(outcome)
+                else None
+            )
             if outcome is not None:
                 _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
         except _SAFE:
