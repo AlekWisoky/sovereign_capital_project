@@ -12,6 +12,8 @@ from .config import OmarConfig
 from .trainer import OmarTrainer
 from .metrics import compute_social_metrics, to_dict
 from .real_learning import OmarRealLearner, OmarRecommendation, ACTIONS
+from .learning_quality_runtime import live_influence_quality
+from .performance_promotion_runtime import live_performance_promotion
 
 
 class OmarRuntime:
@@ -23,6 +25,10 @@ class OmarRuntime:
     OMAR never signs or executes a transaction and never overrides governance.
     Its live recommendation is bounded to veto/downsizing/gas preference.
     Offline self-play remains available as an explicit bootstrap experiment.
+
+    Live policy influence requires two independent gates:
+      1. learning-data quality / lineage integrity;
+      2. out-of-sample performance versus an explicit baseline.
     """
 
     def __init__(self, cfg: OmarConfig, chain_name: str = "default"):
@@ -37,6 +43,8 @@ class OmarRuntime:
         self.last_train: Dict[str, Any] = {}
         self.last_decision: Dict[str, Any] = {}
         self.last_outcome: Dict[str, Any] = {}
+        self.last_learning_quality: Dict[str, Any] = {}
+        self.last_performance_promotion: Dict[str, Any] = {}
         self._cycle = 0
 
         base_data_dir = str(os.environ.get("VICTOR_DATA_DIR", "data") or "data")
@@ -83,16 +91,54 @@ class OmarRuntime:
                 "real_learning": self._real_learner.summary() if self._real_learner else {"enabled": False},
                 "last_decision": dict(self.last_decision),
                 "last_outcome": dict(self.last_outcome),
+                "last_learning_quality": dict(self.last_learning_quality),
+                "last_performance_promotion": dict(self.last_performance_promotion),
                 "last_social": dict(self.last_social),
                 "last_train": dict(self.last_train),
             }
 
+    def learning_quality(self) -> dict[str, Any]:
+        result = live_influence_quality(self)
+        with self._lock:
+            self.last_learning_quality = dict(result)
+        return result
+
+    def performance_promotion(self) -> dict[str, Any]:
+        result = live_performance_promotion(self)
+        with self._lock:
+            self.last_performance_promotion = dict(result)
+        return result
+
+    def _live_influence_gate(self) -> tuple[bool, str]:
+        quality = self.learning_quality()
+        if not bool(quality.get("live_influence_allowed", False)):
+            return False, f"learning_quality_gate:{quality.get('reason', 'not_ready')}"
+        if bool(getattr(self.cfg, "performance_promotion_enabled", True)):
+            performance = self.performance_promotion()
+            if not bool(performance.get("promotion_allowed", False)):
+                return False, f"performance_promotion_gate:{performance.get('reason', 'not_ready')}"
+        return True, "promotion_verified"
+
     def recommend(self, context: Mapping[str, Any]) -> OmarRecommendation:
-        """Return a bounded recommendation for the next real decision."""
+        """Return a bounded recommendation for the next real decision.
+
+        A trained model is not enough for live influence: both the canonical
+        learning-data quality gate and the independent OOS performance gate must
+        pass. Governance remains the final authority.
+        """
         if not self.enabled or not bool(getattr(self.cfg, "live_influence_enabled", True)):
             return OmarRecommendation("", "DISABLED", 0.0, False, 1.0, "standard", False, 0, "omar_disabled")
         if self._real_learner is None:
             return OmarRecommendation("", "UNAVAILABLE", 0.0, False, 1.0, "standard", False, 0, "real_learner_unavailable")
+
+        allowed, gate_reason = self._live_influence_gate()
+        if not allowed:
+            obs = int(getattr(self._real_learner, "total_observations", 0))
+            rec = OmarRecommendation("", "UNTRAINED", 0.0, False, 1.0, "standard", False, obs, gate_reason)
+            with self._lock:
+                self.last_decision = rec.to_dict()
+            return rec
+
         rec = self._real_learner.recommend(context)
         with self._lock:
             self.last_decision = rec.to_dict()
