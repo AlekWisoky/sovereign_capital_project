@@ -19,8 +19,8 @@ class OmarConfig:
     role_embedding_enabled: bool = True
     role_vector_size: int = 64
 
-    # self-play is an offline bootstrap only. Real learning is the production path.
-    self_play_enabled: bool = True
+    # Self-play is an offline bootstrap only. Real learning is the production path.
+    self_play_enabled: bool = False
     max_turns_per_episode: int = 50
     self_play_episodes: int = 200
     discount_factor: float = 0.97
