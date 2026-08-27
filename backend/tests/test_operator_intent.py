@@ -97,3 +97,32 @@ def test_operator_intent_is_persisted_in_canonical_decision_lineage():
     assert opp.meta["canonical_lineage"]["intent_fingerprint"] == fingerprint
     assert decision.metadata["operator_intent"] == intent
     assert decision.metadata["intent_fingerprint"] == fingerprint
+
+
+def test_operator_intent_snapshot_is_immune_to_nested_mutation():
+    opp = SimpleNamespace(id="opp-immutable", route_id="route-immutable", meta={})
+    decision = SimpleNamespace(metadata={})
+    intent = {
+        "aggression_mode": "balanced",
+        "risk_multiplier": 0.7,
+        "goal": {"target_amount": "10000", "timeframe_days": 30},
+        "ai_recommendation": {"action": "WAIT", "confidence": 0.8},
+    }
+    fingerprint = intent_fingerprint(intent)
+
+    ensure_decision_identity(
+        opp,
+        decision,
+        chain_name="ethereum",
+        current_block=123,
+        operator_intent=intent,
+        intent_fingerprint=fingerprint,
+    )
+
+    intent["goal"]["target_amount"] = "999999"
+    intent["ai_recommendation"]["action"] = "EXECUTE"
+
+    assert opp.meta["canonical_lineage"]["operator_intent"]["goal"]["target_amount"] == "10000"
+    assert opp.meta["canonical_lineage"]["operator_intent"]["ai_recommendation"]["action"] == "WAIT"
+    assert decision.metadata["operator_intent"]["goal"]["target_amount"] == "10000"
+    assert decision.metadata["operator_intent"]["ai_recommendation"]["action"] == "WAIT"
