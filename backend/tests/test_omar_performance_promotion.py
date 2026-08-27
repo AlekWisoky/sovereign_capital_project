@@ -5,9 +5,7 @@ from victor_ai_bot.omar.performance_promotion import (
     PerformancePromotionThresholds,
     evaluate_performance_promotion,
 )
-from victor_ai_bot.omar.performance_promotion_runtime import (
-    live_performance_promotion,
-)
+from victor_ai_bot.omar.performance_promotion_runtime import live_performance_promotion
 from victor_ai_bot.omar.real_learning import OmarRecommendation
 from victor_ai_bot.omar.runtime import OmarRuntime
 
@@ -86,6 +84,7 @@ def test_runtime_recommendation_requires_both_gates(tmp_path, monkeypatch):
     runtime = OmarRuntime(OmarConfig(enabled=True), chain_name="combined")
     runtime._real_learner.path = str(tmp_path / "real_policy.json")
 
+    actions = ("WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE")
     quality_path = tmp_path / "real_policy.jsonl"
     with quality_path.open("w", encoding="utf-8") as handle:
         for index in range(50):
@@ -96,7 +95,7 @@ def test_runtime_recommendation_requires_both_gates(tmp_path, monkeypatch):
                         "decision_id": f"decision-{index}",
                         "correlation_id": f"corr-{index}",
                         "state_key": f"state-{index % 10}",
-                        "action": "EXECUTE",
+                        "action": actions[index % len(actions)],
                         "reward": 1.0,
                         "outcome": {
                             "tx_hash": f"0x{index:064x}",
