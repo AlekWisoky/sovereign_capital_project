@@ -155,13 +155,14 @@ class OmarTrainer:
 
     @staticmethod
     def _target_action_index(outcome: Any) -> int:
-        """Translate settled execution into OMAR's own action vocabulary.
+        """Translate a settled trade into OMAR's action vocabulary.
 
-        Successful settlements reinforce EXECUTE. Failed settlements reinforce
-        a conservative response, with DECREASE_RISK when the failed decision
-        carried an aggressive borrow/size signal.
+        Receipt success alone is not enough to reinforce EXECUTE: a successful
+        transaction with zero/non-positive realized reward is treated as WAIT.
+        Failed aggressive decisions reinforce DECREASE_RISK.
         """
-        if bool(getattr(outcome, "ok", False)):
+        reward = float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0)
+        if bool(getattr(outcome, "ok", False)) and reward > 0.0:
             return DEFAULT_ACTION_KEYS.index("EXECUTE")
         context = getattr(outcome, "context", {}) or {}
         brain = context.get("brain") if isinstance(context, dict) else {}
