@@ -1,0 +1,1 @@
+GATE 1 is not accepted by this commit yet. The repository must first expose and test the concrete production callable chain for: decision -> execution record -> canonical settled outcome -> exact action attribution -> OMAR policy update. No parallel test-only lifecycle is acceptable.
