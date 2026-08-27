@@ -5,7 +5,7 @@ import time
 from typing import Any, Awaitable, Callable, Tuple
 
 from ..execution import try_execute_opportunity
-from ..identity import TradeIdentity, attach_identity, identity_from, new_execution_identity
+from ..identity import attach_identity, identity_from, new_execution_identity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
