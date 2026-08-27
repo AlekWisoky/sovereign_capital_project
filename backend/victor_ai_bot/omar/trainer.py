@@ -95,9 +95,7 @@ class OmarTrainer:
 
             step = self.env.step(actions)
             r_team = step.reward
-            exec_frac = sum(1 for a in actions.values() if a == "EXECUTE") / max(
-                1, len(actions)
-            )
+            exec_frac = sum(1 for a in actions.values() if a == "EXECUTE") / max(1, len(actions))
             _r_token = r_team * (0.5 + exec_frac)
 
             for role in self._role_names:
