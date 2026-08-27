@@ -50,6 +50,39 @@ def _prime_context(context: Mapping[str, Any]) -> str:
     return f"{source_bucket}:{availability}:{capacity_bucket}:{cost_bucket}"
 
 
+def _operator_intent_context(context: Mapping[str, Any]) -> tuple[str, str, str, str, str, str, str]:
+    """Convert human/AI intent into coarse, stable learning features.
+
+    Intent is conditioning evidence only. It is deliberately bucketed and never
+    treated as an execution authorization or raw identity.
+    """
+    intent = context.get("operator_intent") if isinstance(context.get("operator_intent"), Mapping) else {}
+    aggression = str(context.get("aggression_mode") or intent.get("aggression_mode") or "balanced").lower()
+    if aggression not in {"conservative", "balanced", "aggressive"}:
+        aggression = "balanced"
+
+    risk = float(context.get("risk_multiplier") or intent.get("risk_multiplier") or 1.0)
+    risk_bucket = _bucket(risk, (0.34, 0.67, 0.99), ("risk_min", "risk_low", "risk_mid", "risk_full"))
+
+    goal = intent.get("goal") if isinstance(intent.get("goal"), Mapping) else {}
+    raw_amount = context.get("goal_target_amount") or goal.get("target_amount") or ""
+    try:
+        amount = float(str(raw_amount).replace(",", "")) if raw_amount not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        amount = 0.0
+    amount_bucket = _bucket(amount, (1_000.0, 10_000.0, 100_000.0), ("goal_amt_unknown_or_low", "goal_amt_small", "goal_amt_mid", "goal_amt_large"))
+
+    horizon = float(context.get("goal_timeframe_days") or goal.get("timeframe_days") or 0.0)
+    horizon_bucket = _bucket(horizon, (7.0, 30.0, 90.0), ("goal_horizon_unknown_or_short", "goal_horizon_short", "goal_horizon_mid", "goal_horizon_long"))
+
+    recommendation = intent.get("ai_recommendation") if isinstance(intent.get("ai_recommendation"), Mapping) else {}
+    rec_action = str(context.get("ai_recommendation_action") or recommendation.get("action") or "none").lower() or "none"
+    rec_posture = str(context.get("ai_recommendation_posture") or recommendation.get("posture") or "none").lower() or "none"
+    rec_confidence = float(context.get("ai_recommendation_confidence") or recommendation.get("confidence") or 0.0)
+    rec_conf_bucket = _bucket(rec_confidence, (0.50, 0.75, 0.90), ("rec_conf_low", "rec_conf_mid", "rec_conf_high", "rec_conf_very_high"))
+    return aggression, risk_bucket, amount_bucket, horizon_bucket, rec_action, rec_posture, rec_conf_bucket
+
+
 @dataclass(frozen=True)
 class OmarRecommendation:
     state_key: str
@@ -92,6 +125,7 @@ class OmarRealLearner:
         goal_gap = float(context.get("goal_gap_pct") or 0.0)
         vol = float(context.get("volatility") or 0.0)
         legs = int(context.get("legs") or 2)
+        aggression, risk_bucket, amount_bucket, horizon_bucket, rec_action, rec_posture, rec_conf_bucket = _operator_intent_context(context)
         return "|".join((
             _bucket(margin, (0.0, .0005, .001, .002), ("m_neg", "m_tiny", "m_low", "m_mid", "m_hi")),
             _bucket(gas, (.0002, .0005, .001), ("g_vlow", "g_low", "g_mid", "g_hi")),
@@ -101,6 +135,13 @@ class OmarRealLearner:
             _bucket(stability, (.55, .70, .85), ("s_low", "s_mid", "s_high", "s_strong")),
             _bucket(goal_gap, (0.0, 2.0, 5.0), ("goal_on_track", "goal_gap_small", "goal_gap_large", "goal_gap_extreme")),
             _bucket(vol, (.10, .20, .35), ("v_low", "v_mid", "v_high", "v_extreme")),
+            aggression,
+            risk_bucket,
+            amount_bucket,
+            horizon_bucket,
+            rec_action,
+            rec_posture,
+            rec_conf_bucket,
             _prime_context(context),
             "l3" if legs > 2 else "l2",
         ))
