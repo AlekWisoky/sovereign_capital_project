@@ -5,6 +5,7 @@ import time
 from typing import Any, Awaitable, Callable, Tuple
 
 from ..execution import try_execute_opportunity
+from ..identity import TradeIdentity, attach_identity, identity_from, new_execution_identity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
@@ -52,6 +53,33 @@ class RuntimeExecuteWrapperFacade:
     bookkeeping from RuntimeBundle._execute_auto while preserving the
     current execution semantics.
     """
+
+    @staticmethod
+    def _ensure_execution_identity(res: Any, decision: Any) -> Any:
+        """Bind one execution-attempt identity to the execution result.
+
+        The decision/correlation pair is never regenerated here. Every actual
+        execution attempt receives its own execution_id, allowing retries to be
+        attributed separately while remaining under the same decision lineage.
+        """
+        decision_identity = identity_from(decision)
+        if decision_identity is None or not decision_identity.decision_id or not decision_identity.correlation_id:
+            return res
+
+        existing = identity_from(res)
+        if existing is not None and existing.execution_id:
+            execution_identity = existing
+        else:
+            execution_identity = new_execution_identity(decision_identity)
+        attach_identity(res, execution_identity)
+
+        try:
+            if isinstance(getattr(res, "plan", None), dict):
+                res.plan.setdefault("identity", {}).update(execution_identity.to_dict())
+                res.plan.setdefault("lineage", {}).update(execution_identity.to_dict())
+        except (AttributeError, TypeError):
+            pass
+        return res
 
     async def _run_prepared_auto_execution(
         self,
@@ -107,6 +135,10 @@ class RuntimeExecuteWrapperFacade:
                 else:
                     res = await _core()
 
+                # The execution boundary is the point at which decision identity
+                # becomes execution identity. This happens before bookkeeping so
+                # every downstream recorder sees the same IDs.
+                res = self._ensure_execution_identity(res, decision)
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
                     bookkeeping_handler = getattr(
