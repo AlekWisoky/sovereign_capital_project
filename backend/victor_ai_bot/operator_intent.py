@@ -52,7 +52,10 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
     if aggression not in _VALID_AGGRESSION:
         aggression = "balanced"
 
-    risk_multiplier = max(0.10, min(1.0, _number(getattr(controls, "risk_multiplier", 1.0), 1.0)))
+    risk_multiplier = max(
+        0.10,
+        min(1.0, _number(getattr(controls, "risk_multiplier", 1.0), 1.0)),
+    )
     recommendation = _recommendation(runtime)
 
     goal_state: dict[str, Any] = {}
@@ -66,8 +69,14 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
         goal_state = {}
 
     goal = _dict(goal_state.get("goal"))
-    target_amount = goal.get("target_amount") or goal.get("target_wealth_usd") or goal.get("target_capital_usd")
-    target_return_pct = goal.get("target_return_percentage") or goal.get("target_return_pct")
+    target_amount = (
+        goal.get("target_amount")
+        or goal.get("target_wealth_usd")
+        or goal.get("target_capital_usd")
+    )
+    target_return_pct = goal.get("target_return_percentage") or goal.get(
+        "target_return_pct"
+    )
     timeframe_days = goal.get("timeframe_days")
     if not timeframe_days and goal.get("time_horizon_seconds"):
         timeframe_days = _number(goal.get("time_horizon_seconds")) / 86400.0
@@ -80,16 +89,31 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
             "target_return_pct": round(_number(target_return_pct), 6),
             "timeframe_days": round(_number(timeframe_days), 6),
             "goal_id": _text(_dict(goal_state.get("meta")).get("active_goal_id")),
-            "goal_revision": int(_number(_dict(goal_state.get("meta")).get("goal_revision"), 1)),
-            "current_return_pct": round(_number(goal_state.get("currentReturnPct") or goal_state.get("current_return_pct")), 6),
-            "drawdown_pct": round(_number(goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")), 6),
+            "goal_revision": int(
+                _number(_dict(goal_state.get("meta")).get("goal_revision"), 1)
+            ),
+            "current_return_pct": round(
+                _number(
+                    goal_state.get("currentReturnPct")
+                    or goal_state.get("current_return_pct")
+                ),
+                6,
+            ),
+            "drawdown_pct": round(
+                _number(
+                    goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")
+                ),
+                6,
+            ),
         },
         "ai_recommendation": {
             "present": bool(recommendation),
             "action": _text(recommendation.get("action")),
             "posture": _text(recommendation.get("posture")),
             "confidence": round(_number(recommendation.get("confidence")), 6),
-            "source": _text(recommendation.get("source") or recommendation.get("kind")),
+            "source": _text(
+                recommendation.get("source") or recommendation.get("kind")
+            ),
         },
         "authority": "operator_intent_only",
     }
