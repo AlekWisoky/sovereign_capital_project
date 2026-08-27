@@ -67,14 +67,10 @@ class LearningOutcome:
             "realizedProfitAfterGasWei": str(self.realized_profit_after_gas_wei),
             "realizedProfitToken": self.realized_profit_token,
             "realizedProfitTokenWei": str(self.realized_profit_token_wei),
-            "realizedGasCostInProfitTokenWei": str(
-                self.realized_gas_cost_in_profit_token_wei
-            ),
+            "realizedGasCostInProfitTokenWei": str(self.realized_gas_cost_in_profit_token_wei),
             "realizedProfitUsdMicro": str(self.realized_profit_usd_micro),
             "realizedGasCostUsdMicro": str(self.realized_gas_cost_usd_micro),
-            "realizedProfitAfterGasUsdMicro": str(
-                self.realized_profit_after_gas_usd_micro
-            ),
+            "realizedProfitAfterGasUsdMicro": str(self.realized_profit_after_gas_usd_micro),
             "strategyType": self.strategy_type,
             "incomeStream": self.income_stream,
             "venuePath": self.venue_path,
@@ -195,16 +191,8 @@ class CanonicalOutcomeLedger:
     ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = (
-            training.get("extra")
-            if isinstance(training.get("extra"), dict)
-            else {}
-        )
-        brain = (
-            training_extra.get("brain")
-            if isinstance(training_extra.get("brain"), dict)
-            else {}
-        )
+        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
@@ -218,27 +206,35 @@ class CanonicalOutcomeLedger:
             "trainingTs": self._int(training.get("ts"), 0),
             "strategy": str(training_extra.get("strategy") or ""),
             "opportunityId": str(
-                training_extra.get("opportunity_id")
-                or row.get("opportunity_id")
-                or ""
+                training_extra.get("opportunity_id") or row.get("opportunity_id") or ""
             ),
             "mode": str(training_extra.get("mode") or row.get("mode") or ""),
             "brain": dict(brain),
-            "aqeDebug": dict(training_extra.get("aqe_debug") or {})
-            if isinstance(training_extra.get("aqe_debug"), dict)
-            else {},
-            "wealthGoal": dict(training_extra.get("wealth_goal") or {})
-            if isinstance(training_extra.get("wealth_goal"), dict)
-            else {},
-            "treasury": dict(training_extra.get("treasury") or {})
-            if isinstance(training_extra.get("treasury"), dict)
-            else {},
-            "governance": dict(training_extra.get("governance") or {})
-            if isinstance(training_extra.get("governance"), dict)
-            else {},
-            "capture": dict(training_extra.get("capture") or {})
-            if isinstance(training_extra.get("capture"), dict)
-            else {},
+            "aqeDebug": (
+                dict(training_extra.get("aqe_debug") or {})
+                if isinstance(training_extra.get("aqe_debug"), dict)
+                else {}
+            ),
+            "wealthGoal": (
+                dict(training_extra.get("wealth_goal") or {})
+                if isinstance(training_extra.get("wealth_goal"), dict)
+                else {}
+            ),
+            "treasury": (
+                dict(training_extra.get("treasury") or {})
+                if isinstance(training_extra.get("treasury"), dict)
+                else {}
+            ),
+            "governance": (
+                dict(training_extra.get("governance") or {})
+                if isinstance(training_extra.get("governance"), dict)
+                else {}
+            ),
+            "capture": (
+                dict(training_extra.get("capture") or {})
+                if isinstance(training_extra.get("capture"), dict)
+                else {}
+            ),
         }
 
         return LearningOutcome(
@@ -276,9 +272,7 @@ class CanonicalOutcomeLedger:
             reward_scaled_ppm=reward_num * 1_000_000 // denom,
             reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
             latency_ms=self._int(training_extra.get("latency_ms"), 0),
-            submit_to_receipt_ms=self._int(
-                training_extra.get("submit_to_receipt_ms"), 0
-            ),
+            submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms"), 0),
             context=context,
         )
 
