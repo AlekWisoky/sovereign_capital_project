@@ -35,14 +35,7 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
     captured = []
 
     def capture_observe(*, state_key, action, reward, outcome):
-        captured.append(
-            {
-                "state_key": state_key,
-                "action": action,
-                "reward": reward,
-                "outcome": outcome,
-            }
-        )
+        captured.append({"state_key": state_key, "action": action, "reward": reward, "outcome": outcome})
         return {"ok": True, "observations": 1}
 
     assert omar._real_learner is not None
@@ -59,10 +52,7 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
                 "receipt_id": "0xtx-1",
                 "ts_ms": 100,
                 "metadata": {
-                    "canonical_lineage": {
-                        "decision_id": "decision-1",
-                        "correlation_id": "corr-1",
-                    },
+                    "canonical_lineage": {"decision_id": "decision-1", "correlation_id": "corr-1"},
                     "opportunity_id": "opp-1",
                     "route_id": "route-1",
                     "expected_net_usd": 4.0,
@@ -80,11 +70,7 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
     intent = {
         "aggression_mode": "balanced",
         "risk_multiplier": 0.7,
-        "goal": {
-            "target_amount": "10000",
-            "timeframe_days": 30,
-            "goal_revision": 1,
-        },
+        "goal": {"target_amount": "10000", "timeframe_days": 30, "goal_revision": 1},
         "ai_recommendation": {"action": "hold", "confidence": 0.8},
     }
     omar.observe_decision(
@@ -101,16 +87,8 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
         id="opp-1",
         route_id="route-1",
         meta={
-            "brain": {
-                "canonical_decision_id": "decision-1",
-                "correlation_id": "corr-1",
-                "operator_intent": intent.copy(),
-            },
-            "canonical_lineage": {
-                "decision_id": "decision-1",
-                "correlation_id": "corr-1",
-                "operator_intent": intent.copy(),
-            },
+            "brain": {"canonical_decision_id": "decision-1", "correlation_id": "corr-1", "operator_intent": intent.copy()},
+            "canonical_lineage": {"decision_id": "decision-1", "correlation_id": "corr-1", "operator_intent": intent.copy()},
         },
     )
     result = SimpleNamespace(tx_hash="0xtx-1", plan={})
@@ -139,12 +117,7 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
 
     service = object.__new__(execution_service.ExecutionService)
     await service.handle_post_execute_bookkeeping(
-        runtime=runtime,
-        opp=opp,
-        result=result,
-        bn=123,
-        latency_ms=12,
-        mode="auto",
+        runtime=runtime, opp=opp, result=result, bn=123, latency_ms=12, mode="auto"
     )
 
     assert len(captured) == 1
