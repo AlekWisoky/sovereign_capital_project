@@ -142,7 +142,30 @@ def _patch_decision_lineage() -> None:
 
 def _canonical_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str, Any] | None:
     """Return only an outcome already marked settled by the canonical ledger."""
-    ledgers = [getattr(runtime, "canonical_outcome_ledger", None), getattr(runtime, "_canonical_outcome_ledger", None), getattr(runtime, "outcome_ledger", None), getattr(runtime, "_outcome_ledger", None)]
+    interface = getattr(runtime, "canonical_settled_outcome", None)
+    if callable(interface):
+        try:
+            meta = _dict(getattr(opp, "meta", None))
+            brain = _dict(meta.get("brain"))
+            lineage = _dict(meta.get("canonical_lineage"))
+            row = interface(
+                tx_hash=_text(getattr(result, "tx_hash", "")),
+                decision_id=_text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
+                correlation_id=_text(brain.get("correlation_id") or lineage.get("correlation_id")),
+                opportunity_id=_text(getattr(opp, "id", "")),
+            )
+            row = _dict(row)
+            if _text(row.get("status")).lower() == "settled":
+                return row
+        except _SAFE:
+            pass
+
+    ledgers = [
+        getattr(runtime, "canonical_outcome_ledger", None),
+        getattr(runtime, "_canonical_outcome_ledger", None),
+        getattr(runtime, "outcome_ledger", None),
+        getattr(runtime, "_outcome_ledger", None),
+    ]
     keys = [_text(getattr(result, "tx_hash", "")), _text(getattr(opp, "id", ""))]
     for ledger in ledgers:
         if ledger is None:
@@ -170,8 +193,98 @@ def _canonical_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str,
     return None
 
 
+def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcome: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply exactly one canonical settled outcome to the real OMAR learner."""
+    omar = getattr(runtime, "_omar", None)
+    if omar is None or not bool(getattr(omar, "enabled", False)):
+        return {"ok": False, "reason": "omar_disabled"}
+
+    pending_row = _dict(pending)
+    brain = _dict(pending_row.get("brain"))
+    lineage = _dict(pending_row.get("canonical_lineage"))
+    decision_id = _text(
+        pending_row.get("canonical_decision_id")
+        or brain.get("canonical_decision_id")
+        or lineage.get("decision_id")
+        or brain.get("omar_decision_id")
+    )
+    correlation_id = _text(
+        pending_row.get("correlation_id")
+        or brain.get("correlation_id")
+        or lineage.get("correlation_id")
+    )
+    if not decision_id or not correlation_id:
+        return {"ok": False, "reason": "missing_canonical_lineage"}
+
+    outcome_row = _dict(outcome)
+    if _text(outcome_row.get("status")).lower() != "settled":
+        return {"ok": False, "reason": "outcome_not_settled"}
+
+    metadata = {
+        "canonical_lineage": {
+            "decision_id": decision_id,
+            "correlation_id": correlation_id,
+        },
+        "source": "phase2_canonical_outcome_ledger",
+        "settlement": copy.deepcopy(outcome_row),
+        "operator_intent": copy.deepcopy(
+            _dict(
+                _dict(pending_row.get("context")).get("operator_intent")
+                or lineage.get("operator_intent")
+                or brain.get("operator_intent")
+            )
+        ),
+        "intent_fingerprint": _text(
+            lineage.get("intent_fingerprint") or brain.get("intent_fingerprint")
+        ),
+    }
+    result = omar.observe_outcome(
+        decision_id=decision_id,
+        ok=bool(outcome_row.get("ok", True)),
+        realized_net_usd=float(outcome_row.get("realized_net_usd", outcome_row.get("realizedNetUsd", 0.0)) or 0.0),
+        expected_net_usd=float(outcome_row.get("expected_net_usd", outcome_row.get("expectedNetUsd", 0.0)) or 0.0),
+        amount_in_wei=int(outcome_row.get("amount_in_wei", outcome_row.get("amountInWei", 0)) or 0),
+        gas_cost_usd=float(outcome_row.get("gas_cost_usd", outcome_row.get("gasCostUsd", 0.0)) or 0.0),
+        slippage_bps=float(outcome_row.get("slippage_bps", outcome_row.get("slippageBps", 0.0)) or 0.0),
+        latency_ms=int(outcome_row.get("latency_ms", outcome_row.get("latencyMs", 0)) or 0),
+        route_id=_text(outcome_row.get("route_id") or pending_row.get("route_id")),
+        tx_hash=_text(outcome_row.get("tx_hash") or outcome_row.get("txHash")),
+        outcome_truth_verified=bool(
+            outcome_row.get("truth_verified", outcome_row.get("outcome_truth_verified", True))
+        ),
+        metadata=metadata,
+    )
+
+    telemetry = getattr(runtime, "_telemetry_service", None)
+    if telemetry is not None and hasattr(telemetry, "record"):
+        try:
+            telemetry.record(
+                "omar_learning_update",
+                {
+                    "decision_id": decision_id,
+                    "correlation_id": correlation_id,
+                    "opportunity_id": _text(pending_row.get("opportunity_id")),
+                    "route_id": _text(outcome_row.get("route_id") or pending_row.get("route_id")),
+                    "tx_hash": _text(outcome_row.get("tx_hash") or outcome_row.get("txHash")),
+                    "state_key": _text(result.get("state_key")),
+                    "action": _text(result.get("action")),
+                    "reward": float(result.get("reward") or 0.0),
+                    "observations": int(result.get("observations") or 0),
+                    "outcome_truth_verified": bool(
+                        outcome_row.get("truth_verified", outcome_row.get("outcome_truth_verified", True))
+                    ),
+                    "intent_fingerprint": metadata["intent_fingerprint"],
+                },
+                chain=_chain_name(runtime),
+            )
+        except _SAFE:
+            pass
+    return dict(result or {})
+
+
 def _patch_settlement_learning() -> None:
     from victor_ai_bot.runtime_services.execution_service import ExecutionService
+
     original = getattr(ExecutionService, "handle_post_execute_bookkeeping", None)
     if original is None or getattr(original, "_omar_settlement_patched", False):
         return
@@ -199,32 +312,7 @@ def _patch_settlement_learning() -> None:
             outcome = _canonical_settled_outcome(runtime, exec_result, opp)
             if outcome is None:
                 return result
-            pending = _dict(getattr(omar, "_pending_decisions", {}).get(str(decision_id)))
-            pending_context = _dict(pending.get("context"))
-            intent_snapshot = _dict(pending_context.get("operator_intent"))
-            if not intent_snapshot:
-                intent_snapshot = _dict(lineage.get("operator_intent") or brain.get("operator_intent"))
-            learning_metadata = {
-                "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
-                "source": "canonical_outcome_ledger",
-                "settlement": copy.deepcopy(outcome),
-                "operator_intent": copy.deepcopy(intent_snapshot),
-                "intent_fingerprint": _text(lineage.get("intent_fingerprint") or brain.get("intent_fingerprint")),
-            }
-            omar.observe_outcome(
-                decision_id=decision_id,
-                ok=bool(outcome.get("ok", True)),
-                realized_net_usd=float(outcome.get("realized_net_usd", outcome.get("realizedNetUsd", 0.0)) or 0.0),
-                expected_net_usd=float(outcome.get("expected_net_usd", outcome.get("expectedNetUsd", 0.0)) or 0.0),
-                amount_in_wei=int(outcome.get("amount_in_wei", outcome.get("amountInWei", 0)) or 0),
-                gas_cost_usd=float(outcome.get("gas_cost_usd", outcome.get("gasCostUsd", 0.0)) or 0.0),
-                slippage_bps=float(outcome.get("slippage_bps", outcome.get("slippageBps", 0.0)) or 0.0),
-                latency_ms=int(outcome.get("latency_ms", outcome.get("latencyMs", 0)) or 0),
-                route_id=_text(outcome.get("route_id") or getattr(opp, "route_id", "")),
-                tx_hash=_text(outcome.get("tx_hash") or outcome.get("txHash")),
-                outcome_truth_verified=bool(outcome.get("truth_verified", outcome.get("outcome_truth_verified", True))),
-                metadata=learning_metadata,
-            )
+            _observe_settled_outcome(runtime, pending=meta, outcome=outcome)
         except _SAFE:
             pass
         return result
@@ -233,10 +321,69 @@ def _patch_settlement_learning() -> None:
     ExecutionService.handle_post_execute_bookkeeping = wrapped
 
 
+def _patch_receipt_settlement_learning() -> None:
+    """Attach OMAR learning after the real receipt path commits canonical settlement."""
+    from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+
+    original = getattr(RuntimeReceiptFacade, "_safe_finalize_receipt_side_effects", None)
+    if original is None or getattr(original, "_omar_receipt_learning_patched", False):
+        return
+
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        signature = inspect.signature(original)
+        bound = signature.bind_partial(self, *args, **kwargs)
+        result = original(self, *args, **kwargs)
+        try:
+            runtime = bound.arguments.get("self")
+            pending = _dict(bound.arguments.get("pending"))
+            if runtime is None or not pending:
+                return result
+            omar = getattr(runtime, "_omar", None)
+            if omar is None or not bool(getattr(omar, "enabled", False)):
+                return result
+            sync = _dict(getattr(runtime, "_last_settlement_sync", None))
+            if not bool(sync.get("ok", False)):
+                return result
+            tx_hash = _text(bound.arguments.get("tx_hash"))
+            brain = _dict(pending.get("brain"))
+            lineage = _dict(pending.get("canonical_lineage"))
+            decision_id = _text(
+                pending.get("canonical_decision_id")
+                or brain.get("canonical_decision_id")
+                or lineage.get("decision_id")
+            )
+            correlation_id = _text(
+                pending.get("correlation_id")
+                or brain.get("correlation_id")
+                or lineage.get("correlation_id")
+            )
+            outcome = _canonical_settled_outcome(
+                runtime,
+                SimpleNamespace(tx_hash=tx_hash),
+                SimpleNamespace(id=_text(pending.get("opportunity_id")), meta={"brain": brain, "canonical_lineage": lineage}),
+            )
+            if outcome is None and hasattr(runtime, "canonical_settled_outcome"):
+                outcome = runtime.canonical_settled_outcome(
+                    tx_hash=tx_hash,
+                    decision_id=decision_id,
+                    correlation_id=correlation_id,
+                    opportunity_id=_text(pending.get("opportunity_id")),
+                )
+            if outcome is not None:
+                _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
+        except _SAFE:
+            pass
+        return result
+
+    wrapped._omar_receipt_learning_patched = True
+    RuntimeReceiptFacade._safe_finalize_receipt_side_effects = wrapped
+
+
 def install_omar_lifecycle_hooks() -> None:
     try:
         _patch_decision_context()
         _patch_decision_lineage()
         _patch_settlement_learning()
+        _patch_receipt_settlement_learning()
     except _SAFE:
         return
