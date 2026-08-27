@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Dict, Any
+
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException
 
 
@@ -9,6 +11,11 @@ def build_router(get_runtime):
     @router.get("/state")
     def state(rt=Depends(get_runtime)) -> Dict[str, Any]:
         return rt.state()
+
+    @router.get("/learning-quality")
+    def learning_quality(rt=Depends(get_runtime)) -> Dict[str, Any]:
+        """Expose the live-influence learning-quality gate without authority changes."""
+        return rt.learning_quality()
 
     @router.post("/start")
     def start(rt=Depends(get_runtime)):
