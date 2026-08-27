@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 from dataclasses import dataclass
@@ -26,14 +27,6 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     body = "|".join(_text(value) for value in parts)
     digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:24]
     return f"{prefix}_{digest}"
-
-
-def _preserve_or_set(mapping: dict[str, Any], key: str, value: Any) -> None:
-    """Set attribution only when the canonical snapshot has no value yet."""
-    if value is None:
-        return
-    if key not in mapping or mapping[key] in (None, ""):
-        mapping[key] = value
 
 
 def ensure_decision_identity(
@@ -95,7 +88,12 @@ def ensure_decision_identity(
         or decision_meta.get("operator_intent")
     )
     if not intent_snapshot and operator_intent is not None:
-        intent_snapshot = dict(operator_intent)
+        # Deep-copy the entire nested intent tree. A shallow dict copy would
+        # allow later mutation of nested goal/recommendation objects to rewrite
+        # historical decision attribution.
+        intent_snapshot = copy.deepcopy(dict(operator_intent))
+    else:
+        intent_snapshot = copy.deepcopy(intent_snapshot)
 
     fingerprint = _text(
         brain.get("intent_fingerprint")
@@ -111,14 +109,14 @@ def ensure_decision_identity(
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
     if intent_snapshot:
-        canonical_lineage["operator_intent"] = dict(intent_snapshot)
+        canonical_lineage["operator_intent"] = copy.deepcopy(intent_snapshot)
     if fingerprint:
         canonical_lineage["intent_fingerprint"] = fingerprint
 
     brain["canonical_decision_id"] = decision_id
     brain["correlation_id"] = correlation_id
     if intent_snapshot:
-        brain["operator_intent"] = dict(intent_snapshot)
+        brain["operator_intent"] = copy.deepcopy(intent_snapshot)
     if fingerprint:
         brain["intent_fingerprint"] = fingerprint
     meta["brain"] = brain
@@ -128,7 +126,7 @@ def ensure_decision_identity(
         decision_meta["canonical_decision_id"] = decision_id
         decision_meta["correlation_id"] = correlation_id
         if intent_snapshot:
-            decision_meta["operator_intent"] = dict(intent_snapshot)
+            decision_meta["operator_intent"] = copy.deepcopy(intent_snapshot)
         if fingerprint:
             decision_meta["intent_fingerprint"] = fingerprint
         decision_meta["decision_lineage"] = {
