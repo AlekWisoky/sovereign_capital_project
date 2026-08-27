@@ -29,7 +29,7 @@ jobs:
 
       - name: Black
         run: |
-          black --diff backend/victor_ai_bot/omar/runtime.py backend/victor_ai_bot/omar/policy.py backend/victor_ai_bot/omar/trainer.py backend/victor_ai_bot/learning/outcome_ledger.py
+          black --check backend
           while read -r slice; do
             xargs -a "$slice" black --check
           done < backend/mypy_targets.txt
