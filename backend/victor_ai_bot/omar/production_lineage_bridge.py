@@ -30,6 +30,38 @@ def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opp
     return True
 
 
+def _patch_omar_context() -> None:
+    """Feed operator intent into OMAR without changing its authority boundary."""
+    from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+
+    original = getattr(RuntimeDecisionFacade, "_omar_context", None)
+    if original is None or getattr(original, "_operator_intent_patched", False):
+        return
+
+    def wrapped(self: Any, opp: Any, *, p_success: float, ev_wei: int):
+        context = dict(original(self, opp, p_success=p_success, ev_wei=ev_wei) or {})
+        intent = resolve_operator_intent(self)
+        goal = _dict(intent.get("goal"))
+        recommendation = _dict(intent.get("ai_recommendation"))
+        context.update(
+            {
+                "aggression_mode": _text(intent.get("aggression_mode")) or "balanced",
+                "risk_multiplier": float(intent.get("risk_multiplier") or 1.0),
+                "goal_horizon_compatibility": float(goal.get("horizon_compatibility") or 1.0),
+                "goal_target_amount": _text(goal.get("target_amount")),
+                "goal_id": _text(goal.get("goal_id")),
+                "goal_revision": int(goal.get("goal_revision") or 1),
+                "ai_recommendation_action": _text(recommendation.get("action")) or "none",
+                "ai_recommendation_posture": _text(recommendation.get("posture")) or "none",
+                "ai_recommendation_confidence": float(recommendation.get("confidence") or 0.0),
+            }
+        )
+        return context
+
+    wrapped._operator_intent_patched = True
+    RuntimeDecisionFacade._omar_context = wrapped
+
+
 def _patch_decision_identity() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
@@ -131,6 +163,7 @@ def _patch_settlement_resolution() -> None:
 
 def install_production_lineage_bridge() -> None:
     try:
+        _patch_omar_context()
         _patch_decision_identity()
         _patch_execution_identity()
         _patch_settlement_resolution()
