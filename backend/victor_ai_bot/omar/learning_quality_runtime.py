@@ -29,9 +29,15 @@ def _events_from_jsonl(path: str) -> Iterable[dict[str, Any]]:
                 metadata = _dict(outcome.get("metadata"))
                 lineage = _dict(metadata.get("canonical_lineage"))
                 yield {
-                    "decision_id": _text(row.get("decision_id")),
+                    "decision_id": _text(
+                        row.get("decision_id")
+                        or outcome.get("decision_id")
+                        or lineage.get("decision_id")
+                    ),
                     "correlation_id": _text(
-                        outcome.get("correlation_id") or lineage.get("correlation_id")
+                        row.get("correlation_id")
+                        or outcome.get("correlation_id")
+                        or lineage.get("correlation_id")
                     ),
                     "state_key": _text(row.get("state_key")),
                     "action": _text(row.get("action")),
