@@ -163,8 +163,9 @@ def _patch_settlement_resolution() -> None:
 
 
 def _patch_learning_identity() -> None:
-    """Make decision->outcome learning identity survive restarts and deduplicate settlement."""
+    """Make decision->outcome learning identity durable, idempotent, and fail-closed."""
     from victor_ai_bot.omar.learning_identity import DurableLearningIdentity
+    from victor_ai_bot.omar.learning_integrity import validate_learning_transition
     from victor_ai_bot.omar.runtime import OmarRuntime
 
     original_decision = getattr(OmarRuntime, "observe_decision", None)
@@ -197,6 +198,7 @@ def _patch_learning_identity() -> None:
                 "route_id": _text(kwargs.get("route_id")),
                 "action": _text(kwargs.get("action")),
                 "state_key": _text(kwargs.get("state_key")),
+                "context": _dict(kwargs.get("context")),
                 "metadata": _dict(kwargs.get("metadata")),
             },
         )
@@ -205,20 +207,65 @@ def _patch_learning_identity() -> None:
         decision_id = _text(kwargs.get("decision_id"))
         store = store_for(self)
         if decision_id and store.is_settled(decision_id):
-            return {"ok": True, "duplicate": True, "reason": "settled_outcome_already_learned", "decision_id": decision_id}
+            return {
+                "ok": True,
+                "duplicate": True,
+                "learned": False,
+                "reason": "settled_outcome_already_learned",
+                "decision_id": decision_id,
+            }
+
+        pending = store.pending(decision_id) if decision_id else {}
+        metadata = _dict(kwargs.get("metadata"))
+        settlement = _dict(metadata.get("settlement"))
+        canonical_lineage = _dict(metadata.get("canonical_lineage"))
+        outcome = dict(settlement)
+        outcome.update(
+            {
+                "status": _text(settlement.get("status")) or "settled",
+                "decision_id": _text(settlement.get("decision_id")) or decision_id,
+                "correlation_id": _text(settlement.get("correlation_id"))
+                or _text(canonical_lineage.get("correlation_id")),
+                "opportunity_id": _text(settlement.get("opportunity_id"))
+                or _text(pending.get("opportunity_id")),
+                "action": _text(settlement.get("action")) or _text(pending.get("action")),
+                "route_id": _text(settlement.get("route_id")) or _text(kwargs.get("route_id") or pending.get("route_id")),
+                "outcome_truth_verified": bool(
+                    settlement.get(
+                        "truth_verified",
+                        settlement.get("outcome_truth_verified", kwargs.get("outcome_truth_verified", False)),
+                    )
+                ),
+                "source": _text(settlement.get("source")) or _text(metadata.get("source")),
+                "canonical_lineage": {
+                    "decision_id": _text(canonical_lineage.get("decision_id")) or decision_id,
+                    "correlation_id": _text(canonical_lineage.get("correlation_id")),
+                },
+            }
+        )
+
+        gate = validate_learning_transition(pending, outcome, decision_id=decision_id)
+        if not gate.allowed:
+            self._log(
+                {
+                    "event": "omar_learning_integrity_rejected",
+                    "decision_id": decision_id,
+                    "reason": gate.reason,
+                    "lineage": gate.to_dict(),
+                }
+            )
+            return {"ok": False, "learned": False, "reason": gate.reason, "decision_id": decision_id}
 
         result = original_outcome(self, **kwargs)
         if isinstance(result, Mapping) and result.get("ok") and decision_id:
-            pending = store.pending(decision_id)
             store.mark_settled(
                 decision_id,
                 {
-                    "correlation_id": _text(_dict(kwargs.get("metadata")).get("canonical_lineage", {}).get("correlation_id"))
-                    or _text(pending.get("correlation_id")),
-                    "action": _text(pending.get("action")),
-                    "route_id": _text(kwargs.get("route_id") or pending.get("route_id")),
-                    "tx_hash": _text(kwargs.get("tx_hash")),
-                    "operator_intent_fingerprint": _text(_dict(kwargs.get("metadata")).get("operator_intent_fingerprint")),
+                    "correlation_id": outcome["correlation_id"],
+                    "action": outcome["action"],
+                    "route_id": outcome["route_id"],
+                    "tx_hash": _text(kwargs.get("tx_hash") or outcome.get("tx_hash")),
+                    "operator_intent_fingerprint": _text(metadata.get("operator_intent_fingerprint")),
                 },
             )
         return result
