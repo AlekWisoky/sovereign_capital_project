@@ -13,12 +13,7 @@ _SAFE_LEDGER_EXCEPTIONS = (OSError, sqlite3.Error, TypeError, ValueError)
 
 @dataclass(frozen=True)
 class LearningOutcome:
-    """Canonical settled-trade learning record.
-
-    The PnL SQLite store remains the source of truth for execution outcomes.
-    This object is a normalized read model for learning consumers such as OMAR;
-    it deliberately does not create a second financial ledger.
-    """
+    """Canonical settled-trade learning record."""
 
     ledger_id: int
     ts: int
@@ -91,11 +86,10 @@ class LearningOutcome:
 
 
 class CanonicalOutcomeLedger:
-    """Read-only canonical outcome ledger backed by PnLStore's SQLite journal.
+    """Read-only canonical outcome view backed by PnLStore's SQLite journal.
 
-    OMAR consumes this interface instead of reading execution logs directly.
-    The ledger joins finalized PnL rows with the existing RL training record by
-    transaction hash, so decision context and realized outcome stay linked.
+    Financial truth stays in the existing PnL store. OMAR reads this normalized
+    view and joins the existing RL training record by transaction hash.
     """
 
     def __init__(self, *, data_dir: str, chain: str, bootstrap_history: int = 500):
@@ -110,7 +104,6 @@ class CanonicalOutcomeLedger:
         )
         self.bootstrap_history = max(1, int(bootstrap_history))
         self._seen: set[str] = set()
-        self._loaded = False
         self.last_error = ""
         self._load_cursor()
 
@@ -121,17 +114,7 @@ class CanonicalOutcomeLedger:
         except (TypeError, ValueError):
             return int(default)
 
-    @staticmethod
-    def _float(value: Any, default: float = 0.0) -> float:
-        try:
-            return float(value or default)
-        except (TypeError, ValueError):
-            return float(default)
-
     def _load_cursor(self) -> None:
-        if self._loaded:
-            return
-        self._loaded = True
         try:
             with open(self.cursor_path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -194,42 +177,41 @@ class CanonicalOutcomeLedger:
     def _normalize(self, row: Dict[str, Any], training: Dict[str, Any]) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        amount_in = self._int(row.get("expected_gross_profit_wei"), 0)
+        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
+        amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
-        ok = receipt_status == 1 and realized_after >= 0
+        ok = receipt_status == 1
+        denom = max(1, amount_in)
+        realized_for_reward = realized_after if ok else 0
+        penalty = 0 if ok else abs(expected_after)
+        reward_num = realized_for_reward - penalty
 
-        extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
-        brain = extra.get("brain") if isinstance(extra.get("brain"), dict) else {}
         context = {
             "trainingTs": self._int(training.get("ts"), 0),
-            "strategy": str(extra.get("strategy") or ""),
-            "opportunityId": str(extra.get("opportunity_id") or row.get("opportunity_id") or ""),
-            "mode": str(extra.get("mode") or row.get("mode") or ""),
+            "strategy": str(training_extra.get("strategy") or ""),
+            "opportunityId": str(
+                training_extra.get("opportunity_id") or row.get("opportunity_id") or ""
+            ),
+            "mode": str(training_extra.get("mode") or row.get("mode") or ""),
             "brain": dict(brain),
-            "aqeDebug": dict(extra.get("aqe_debug") or {})
-            if isinstance(extra.get("aqe_debug"), dict)
+            "aqeDebug": dict(training_extra.get("aqe_debug") or {})
+            if isinstance(training_extra.get("aqe_debug"), dict)
             else {},
-            "wealthGoal": dict(extra.get("wealth_goal") or {})
-            if isinstance(extra.get("wealth_goal"), dict)
+            "wealthGoal": dict(training_extra.get("wealth_goal") or {})
+            if isinstance(training_extra.get("wealth_goal"), dict)
             else {},
-            "treasury": dict(extra.get("treasury") or {})
-            if isinstance(extra.get("treasury"), dict)
+            "treasury": dict(training_extra.get("treasury") or {})
+            if isinstance(training_extra.get("treasury"), dict)
             else {},
-            "governance": dict(extra.get("governance") or {})
-            if isinstance(extra.get("governance"), dict)
+            "governance": dict(training_extra.get("governance") or {})
+            if isinstance(training_extra.get("governance"), dict)
             else {},
-            "capture": dict(extra.get("capture") or {})
-            if isinstance(extra.get("capture"), dict)
+            "capture": dict(training_extra.get("capture") or {})
+            if isinstance(training_extra.get("capture"), dict)
             else {},
         }
-
-        denom = max(1, amount_in)
-        realized_for_reward = realized_after if receipt_status == 1 else 0
-        penalty = 0 if receipt_status == 1 else abs(expected_after)
-        reward_num = realized_for_reward - penalty
-        reward_scaled_ppm = reward_num * 1_000_000 // denom
-        reward_scaled_float = reward_num / float(denom) * 1_000_000.0
 
         return LearningOutcome(
             ledger_id=self._int(row.get("id"), 0),
@@ -261,25 +243,17 @@ class CanonicalOutcomeLedger:
             income_stream=str(row.get("income_stream") or ""),
             venue_path=str(row.get("venue_path") or ""),
             rl_state=str(training.get("rl_state") or brain.get("state") or ""),
-            rl_action_index=self._int(
-                training.get("rl_action_index"),
-            ),
-            aqe_action=str(training.get("extra", {}).get("aqe_action") or "")
-            if isinstance(training.get("extra"), dict)
-            else "",
-            reward_scaled_ppm=reward_scaled_ppm,
-            reward_scaled_float=reward_scaled_float,
-            latency_ms=self._int(training.get("extra", {}).get("latency_ms"), 0)
-            if isinstance(training.get("extra"), dict)
-            else 0,
-            submit_to_receipt_ms=self._int(training.get("extra", {}).get("submit_to_receipt_ms"), 0)
-            if isinstance(training.get("extra"), dict)
-            else 0,
+            rl_action_index=self._int(training.get("rl_action_index"), -1),
+            aqe_action=str(training_extra.get("aqe_action") or ""),
+            reward_scaled_ppm=reward_num * 1_000_000 // denom,
+            reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
+            latency_ms=self._int(training_extra.get("latency_ms"), 0),
+            submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms"), 0),
             context=context,
         )
 
     def poll(self, *, limit: int = 50) -> List[LearningOutcome]:
-        """Return newly settled outcomes, newest first, without duplicates."""
+        """Return newly settled outcomes, oldest first, without duplicates."""
         try:
             rows = self._query_rows(max(1, int(limit)))
             training = self._training_context()
