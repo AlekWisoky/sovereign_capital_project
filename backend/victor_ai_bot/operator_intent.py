@@ -121,5 +121,7 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
 
 def intent_fingerprint(intent: Mapping[str, Any]) -> str:
     """Stable fingerprint for attribution; never use it as the learning state key."""
-    payload = json.dumps(dict(intent), sort_keys=True, separators=(",", ":"), default=str)
+    payload = json.dumps(
+        dict(intent), sort_keys=True, separators=(",", ":"), default=str
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
