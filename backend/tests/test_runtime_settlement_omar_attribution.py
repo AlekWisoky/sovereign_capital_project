@@ -115,6 +115,8 @@ async def test_production_settlement_reaches_omar_with_frozen_intent(monkeypatch
     )
     result = SimpleNamespace(tx_hash="0xtx-1", plan={})
 
+    # These are the new live controls. They must not mutate the historical
+    # decision snapshot captured by observe_decision above.
     intent["aggression_mode"] = "aggressive"
     intent["goal"]["target_amount"] = "50000"
     opp.meta["brain"]["operator_intent"] = {
