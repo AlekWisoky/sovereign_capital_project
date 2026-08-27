@@ -38,7 +38,9 @@ class OmarRuntime:
         self.last_real_learning: Dict[str, Any] = {}
         self._cycle = 0
 
-        self.data_dir = canonical_data_dir(os.environ.get("VICTOR_DATA_DIR", "backend/data"))
+        self.data_dir = canonical_data_dir(
+            os.environ.get("VICTOR_DATA_DIR", "backend/data")
+        )
         self.omar_dir = os.path.join(self.data_dir, "omar")
         os.makedirs(self.omar_dir, exist_ok=True)
         self.audit_path = os.path.join(
