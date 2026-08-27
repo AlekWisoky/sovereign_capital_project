@@ -26,16 +26,17 @@ def test_prime_economics_change_learning_state_but_prime_id_does_not():
     assert OmarRealLearner.state_key(base) != OmarRealLearner.state_key(expensive_prime)
 
 
-def test_outcome_lineage_can_use_decision_id_as_correlation_fallback(tmp_path):
+def test_outcome_lineage_preserves_decision_and_transaction_identity(tmp_path):
     learner = OmarRealLearner(path=str(tmp_path / "policy.json"), min_observations=1)
     result = learner.observe(
         state_key="state",
         action="EXECUTE",
         reward=1.0,
-        outcome={"decision_id": "decision-1", "tx_hash": "0xabc"},
+        outcome={"decision_id": "decision-1", "correlation_id": "corr-1", "tx_hash": "0xabc"},
     )
 
     assert result["ok"] is True
     events = (tmp_path / "policy.json.jsonl").read_text(encoding="utf-8")
     assert "decision-1" in events
+    assert "corr-1" in events
     assert "0xabc" in events
