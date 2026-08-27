@@ -89,8 +89,9 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
     metadata["correlation_id"] = correlation_id
     metadata["decision_lineage"] = {"decision_id": decision_id, "correlation_id": correlation_id}
     if isinstance(meta, dict):
-        intent = _dict(meta.get("canonical_lineage")).get("operator_intent")
-        fingerprint = _dict(meta.get("canonical_lineage")).get("intent_fingerprint")
+        lineage = _dict(meta.get("canonical_lineage"))
+        intent = lineage.get("operator_intent")
+        fingerprint = lineage.get("intent_fingerprint")
         if intent and not metadata.get("operator_intent"):
             metadata["operator_intent"] = copy.deepcopy(intent)
         if fingerprint and not metadata.get("intent_fingerprint"):
@@ -104,13 +105,21 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
 
 def _patch_decision_context() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+    from ..operator_intent import resolve_operator_intent
+
     original = getattr(RuntimeDecisionFacade, "_omar_context", None)
     if original is None or getattr(original, "_omar_capital_patched", False):
         return
+
     def wrapped(self: Any, opp: Any, *, p_success: float, ev_wei: int) -> dict[str, Any]:
         context = _dict(original(self, opp, p_success=p_success, ev_wei=ev_wei))
         context.update(capital_authority_context(self))
+        try:
+            context["operator_intent"] = copy.deepcopy(resolve_operator_intent(self))
+        except _SAFE:
+            context["operator_intent"] = {}
         return context
+
     wrapped._omar_capital_patched = True
     RuntimeDecisionFacade._omar_context = wrapped
 
@@ -120,11 +129,13 @@ def _patch_decision_lineage() -> None:
     original = getattr(RuntimeDecisionFacade, "_apply_omar_to_candidate", None)
     if original is None or getattr(original, "_omar_lineage_patched", False):
         return
+
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
         chosen, selected = original(self, opp, decision, current_block=current_block)
         if chosen is not None and selected is not None:
             ensure_lineage(chosen, selected, int(current_block))
         return chosen, selected
+
     wrapped._omar_lineage_patched = True
     RuntimeDecisionFacade._apply_omar_to_candidate = wrapped
 
@@ -164,6 +175,7 @@ def _patch_settlement_learning() -> None:
     original = getattr(ExecutionService, "handle_post_execute_bookkeeping", None)
     if original is None or getattr(original, "_omar_settlement_patched", False):
         return
+
     async def wrapped(*args: Any, **kwargs: Any):
         signature = inspect.signature(original)
         bound = signature.bind_partial(*args, **kwargs)
@@ -188,11 +200,8 @@ def _patch_settlement_learning() -> None:
             if outcome is None:
                 return result
             pending = _dict(getattr(omar, "_pending_decisions", {}).get(str(decision_id)))
-            intent_snapshot = _dict(
-                pending.get("context", {}).get("operator_intent")
-                if isinstance(pending.get("context"), Mapping)
-                else None
-            )
+            pending_context = _dict(pending.get("context"))
+            intent_snapshot = _dict(pending_context.get("operator_intent"))
             if not intent_snapshot:
                 intent_snapshot = _dict(lineage.get("operator_intent") or brain.get("operator_intent"))
             learning_metadata = {
@@ -219,6 +228,7 @@ def _patch_settlement_learning() -> None:
         except _SAFE:
             pass
         return result
+
     wrapped._omar_settlement_patched = True
     ExecutionService.handle_post_execute_bookkeeping = wrapped
 
