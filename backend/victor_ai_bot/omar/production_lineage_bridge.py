@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
+from ..operator_intent import intent_fingerprint, resolve_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -16,7 +17,9 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
+def _lineage_matches(
+    outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str
+) -> bool:
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
@@ -29,6 +32,11 @@ def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opp
     return True
 
 
+def _chain_name(obj: Any) -> str:
+    chain = getattr(getattr(obj, "cfg", None), "chain", None)
+    return _text(getattr(chain, "name", None)) or "chain"
+
+
 def _patch_decision_identity() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
@@ -37,11 +45,15 @@ def _patch_decision_identity() -> None:
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
+        intent = resolve_operator_intent(self)
+        fingerprint = intent_fingerprint(intent)
         ensure_decision_identity(
             opp,
             decision,
-            chain_name=_text(getattr(getattr(self, "cfg", None), "chain", None).name if getattr(getattr(self, "cfg", None), "chain", None) is not None else "chain"),
+            chain_name=_chain_name(self),
             current_block=int(current_block),
+            operator_intent=intent,
+            intent_fingerprint=fingerprint,
         )
         return original(self, opp, decision, current_block=current_block)
 
@@ -65,11 +77,14 @@ def _patch_execution_identity() -> None:
         result = bound.arguments.get("result")
         if runtime is not None and opp is not None:
             try:
+                intent = resolve_operator_intent(runtime)
                 ensure_decision_identity(
                     opp,
                     decision,
-                    chain_name=_text(getattr(getattr(runtime, "cfg", None), "chain", None).name if getattr(getattr(runtime, "cfg", None), "chain", None) is not None else "chain"),
+                    chain_name=_chain_name(runtime),
                     current_block=int(bound.arguments.get("bn") or 0),
+                    operator_intent=intent,
+                    intent_fingerprint=intent_fingerprint(intent),
                 )
                 lineage = lineage_from_opportunity(opp)
                 if result is not None:
