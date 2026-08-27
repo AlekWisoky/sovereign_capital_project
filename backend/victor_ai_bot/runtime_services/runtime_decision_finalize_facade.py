@@ -15,35 +15,23 @@ class RuntimeDecisionFinalizeFacade:
     overlay, auto-queue refresh, and post-decision analytics behavior.
     """
 
-    @staticmethod
-    def _ensure_decision_identity(decision: Any, *, opps: List[Opportunity]) -> Any:
-        """Make lifecycle identity explicit at the canonical decision boundary.
-
-        Identity is created once for the decision and then carried unchanged
-        through treasury overlays, execution, settlement, and OMAR learning.
-        A skip is still a real decision and therefore receives an identity.
-        """
+    def _ensure_decision_identity(self, decision: Any, *, opps: List[Opportunity]) -> Any:
+        """Make lifecycle identity explicit at the canonical decision boundary."""
         if decision is None:
             return decision
         existing = identity_from(decision)
-        if existing is None or not existing.decision_id or not existing.correlation_id:
-            identity = new_decision_identity()
-        else:
-            identity = existing
+        identity = (
+            existing
+            if existing is not None and existing.decision_id and existing.correlation_id
+            else new_decision_identity()
+        )
         attach_identity(decision, identity)
-
-        # Preserve useful decision context beside the identity without making
-        # identity generation depend on mutable opportunity metadata.
         try:
             metadata = getattr(decision, "metadata", None)
             if isinstance(metadata, dict):
                 metadata.setdefault("identity", {}).update(identity.to_dict())
-                metadata.setdefault("decision_context", {})
-                metadata["decision_context"].update(
-                    {
-                        "chain": str(getattr(self, "chain", "") or ""),
-                        "candidate_count": int(len(opps or [])),
-                    }
+                metadata.setdefault("decision_context", {}).update(
+                    {"candidate_count": int(len(opps or []))}
                 )
         except (AttributeError, TypeError, ValueError):
             pass
@@ -73,15 +61,13 @@ class RuntimeDecisionFinalizeFacade:
             treasury_state=dict(treasury_state or {}),
             regime_label=str(regime_label),
         )
-        # Treasury overlays may return a replacement decision object. Re-attach
-        # the original identity rather than creating a second decision lineage.
+        # Treasury overlays may return a replacement decision object. Reuse the
+        # existing lineage whenever it survived the overlay; otherwise the
+        # overlay metadata is the recovery source. Do not create a second
+        # identity when the original is recoverable.
         identity = identity_from(decision)
         if identity is None or not identity.decision_id or not identity.correlation_id:
-            # The canonical identity was already created above. Recover it from
-            # the selected decision metadata when an overlay replaced the object.
-            identity = identity_from(
-                getattr(decision, "metadata", {}) if decision is not None else {}
-            ) or new_decision_identity()
+            identity = identity_from(getattr(decision, "metadata", {})) or new_decision_identity()
         attach_identity(decision, identity)
 
         self._refresh_auto_queue_from_decision(decision, current_block=int(current_block))
