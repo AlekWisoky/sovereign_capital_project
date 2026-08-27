@@ -67,10 +67,14 @@ class LearningOutcome:
             "realizedProfitAfterGasWei": str(self.realized_profit_after_gas_wei),
             "realizedProfitToken": self.realized_profit_token,
             "realizedProfitTokenWei": str(self.realized_profit_token_wei),
-            "realizedGasCostInProfitTokenWei": str(self.realized_gas_cost_in_profit_token_wei),
+            "realizedGasCostInProfitTokenWei": str(
+                self.realized_gas_cost_in_profit_token_wei
+            ),
             "realizedProfitUsdMicro": str(self.realized_profit_usd_micro),
             "realizedGasCostUsdMicro": str(self.realized_gas_cost_usd_micro),
-            "realizedProfitAfterGasUsdMicro": str(self.realized_profit_after_gas_usd_micro),
+            "realizedProfitAfterGasUsdMicro": str(
+                self.realized_profit_after_gas_usd_micro
+            ),
             "strategyType": self.strategy_type,
             "incomeStream": self.income_stream,
             "venuePath": self.venue_path,
@@ -92,15 +96,25 @@ class CanonicalOutcomeLedger:
     view and joins the existing RL training record by transaction hash.
     """
 
-    def __init__(self, *, data_dir: str, chain: str, bootstrap_history: int = 500):
+    def __init__(
+        self,
+        *,
+        data_dir: str,
+        chain: str,
+        bootstrap_history: int = 500,
+    ):
         self.data_dir = str(data_dir or "")
         self.chain = str(chain or "")
         self.pnl_path = os.path.join(self.data_dir, f"pnl_{self.chain}.sqlite")
         self.training_path = os.path.join(
-            self.data_dir, "training", f"rl_training_{self.chain}.jsonl"
+            self.data_dir,
+            "training",
+            f"rl_training_{self.chain}.jsonl",
         )
         self.cursor_path = os.path.join(
-            self.data_dir, "omar", f"outcome_cursor_{self.chain}.json"
+            self.data_dir,
+            "omar",
+            f"outcome_cursor_{self.chain}.json",
         )
         self.bootstrap_history = max(1, int(bootstrap_history))
         self._seen: set[str] = set()
@@ -174,11 +188,23 @@ class CanonicalOutcomeLedger:
         finally:
             con.close()
 
-    def _normalize(self, row: Dict[str, Any], training: Dict[str, Any]) -> LearningOutcome:
+    def _normalize(
+        self,
+        row: Dict[str, Any],
+        training: Dict[str, Any],
+    ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
-        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
+        training_extra = (
+            training.get("extra")
+            if isinstance(training.get("extra"), dict)
+            else {}
+        )
+        brain = (
+            training_extra.get("brain")
+            if isinstance(training_extra.get("brain"), dict)
+            else {}
+        )
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
@@ -192,7 +218,9 @@ class CanonicalOutcomeLedger:
             "trainingTs": self._int(training.get("ts"), 0),
             "strategy": str(training_extra.get("strategy") or ""),
             "opportunityId": str(
-                training_extra.get("opportunity_id") or row.get("opportunity_id") or ""
+                training_extra.get("opportunity_id")
+                or row.get("opportunity_id")
+                or ""
             ),
             "mode": str(training_extra.get("mode") or row.get("mode") or ""),
             "brain": dict(brain),
@@ -248,14 +276,19 @@ class CanonicalOutcomeLedger:
             reward_scaled_ppm=reward_num * 1_000_000 // denom,
             reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
             latency_ms=self._int(training_extra.get("latency_ms"), 0),
-            submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms"), 0),
+            submit_to_receipt_ms=self._int(
+                training_extra.get("submit_to_receipt_ms"), 0
+            ),
             context=context,
         )
 
     def poll(self, *, limit: int = 50) -> List[LearningOutcome]:
         """Return newly settled outcomes, oldest first, without duplicates."""
         try:
-            rows = self._query_rows(max(1, int(limit)))
+            query_limit = max(1, int(limit))
+            if not self._seen:
+                query_limit = max(query_limit, self.bootstrap_history)
+            rows = self._query_rows(query_limit)
             training = self._training_context()
             outcomes: List[LearningOutcome] = []
             for row in reversed(rows):
