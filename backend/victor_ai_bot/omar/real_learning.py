@@ -5,6 +5,7 @@ import json
 import os
 import time
 from typing import Any, Callable, Dict, Mapping, Optional
+import uuid
 
 _SAFE_EXCEPTIONS = (AttributeError, KeyError, OSError, TypeError, ValueError)
 
@@ -99,6 +100,7 @@ class SettledOutcomeRecord:
 
 @dataclass(frozen=True)
 class ActionAttribution:
+    learning_id: str
     decision_id: str
     correlation_id: str
     execution_id: str
@@ -262,10 +264,12 @@ class OmarRealLearningLoop:
         self._log("settled_outcome", outcome.to_dict())
         eligible = outcome.status.lower() in {"settled", "closed", "complete", "completed"}
         attribution = ActionAttribution(
+            learning_id=f"learning_{uuid.uuid4().hex}",
             decision_id=decision_id, correlation_id=correlation_id, execution_id=execution_id,
             settlement_id=settlement_id, action=execution.action, attribution_weight=1.0,
             reward_wei=reward, eligible_for_learning=eligible,
-            reason_codes=[] if eligible else ["outcome_not_settled"], metadata={"status": outcome.status},
+            reason_codes=[] if eligible else ["outcome_not_settled"],
+            metadata={"status": outcome.status},
         )
         self._log("action_attribution", attribution.to_dict())
         if eligible and self.policy_updater is not None:
