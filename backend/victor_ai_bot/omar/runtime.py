@@ -158,8 +158,12 @@ class OmarRuntime:
     ) -> None:
         if not self.enabled or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return
+        canonical_decision_id = str(decision_id or "").strip()
+        if not canonical_decision_id:
+            return
         row = {
-            "decision_id": str(decision_id),
+            "canonical_decision_id": canonical_decision_id,
+            "decision_id": canonical_decision_id,
             "opportunity_id": str(opportunity_id),
             "route_id": str(route_id),
             "action": str(action),
@@ -169,7 +173,7 @@ class OmarRuntime:
             "ts_ms": int(time.time() * 1000),
         }
         with self._lock:
-            self._pending_decisions[str(decision_id)] = row
+            self._pending_decisions[canonical_decision_id] = row
             if len(self._pending_decisions) > 512:
                 oldest = sorted(self._pending_decisions.items(), key=lambda item: item[1].get("ts_ms", 0))[:64]
                 for key, _ in oldest:
@@ -198,14 +202,22 @@ class OmarRuntime:
     ) -> Dict[str, Any]:
         if not self.enabled or self._real_learner is None or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
+        canonical_decision_id = str(decision_id or "").strip()
+        if not canonical_decision_id:
+            return {"ok": False, "reason": "missing_canonical_decision_id"}
         with self._lock:
-            pending = dict(self._pending_decisions.pop(str(decision_id), {}) or {})
+            pending = dict(self._pending_decisions.pop(canonical_decision_id, {}) or {})
         state_key = str(pending.get("state_key") or "")
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
-            return {"ok": False, "reason": "missing_decision_link", "decision_id": str(decision_id)}
+            return {"ok": False, "reason": "missing_decision_link", "decision_id": canonical_decision_id}
         pending_metadata = pending.get("metadata") if isinstance(pending.get("metadata"), Mapping) else {}
         outcome_metadata = dict(metadata or {})
+        correlation_id = str(
+            pending_metadata.get("correlation_id")
+            or outcome_metadata.get("correlation_id")
+            or ""
+        )
         reward = float(realized_net_usd) - 0.25 * max(0.0, float(expected_net_usd) - float(realized_net_usd))
         reward -= max(0.0, float(slippage_bps)) * 0.01
         reward -= max(0.0, float(latency_ms)) * 0.0001
@@ -215,7 +227,10 @@ class OmarRuntime:
             reward -= 2.0
         reward = float(np.clip(reward, -50.0, 50.0))
         outcome = {
-            "decision_id": str(decision_id), "route_id": str(route_id or pending.get("route_id") or ""),
+            "canonical_decision_id": canonical_decision_id,
+            "decision_id": canonical_decision_id,
+            "correlation_id": correlation_id,
+            "route_id": str(route_id or pending.get("route_id") or ""),
             "tx_hash": str(tx_hash), "ok": bool(ok), "realized_net_usd": float(realized_net_usd),
             "expected_net_usd": float(expected_net_usd), "amount_in_wei": int(amount_in_wei),
             "gas_cost_usd": float(gas_cost_usd), "slippage_bps": float(slippage_bps),
@@ -226,12 +241,9 @@ class OmarRuntime:
         if not result.get("ok"):
             return result
         lineage = {
-            "decision_id": str(decision_id),
-            "correlation_id": str(
-                pending_metadata.get("correlation_id")
-                or outcome_metadata.get("correlation_id")
-                or ""
-            ),
+            "decision_id": canonical_decision_id,
+            "canonical_decision_id": canonical_decision_id,
+            "correlation_id": correlation_id,
             "opportunity_id": str(pending.get("opportunity_id") or ""),
             "route_id": str(route_id or pending.get("route_id") or ""),
             "execution_id": str(execution_id or outcome_metadata.get("execution_id") or ""),
@@ -244,7 +256,7 @@ class OmarRuntime:
             oos_baseline = pending_metadata.get("baseline_reward_usd", outcome_metadata.get("baseline_reward_usd"))
         oos = record_oos_evidence(
             self,
-            decision_id=str(decision_id),
+            decision_id=canonical_decision_id,
             correlation_id=lineage["correlation_id"],
             opportunity_id=lineage["opportunity_id"],
             route_id=lineage["route_id"],
@@ -261,7 +273,8 @@ class OmarRuntime:
         with self._lock:
             self.last_outcome = {
                 **dict(result),
-                "decision_id": str(decision_id),
+                "canonical_decision_id": canonical_decision_id,
+                "decision_id": canonical_decision_id,
                 "action": action,
                 "oos_evidence": oos,
             }
@@ -320,8 +333,13 @@ class OmarRuntime:
                     action = str(brain.get("omar_action") or "")
                     state_key = str(brain.get("omar_state_key") or "")
                     tx_hash = str(row.get("tx_hash") or "")
-                    decision_id = str(brain.get("omar_decision_id") or tx_hash)
-                    if not state_key or action not in ACTIONS or decision_id in seen:
+                    canonical_decision_id = str(
+                        brain.get("canonical_decision_id")
+                        or extra.get("canonical_decision_id")
+                        or row.get("canonical_decision_id")
+                        or ""
+                    ).strip()
+                    if not state_key or action not in ACTIONS or not canonical_decision_id or canonical_decision_id in seen:
                         continue
                     try:
                         amount_in = int(row.get("amount_in_wei") or 0)
@@ -339,6 +357,8 @@ class OmarRuntime:
                         action=action,
                         reward=float(reward),
                         outcome={
+                            "canonical_decision_id": canonical_decision_id,
+                            "correlation_id": str(brain.get("correlation_id") or extra.get("correlation_id") or row.get("correlation_id") or ""),
                             "tx_hash": tx_hash,
                             "amount_in_wei": amount_in,
                             "expected_after_costs_wei": expected,
@@ -350,8 +370,8 @@ class OmarRuntime:
                         },
                     )
                     if result.get("ok"):
-                        seen.add(decision_id)
-                        self.last_outcome = {**dict(result), "decision_id": decision_id, "tx_hash": tx_hash}
+                        seen.add(canonical_decision_id)
+                        self.last_outcome = {**dict(result), "canonical_decision_id": canonical_decision_id, "decision_id": canonical_decision_id, "tx_hash": tx_hash}
             self._learning_cursor = {"offset": offset, "seen": list(sorted(seen))[-2048:]}
             self._save_learning_cursor()
         except OSError:
