@@ -276,11 +276,23 @@ def _patch_learning_identity() -> None:
 
 
 def install_production_lineage_bridge() -> None:
+    """Install identity propagation even when OMAR's numerical runtime is unavailable.
+
+    The decision/execution/settlement identity layer is useful independently of
+    the learning runtime. In constrained environments such as Termux, NumPy may
+    be unavailable; that must not disable canonical lineage propagation.
+    """
     try:
         _patch_omar_context()
         _patch_decision_identity()
         _patch_execution_identity()
         _patch_settlement_resolution()
+    except _SAFE:
+        return
+
+    try:
         _patch_learning_identity()
+    except (ImportError, ModuleNotFoundError):
+        return
     except _SAFE:
         return
