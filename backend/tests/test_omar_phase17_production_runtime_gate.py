@@ -113,11 +113,17 @@ def _runtime_for_execution_gate():
 
 
 @pytest.mark.asyncio
-async def test_phase17_execution_to_canonical_settlement_to_learning_lineage(monkeypatch, tmp_path):
+async def test_phase17_execution_to_canonical_settlement_to_learning_lineage(tmp_path):
     import victor_ai_bot.omar  # noqa: F401
 
     runtime = _runtime_for_execution_gate()
-    runtime._record_exec = lambda *args, **kwargs: None
+
+    async def record_exec(*args, **kwargs):
+        return None
+
+    runtime._record_exec = record_exec
+
+    from victor_ai_bot.omar.real_learning import OmarRealLearner
 
     learner_runtime = OmarRuntime(
         cfg=SimpleNamespace(
@@ -132,9 +138,10 @@ async def test_phase17_execution_to_canonical_settlement_to_learning_lineage(mon
         chain_name="ethereum",
     )
     learner_runtime.data_dir = str(tmp_path)
-    learner_runtime._real_learner = __import__(
-        "victor_ai_bot.omar.real_learning", fromlist=["OmarRealLearner"]
-    ).OmarRealLearner(path=str(tmp_path / "policy.json"), min_observations=1)
+    learner_runtime._real_learner = OmarRealLearner(
+        path=str(tmp_path / "policy.json"),
+        min_observations=1,
+    )
     runtime._omar = learner_runtime
 
     opp = SimpleNamespace(
@@ -153,13 +160,8 @@ async def test_phase17_execution_to_canonical_settlement_to_learning_lineage(mon
             },
         },
     )
-    decision = SimpleNamespace(
-        metadata={
-            "canonical_decision_id": "decision-phase17",
-            "correlation_id": "corr-phase17",
-        }
-    )
-    runtime._omar.observe_decision(
+
+    learner_runtime.observe_decision(
         decision_id="decision-phase17",
         opportunity_id="opp-17",
         route_id="route-17",
