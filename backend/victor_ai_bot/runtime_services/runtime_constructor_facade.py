@@ -80,7 +80,9 @@ class RuntimeConstructorFacade:
         # inert unless explicitly enabled, preserving existing safe defaults.
         env_enabled = (os.environ.get("VICTOR_ENABLE_OMAR", "") or "").strip() == "1"
         configured = getattr(getattr(cfg, "superstructure", None), "omar", None)
-        omar_cfg = configured if isinstance(configured, OmarConfig) else OmarConfig(enabled=env_enabled)
+        omar_cfg = (
+            configured if isinstance(configured, OmarConfig) else OmarConfig(enabled=env_enabled)
+        )
         if env_enabled:
             omar_cfg.enabled = True
         self._omar = OmarRuntime(cfg=omar_cfg, chain_name=cfg.chain.name)

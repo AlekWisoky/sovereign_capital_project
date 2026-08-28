@@ -17,7 +17,9 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
+def _lineage_matches(
+    outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str
+) -> bool:
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
@@ -97,7 +99,9 @@ def _patch_decision_identity() -> None:
                 brain["omar_decision_id"] = lineage["decision_id"]
             brain["omar_correlation_id"] = lineage["correlation_id"]
             opp.meta["brain"] = brain
-        if returned_decision is not None and isinstance(getattr(returned_decision, "metadata", None), dict):
+        if returned_decision is not None and isinstance(
+            getattr(returned_decision, "metadata", None), dict
+        ):
             returned_decision.metadata["omar_decision_id"] = lineage["decision_id"]
             returned_decision.metadata["omar_correlation_id"] = lineage["correlation_id"]
         return chosen, returned_decision
