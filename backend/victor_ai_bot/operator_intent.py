@@ -89,11 +89,16 @@ def _goal_snapshot(goal_state: Mapping[str, Any]) -> dict[str, Any]:
         "goal_id": _text(meta.get("active_goal_id")),
         "goal_revision": int(_number(meta.get("goal_revision"), 1)),
         "current_return_pct": round(
-            _number(goal_state.get("currentReturnPct") or goal_state.get("current_return_pct")),
+            _number(
+                goal_state.get("currentReturnPct")
+                or goal_state.get("current_return_pct")
+            ),
             6,
         ),
         "drawdown_pct": round(
-            _number(goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")),
+            _number(
+                goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")
+            ),
             6,
         ),
     }
