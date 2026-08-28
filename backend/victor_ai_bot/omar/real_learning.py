@@ -165,20 +165,54 @@ class OmarRealLearner:
             return rec
 
     def observe(self, *, state_key: str, action: str, reward: float, outcome: Mapping[str, Any]) -> Dict[str, Any]:
+        """Consume one settled transition keyed by the canonical decision identity.
+
+        The canonical decision ID is the learning-record identity. A transaction
+        hash, opportunity ID, route ID, or correlation ID may enrich lineage but
+        may never substitute for the originating decision identity.
+        """
         with self._lock:
             if not state_key or action not in ACTIONS:
                 return {"ok": False, "reason": "invalid_real_learning_transition"}
+            outcome_row = dict(outcome or {})
+            canonical_decision_id = str(
+                outcome_row.get("canonical_decision_id") or outcome_row.get("decision_id") or ""
+            ).strip()
+            if not canonical_decision_id:
+                return {"ok": False, "reason": "missing_canonical_decision_id"}
             self._ensure(state_key)
             reward = _clip(reward, -50.0, 50.0)
             old = float(self.q[state_key].get(action, 0.0))
             self.q[state_key][action] = old + self.alpha * (reward - old)
             self.n[state_key] = int(self.n.get(state_key, 0)) + 1
             self.total_observations += 1
-            payload = {"event": "omar_real_outcome", "ts_ms": int(time.time() * 1000), "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations, "outcome": dict(outcome or {})}
+            correlation_id = str(outcome_row.get("correlation_id") or "").strip()
+            outcome_row["canonical_decision_id"] = canonical_decision_id
+            if correlation_id:
+                outcome_row["correlation_id"] = correlation_id
+            payload = {
+                "event": "omar_real_outcome",
+                "ts_ms": int(time.time() * 1000),
+                "canonical_decision_id": canonical_decision_id,
+                "correlation_id": correlation_id,
+                "state_key": state_key,
+                "action": action,
+                "reward": reward,
+                "observations": self.total_observations,
+                "outcome": outcome_row,
+            }
             self._append_event(payload)
             if self.total_observations % 5 == 0:
                 self.save()
-            return {"ok": True, "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations}
+            return {
+                "ok": True,
+                "canonical_decision_id": canonical_decision_id,
+                "correlation_id": correlation_id,
+                "state_key": state_key,
+                "action": action,
+                "reward": reward,
+                "observations": self.total_observations,
+            }
 
     def summary(self) -> Dict[str, Any]:
         with self._lock:
