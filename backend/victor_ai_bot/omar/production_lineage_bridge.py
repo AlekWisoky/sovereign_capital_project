@@ -7,6 +7,7 @@ from ..decision_identity import ensure_decision_identity, lineage_from_opportuni
 from ..operator_intent import intent_fingerprint, resolve_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
+# Phase 6: preserve canonical lineage across production runtime seams.
 
 
 def _text(value: Any) -> str:
