@@ -7,6 +7,7 @@ from typing import Any, Awaitable, List, Optional
 
 from ..decision_engine import TradeDecision
 from ..features import build_features
+from ..fund_os.family_identity import canonical_launch_family_id, family_alias_candidates
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
@@ -41,6 +42,11 @@ class RuntimeDecisionFacade:
     OMAR is inserted here as the learning decision layer immediately before
     governance/execution. It can only veto or shrink an already executable
     opportunity; it cannot bypass governance or upsize capital.
+
+    Strategy rollout is enforced at this boundary as well. This is deliberate:
+    launch state must constrain the actual production candidate path, not merely
+    the operator UI or rollout recommendation surface. V1_ONLY therefore means
+    that only the canonical ``flash_arb`` family can reach automatic execution.
     """
 
     cfg: Any
@@ -85,6 +91,84 @@ class RuntimeDecisionFacade:
         truth = inspect_profit_after_costs_truth(opp)
         return bool(truth.verified and truth.positive)
 
+    @staticmethod
+    def _candidate_family(opp: Opportunity) -> str:
+        """Resolve a candidate's strategy family through canonical identity.
+
+        Strategy producers have historically populated different fields. Keep
+        all supported representations in the resolution order so V1 gating is
+        applied consistently without rewriting producer contracts.
+        """
+        meta = getattr(opp, "meta", None)
+        meta = meta if isinstance(meta, dict) else {}
+        for raw in (
+            meta.get("strategy_family"),
+            meta.get("route_family"),
+            meta.get("engine_type"),
+            getattr(opp, "strategy", ""),
+        ):
+            value = str(raw or "").strip()
+            if value:
+                return canonical_launch_family_id(value)
+        return ""
+
+    def _rollout_allowed_families(self) -> tuple[set[str], str]:
+        """Return the families permitted to reach the production decision path.
+
+        The runtime deliberately defaults to V1_ONLY when rollout state is
+        absent or malformed. This makes V1 self-contained and prevents a
+        missing rollout component from silently widening the trading universe.
+        """
+        rollout = getattr(self, "_launch_rollout", None)
+        profile = getattr(rollout, "profile", None) if rollout is not None else None
+        mode = str(getattr(profile, "mode", "V1_ONLY") or "V1_ONLY")
+
+        if mode == "V1_ONLY":
+            return {"flash_arb"}, mode
+
+        raw_active = list(getattr(profile, "active_families", []) or [])
+        allowed = {
+            canonical_launch_family_id(str(family or ""))
+            for family in raw_active
+            if str(family or "").strip()
+        }
+        # An empty activation set is never an implicit "all strategies" mode.
+        if not allowed:
+            return {"flash_arb"}, "V1_ONLY"
+        return allowed, mode
+
+    def _opp_is_rollout_eligible(self, opp: Opportunity) -> bool:
+        allowed, _mode = self._rollout_allowed_families()
+        return self._candidate_family(opp) in allowed
+
+    def _apply_rollout_annotations(self, opps: List[Opportunity]) -> List[Opportunity]:
+        """Annotate every candidate and return only rollout-eligible candidates.
+
+        Non-active strategies remain in the runtime observation surface so
+        telemetry/debugging can see that they were discovered, but they cannot
+        enter the decision or execution path until their family is activated.
+        """
+        allowed, mode = self._rollout_allowed_families()
+        eligible: List[Opportunity] = []
+        for opp in list(opps or []):
+            family = self._candidate_family(opp)
+            allowed_here = family in allowed
+            meta = getattr(opp, "meta", None)
+            if isinstance(meta, dict):
+                rollout_meta = dict(meta.get("launch_rollout") or {})
+                rollout_meta.update(
+                    {
+                        "mode": mode,
+                        "family": family,
+                        "allowed": allowed_here,
+                        "reason_code": "ok" if allowed_here else "launch_family_not_active",
+                    }
+                )
+                meta["launch_rollout"] = rollout_meta
+            if allowed_here:
+                eligible.append(opp)
+        return eligible
+
     def _scale_opportunity(self, opp: Opportunity, size_mult: float) -> Opportunity:
         service = getattr(self, "_execution_service", None)
         return service.scale_opportunity(opp, size_mult) if service is not None else opp
@@ -121,6 +205,10 @@ class RuntimeDecisionFacade:
         auto_enabled: bool,
         gas_budget_remaining_wei: int,
     ) -> Optional[Any]:
+        eligible_opps = self._apply_rollout_annotations(opps)
+        if not eligible_opps:
+            return None
+
         capital_budget_remaining_wei = None
         family_capital_remaining_wei: dict[str, int] = {}
         try:
@@ -142,7 +230,7 @@ class RuntimeDecisionFacade:
             family_capital_remaining_wei = {}
         try:
             return self._decision.annotate_and_decide(
-                opps,
+                eligible_opps,
                 current_block=int(current_block),
                 pending_txs=int(pending_txs),
                 auto_enabled=bool(auto_enabled),
@@ -168,7 +256,11 @@ class RuntimeDecisionFacade:
             max_pending = 1
         if max_pending > 0 and len(self._pending) >= max_pending:
             return None
-        ready_candidates = [o for o in self._opps if self._opp_is_exec_ready(o)]
+        ready_candidates = [
+            o
+            for o in self._apply_rollout_annotations(self._opps)
+            if self._opp_is_exec_ready(o)
+        ]
         if not ready_candidates:
             return None
         ready_candidates.sort(key=opportunity_profit_sort_key, reverse=True)
@@ -179,7 +271,14 @@ class RuntimeDecisionFacade:
         try:
             for oid in list(getattr(decision, "portfolio", []) or self._auto_queue):
                 cand = next(
-                    (o for o in self._opps if o.id == oid and self._opp_is_exec_ready(o)), None
+                    (
+                        o
+                        for o in self._opps
+                        if o.id == oid
+                        and self._opp_is_rollout_eligible(o)
+                        and self._opp_is_exec_ready(o)
+                    ),
+                    None,
                 )
                 if cand is not None:
                     chosen = cand
@@ -188,7 +287,13 @@ class RuntimeDecisionFacade:
             chosen = None
         if chosen is None:
             chosen = next(
-                (o for o in self._opps if o.id == decision.opp_id and self._opp_is_exec_ready(o)),
+                (
+                    o
+                    for o in self._opps
+                    if o.id == decision.opp_id
+                    and self._opp_is_rollout_eligible(o)
+                    and self._opp_is_exec_ready(o)
+                ),
                 None,
             )
         return chosen
