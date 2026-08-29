@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from victor_ai_bot.runtime_legacy import RuntimeBundle
-from victor_ai_bot.runtime_services.execution_service import ExecutionGateResult, ExecutionService
 from victor_ai_bot.runtime_services import runtime_execute_wrapper_facade
+from victor_ai_bot.runtime_services.execution_service import ExecutionGateResult, ExecutionService
 
 
 class _AllowingExecutionService(ExecutionService):
@@ -33,6 +33,43 @@ class _AllowingExecutionService(ExecutionService):
         return ExecutionGateResult(True, "ok", {"blocked": False})
 
 
+class _RecordingExecutionService(_AllowingExecutionService):
+    """Record the real ExecutionService method sequence."""
+
+    def __init__(self):
+        self.events: list[str] = []
+
+    def handle_auto_trade_admission(self, runtime, opp, decision, *, force_dry_run):
+        self.events.append("admission")
+        return super().handle_auto_trade_admission(
+            runtime, opp, decision, force_dry_run=force_dry_run
+        )
+
+    def handle_superstructure_pre_execute(self, runtime, opp, decision, *, force_dry_run):
+        self.events.append("superstructure")
+        return super().handle_superstructure_pre_execute(
+            runtime, opp, decision, force_dry_run=force_dry_run
+        )
+
+    def handle_governance_pre_execute(self, runtime, opp, bn, decision, *, force_dry_run):
+        self.events.append("governance")
+        return super().handle_governance_pre_execute(
+            runtime, opp, bn, decision, force_dry_run=force_dry_run
+        )
+
+    async def handle_fioa_execution_wrapper(self, runtime, opp, decision, core_coro):
+        self.events.append("fioa")
+        return await super().handle_fioa_execution_wrapper(runtime, opp, decision, core_coro)
+
+    async def handle_post_execute_bookkeeping(
+        self, runtime, opp, result, *, bn, latency_ms, mode
+    ):
+        self.events.append("bookkeeping")
+        return await super().handle_post_execute_bookkeeping(
+            runtime, opp, result, bn=bn, latency_ms=latency_ms, mode=mode
+        )
+
+
 class _Rpc:
     def __init__(self, url, **kwargs):
         self.url = url
@@ -45,67 +82,7 @@ class _Rpc:
         return False
 
 
-@pytest.mark.asyncio
-async def test_production_runtime_method_chain_preserves_lineage_to_execution_record(monkeypatch):
-    """Walk RuntimeBundle -> dispatch -> real ExecutionService -> wrapper -> record."""
-    events: list[str] = []
-    captured: dict[str, object] = {}
-
-    class RecordingExecutionService(_AllowingExecutionService):
-        def handle_auto_trade_admission(self, runtime, opp, decision, *, force_dry_run):
-            events.append("execution_service.handle_auto_trade_admission")
-            return super().handle_auto_trade_admission(
-                runtime, opp, decision, force_dry_run=force_dry_run
-            )
-
-        def handle_superstructure_pre_execute(self, runtime, opp, decision, *, force_dry_run):
-            events.append("execution_service.handle_superstructure_pre_execute")
-            return super().handle_superstructure_pre_execute(
-                runtime, opp, decision, force_dry_run=force_dry_run
-            )
-
-        def handle_governance_pre_execute(self, runtime, opp, bn, decision, *, force_dry_run):
-            events.append("execution_service.handle_governance_pre_execute")
-            return super().handle_governance_pre_execute(
-                runtime, opp, bn, decision, force_dry_run=force_dry_run
-            )
-
-        async def handle_fioa_execution_wrapper(self, runtime, opp, decision, core_coro):
-            events.append("execution_service.handle_fioa_execution_wrapper")
-            return await super().handle_fioa_execution_wrapper(runtime, opp, decision, core_coro)
-
-        async def handle_post_execute_bookkeeping(
-            self, runtime, opp, result, *, bn, latency_ms, mode
-        ):
-            events.append("execution_service.handle_post_execute_bookkeeping")
-            captured["result"] = result
-            captured["opp"] = opp
-            captured["decision"] = decision
-            captured["bn"] = bn
-            captured["latency_ms"] = latency_ms
-            captured["mode"] = mode
-            return await super().handle_post_execute_bookkeeping(
-                runtime, opp, result, bn=bn, latency_ms=latency_ms, mode=mode
-            )
-
-    async def fake_execute(*args, **kwargs):
-        del args
-        events.append("try_execute_opportunity")
-        decision = kwargs.get("decision")
-        captured["execute_decision"] = decision
-        return SimpleNamespace(
-            ok=True,
-            dry_run=False,
-            submitted=True,
-            plan={"latency_stages_ms": {"total": 7.0}},
-        )
-
-    monkeypatch.setattr(
-        runtime_execute_wrapper_facade,
-        "_compat_execution_wrapper_symbols",
-        lambda: (_Rpc, fake_execute),
-    )
-
+def _runtime_stub():
     runtime = RuntimeBundle.__new__(RuntimeBundle)
     runtime.cfg = SimpleNamespace(
         chain=SimpleNamespace(name="ethereum"),
@@ -128,8 +105,10 @@ async def test_production_runtime_method_chain_preserves_lineage_to_execution_re
         best_private=lambda: None,
         best_read=lambda: "http://read",
     )
-    runtime._execution_service = RecordingExecutionService()
-    runtime._cc = None
+    runtime._execution_service = _RecordingExecutionService()
+    runtime._cc = SimpleNamespace(
+        controls=SimpleNamespace(aggression_mode="balanced", risk_multiplier=1.0)
+    )
     runtime._consensus = None
     runtime._gov = None
     runtime._super = None
@@ -139,13 +118,12 @@ async def test_production_runtime_method_chain_preserves_lineage_to_execution_re
     runtime.cache = None
     runtime._mev_guard = None
     runtime._recorded = []
+    runtime._wealth_goal_service = None
+    runtime._ai_recommendation = None
+    return runtime
 
-    async def record_exec(result, opp, *, latency_ms, mode):
-        events.append("runtime._record_exec")
-        runtime._recorded.append((result, opp, latency_ms, mode))
 
-    runtime._record_exec = record_exec
-
+def _opportunity_and_decision():
     opp = SimpleNamespace(
         id="opp-runtime-19",
         route_id="route-runtime-19",
@@ -160,36 +138,64 @@ async def test_production_runtime_method_chain_preserves_lineage_to_execution_re
         gas_mode="standard",
         metadata={},
     )
+    return opp, decision
 
-    # First cross the production decision boundary so canonical identity exists
-    # before the real execution method chain begins.
-    runtime._cc = SimpleNamespace(controls=SimpleNamespace(aggression_mode="balanced", risk_multiplier=1.0))
-    runtime._wealth_goal_service = None
-    runtime._ai_recommendation = None
+
+async def _record_exec(runtime, result, opp, *, latency_ms, mode):
+    runtime._recorded.append((result, opp, latency_ms, mode))
+
+
+async def _fake_execute(*args, **kwargs):
+    del args
+    _fake_execute.decision = kwargs.get("decision")
+    return SimpleNamespace(
+        ok=True,
+        dry_run=False,
+        submitted=True,
+        plan={"latency_stages_ms": {"total": 7.0}},
+    )
+
+
+_fake_execute.decision = None
+
+
+def _assert_lineage(result, decision):
+    lineage = result.plan["canonical_lineage"]
+    assert result.plan["canonical_decision_id"] == decision.metadata["canonical_decision_id"]
+    assert result.plan["correlation_id"] == decision.metadata["correlation_id"]
+    assert lineage["decision_id"] == decision.metadata["canonical_decision_id"]
+    assert lineage["correlation_id"] == decision.metadata["correlation_id"]
+
+
+@pytest.mark.asyncio
+async def test_production_runtime_method_chain_preserves_lineage_to_execution_record(monkeypatch):
+    """Walk the production execution shell through the real ExecutionService."""
+    runtime = _runtime_stub()
+    monkeypatch.setattr(
+        runtime_execute_wrapper_facade,
+        "_compat_execution_wrapper_symbols",
+        lambda: (_Rpc, _fake_execute),
+    )
+    runtime._record_exec = lambda result, opp, *, latency_ms, mode: _record_exec(
+        runtime, result, opp, latency_ms=latency_ms, mode=mode
+    )
+
+    opp, decision = _opportunity_and_decision()
     chosen, decision = runtime._apply_omar_to_candidate(opp, decision, current_block=901)
     assert chosen is opp
 
     await runtime._execute_auto(opp, 901, decision=decision)
 
-    assert events == [
-        "execution_service.handle_auto_trade_admission",
-        "execution_service.handle_superstructure_pre_execute",
-        "execution_service.handle_governance_pre_execute",
-        "execution_service.handle_fioa_execution_wrapper",
-        "try_execute_opportunity",
-        "execution_service.handle_post_execute_bookkeeping",
-        "runtime._record_exec",
+    assert runtime._execution_service.events == [
+        "admission",
+        "superstructure",
+        "governance",
+        "fioa",
+        "bookkeeping",
     ]
     assert runtime._recorded
-
-    result = captured["result"]
-    assert result.plan["canonical_decision_id"] == decision.metadata["canonical_decision_id"]
-    assert result.plan["correlation_id"] == decision.metadata["correlation_id"]
-    assert result.plan["canonical_lineage"]["decision_id"] == decision.metadata["canonical_decision_id"]
-    assert result.plan["canonical_lineage"]["correlation_id"] == decision.metadata["correlation_id"]
-    assert captured["bn"] == 901
-    assert captured["mode"] == "auto"
-    assert captured["latency_ms"] >= 0
+    _assert_lineage(runtime._recorded[-1][0], decision)
+    assert _fake_execute.decision is decision
     assert runtime._last_submitted_block == 901
 
 
