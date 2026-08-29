@@ -2,10 +2,23 @@
 
 OMAR remains downstream of decision selection and upstream of governance/execution.
 It learns from settled real outcomes and may only provide bounded recommendations.
+
+The runtime implementation is imported lazily so lineage/bridge modules that do
+not require the numerical learning stack remain importable when optional runtime
+ML dependencies (for example NumPy on constrained Termux environments) are not
+installed yet.
 """
 
 from .config import OmarConfig
-from .runtime import OmarRuntime
+
+
+def __getattr__(name: str):
+    if name == "OmarRuntime":
+        from .runtime import OmarRuntime
+
+        return OmarRuntime
+    raise AttributeError(name)
+
 
 try:
     from .production_lineage_bridge import install_production_lineage_bridge
