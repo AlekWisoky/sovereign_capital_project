@@ -45,7 +45,11 @@ def _aggression_and_risk(runtime: Any) -> tuple[str, float]:
 
 def _recommendation(runtime: Any) -> dict[str, Any]:
     """Read the latest operator-facing AI recommendation without authority."""
-    for attr in ("_ai_recommendation", "_recommendation", "_launch_recommendation"):
+    for attr in (
+        "_ai_recommendation",
+        "_recommendation",
+        "_launch_recommendation",
+    ):
         try:
             value = getattr(runtime, attr, None)
             if isinstance(value, Mapping):
@@ -110,7 +114,9 @@ def _recommendation_snapshot(recommendation: Mapping[str, Any]) -> dict[str, Any
         "action": _text(recommendation.get("action")),
         "posture": _text(recommendation.get("posture")),
         "confidence": round(_number(recommendation.get("confidence")), 6),
-        "source": _text(recommendation.get("source") or recommendation.get("kind")),
+        "source": _text(
+            recommendation.get("source") or recommendation.get("kind")
+        ),
     }
 
 
