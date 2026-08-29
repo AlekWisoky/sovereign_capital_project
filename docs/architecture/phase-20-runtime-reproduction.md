@@ -10,11 +10,11 @@ The Phase 20 regression intentionally uses the real `RuntimeBundle` constructor 
 
 `RuntimeBundle.__init__ -> RuntimeBundle._execute_auto -> RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch -> ExecutionService admission -> ExecutionService superstructure -> ExecutionService governance -> ExecutionService FIOA wrapper -> try_execute_opportunity -> ExecutionService post-execute bookkeeping -> runtime._record_exec`
 
-The test also verifies that canonical decision ID and correlation ID survive into the execution result plan and that a successful submission updates the runtime's last-submitted block.
+The regression verifies that canonical decision ID and correlation ID survive into the execution result plan and that a successful submission updates the runtime's last-submitted block.
 
 ## Deployment boundary
 
-The deployed process uses the same `RuntimeBundle` constructor and `_execute_auto` implementation. Therefore the production artifact does not need a separate execution path to reproduce this chain.
+The deployed process uses the same `RuntimeBundle` constructor and `_execute_auto` implementation. Phase 20 therefore removes the prior test seam where the runtime object was created with `__new__` and manually populated.
 
 Phase 20 does **not** claim live end-to-end trading. RPC, signing, and capital movement remain outside the regression and must be verified separately in the deployment environment.
 
