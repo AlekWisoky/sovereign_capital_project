@@ -32,6 +32,41 @@ def test_real_learner_persists_and_reloads(tmp_path: Path):
     assert reloaded.total_observations == 1
 
 
+def test_operator_intent_and_goal_shape_learning_state():
+    learner = OmarRealLearner(path="/tmp/omar-intent-test.json", min_observations=1)
+    base = {
+        "margin_ratio": 0.001,
+        "gas_ratio": 0.0004,
+        "p_success": 0.9,
+        "drawdown_pct": 1.0,
+        "execution_realism": 0.9,
+        "stability": 0.9,
+        "goal_gap_pct": 0.0,
+        "volatility": 0.1,
+        "legs": 2,
+        "aggression_mode": "conservative",
+        "risk_multiplier": 0.5,
+        "goal_target_amount": "10000",
+        "goal_timeframe_days": 30,
+        "ai_recommendation_action": "hold",
+        "ai_recommendation_posture": "defensive",
+        "ai_recommendation_confidence": 0.8,
+    }
+    aggressive = dict(base)
+    aggressive.update(
+        {
+            "aggression_mode": "aggressive",
+            "risk_multiplier": 1.0,
+            "goal_target_amount": "100000",
+            "goal_timeframe_days": 180,
+            "ai_recommendation_action": "execute",
+            "ai_recommendation_posture": "risk_on",
+            "ai_recommendation_confidence": 0.95,
+        }
+    )
+    assert learner.state_key(base) != learner.state_key(aggressive)
+
+
 def test_untrained_omar_does_not_influence_live_decision(tmp_path: Path):
     rt = OmarRuntime(OmarConfig(enabled=True, self_play_enabled=False, real_learning_min_observations=20), "test")
     rt.learning_path = str(tmp_path / "omar.json")
