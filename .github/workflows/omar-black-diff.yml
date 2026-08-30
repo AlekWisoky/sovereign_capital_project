@@ -1,0 +1,24 @@
+name: OMAR Black diff helper
+
+on:
+  push:
+    branches:
+      - omar/phase-6-runtime-method-chain
+
+jobs:
+  black-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install black==24.10.0
+      - run: >-
+          black --diff --color
+          backend/victor_ai_bot/omar/lineage_identity.py
+          backend/victor_ai_bot/omar/production_lineage_bridge.py
+          backend/victor_ai_bot/operator_intent.py
+          backend/victor_ai_bot/omar/runtime.py
+          backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py
+          backend/victor_ai_bot/runtime_services/runtime_decision_facade.py
