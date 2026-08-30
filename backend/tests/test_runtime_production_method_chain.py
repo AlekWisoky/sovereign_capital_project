@@ -6,7 +6,9 @@ import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
 from victor_ai_bot.decision_identity import lineage_from_opportunity
-from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
+from victor_ai_bot.omar.production_lineage_bridge import (
+    install_production_lineage_bridge,
+)
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 
 
@@ -65,7 +67,9 @@ def _runtime():
 
 
 @pytest.mark.asyncio
-async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(monkeypatch):
+async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(
+    monkeypatch,
+):
     runtime = _runtime()
     events = []
     execution_result = SimpleNamespace(ok=True, dry_run=False, submitted=True)
@@ -130,7 +134,9 @@ def test_production_lineage_bridge_is_installed_on_runtime_decision_boundary():
     opp = SimpleNamespace(id="opp-2", route_id="route-2", meta={})
     decision = SimpleNamespace(metadata={})
 
-    chosen, returned = runtime._apply_omar_to_candidate(opp, decision, current_block=456)
+    chosen, returned = runtime._apply_omar_to_candidate(
+        opp, decision, current_block=456
+    )
 
     assert chosen is opp
     assert returned is decision

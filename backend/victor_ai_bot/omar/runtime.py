@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Dict, Any, Optional, Mapping
+import copy
 import threading
 import time
 import json
@@ -111,14 +112,16 @@ class OmarRuntime:
     ) -> None:
         if not self.enabled or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return
+        # A decision is historical evidence. Deep-copy nested human intent,
+        # wealth-goal, recommendation, and capital context at decision time.
         row = {
             "decision_id": str(decision_id),
             "opportunity_id": str(opportunity_id),
             "route_id": str(route_id),
             "action": str(action),
             "state_key": str(state_key),
-            "context": dict(context or {}),
-            "metadata": dict(metadata or {}),
+            "context": copy.deepcopy(dict(context or {})),
+            "metadata": copy.deepcopy(dict(metadata or {})),
             "ts_ms": int(time.time() * 1000),
         }
         with self._lock:
@@ -127,7 +130,7 @@ class OmarRuntime:
                 oldest = sorted(self._pending_decisions.items(), key=lambda item: item[1].get("ts_ms", 0))[:64]
                 for key, _ in oldest:
                     self._pending_decisions.pop(key, None)
-        self._log({"event": "omar_real_decision", **row})
+        self._log({"event": "omar_real_decision", **copy.deepcopy(row)})
 
     def observe_outcome(
         self,
@@ -148,7 +151,7 @@ class OmarRuntime:
         if not self.enabled or self._real_learner is None or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
         with self._lock:
-            pending = dict(self._pending_decisions.pop(str(decision_id), {}) or {})
+            pending = copy.deepcopy(dict(self._pending_decisions.pop(str(decision_id), {}) or {}))
         state_key = str(pending.get("state_key") or "")
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
@@ -167,12 +170,12 @@ class OmarRuntime:
             "expected_net_usd": float(expected_net_usd), "amount_in_wei": int(amount_in_wei),
             "gas_cost_usd": float(gas_cost_usd), "slippage_bps": float(slippage_bps),
             "latency_ms": int(latency_ms), "outcome_truth_verified": bool(outcome_truth_verified),
-            "metadata": dict(metadata or {}),
+            "metadata": copy.deepcopy(dict(metadata or {})),
         }
         result = self._real_learner.observe(state_key=state_key, action=action, reward=reward, outcome=outcome)
         with self._lock:
             self.last_outcome = {**dict(result), "decision_id": str(decision_id), "action": action}
-        self._log({"event": "omar_real_learning_update", **dict(result), "outcome": outcome})
+        self._log({"event": "omar_real_learning_update", **dict(result), "outcome": copy.deepcopy(outcome), "decision_snapshot": pending})
         return result
 
     def _load_learning_cursor(self) -> Dict[str, Any]:

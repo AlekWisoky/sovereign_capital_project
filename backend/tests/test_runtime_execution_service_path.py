@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
-from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
+from victor_ai_bot.omar.production_lineage_bridge import (
+    install_production_lineage_bridge,
+)
 from victor_ai_bot.runtime_services.runtime_execute_wrapper_facade import (
     AutoExecutionDispatchContext,
     RuntimeExecuteWrapperFacade,
@@ -99,4 +101,6 @@ async def test_prepared_auto_execution_uses_execution_service_lifecycle(monkeypa
 
 def test_production_lineage_bridge_remains_compatible_with_execution_service_path():
     install_production_lineage_bridge()
-    assert callable(getattr(RuntimeExecuteWrapperFacade, "_run_prepared_auto_execution"))
+    assert callable(
+        getattr(RuntimeExecuteWrapperFacade, "_run_prepared_auto_execution")
+    )

@@ -18,7 +18,13 @@ from ..persistence.db import PersistenceDB
 from ..rpc_manager import RpcManager
 from ..security.audit import SecurityAuditStore
 from ..omar.config import OmarConfig
+from ..omar.lifecycle_bridge import install_omar_lifecycle_hooks
+from ..omar.production_lineage_bridge import install_production_lineage_bridge
 from ..omar.runtime import OmarRuntime
+from .canonical_settlement_interface import (
+    install_canonical_settlement_bridge,
+    install_canonical_settlement_interface,
+)
 
 
 class RuntimeConstructorFacade:
@@ -78,6 +84,16 @@ class RuntimeConstructorFacade:
         if env_enabled:
             omar_cfg.enabled = True
         self._omar = OmarRuntime(cfg=omar_cfg, chain_name=cfg.chain.name)
+
+        # Install the canonical lifecycle bridges after OMAR exists. These hooks
+        # connect decision identity, execution bookkeeping, canonical Phase 2
+        # settlement, and OMAR learning on the real RuntimeBundle path. They are
+        # safe to install repeatedly because each installer is idempotent.
+        install_canonical_settlement_interface()
+        install_canonical_settlement_bridge()
+        install_production_lineage_bridge()
+        install_omar_lifecycle_hooks()
+
         if bool(omar_cfg.enabled):
             self._omar.start()
 
