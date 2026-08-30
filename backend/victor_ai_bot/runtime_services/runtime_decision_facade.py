@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, List, Optional
 
 from ..decision_engine import TradeDecision
+from ..decision_identity import ensure_decision_identity, snapshot_operator_intent
 from ..features import build_features
 from ..models import Opportunity
+from ..operator_intent import resolve_operator_intent
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
 from .profitability_truth import inspect_profit_after_costs_truth, opportunity_profit_sort_key
@@ -36,11 +37,12 @@ def _coerce_nonnegative_int(value: Any, default: int | None = 0) -> int | None:
 
 
 class RuntimeDecisionFacade:
-    """Execution-safety wrapper compatibility facade.
+    """Canonical execution-decision facade.
 
-    OMAR is inserted here as the learning decision layer immediately before
-    governance/execution. It can only veto or shrink an already executable
-    opportunity; it cannot bypass governance or upsize capital.
+    OMAR is a bounded learning layer immediately before governance/execution.
+    Canonical decision identity is created here, before OMAR observes a decision,
+    and is carried unchanged through execution and settlement. OMAR cannot
+    create a second decision identity, approve capital, sign, or bypass governance.
     """
 
     cfg: Any
@@ -196,7 +198,7 @@ class RuntimeDecisionFacade:
                 state = service.state(self)
                 return dict(state.get("state") or {}) if isinstance(state, dict) else {}
         except _SAFE_DECISION_EXCEPTIONS:
-            pass
+            return {}
         return {}
 
     def _omar_context(self, opp: Opportunity, *, p_success: float, ev_wei: int) -> dict[str, Any]:
@@ -218,61 +220,146 @@ class RuntimeDecisionFacade:
             "strategy_family": str((getattr(opp, "meta", {}) or {}).get("strategy_family") or (getattr(opp, "meta", {}) or {}).get("route_family") or ""),
         }
 
-    def _apply_omar_to_candidate(self, opp: Opportunity, decision: Any | None, *, current_block: int) -> tuple[Opportunity | None, Any | None]:
+    def _apply_omar_to_candidate(
+        self,
+        opp: Opportunity,
+        decision: Any | None,
+        *,
+        current_block: int,
+    ) -> tuple[Opportunity | None, Any | None]:
+        """Apply bounded OMAR influence using the canonical decision identity.
+
+        This is the production implementation, not a test-only adapter. The
+        operator-intent snapshot is captured once, identity is ensured before
+        recommendation/observation, and the same identity is retained on the
+        opportunity and decision metadata.
+        """
+        intent = snapshot_operator_intent(self)
+        chain_cfg = getattr(getattr(self, "cfg", None), "chain", None)
+        chain_name = str(getattr(chain_cfg, "name", "chain") or "chain")
+        identity = ensure_decision_identity(
+            opp,
+            decision,
+            chain_name=chain_name,
+            current_block=int(current_block),
+            operator_intent=intent,
+        )
+
         omar = getattr(self, "_omar", None)
         if omar is None or not bool(getattr(omar, "enabled", False)):
             return opp, decision
+
         try:
             bm = (getattr(opp, "meta", {}) or {}).get("brain") or {}
             p_success = float(bm.get("p_success") or getattr(decision, "p_success", 0.0) or 0.0)
             ev_wei = int(bm.get("ev_wei") or getattr(decision, "ev_wei", 0) or 0)
-            context = self._omar_context(opp, p_success=p_success, ev_wei=ev_wei)
+            context = dict(self._omar_context(opp, p_success=p_success, ev_wei=ev_wei) or {})
+            # The detached snapshot is passed explicitly. No later command-center
+            # or goal mutation can rewrite this decision's intent attribution.
+            context["operator_intent"] = dict(intent)
+            context["canonical_decision_id"] = identity.decision_id
+            context["correlation_id"] = identity.correlation_id
+
             rec = omar.recommend(context)
-            learning_action = str(rec.action) if str(rec.action) in {"WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE"} else "EXECUTE"
-            decision_id = f"omar-{getattr(self.cfg.chain, 'name', 'chain')}-{int(current_block)}-{str(getattr(opp, 'id', '') or '')}-{time.time_ns()}"
+            learning_action = str(getattr(rec, "action", "") or "")
+            if learning_action not in {"WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE"}:
+                learning_action = "EXECUTE"
+
             if isinstance(getattr(opp, "meta", None), dict):
                 brain = dict(opp.meta.get("brain") or {})
-                brain["omar_decision_id"] = decision_id
+                brain["canonical_decision_id"] = identity.decision_id
+                brain["correlation_id"] = identity.correlation_id
+                brain.pop("omar_decision_id", None)
                 brain["omar_action"] = learning_action
-                brain["omar_state_key"] = rec.state_key
-                brain["omar_confidence"] = float(rec.confidence)
-                brain["omar_trained"] = bool(rec.trained)
-                brain["omar_observations"] = int(rec.observations)
-                brain["omar_reason"] = str(rec.reason)
+                brain["omar_state_key"] = str(getattr(rec, "state_key", ""))
+                brain["omar_confidence"] = float(getattr(rec, "confidence", 0.0) or 0.0)
+                brain["omar_trained"] = bool(getattr(rec, "trained", False))
+                brain["omar_observations"] = int(getattr(rec, "observations", 0) or 0)
+                brain["omar_reason"] = str(getattr(rec, "reason", "") or "")
+                brain["operator_intent"] = dict(intent)
                 opp.meta["brain"] = brain
                 opp.meta["omar"] = rec.to_dict()
-            if rec.veto:
+
+            metadata = {
+                "current_block": int(current_block),
+                "ev_wei": int(ev_wei),
+                "p_success": float(p_success),
+                "canonical_decision_id": identity.decision_id,
+                "correlation_id": identity.correlation_id,
+                "operator_intent": dict(intent),
+                "recommendation": rec.to_dict(),
+            }
+
+            if bool(getattr(rec, "veto", False)):
                 omar.observe_decision(
-                    decision_id=decision_id, opportunity_id=str(getattr(opp, "id", "") or ""), route_id=str(getattr(opp, "route_id", "") or ""),
-                    action=learning_action, state_key=str(rec.state_key), context=context,
-                    metadata={"current_block": int(current_block), "ev_wei": int(ev_wei), "p_success": float(p_success), "recommendation": rec.to_dict()},
+                    decision_id=identity.decision_id,
+                    opportunity_id=str(getattr(opp, "id", "") or ""),
+                    route_id=str(getattr(opp, "route_id", "") or ""),
+                    action=learning_action,
+                    state_key=str(getattr(rec, "state_key", "")),
+                    context=context,
+                    metadata=metadata,
                 )
                 return None, decision
+
             if decision is None:
                 decision = TradeDecision(
-                    action="trade", opp_id=str(getattr(opp, "id", "")), route_id=str(getattr(opp, "route_id", "")),
-                    size_mult=float(rec.size_mult), borrow_mult=1.0, gas_mode=str(rec.gas_mode),
-                    p_success=p_success, ev_wei=ev_wei, reason="omar_selected", rl_state="", rl_action_index=-1,
-                    portfolio=[str(getattr(opp, "id", ""))],
+                    action="trade",
+                    opp_id=str(getattr(opp, "id", "")),
+                    route_id=str(getattr(opp, "route_id", "") or ""),
+                    size_mult=float(getattr(rec, "size_mult", 1.0) or 1.0),
+                    borrow_mult=1.0,
+                    gas_mode=str(getattr(rec, "gas_mode", "standard") or "standard"),
+                    p_success=p_success,
+                    ev_wei=ev_wei,
+                    reason="omar_selected",
+                    rl_state="",
+                    rl_action_index=-1,
+                    portfolio=[str(getattr(opp, "id", "") or "")],
                 )
             else:
-                decision.size_mult = min(float(getattr(decision, "size_mult", 1.0) or 1.0), float(rec.size_mult))
+                decision.size_mult = min(
+                    float(getattr(decision, "size_mult", 1.0) or 1.0),
+                    float(getattr(rec, "size_mult", 1.0) or 1.0),
+                )
                 decision.borrow_mult = min(float(getattr(decision, "borrow_mult", 1.0) or 1.0), 1.0)
-                if str(rec.gas_mode) in {"standard", "fast", "instant"}:
-                    decision.gas_mode = str(rec.gas_mode)
+                if str(getattr(rec, "gas_mode", "")) in {"standard", "fast", "instant"}:
+                    decision.gas_mode = str(getattr(rec, "gas_mode"))
+
+            ensure_decision_identity(
+                opp,
+                decision,
+                chain_name=chain_name,
+                current_block=int(current_block),
+                operator_intent=intent,
+            )
+            decision.metadata["canonical_decision_id"] = identity.decision_id
+            decision.metadata["correlation_id"] = identity.correlation_id
+            decision.metadata["operator_intent"] = dict(intent)
+
             if isinstance(getattr(opp, "meta", None), dict):
                 brain = dict(opp.meta.get("brain") or {})
                 brain["size_mult_omar"] = float(getattr(decision, "size_mult", 1.0) or 1.0)
                 brain["gas_mode_omar"] = str(getattr(decision, "gas_mode", "standard") or "standard")
+                brain["canonical_decision_id"] = identity.decision_id
+                brain["correlation_id"] = identity.correlation_id
+                brain["operator_intent"] = dict(intent)
                 opp.meta["brain"] = brain
+
             omar.observe_decision(
-                decision_id=decision_id, opportunity_id=str(getattr(opp, "id", "") or ""), route_id=str(getattr(opp, "route_id", "") or ""),
-                action=learning_action, state_key=str(rec.state_key), context=context,
-                metadata={"current_block": int(current_block), "ev_wei": int(ev_wei), "p_success": float(p_success), "recommendation": rec.to_dict()},
+                decision_id=identity.decision_id,
+                opportunity_id=str(getattr(opp, "id", "") or ""),
+                route_id=str(getattr(opp, "route_id", "") or ""),
+                action=learning_action,
+                state_key=str(getattr(rec, "state_key", "")),
+                context=context,
+                metadata=metadata,
             )
             return opp, decision
         except _SAFE_DECISION_EXCEPTIONS:
             return opp, decision
+
+    _apply_omar_to_candidate._canonical_identity_authoritative = True
 
     def _maybe_dispatch_auto_trade(self, *, current_block: int, decision: Any = None) -> bool:
         if not self._auto_trading or not self._opps or not self._cb.allow_auto_trading():
@@ -289,7 +376,11 @@ class RuntimeDecisionFacade:
         if chosen is None:
             return False
 
-        chosen, decision = self._apply_omar_to_candidate(chosen, decision if brain_mode != "off" else None, current_block=int(current_block))
+        chosen, decision = self._apply_omar_to_candidate(
+            chosen,
+            decision if brain_mode != "off" else None,
+            current_block=int(current_block),
+        )
         if chosen is None:
             return False
 
