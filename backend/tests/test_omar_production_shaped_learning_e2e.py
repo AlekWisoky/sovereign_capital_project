@@ -110,33 +110,75 @@ class _Runtime(RuntimeReceiptFacade):
         self.recorded.append((result, opp, latency_ms, mode))
 
 
-@pytest.mark.asyncio
-# @codescene(disable:"Large Method") Production-shaped integration test intentionally keeps the complete lifecycle assertion in one scenario.
-async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
-    monkeypatch, tmp_path
-):
+class _SettlementRepo:
+    def __init__(self, opp: _Opportunity, decision_id: str):
+        self.opp = opp
+        self.decision_id = decision_id
+
+    def all_transactions(self, *, chain):
+        sizing_id = self.opp.meta["brain"]["sizing_id"]
+        return [
+            {
+                "transaction_id": "settlement-phase7",
+                "tx_type": "receipt_settlement",
+                "receipt_id": "0xphase7",
+                "ts_ms": 2000,
+                "metadata": {
+                    "canonical_lineage": {
+                        "decision_id": self.decision_id,
+                        "correlation_id": self.opp.meta["brain"]["correlation_id"],
+                        "sizing_id": sizing_id,
+                    },
+                    "canonical_decision_id": self.decision_id,
+                    "correlation_id": self.opp.meta["brain"]["correlation_id"],
+                    "sizing_id": sizing_id,
+                    "opportunity_id": self.opp.id,
+                    "route_id": self.opp.route_id,
+                    "expected_net_usd": 5.0,
+                    "realized_net_usd": 4.0,
+                    "gas_cost_usd": 0.2,
+                    "slippage_bps": 2.0,
+                    "latency_ms": 11,
+                    "truth_verified": True,
+                },
+            }
+        ]
+
+
+def _install_lifecycle_bridges() -> None:
     install_canonical_settlement_interface()
     install_canonical_settlement_bridge()
     install_omar_lifecycle_hooks()
 
+
+def _make_omar(tmp_path) -> OmarRuntime:
     omar = OmarRuntime(OmarConfig(enabled=True), chain_name="phase7")
     omar.learning_path = str(tmp_path / "real_policy.json")
     omar._real_learner.path = omar.learning_path
+    return omar
 
-    opp = _Opportunity()
-    decision = SimpleNamespace(
+
+def _make_decision():
+    return SimpleNamespace(
         action="trade",
         size_mult=0.75,
         borrow_mult=1.0,
         gas_mode="standard",
         metadata={},
     )
+
+
+def _prepare_lineage(opp: _Opportunity, decision):
     identity = ensure_decision_identity(
         opp,
         decision,
         chain_name="ethereum",
         current_block=123,
     )
+    return identity
+
+
+def _record_omar_decision(omar: OmarRuntime, opp: _Opportunity, identity) -> None:
     omar.observe_decision(
         decision_id=identity.decision_id,
         opportunity_id=opp.id,
@@ -147,6 +189,8 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
         metadata={"correlation_id": identity.correlation_id},
     )
 
+
+def _scale_candidate(opp: _Opportunity, identity):
     scaled = ExecutionService.scale_opportunity(ExecutionService, opp, 0.75)
     scaled.meta["canonical_lineage"] = {
         "decision_id": identity.decision_id,
@@ -154,47 +198,10 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
     }
     scaled.meta["brain"]["canonical_decision_id"] = identity.decision_id
     scaled.meta["brain"]["correlation_id"] = identity.correlation_id
+    return scaled
 
-    events = []
-    execution_result = SimpleNamespace(
-        ok=True,
-        dry_run=False,
-        submitted=True,
-        tx_hash="0xphase7",
-        plan={},
-    )
 
-    class _Repo:
-        def all_transactions(self, *, chain):
-            sizing_id = scaled.meta["brain"]["sizing_id"]
-            return [
-                {
-                    "transaction_id": "settlement-phase7",
-                    "tx_type": "receipt_settlement",
-                    "receipt_id": "0xphase7",
-                    "ts_ms": 2000,
-                    "metadata": {
-                        "canonical_lineage": {
-                            "decision_id": identity.decision_id,
-                            "correlation_id": identity.correlation_id,
-                            "sizing_id": sizing_id,
-                        },
-                        "canonical_decision_id": identity.decision_id,
-                        "correlation_id": identity.correlation_id,
-                        "sizing_id": sizing_id,
-                        "opportunity_id": opp.id,
-                        "route_id": opp.route_id,
-                        "expected_net_usd": 5.0,
-                        "realized_net_usd": 4.0,
-                        "gas_cost_usd": 0.2,
-                        "slippage_bps": 2.0,
-                        "latency_ms": 11,
-                        "truth_verified": True,
-                    },
-                }
-            ]
-
-    runtime = _Runtime(omar=omar, ledger_repo=_Repo())
+def _install_execution_seams(monkeypatch, identity, execution_result, events):
     monkeypatch.setattr(runtime_legacy_module, "JsonRpcClient", _Rpc)
 
     async def fake_execute(
@@ -224,9 +231,8 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
         fake_prepare,
     )
 
-    await RuntimeBundle._execute_auto(runtime, scaled, 123, decision)
 
-    assert events and events[0][0] == "execute"
+def _assert_learning_update(omar, scaled, identity, runtime, execution_result):
     assert runtime.recorded
     recorded_result, recorded_opp, _latency_ms, mode = runtime.recorded[0]
     assert recorded_result is execution_result
@@ -255,3 +261,35 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
     )
     assert update["outcome"]["metadata"]["size_mult_applied"] == 0.75
     assert update["reward"] == pytest.approx(3.7289)
+
+
+@pytest.mark.asyncio
+async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
+    monkeypatch, tmp_path
+):
+    _install_lifecycle_bridges()
+    omar = _make_omar(tmp_path)
+    opp = _Opportunity()
+    decision = _make_decision()
+    identity = _prepare_lineage(opp, decision)
+    _record_omar_decision(omar, opp, identity)
+    scaled = _scale_candidate(opp, identity)
+
+    execution_result = SimpleNamespace(
+        ok=True,
+        dry_run=False,
+        submitted=True,
+        tx_hash="0xphase7",
+        plan={},
+    )
+    events = []
+    _install_execution_seams(monkeypatch, identity, execution_result, events)
+
+    runtime = _Runtime(
+        omar=omar,
+        ledger_repo=_SettlementRepo(opp, identity.decision_id),
+    )
+    await RuntimeBundle._execute_auto(runtime, scaled, 123, decision)
+
+    assert events and events[0][0] == "execute"
+    _assert_learning_update(omar, scaled, identity, runtime, execution_result)
