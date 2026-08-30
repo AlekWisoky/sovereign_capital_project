@@ -102,5 +102,8 @@ def test_learning_reward_uses_truth_verified_settled_net_profit():
         {"truth_verified": True, "realized_net_usd": 40.0, "expected_net_usd": 20.0}
     ) == 45.0
     assert learning_reward_from_settled_outcome(
+        {"truth_verified": True, "realized_net_usd": 0.0, "expected_net_usd": -20.0}
+    ) == 0.0
+    assert learning_reward_from_settled_outcome(
         {"truth_verified": False, "realized_net_usd": 100.0, "expected_net_usd": 20.0}
     ) == 0.0
