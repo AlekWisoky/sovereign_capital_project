@@ -74,14 +74,10 @@ def _goal_state(runtime: Any) -> dict[str, Any]:
 
 def _goal_snapshot(goal_state: Mapping[str, Any]) -> dict[str, Any]:
     goal = _dict(goal_state.get("goal"))
-    target_amount = (
-        goal.get("target_amount")
-        or goal.get("target_wealth_usd")
-        or goal.get("target_capital_usd")
+    target_amount = goal.get("target_amount") or goal.get("target_wealth_usd") or goal.get(
+        "target_capital_usd"
     )
-    target_return_pct = goal.get("target_return_percentage") or goal.get(
-        "target_return_pct"
-    )
+    target_return_pct = goal.get("target_return_percentage") or goal.get("target_return_pct")
     timeframe_days = goal.get("timeframe_days")
     if not timeframe_days and goal.get("time_horizon_seconds"):
         timeframe_days = _number(goal.get("time_horizon_seconds")) / 86400.0
@@ -93,16 +89,11 @@ def _goal_snapshot(goal_state: Mapping[str, Any]) -> dict[str, Any]:
         "goal_id": _text(meta.get("active_goal_id")),
         "goal_revision": int(_number(meta.get("goal_revision"), 1)),
         "current_return_pct": round(
-            _number(
-                goal_state.get("currentReturnPct")
-                or goal_state.get("current_return_pct")
-            ),
+            _number(goal_state.get("currentReturnPct") or goal_state.get("current_return_pct")),
             6,
         ),
         "drawdown_pct": round(
-            _number(
-                goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")
-            ),
+            _number(goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")),
             6,
         ),
     }
@@ -114,9 +105,7 @@ def _recommendation_snapshot(recommendation: Mapping[str, Any]) -> dict[str, Any
         "action": _text(recommendation.get("action")),
         "posture": _text(recommendation.get("posture")),
         "confidence": round(_number(recommendation.get("confidence")), 6),
-        "source": _text(
-            recommendation.get("source") or recommendation.get("kind")
-        ),
+        "source": _text(recommendation.get("source") or recommendation.get("kind")),
     }
 
 
@@ -134,7 +123,5 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
 
 def intent_fingerprint(intent: Mapping[str, Any]) -> str:
     """Stable attribution fingerprint; never use it as the learning state key."""
-    payload = json.dumps(
-        dict(intent), sort_keys=True, separators=(",", ":"), default=str
-    )
+    payload = json.dumps(dict(intent), sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
