@@ -86,6 +86,29 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
     return decision_id, correlation_id
 
 
+def _ensure_sizing_lineage(opp: Any, decision: Any | None) -> str:
+    try:
+        from victor_ai_bot.decision_identity import ensure_sizing_identity
+
+        meta = _dict(getattr(opp, "meta", None))
+        brain = _dict(meta.get("brain"))
+        decision_meta = _dict(getattr(decision, "metadata", None))
+        decision_id = _text(
+            brain.get("canonical_decision_id")
+            or brain.get("omar_decision_id")
+            or decision_meta.get("canonical_decision_id")
+        )
+        size_mult = getattr(decision, "size_mult", None) if decision is not None else None
+        return ensure_sizing_identity(
+            opp,
+            decision,
+            decision_id=decision_id,
+            applied_size_mult=size_mult,
+        )
+    except _SAFE:
+        return ""
+
+
 def _patch_decision_context() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
     original = getattr(RuntimeDecisionFacade, "_omar_context", None)
@@ -108,6 +131,7 @@ def _patch_decision_lineage() -> None:
         chosen, selected = original(self, opp, decision, current_block=current_block)
         if chosen is not None and selected is not None:
             ensure_lineage(chosen, selected, int(current_block))
+            _ensure_sizing_lineage(chosen, selected)
         return chosen, selected
     wrapped._omar_lineage_patched = True
     RuntimeDecisionFacade._apply_omar_to_candidate = wrapped
@@ -163,13 +187,21 @@ def _patch_settlement_learning() -> None:
                 return result
             meta = _dict(getattr(opp, "meta", None))
             brain = _dict(meta.get("brain"))
+            lineage = _dict(meta.get("canonical_lineage"))
             decision_id = _text(brain.get("canonical_decision_id") or brain.get("omar_decision_id"))
             correlation_id = _text(brain.get("correlation_id"))
+            sizing_id = _text(brain.get("sizing_id") or lineage.get("sizing_id"))
             if not decision_id or not correlation_id:
                 return result
             outcome = _canonical_settled_outcome(runtime, exec_result, opp)
             if outcome is None:
                 return result
+            canonical_lineage = {
+                "decision_id": decision_id,
+                "correlation_id": correlation_id,
+            }
+            if sizing_id:
+                canonical_lineage["sizing_id"] = sizing_id
             omar.observe_outcome(
                 decision_id=decision_id,
                 ok=bool(outcome.get("ok", True)),
@@ -182,7 +214,14 @@ def _patch_settlement_learning() -> None:
                 route_id=_text(outcome.get("route_id") or getattr(opp, "route_id", "")),
                 tx_hash=_text(outcome.get("tx_hash") or outcome.get("txHash")),
                 outcome_truth_verified=bool(outcome.get("truth_verified", outcome.get("outcome_truth_verified", True))),
-                metadata={"canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id}, "source": "canonical_outcome_ledger", "settlement": dict(outcome)},
+                metadata={
+                    "canonical_lineage": canonical_lineage,
+                    "source": "canonical_outcome_ledger",
+                    "settlement": dict(outcome),
+                    "sizing_id": sizing_id,
+                    "size_mult_applied": float(brain.get("size_mult_applied", 1.0) or 1.0),
+                    "operator_intent": dict(lineage.get("operator_intent") or {}),
+                },
             )
         except _SAFE:
             pass
