@@ -38,12 +38,7 @@ def _text(context: Mapping[str, Any], *keys: str) -> str:
 
 
 def _prime_context(context: Mapping[str, Any]) -> str:
-    """Return a stable economic bucket, never a raw prime identifier.
-
-    Correlation IDs and prime IDs are trace identifiers and must not fragment
-    the learning state. Prime *economics* can influence the state through
-    stable buckets such as source, availability, capacity, and cost.
-    """
+    """Return a stable economic bucket, never a raw prime identifier."""
     source = _text(context, "capital_source", "prime_source", "internal_prime_source").lower()
     available = bool(context.get("internal_prime_available", context.get("prime_available", False)))
     capacity = float(context.get("prime_capacity_ratio") or context.get("internal_prime_capacity_ratio") or 0.0)
@@ -53,6 +48,39 @@ def _prime_context(context: Mapping[str, Any]) -> str:
     capacity_bucket = _bucket(capacity, (0.10, 0.50, 0.90), ("cap_low", "cap_mid", "cap_high", "cap_full"))
     cost_bucket = _bucket(cost_bps, (0.0, 5.0, 15.0), ("cost_free", "cost_low", "cost_mid", "cost_high"))
     return f"{source_bucket}:{availability}:{capacity_bucket}:{cost_bucket}"
+
+
+def _operator_intent_context(context: Mapping[str, Any]) -> tuple[str, str, str, str, str, str, str]:
+    """Convert human/AI intent into coarse, stable learning features.
+
+    Intent is conditioning evidence only. It is deliberately bucketed and never
+    treated as an execution authorization or raw identity.
+    """
+    intent = context.get("operator_intent") if isinstance(context.get("operator_intent"), Mapping) else {}
+    aggression = str(context.get("aggression_mode") or intent.get("aggression_mode") or "balanced").lower()
+    if aggression not in {"conservative", "balanced", "aggressive"}:
+        aggression = "balanced"
+
+    risk = float(context.get("risk_multiplier") or intent.get("risk_multiplier") or 1.0)
+    risk_bucket = _bucket(risk, (0.34, 0.67, 0.99), ("risk_min", "risk_low", "risk_mid", "risk_full"))
+
+    goal = intent.get("goal") if isinstance(intent.get("goal"), Mapping) else {}
+    raw_amount = context.get("goal_target_amount") or goal.get("target_amount") or ""
+    try:
+        amount = float(str(raw_amount).replace(",", "")) if raw_amount not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        amount = 0.0
+    amount_bucket = _bucket(amount, (1_000.0, 10_000.0, 100_000.0), ("goal_amt_unknown_or_low", "goal_amt_small", "goal_amt_mid", "goal_amt_large"))
+
+    horizon = float(context.get("goal_timeframe_days") or goal.get("timeframe_days") or 0.0)
+    horizon_bucket = _bucket(horizon, (7.0, 30.0, 90.0), ("goal_horizon_unknown_or_short", "goal_horizon_short", "goal_horizon_mid", "goal_horizon_long"))
+
+    recommendation = intent.get("ai_recommendation") if isinstance(intent.get("ai_recommendation"), Mapping) else {}
+    rec_action = str(context.get("ai_recommendation_action") or recommendation.get("action") or "none").lower() or "none"
+    rec_posture = str(context.get("ai_recommendation_posture") or recommendation.get("posture") or "none").lower() or "none"
+    rec_confidence = float(context.get("ai_recommendation_confidence") or recommendation.get("confidence") or 0.0)
+    rec_conf_bucket = _bucket(rec_confidence, (0.50, 0.75, 0.90), ("rec_conf_low", "rec_conf_mid", "rec_conf_high", "rec_conf_very_high"))
+    return aggression, risk_bucket, amount_bucket, horizon_bucket, rec_action, rec_posture, rec_conf_bucket
 
 
 @dataclass(frozen=True)
@@ -72,15 +100,7 @@ class OmarRecommendation:
 
 
 class OmarRealLearner:
-    """Persistent contextual bandit trained from settled real trade outcomes.
-
-    OMAR never executes or signs transactions. Live influence is bounded to a
-    veto, downsizing, or gas-mode recommendation; governance remains authoritative.
-
-    Correlation IDs are retained as lineage metadata, not learning features.
-    Internal-prime identifiers are likewise lineage-only; prime economics are
-    represented by stable buckets so learning generalizes across transactions.
-    """
+    """Persistent contextual bandit trained from settled real trade outcomes."""
 
     def __init__(self, *, path: str, alpha: float = 0.12, epsilon: float = 0.0, min_observations: int = 20) -> None:
         self.path = path
@@ -105,20 +125,26 @@ class OmarRealLearner:
         goal_gap = float(context.get("goal_gap_pct") or 0.0)
         vol = float(context.get("volatility") or 0.0)
         legs = int(context.get("legs") or 2)
-        return "|".join(
-            (
-                _bucket(margin, (0.0, .0005, .001, .002), ("m_neg", "m_tiny", "m_low", "m_mid", "m_hi")),
-                _bucket(gas, (.0002, .0005, .001), ("g_vlow", "g_low", "g_mid", "g_hi")),
-                _bucket(p, (.70, .80, .90), ("p_low", "p_mid", "p_high", "p_very_high")),
-                _bucket(dd, (2.0, 5.0, 8.0), ("dd_low", "dd_mid", "dd_high", "dd_critical")),
-                _bucket(realism, (.55, .70, .85), ("r_low", "r_mid", "r_high", "r_strong")),
-                _bucket(stability, (.55, .70, .85), ("s_low", "s_mid", "s_high", "s_strong")),
-                _bucket(goal_gap, (0.0, 2.0, 5.0), ("goal_on_track", "goal_gap_small", "goal_gap_large", "goal_gap_extreme")),
-                _bucket(vol, (.10, .20, .35), ("v_low", "v_mid", "v_high", "v_extreme")),
-                _prime_context(context),
-                "l3" if legs > 2 else "l2",
-            )
-        )
+        aggression, risk_bucket, amount_bucket, horizon_bucket, rec_action, rec_posture, rec_conf_bucket = _operator_intent_context(context)
+        return "|".join((
+            _bucket(margin, (0.0, .0005, .001, .002), ("m_neg", "m_tiny", "m_low", "m_mid", "m_hi")),
+            _bucket(gas, (.0002, .0005, .001), ("g_vlow", "g_low", "g_mid", "g_hi")),
+            _bucket(p, (.70, .80, .90), ("p_low", "p_mid", "p_high", "p_very_high")),
+            _bucket(dd, (2.0, 5.0, 8.0), ("dd_low", "dd_mid", "dd_high", "dd_critical")),
+            _bucket(realism, (.55, .70, .85), ("r_low", "r_mid", "r_high", "r_strong")),
+            _bucket(stability, (.55, .70, .85), ("s_low", "s_mid", "s_high", "s_strong")),
+            _bucket(goal_gap, (0.0, 2.0, 5.0), ("goal_on_track", "goal_gap_small", "goal_gap_large", "goal_gap_extreme")),
+            _bucket(vol, (.10, .20, .35), ("v_low", "v_mid", "v_high", "v_extreme")),
+            aggression,
+            risk_bucket,
+            amount_bucket,
+            horizon_bucket,
+            rec_action,
+            rec_posture,
+            rec_conf_bucket,
+            _prime_context(context),
+            "l3" if legs > 2 else "l2",
+        ))
 
     def _ensure(self, key: str) -> None:
         if key not in self.q:
@@ -131,17 +157,7 @@ class OmarRealLearner:
             self._ensure(key)
             obs = int(self.total_observations)
             if obs < self.min_observations:
-                rec = OmarRecommendation(
-                    key,
-                    "UNTRAINED",
-                    0.0,
-                    False,
-                    1.0,
-                    "standard",
-                    False,
-                    obs,
-                    "insufficient_real_outcomes",
-                )
+                rec = OmarRecommendation(key, "UNTRAINED", 0.0, False, 1.0, "standard", False, obs, "insufficient_real_outcomes")
                 self.last_recommendation = rec.to_dict()
                 return rec
             ranked = sorted(self.q[key].items(), key=lambda item: (-float(item[1]), item[0]))
@@ -171,15 +187,7 @@ class OmarRealLearner:
             self.q[state_key][action] = old + self.alpha * (reward - old)
             self.n[state_key] = int(self.n.get(state_key, 0)) + 1
             self.total_observations += 1
-            payload = {
-                "event": "omar_real_outcome",
-                "ts_ms": int(time.time() * 1000),
-                "state_key": state_key,
-                "action": action,
-                "reward": reward,
-                "observations": self.total_observations,
-                "outcome": dict(outcome or {}),
-            }
+            payload = {"event": "omar_real_outcome", "ts_ms": int(time.time() * 1000), "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations, "outcome": dict(outcome or {})}
             self._append_event(payload)
             if self.total_observations % 5 == 0:
                 self.save()
@@ -187,15 +195,7 @@ class OmarRealLearner:
 
     def summary(self) -> Dict[str, Any]:
         with self._lock:
-            return {
-                "enabled": True,
-                "states": len(self.q),
-                "total_observations": self.total_observations,
-                "min_observations": self.min_observations,
-                "alpha": self.alpha,
-                "epsilon": self.epsilon,
-                "last_recommendation": dict(self.last_recommendation),
-            }
+            return {"enabled": True, "states": len(self.q), "total_observations": self.total_observations, "min_observations": self.min_observations, "alpha": self.alpha, "epsilon": self.epsilon, "last_recommendation": dict(self.last_recommendation)}
 
     def save(self) -> None:
         with self._lock:
@@ -203,20 +203,7 @@ class OmarRealLearner:
                 os.makedirs(os.path.dirname(self.path), exist_ok=True)
                 tmp = self.path + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as handle:
-                    json.dump(
-                        {
-                            "v": 1,
-                            "ts": int(time.time()),
-                            "alpha": self.alpha,
-                            "epsilon": self.epsilon,
-                            "min_observations": self.min_observations,
-                            "total_observations": self.total_observations,
-                            "q": self.q,
-                            "n": self.n,
-                        },
-                        handle,
-                        sort_keys=True,
-                    )
+                    json.dump({"v": 1, "ts": int(time.time()), "alpha": self.alpha, "epsilon": self.epsilon, "min_observations": self.min_observations, "total_observations": self.total_observations, "q": self.q, "n": self.n}, handle, sort_keys=True)
                 os.replace(tmp, self.path)
             except _SAFE:
                 return
@@ -245,11 +232,7 @@ class OmarRealLearner:
                 self.total_observations = max(0, int(payload.get("total_observations", 0)))
                 raw_q = payload.get("q")
                 if isinstance(raw_q, dict):
-                    self.q = {
-                        str(state): {a: float(values.get(a, 0.0)) for a in ACTIONS}
-                        for state, values in raw_q.items()
-                        if isinstance(values, dict)
-                    }
+                    self.q = {str(state): {a: float(values.get(a, 0.0)) for a in ACTIONS} for state, values in raw_q.items() if isinstance(values, dict)}
                 raw_n = payload.get("n")
                 if isinstance(raw_n, dict):
                     self.n = {str(k): int(v) for k, v in raw_n.items()}
