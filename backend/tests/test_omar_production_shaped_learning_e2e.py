@@ -8,11 +8,9 @@ import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
 from victor_ai_bot.decision_identity import ensure_decision_identity, lineage_from_opportunity
-from victor_ai_bot.omar.lifecycle_bridge import (
-    install_omar_lifecycle_hooks,
-)
-from victor_ai_bot.omar.runtime import OmarRuntime
 from victor_ai_bot.omar.config import OmarConfig
+from victor_ai_bot.omar.lifecycle_bridge import install_omar_lifecycle_hooks
+from victor_ai_bot.omar.runtime import OmarRuntime
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services.canonical_settlement_interface import (
     install_canonical_settlement_bridge,
@@ -54,10 +52,7 @@ class _Opportunity:
         self.min_outs = ["990"]
         self.expected_profit_raw = "8"
         self.meta = {
-            "safety": {
-                "exec_ready": True,
-                "profit_after_costs_wei": "8",
-            },
+            "safety": {"exec_ready": True, "profit_after_costs_wei": "8"},
             "profit_after_costs": "8",
             "brain": {},
         }
@@ -141,8 +136,6 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
         chain_name="ethereum",
         current_block=123,
     )
-
-    # Register the exact action/state pair that the settled outcome must update.
     omar.observe_decision(
         decision_id=identity.decision_id,
         opportunity_id=opp.id,
@@ -153,7 +146,6 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
         metadata={"correlation_id": identity.correlation_id},
     )
 
-    # Apply the real production sizing function before the execution boundary.
     scaled = ExecutionService.scale_opportunity(ExecutionService, opp, 0.75)
     scaled.meta["canonical_lineage"] = {
         "decision_id": identity.decision_id,
@@ -173,6 +165,7 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
 
     class _Repo:
         def all_transactions(self, *, chain):
+            sizing_id = scaled.meta["brain"]["sizing_id"]
             return [
                 {
                     "transaction_id": "settlement-phase7",
@@ -183,11 +176,11 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
                         "canonical_lineage": {
                             "decision_id": identity.decision_id,
                             "correlation_id": identity.correlation_id,
-                            "sizing_id": scaled.meta["brain"]["sizing_id"],
+                            "sizing_id": sizing_id,
                         },
                         "canonical_decision_id": identity.decision_id,
                         "correlation_id": identity.correlation_id,
-                        "sizing_id": scaled.meta["brain"]["sizing_id"],
+                        "sizing_id": sizing_id,
                         "opportunity_id": opp.id,
                         "route_id": opp.route_id,
                         "expected_net_usd": 5.0,
@@ -201,10 +194,11 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
             ]
 
     runtime = _Runtime(omar=omar, ledger_repo=_Repo())
-
     monkeypatch.setattr(runtime_legacy_module, "JsonRpcClient", _Rpc)
 
-    async def fake_execute(rpc_r, rpc_s, cfg, candidate, bn, last_submitted_block, **kwargs):
+    async def fake_execute(
+        rpc_r, rpc_s, cfg, candidate, bn, last_submitted_block, **kwargs
+    ):
         events.append(("execute", candidate, kwargs["decision"]))
         assert candidate.meta["brain"]["sizing_id"]
         assert candidate.meta["brain"]["canonical_decision_id"] == identity.decision_id
@@ -215,12 +209,12 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
 
     async def fake_prepare(self, *, opp, bn, decision):
         return AutoExecutionDispatchContext(
+            opportunity=opp,
             force_dry=False,
             old_gas_mode="standard",
             old_send_mode="public",
             read_url="read-rpc",
             send_url="send-rpc",
-            opportunity=opp,
         )
 
     monkeypatch.setattr(
@@ -254,6 +248,9 @@ async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
     assert update["action"] == "EXECUTE"
     assert update["outcome"]["realized_net_usd"] == 4.0
     assert update["outcome"]["gas_cost_usd"] == 0.2
-    assert update["outcome"]["metadata"]["canonical_lineage"]["sizing_id"] == lineage["sizing_id"]
+    assert (
+        update["outcome"]["metadata"]["canonical_lineage"]["sizing_id"]
+        == lineage["sizing_id"]
+    )
     assert update["outcome"]["metadata"]["size_mult_applied"] == 0.75
     assert update["reward"] == pytest.approx(3.7289)
