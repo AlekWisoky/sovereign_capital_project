@@ -14,7 +14,14 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{digest}"
 
 
-def execution_id(*, decision_id: str, correlation_id: str, tx_hash: str = "", route_id: str = "", existing: str = "") -> str:
+def execution_id(
+    *,
+    decision_id: str,
+    correlation_id: str,
+    tx_hash: str = "",
+    route_id: str = "",
+    existing: str = "",
+) -> str:
     """Identify one concrete execution attempt, preferring an upstream ID."""
     existing_text = _text(existing)
     if existing_text:
@@ -22,7 +29,9 @@ def execution_id(*, decision_id: str, correlation_id: str, tx_hash: str = "", ro
     return _stable_id("execution", decision_id, correlation_id, tx_hash, route_id)
 
 
-def outcome_id(*, decision_id: str, correlation_id: str, transaction_id: str = "", tx_hash: str = "") -> str:
+def outcome_id(
+    *, decision_id: str, correlation_id: str, transaction_id: str = "", tx_hash: str = ""
+) -> str:
     """Identify one canonical settled ledger outcome."""
     transaction_text = _text(transaction_id)
     if transaction_text:
