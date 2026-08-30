@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
+from victor_ai_bot.persistence.db import PersistenceDB
+from victor_ai_bot.persistence.repositories.ledger_repository import LedgerRepository
 from victor_ai_bot.runtime_services.canonical_settlement_interface import canonical_settled_outcome
 from victor_ai_bot.runtime_services.execution_service import ExecutionService
 from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
@@ -160,6 +163,60 @@ def test_actual_receipt_finalize_carries_complete_identity_to_settlement_and_per
 
     assert settlement["execution_id"] == persisted["execution_id"]
     assert settlement["outcome_id"] == persisted["outcome_id"]
+
+
+def test_real_ledger_transaction_round_trip_preserves_all_lineage_fields(tmp_path: Path):
+    db = PersistenceDB(str(tmp_path / "ledger.sqlite"))
+    ledger = LedgerRepository(db, chain="ethereum")
+    metadata = {
+        "canonical_lineage": {
+            "decision_id": "decision-physical",
+            "correlation_id": "corr-physical",
+            "execution_id": "execution-physical",
+            "outcome_id": "outcome-physical",
+            "sizing_id": "sizing-physical",
+            "opportunity_id": "opp-physical",
+            "route_id": "route-physical",
+            "action": "EXECUTE",
+        },
+        "canonical_decision_id": "decision-physical",
+        "correlation_id": "corr-physical",
+        "execution_id": "execution-physical",
+        "outcome_id": "outcome-physical",
+        "sizing_id": "sizing-physical",
+        "opportunity_id": "opp-physical",
+        "route_id": "route-physical",
+        "action": "EXECUTE",
+        "truth_verified": True,
+    }
+    ledger.append_transaction(
+        chain="ethereum",
+        payload={
+            "transaction_id": "settlement-physical",
+            "ts_ms": 100,
+            "tx_type": "receipt_settlement",
+            "receipt_id": "0xphysical",
+            "metadata": metadata,
+        },
+    )
+
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(chain=SimpleNamespace(name="ethereum")),
+        _ledger_repo=ledger,
+    )
+    outcome = canonical_settled_outcome(
+        runtime,
+        tx_hash="0xphysical",
+        decision_id="decision-physical",
+        correlation_id="corr-physical",
+        opportunity_id="opp-physical",
+    )
+
+    assert outcome is not None
+    assert outcome["lineage_persisted"] is True
+    assert outcome["canonical_lineage"] == metadata["canonical_lineage"]
+    stored = ledger.transactions_tail(chain="ethereum", limit=1)[0]
+    assert stored["metadata"]["canonical_lineage"] == metadata["canonical_lineage"]
 
 
 def test_canonical_settlement_reader_requires_physical_complete_lineage():
