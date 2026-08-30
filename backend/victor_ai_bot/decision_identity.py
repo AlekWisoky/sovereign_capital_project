@@ -180,8 +180,11 @@ def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     meta = _dict(getattr(opp, "meta", None))
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
-    return {
+    result = {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
-        "sizing_id": _text(brain.get("sizing_id") or lineage.get("sizing_id")),
     }
+    sizing_id = _text(brain.get("sizing_id") or lineage.get("sizing_id"))
+    if sizing_id:
+        result["sizing_id"] = sizing_id
+    return result
