@@ -1,0 +1,59 @@
+name: Repair Phase 7 Mypy Regression
+
+on:
+  push:
+    branches:
+      - omar/phase-7-production-shaped-lineage
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: omar/phase-7-production-shaped-lineage
+
+      - name: Apply canonical withdraw-all typing repair
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          text = text.replace(old_chain, new_chain, 1)
+          text = text.replace('''        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,\n            "approved_destination": str(state.get("approved_destination") or ""),\n            "mode": mode,\n            "items": [],\n        }''', '''        execute_result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,\n            "approved_destination": str(state.get("approved_destination") or ""),\n            "mode": mode,\n            "items": [],\n        }''', 1)
+          start = text.find('        if dry_run or mode != "backend":')
+          end = text.find('        return execute_result', start)
+          if start == -1 or end == -1:
+              raise SystemExit("expected execute block not found")
+          block = text[start:end]
+          block = block.replace("result[", "execute_result[")
+          block = block.replace("result = _attach_lifecycle_summary(", "execute_result = _attach_lifecycle_summary(")
+          block = block.replace("result, fallback_status", "execute_result, fallback_status")
+          block = block.replace('"result": result', '"result": execute_result')
+          text = text[:start] + block + text[end:]
+          # Remaining references in the production execute section belong to the renamed result object.
+          section_start = text.find('        if dry_run or mode != "backend":')
+          section_end = text.find('        return execute_result', section_start)
+          section = text[section_start:section_end]
+          section = section.replace('result.get(', 'execute_result.get(')
+          section = section.replace('result[', 'execute_result[')
+          section = section.replace('result = ', 'execute_result = ')
+          section = section.replace('"result": result', '"result": execute_result')
+          text = text[:section_start] + section + text[section_end:]
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git diff --cached --check
+          git commit -m "fix(omar): preserve withdraw-all typing after lifecycle refactor"
+          git push origin HEAD:omar/phase-7-production-shaped-lineage
