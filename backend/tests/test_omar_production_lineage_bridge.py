@@ -97,7 +97,7 @@ def test_settlement_guard_rejects_cross_trade_lineage():
     )
 
 
-def test_legacy_lifecycle_bridge_does_not_wrap_authoritative_decision_identity(monkeypatch):
+def test_legacy_lifecycle_bridge_does_not_wrap_authoritative_decision_identity():
     """The production facade is the only component allowed to create identity."""
     authoritative = RuntimeDecisionFacade._apply_omar_to_candidate
     assert getattr(authoritative, "_canonical_identity_authoritative", False) is True
@@ -108,7 +108,7 @@ def test_legacy_lifecycle_bridge_does_not_wrap_authoritative_decision_identity(m
     assert not getattr(authoritative, "_omar_lineage_patched", False)
 
 
-def test_canonical_identity_remains_authoritative_after_bridge_install(monkeypatch):
+def test_canonical_identity_remains_authoritative_after_bridge_install():
     authoritative = RuntimeDecisionFacade._apply_omar_to_candidate
 
     # Simulate a legacy bridge trying to install again. The authoritative marker
@@ -117,4 +117,8 @@ def test_canonical_identity_remains_authoritative_after_bridge_install(monkeypat
     lifecycle_bridge._patch_decision_lineage()
 
     assert RuntimeDecisionFacade._apply_omar_to_candidate is authoritative
-    assert getattr(RuntimeDecisionFacade._apply_omar_to_candidate, "_canonical_identity_authoritative", False)
+    assert getattr(
+        RuntimeDecisionFacade._apply_omar_to_candidate,
+        "_canonical_identity_authoritative",
+        False,
+    )
