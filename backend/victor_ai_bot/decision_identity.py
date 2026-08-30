@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .operator_intent import intent_fingerprint
+from .operator_intent import intent_fingerprint, resolve_operator_intent
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,11 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{digest}"
 
 
+def snapshot_operator_intent(runtime: Any) -> dict[str, Any]:
+    """Capture one detached operator-intent snapshot at the canonical boundary."""
+    return deepcopy(resolve_operator_intent(runtime))
+
+
 def ensure_decision_identity(
     opp: Any,
     decision: Any | None,
@@ -38,11 +44,7 @@ def ensure_decision_identity(
     current_block: int,
     operator_intent: Mapping[str, Any] | None = None,
 ) -> DecisionExecutionIdentity:
-    """Create/preserve canonical identity and attach operator-intent attribution.
-
-    Identity creation is independent of OMAR. Operator intent is metadata only:
-    it describes why the decision was made, but never grants execution authority.
-    """
+    """Create/preserve canonical identity and attach operator-intent attribution."""
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
         meta = {}
@@ -119,13 +121,18 @@ def ensure_decision_identity(
 
 
 def lineage_from_opportunity(opp: Any) -> dict[str, str]:
+    """Return the stable two-field decision/execution lineage contract."""
     meta = _dict(getattr(opp, "meta", None))
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
     return {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
-        "operator_intent_fingerprint": _text(
-            brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint")
-        ),
     }
+
+
+def operator_intent_fingerprint_from_opportunity(opp: Any) -> str:
+    meta = _dict(getattr(opp, "meta", None))
+    brain = _dict(meta.get("brain"))
+    lineage = _dict(meta.get("canonical_lineage"))
+    return _text(brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint"))
