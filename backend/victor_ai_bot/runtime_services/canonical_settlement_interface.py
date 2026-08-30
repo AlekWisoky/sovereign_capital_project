@@ -105,6 +105,17 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
                     return value
         return default
 
+    realized_net = float(
+        first(
+            "realized_net_usd",
+            "realizedNetUsd",
+            "realized_net_after_costs_usd",
+            "realizedNetAfterCostsUsd",
+            default=0.0,
+        )
+        or 0.0
+    )
+
     return {
         "status": "settled",
         "source": "phase2_canonical_outcome_ledger",
@@ -126,6 +137,9 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "correlation_id": _text(
             first("correlation_id", default=lineage.get("correlation_id"))
         ),
+        "sizing_id": _text(
+            first("sizing_id", default=lineage.get("sizing_id"))
+        ),
         "opportunity_id": _text(first("opportunity_id", "opportunityId")),
         "route_id": _text(first("route_id", "routeId")),
         "strategy_family": _text(
@@ -135,9 +149,8 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "expected_net_usd": float(
             first("expected_net_usd", "expectedNetUsd", default=0.0) or 0.0
         ),
-        "realized_net_usd": float(
-            first("realized_net_usd", "realizedNetUsd", default=0.0) or 0.0
-        ),
+        "realized_net_usd": realized_net,
+        "realized_net_after_costs_usd": realized_net,
         "amount_in_wei": int(
             first("amount_in_wei", "amountInWei", default=0) or 0
         ),
