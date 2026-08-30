@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .operator_intent import intent_fingerprint
+from .operator_intent import intent_fingerprint, resolve_operator_intent
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,11 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{digest}"
 
 
+def snapshot_operator_intent(runtime: Any) -> dict[str, Any]:
+    """Capture one detached operator-intent snapshot at the canonical boundary."""
+    return deepcopy(resolve_operator_intent(runtime))
+
+
 def ensure_decision_identity(
     opp: Any,
     decision: Any | None,
@@ -40,8 +46,9 @@ def ensure_decision_identity(
 ) -> DecisionExecutionIdentity:
     """Create/preserve canonical identity and attach operator-intent attribution.
 
-    Identity creation is independent of OMAR. Operator intent is metadata only:
-    it describes why the decision was made, but never grants execution authority.
+    Identity creation is independent of OMAR. Operator intent is contextual
+    attribution only; it never grants execution, capital, signing, or governance
+    authority.
     """
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
