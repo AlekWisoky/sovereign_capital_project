@@ -100,6 +100,82 @@ def ensure_decision_identity(
     return DecisionExecutionIdentity(decision_id=decision_id, correlation_id=correlation_id)
 
 
+def ensure_sizing_identity(
+    opp: Any,
+    decision: Any | None,
+    *,
+    decision_id: str = "",
+    applied_size_mult: float | None = None,
+) -> str:
+    """Create/preserve a deterministic identity for the applied trade size.
+
+    The sizing identity is lineage, not a learning feature. It binds the
+    selected decision to the concrete amount/size multiplier that reaches the
+    execution boundary, allowing the settled outcome to attribute realized
+    economics to the exact sized action.
+    """
+    meta = getattr(opp, "meta", None)
+    if not isinstance(meta, dict):
+        return ""
+    brain = _dict(meta.get("brain"))
+    lineage = _dict(meta.get("canonical_lineage"))
+    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
+    canonical_decision_id = _text(
+        decision_id
+        or brain.get("canonical_decision_id")
+        or lineage.get("decision_id")
+        or decision_meta.get("canonical_decision_id")
+    )
+    if not canonical_decision_id:
+        return ""
+
+    if applied_size_mult is None:
+        try:
+            applied_size_mult = float(
+                getattr(decision, "size_mult", None)
+                if decision is not None
+                else brain.get("size_mult_applied") or brain.get("size_mult_omar") or 1.0
+            )
+        except (TypeError, ValueError):
+            applied_size_mult = 1.0
+    try:
+        size_mult = float(applied_size_mult)
+    except (TypeError, ValueError):
+        size_mult = 1.0
+
+    amount_in_wei = ""
+    try:
+        amount_in_wei = _text(getattr(opp.route.legs[0], "amount_in", ""))
+    except (AttributeError, IndexError, TypeError):
+        amount_in_wei = _text(meta.get("amount_in_wei") or meta.get("amountInWei"))
+
+    existing = _text(brain.get("sizing_id") or lineage.get("sizing_id") or decision_meta.get("sizing_id"))
+    sizing_id = existing or _stable_id(
+        "sizing",
+        canonical_decision_id,
+        _text(getattr(opp, "id", "")),
+        _text(getattr(opp, "route_id", "")),
+        amount_in_wei,
+        f"{size_mult:.12f}",
+    )
+    brain["sizing_id"] = sizing_id
+    brain["size_mult_applied"] = size_mult
+    if amount_in_wei:
+        brain["amount_in_wei"] = amount_in_wei
+    meta["brain"] = brain
+    lineage["decision_id"] = canonical_decision_id
+    lineage["sizing_id"] = sizing_id
+    meta["canonical_lineage"] = lineage
+    if decision is not None:
+        decision_meta["sizing_id"] = sizing_id
+        decision_meta["size_mult_applied"] = size_mult
+        try:
+            decision.metadata = decision_meta
+        except (AttributeError, TypeError):
+            pass
+    return sizing_id
+
+
 def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     meta = _dict(getattr(opp, "meta", None))
     brain = _dict(meta.get("brain"))
@@ -107,4 +183,5 @@ def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     return {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
+        "sizing_id": _text(brain.get("sizing_id") or lineage.get("sizing_id")),
     }
