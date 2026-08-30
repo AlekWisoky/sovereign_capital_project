@@ -7,7 +7,11 @@ import pytest
 
 from victor_ai_bot.decision_identity import lineage_from_opportunity
 from victor_ai_bot.omar.config import OmarConfig
-from victor_ai_bot.omar.lifecycle_bridge import _observe_settled_outcome
+from victor_ai_bot.omar.lifecycle_bridge import (
+    _observe_settled_outcome,
+    install_omar_lifecycle_hooks,
+)
+from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
 from victor_ai_bot.omar.runtime import OmarRuntime
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services.canonical_settlement_interface import (
@@ -72,6 +76,7 @@ def runtime(tmp_path: Path):
         ),
         chain_name="ethereum",
     )
+    omar.data_dir = str(tmp_path)
     omar.learning_path = str(tmp_path / "policy.json")
     omar._learning_cursor_path = str(tmp_path / "cursor.json")
     omar._seen_outcome_ids = set()
@@ -88,9 +93,15 @@ def runtime(tmp_path: Path):
     )
     rt._execution_service = AllowingExecutionService()
     rt._omar = omar
-    rt._cc = SimpleNamespace(controls=SimpleNamespace(aggression_mode="balanced", risk_multiplier=0.7))
+    rt._cc = SimpleNamespace(
+        controls=SimpleNamespace(aggression_mode="balanced", risk_multiplier=0.7)
+    )
     rt._wealth_goal_service = None
-    rt._ai_recommendation = {"action": "WAIT", "posture": "protect_capital", "confidence": 0.9}
+    rt._ai_recommendation = {
+        "action": "WAIT",
+        "posture": "protect_capital",
+        "confidence": 0.9,
+    }
     rt._market_regime = {"volatility": 0.1}
     rt._last_submitted_block = 17
     rt._mev_guard = None
@@ -104,6 +115,20 @@ def runtime(tmp_path: Path):
     rt._exec_log = []
     rt._pending_gas_est_wei = 0
     rt._receipt_q = None
+    rt.capital_engine_state = lambda: {
+        "capital_engine": {
+            "available_bankroll_wei": 9000,
+            "deployable_bankroll_wei": 5000,
+            "family_allocations_wei": {"flash_arb": 5000},
+            "status": "authorized",
+            "freshness_class": "fresh",
+            "authority_id": "authority-phase22",
+            "source": "capital-engine",
+            "internal_prime_available": True,
+            "prime_capacity_ratio": 0.8,
+            "prime_cost_bps": 4.0,
+        }
+    }
     return rt, omar
 
 
@@ -111,6 +136,8 @@ def runtime(tmp_path: Path):
 async def test_phase22_one_canonical_decision_id_survives_production_lifecycle(monkeypatch, tmp_path):
     """Verify one canonical decision ID is invariant across the production-shaped chain."""
     install_canonical_settlement_interface()
+    install_production_lineage_bridge()
+    install_omar_lifecycle_hooks()
     rt, omar = runtime(tmp_path)
     telemetry = Telemetry()
     repo = LedgerRepo()
@@ -159,6 +186,7 @@ async def test_phase22_one_canonical_decision_id_survives_production_lifecycle(m
     assert canonical_id == lineage_from_opportunity(opp)["decision_id"]
     assert correlation_id == lineage_from_opportunity(opp)["correlation_id"]
     assert omar._pending_decisions[canonical_id]["decision_id"] == canonical_id
+    assert omar._pending_decisions[canonical_id]["context"]["capital_authority_source"] == "capital_engine_state"
 
     # 2) Production RuntimeBundle auto execution reaches the real wrapper seam.
     await rt._execute_auto(opp, 222, decision=decision)
@@ -234,7 +262,7 @@ async def test_phase22_one_canonical_decision_id_survives_production_lifecycle(m
     # 5) A cross-trade settlement cannot be attributed to this decision.
     cross = canonical_settled_outcome(
         rt,
-        tx_hash="0xphase22",
+        tx_hash="0xdifferent",
         decision_id="different-decision",
         correlation_id=correlation_id,
         opportunity_id=opp.id,
