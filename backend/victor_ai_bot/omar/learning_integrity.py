@@ -4,6 +4,14 @@ from dataclasses import dataclass, asdict
 from typing import Any, Mapping
 
 
+CANONICAL_SETTLEMENT_SOURCES = frozenset(
+    {
+        "canonical_outcome_ledger",
+        "phase2_canonical_outcome_ledger",
+    }
+)
+
+
 @dataclass(frozen=True)
 class LearningIntegrityResult:
     allowed: bool
@@ -88,7 +96,7 @@ def validate_learning_transition(
         return LearningIntegrityResult(False, "outcome_truth_unverified", did, correlation, action)
 
     source = _text(row.get("source"))
-    if source != "canonical_outcome_ledger":
+    if source not in CANONICAL_SETTLEMENT_SOURCES:
         return LearningIntegrityResult(False, "noncanonical_learning_source", did, correlation, action)
 
     capital = _capital_context(pending)
