@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from victor_ai_bot.decision_identity import ensure_decision_identity, lineage_from_opportunity
-from victor_ai_bot.omar import production_lineage_bridge
+from victor_ai_bot.omar import lifecycle_bridge, production_lineage_bridge
 from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
 
@@ -94,4 +94,31 @@ def test_settlement_guard_rejects_cross_trade_lineage():
         decision_id="decision-1",
         correlation_id="corr-1",
         opportunity_id="opp-1",
+    )
+
+
+def test_legacy_lifecycle_bridge_does_not_wrap_authoritative_decision_identity():
+    """The production facade is the only component allowed to create identity."""
+    authoritative = RuntimeDecisionFacade._apply_omar_to_candidate
+    assert getattr(authoritative, "_canonical_identity_authoritative", False) is True
+
+    lifecycle_bridge.install_omar_lifecycle_hooks()
+
+    assert RuntimeDecisionFacade._apply_omar_to_candidate is authoritative
+    assert not getattr(authoritative, "_omar_lineage_patched", False)
+
+
+def test_canonical_identity_remains_authoritative_after_bridge_install():
+    authoritative = RuntimeDecisionFacade._apply_omar_to_candidate
+
+    # Simulate a legacy bridge trying to install again. The authoritative marker
+    # must make the compatibility patch a no-op rather than introducing another
+    # identity-generation layer.
+    lifecycle_bridge._patch_decision_lineage()
+
+    assert RuntimeDecisionFacade._apply_omar_to_candidate is authoritative
+    assert getattr(
+        RuntimeDecisionFacade._apply_omar_to_candidate,
+        "_canonical_identity_authoritative",
+        False,
     )

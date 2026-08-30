@@ -21,22 +21,39 @@ def test_real_learner_persists_and_reloads(tmp_path: Path):
             "legs": 2,
         }
     )
-    result = learner.observe(state_key=key, action="EXECUTE", reward=5.0, outcome={"ok": True})
+    result = learner.observe(
+        state_key=key,
+        action="EXECUTE",
+        reward=5.0,
+        outcome={"ok": True, "canonical_decision_id": "decision-test-1"},
+    )
     assert result["ok"] is True
+    assert result["canonical_decision_id"] == "decision-test-1"
     learner.save()
 
     reloaded = OmarRealLearner(path=str(path), min_observations=1)
-    rec = reloaded.recommend({"margin_ratio": 0.001, "gas_ratio": 0.0004, "p_success": 0.9, "legs": 2})
+    rec = reloaded.recommend(
+        {"margin_ratio": 0.001, "gas_ratio": 0.0004, "p_success": 0.9, "legs": 2}
+    )
     assert rec.trained is True
     assert rec.action in ACTIONS
     assert reloaded.total_observations == 1
 
 
 def test_untrained_omar_does_not_influence_live_decision(tmp_path: Path):
-    rt = OmarRuntime(OmarConfig(enabled=True, self_play_enabled=False, real_learning_min_observations=20), "test")
+    rt = OmarRuntime(
+        OmarConfig(
+            enabled=True,
+            self_play_enabled=False,
+            real_learning_min_observations=20,
+        ),
+        "test",
+    )
     rt.learning_path = str(tmp_path / "omar.json")
     rt._real_learner = OmarRealLearner(path=rt.learning_path, min_observations=20)
-    rec = rt.recommend({"margin_ratio": 0.001, "gas_ratio": 0.0004, "p_success": 0.9, "legs": 2})
+    rec = rt.recommend(
+        {"margin_ratio": 0.001, "gas_ratio": 0.0004, "p_success": 0.9, "legs": 2}
+    )
     assert rec.trained is False
     assert rec.veto is False
     assert rec.size_mult == 1.0

@@ -61,7 +61,7 @@ def capital_authority_context(runtime: Any) -> dict[str, Any]:
 
 
 def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, str]:
-    """Persist canonical decision/correlation IDs on both decision and opportunity."""
+    """Legacy helper retained for compatibility; the production facade owns identity."""
     meta = getattr(opp, "meta", None)
     brain = _dict(meta.get("brain")) if isinstance(meta, dict) else {}
     decision_id = _text(brain.get("canonical_decision_id") or brain.get("omar_decision_id"))
@@ -100,9 +100,14 @@ def _patch_decision_context() -> None:
 
 
 def _patch_decision_lineage() -> None:
+    """Do not create a second identity after the canonical decision facade."""
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
     original = getattr(RuntimeDecisionFacade, "_apply_omar_to_candidate", None)
-    if original is None or getattr(original, "_omar_lineage_patched", False):
+    if original is None:
+        return
+    if getattr(original, "_canonical_identity_authoritative", False):
+        return
+    if getattr(original, "_omar_lineage_patched", False):
         return
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
         chosen, selected = original(self, opp, decision, current_block=current_block)
