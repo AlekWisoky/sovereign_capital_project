@@ -248,9 +248,11 @@ async def test_phase22_one_canonical_decision_id_survives_production_lifecycle(m
     pending = omar._pending_decisions[canonical_id]
     observed = _observe_settled_outcome(rt, pending=pending, outcome=settled)
     assert observed["ok"] is True
-    assert observed["decision_id"] == canonical_id
-    assert observed["execution_id"] == execution_id
-    assert observed["outcome_id"] == outcome_id
+    assert observed["canonical_decision_id"] == canonical_id
+    assert observed["oos_evidence"]["lineage"]["decision_id"] == canonical_id
+    assert observed["oos_evidence"]["lineage"]["correlation_id"] == correlation_id
+    assert observed["oos_evidence"]["lineage"]["execution_id"] == execution_id
+    assert observed["oos_evidence"]["lineage"]["outcome_id"] == outcome_id
     assert omar._real_learner.total_observations == 1
     assert omar._real_learner.q[pending["state_key"]][pending["action"]] != 0.0
 
