@@ -6,7 +6,9 @@ import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
 from victor_ai_bot.decision_identity import lineage_from_opportunity
-from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
+from victor_ai_bot.omar.production_lineage_bridge import (
+    install_production_lineage_bridge,
+)
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 
 
@@ -51,7 +53,27 @@ def _runtime():
     runtime.rpc_manager = _RpcManager()
     runtime.cache = object()
     runtime._mev_guard = None
-    runtime._cc = None
+    runtime._cc = SimpleNamespace(
+        controls=SimpleNamespace(aggression_mode="aggressive", risk_multiplier=0.75)
+    )
+    runtime._wealth_goal_service = SimpleNamespace(
+        state=lambda _runtime: {
+            "state": {
+                "goal": {
+                    "target_amount": "100000",
+                    "timeframe_days": 180,
+                    "target_return_percentage": 25.0,
+                },
+                "currentReturnPct": 5.0,
+            }
+        }
+    )
+    runtime._ai_recommendation = {
+        "action": "execute",
+        "posture": "risk_on",
+        "confidence": 0.92,
+        "source": "test-ai",
+    }
     runtime._execution_service = None
     runtime._last_submitted_block = 17
     runtime._pending = {}
@@ -65,7 +87,9 @@ def _runtime():
 
 
 @pytest.mark.asyncio
-async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(monkeypatch):
+async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(
+    monkeypatch,
+):
     runtime = _runtime()
     events = []
     execution_result = SimpleNamespace(ok=True, dry_run=False, submitted=True)
@@ -124,16 +148,22 @@ async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(mo
 
 def test_production_lineage_bridge_is_installed_on_runtime_decision_boundary():
     install_production_lineage_bridge()
-    runtime = object.__new__(RuntimeBundle)
-    runtime.cfg = SimpleNamespace(chain=SimpleNamespace(name="ethereum"))
-    runtime._omar = None
+    runtime = _runtime()
     opp = SimpleNamespace(id="opp-2", route_id="route-2", meta={})
     decision = SimpleNamespace(metadata={})
 
-    chosen, returned = runtime._apply_omar_to_candidate(opp, decision, current_block=456)
+    chosen, returned = runtime._apply_omar_to_candidate(
+        opp, decision, current_block=456
+    )
 
     assert chosen is opp
     assert returned is decision
     lineage = lineage_from_opportunity(opp)
     assert lineage["decision_id"] == decision.metadata["canonical_decision_id"]
     assert lineage["correlation_id"] == decision.metadata["correlation_id"]
+    intent = opp.meta["canonical_lineage"]["operator_intent"]
+    assert intent["aggression_mode"] == "aggressive"
+    assert intent["risk_multiplier"] == 0.75
+    assert intent["goal"]["target_amount"] == "100000"
+    assert intent["goal"]["timeframe_days"] == 180
+    assert intent["ai_recommendation"]["action"] == "execute"

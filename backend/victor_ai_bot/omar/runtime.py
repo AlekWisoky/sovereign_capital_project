@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Dict, Any, Optional, Mapping
+import copy
 import threading
 import time
 import json
@@ -12,6 +13,7 @@ from .config import OmarConfig
 from .trainer import OmarTrainer
 from .metrics import compute_social_metrics, to_dict
 from .real_learning import OmarRealLearner, OmarRecommendation, ACTIONS
+from .lineage_identity import outcome_id as make_outcome_id
 
 
 class OmarRuntime:
@@ -59,6 +61,9 @@ class OmarRuntime:
             self.data_dir, "omar_learning", f"cursor_{chain_name}.json"
         )
         self._learning_cursor = self._load_learning_cursor()
+        self._seen_outcome_ids = set(
+            str(value) for value in list(self._learning_cursor.get("seen_outcomes") or []) if value
+        )
 
     @property
     def enabled(self) -> bool:
@@ -80,7 +85,9 @@ class OmarRuntime:
                 "enabled": bool(self.cfg.enabled),
                 "policy_model": self.cfg.policy_model,
                 "cycle": self._cycle,
-                "real_learning": self._real_learner.summary() if self._real_learner else {"enabled": False},
+                "real_learning": (
+                    self._real_learner.summary() if self._real_learner else {"enabled": False}
+                ),
                 "last_decision": dict(self.last_decision),
                 "last_outcome": dict(self.last_outcome),
                 "last_social": dict(self.last_social),
@@ -90,9 +97,13 @@ class OmarRuntime:
     def recommend(self, context: Mapping[str, Any]) -> OmarRecommendation:
         """Return a bounded recommendation for the next real decision."""
         if not self.enabled or not bool(getattr(self.cfg, "live_influence_enabled", True)):
-            return OmarRecommendation("", "DISABLED", 0.0, False, 1.0, "standard", False, 0, "omar_disabled")
+            return OmarRecommendation(
+                "", "DISABLED", 0.0, False, 1.0, "standard", False, 0, "omar_disabled"
+            )
         if self._real_learner is None:
-            return OmarRecommendation("", "UNAVAILABLE", 0.0, False, 1.0, "standard", False, 0, "real_learner_unavailable")
+            return OmarRecommendation(
+                "", "UNAVAILABLE", 0.0, False, 1.0, "standard", False, 0, "real_learner_unavailable"
+            )
         rec = self._real_learner.recommend(context)
         with self._lock:
             self.last_decision = rec.to_dict()
@@ -117,17 +128,19 @@ class OmarRuntime:
             "route_id": str(route_id),
             "action": str(action),
             "state_key": str(state_key),
-            "context": dict(context or {}),
-            "metadata": dict(metadata or {}),
+            "context": copy.deepcopy(dict(context or {})),
+            "metadata": copy.deepcopy(dict(metadata or {})),
             "ts_ms": int(time.time() * 1000),
         }
         with self._lock:
             self._pending_decisions[str(decision_id)] = row
             if len(self._pending_decisions) > 512:
-                oldest = sorted(self._pending_decisions.items(), key=lambda item: item[1].get("ts_ms", 0))[:64]
+                oldest = sorted(
+                    self._pending_decisions.items(), key=lambda item: item[1].get("ts_ms", 0)
+                )[:64]
                 for key, _ in oldest:
                     self._pending_decisions.pop(key, None)
-        self._log({"event": "omar_real_decision", **row})
+        self._log({"event": "omar_real_decision", **copy.deepcopy(row)})
 
     def observe_outcome(
         self,
@@ -144,16 +157,73 @@ class OmarRuntime:
         tx_hash: str = "",
         outcome_truth_verified: bool = True,
         metadata: Mapping[str, Any] | None = None,
+        execution_id: str = "",
+        outcome_id: str = "",
+        settlement_status: str = "settled",
     ) -> Dict[str, Any]:
-        if not self.enabled or self._real_learner is None or not bool(getattr(self.cfg, "real_learning_enabled", True)):
+        if (
+            not self.enabled
+            or self._real_learner is None
+            or not bool(getattr(self.cfg, "real_learning_enabled", True))
+        ):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
+        if str(settlement_status or "").strip().lower() != "settled":
+            return {
+                "ok": False,
+                "reason": "outcome_not_settled",
+                "decision_id": str(decision_id),
+            }
+
+        metadata_copy = copy.deepcopy(dict(metadata or {}))
+        ledger = metadata_copy.get("settlement") if isinstance(metadata_copy.get("settlement"), Mapping) else {}
+        lineage = metadata_copy.get("canonical_lineage") if isinstance(metadata_copy.get("canonical_lineage"), Mapping) else {}
+        transaction_id = str(
+            metadata_copy.get("transaction_id")
+            or ledger.get("transaction_id")
+            or ""
+        )
+        execution_identity = str(
+            execution_id
+            or metadata_copy.get("execution_id")
+            or ledger.get("execution_id")
+            or lineage.get("execution_id")
+            or ""
+        )
+        canonical_outcome_id = str(
+            outcome_id
+            or metadata_copy.get("outcome_id")
+            or ledger.get("outcome_id")
+            or lineage.get("outcome_id")
+            or ""
+        )
+        canonical_outcome_id = canonical_outcome_id or make_outcome_id(
+            decision_id=str(decision_id),
+            correlation_id=str(metadata_copy.get("canonical_lineage", {}).get("correlation_id", ""))
+            if isinstance(metadata_copy.get("canonical_lineage"), Mapping)
+            else "",
+            transaction_id=transaction_id,
+            tx_hash=str(tx_hash),
+        )
+
         with self._lock:
-            pending = dict(self._pending_decisions.pop(str(decision_id), {}) or {})
+            if canonical_outcome_id in self._seen_outcome_ids:
+                return {
+                    "ok": False,
+                    "reason": "duplicate_canonical_settlement",
+                    "decision_id": str(decision_id),
+                    "execution_id": execution_identity,
+                    "outcome_id": canonical_outcome_id,
+                }
+            pending = copy.deepcopy(dict(self._pending_decisions.pop(str(decision_id), {}) or {}))
+
         state_key = str(pending.get("state_key") or "")
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
             return {"ok": False, "reason": "missing_decision_link", "decision_id": str(decision_id)}
-        reward = float(realized_net_usd) - 0.25 * max(0.0, float(expected_net_usd) - float(realized_net_usd))
+
+        reward = float(realized_net_usd) - 0.25 * max(
+            0.0, float(expected_net_usd) - float(realized_net_usd)
+        )
         reward -= max(0.0, float(slippage_bps)) * 0.01
         reward -= max(0.0, float(latency_ms)) * 0.0001
         if not ok:
@@ -162,18 +232,55 @@ class OmarRuntime:
             reward -= 2.0
         reward = float(np.clip(reward, -50.0, 50.0))
         outcome = {
-            "decision_id": str(decision_id), "route_id": str(route_id or pending.get("route_id") or ""),
-            "tx_hash": str(tx_hash), "ok": bool(ok), "realized_net_usd": float(realized_net_usd),
-            "expected_net_usd": float(expected_net_usd), "amount_in_wei": int(amount_in_wei),
-            "gas_cost_usd": float(gas_cost_usd), "slippage_bps": float(slippage_bps),
-            "latency_ms": int(latency_ms), "outcome_truth_verified": bool(outcome_truth_verified),
-            "metadata": dict(metadata or {}),
+            "decision_id": str(decision_id),
+            "execution_id": execution_identity,
+            "outcome_id": canonical_outcome_id,
+            "settlement_status": "settled",
+            "route_id": str(route_id or pending.get("route_id") or ""),
+            "tx_hash": str(tx_hash),
+            "ok": bool(ok),
+            "realized_net_usd": float(realized_net_usd),
+            "expected_net_usd": float(expected_net_usd),
+            "amount_in_wei": int(amount_in_wei),
+            "gas_cost_usd": float(gas_cost_usd),
+            "slippage_bps": float(slippage_bps),
+            "latency_ms": int(latency_ms),
+            "outcome_truth_verified": bool(outcome_truth_verified),
+            "metadata": metadata_copy,
         }
-        result = self._real_learner.observe(state_key=state_key, action=action, reward=reward, outcome=outcome)
+        result = self._real_learner.observe(
+            state_key=state_key, action=action, reward=reward, outcome=outcome
+        )
+        if not result.get("ok"):
+            return result
         with self._lock:
-            self.last_outcome = {**dict(result), "decision_id": str(decision_id), "action": action}
-        self._log({"event": "omar_real_learning_update", **dict(result), "outcome": outcome})
-        return result
+            self._seen_outcome_ids.add(canonical_outcome_id)
+            if len(self._seen_outcome_ids) > 4096:
+                self._seen_outcome_ids = set(sorted(self._seen_outcome_ids)[-4096:])
+            self._learning_cursor["seen_outcomes"] = sorted(self._seen_outcome_ids)[-4096:]
+            self._save_learning_cursor()
+            self.last_outcome = {
+                **dict(result),
+                "decision_id": str(decision_id),
+                "correlation_id": str(
+                    lineage.get("correlation_id") if isinstance(lineage, Mapping) else ""
+                ),
+                "execution_id": execution_identity,
+                "outcome_id": canonical_outcome_id,
+                "action": action,
+            }
+        self._log(
+            {
+                "event": "omar_real_learning_update",
+                **dict(result),
+                "decision_id": str(decision_id),
+                "execution_id": execution_identity,
+                "outcome_id": canonical_outcome_id,
+                "outcome": copy.deepcopy(outcome),
+                "decision_snapshot": pending,
+            }
+        )
+        return {**dict(result), "execution_id": execution_identity, "outcome_id": canonical_outcome_id}
 
     def _load_learning_cursor(self) -> Dict[str, Any]:
         try:
@@ -184,7 +291,7 @@ class OmarRuntime:
                         return payload
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
-        return {"offset": 0, "seen": []}
+        return {"offset": 0, "seen": [], "seen_outcomes": []}
 
     def _save_learning_cursor(self) -> None:
         try:
@@ -259,7 +366,11 @@ class OmarRuntime:
                     if result.get("ok"):
                         seen.add(decision_id)
                         self.last_outcome = {**dict(result), "decision_id": decision_id, "tx_hash": tx_hash}
-            self._learning_cursor = {"offset": offset, "seen": list(sorted(seen))[-2048:]}
+            self._learning_cursor = {
+                "offset": offset,
+                "seen": list(sorted(seen))[-2048:],
+                "seen_outcomes": sorted(self._seen_outcome_ids)[-4096:],
+            }
             self._save_learning_cursor()
         except OSError:
             return
