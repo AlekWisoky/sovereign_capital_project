@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
+from ..operator_intent import resolve_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -29,6 +30,38 @@ def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opp
     return True
 
 
+def _patch_omar_context() -> None:
+    """Feed operator intent into OMAR without changing its authority boundary."""
+    from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+
+    original = getattr(RuntimeDecisionFacade, "_omar_context", None)
+    if original is None or getattr(original, "_operator_intent_patched", False):
+        return
+
+    def wrapped(self: Any, opp: Any, *, p_success: float, ev_wei: int):
+        context = dict(original(self, opp, p_success=p_success, ev_wei=ev_wei) or {})
+        intent = resolve_operator_intent(self)
+        goal = _dict(intent.get("goal"))
+        recommendation = _dict(intent.get("ai_recommendation"))
+        context.update(
+            {
+                "aggression_mode": _text(intent.get("aggression_mode")) or "balanced",
+                "risk_multiplier": float(intent.get("risk_multiplier") or 1.0),
+                "goal_horizon_compatibility": float(goal.get("horizon_compatibility") or 1.0),
+                "goal_target_amount": _text(goal.get("target_amount")),
+                "goal_id": _text(goal.get("goal_id")),
+                "goal_revision": int(goal.get("goal_revision") or 1),
+                "ai_recommendation_action": _text(recommendation.get("action")) or "none",
+                "ai_recommendation_posture": _text(recommendation.get("posture")) or "none",
+                "ai_recommendation_confidence": float(recommendation.get("confidence") or 0.0),
+            }
+        )
+        return context
+
+    wrapped._operator_intent_patched = True
+    RuntimeDecisionFacade._omar_context = wrapped
+
+
 def _patch_decision_identity() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
@@ -37,11 +70,17 @@ def _patch_decision_identity() -> None:
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
+        intent = resolve_operator_intent(self)
         ensure_decision_identity(
             opp,
             decision,
-            chain_name=_text(getattr(getattr(self, "cfg", None), "chain", None).name if getattr(getattr(self, "cfg", None), "chain", None) is not None else "chain"),
+            chain_name=_text(
+                getattr(getattr(self, "cfg", None), "chain", None).name
+                if getattr(getattr(self, "cfg", None), "chain", None) is not None
+                else "chain"
+            ),
             current_block=int(current_block),
+            operator_intent=intent,
         )
         return original(self, opp, decision, current_block=current_block)
 
@@ -68,8 +107,13 @@ def _patch_execution_identity() -> None:
                 ensure_decision_identity(
                     opp,
                     decision,
-                    chain_name=_text(getattr(getattr(runtime, "cfg", None), "chain", None).name if getattr(getattr(runtime, "cfg", None), "chain", None) is not None else "chain"),
+                    chain_name=_text(
+                        getattr(getattr(runtime, "cfg", None), "chain", None).name
+                        if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
+                        else "chain"
+                    ),
                     current_block=int(bound.arguments.get("bn") or 0),
+                    operator_intent=resolve_operator_intent(runtime),
                 )
                 lineage = lineage_from_opportunity(opp)
                 if result is not None:
@@ -77,6 +121,7 @@ def _patch_execution_identity() -> None:
                     plan["canonical_lineage"] = dict(lineage)
                     plan["canonical_decision_id"] = lineage["decision_id"]
                     plan["correlation_id"] = lineage["correlation_id"]
+                    plan["operator_intent_fingerprint"] = lineage["operator_intent_fingerprint"]
                     result.plan = plan
             except _SAFE:
                 pass
@@ -105,6 +150,11 @@ def _patch_settlement_resolution() -> None:
             opportunity_id=_text(getattr(opp, "id", "")),
         ):
             return None
+        try:
+            if isinstance(outcome, dict):
+                outcome["operator_intent_fingerprint"] = lineage["operator_intent_fingerprint"]
+        except (AttributeError, TypeError):
+            pass
         return outcome
 
     wrapped._production_identity_patched = True
@@ -113,6 +163,7 @@ def _patch_settlement_resolution() -> None:
 
 def install_production_lineage_bridge() -> None:
     try:
+        _patch_omar_context()
         _patch_decision_identity()
         _patch_execution_identity()
         _patch_settlement_resolution()
