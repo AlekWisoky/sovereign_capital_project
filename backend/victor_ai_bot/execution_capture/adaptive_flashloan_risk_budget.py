@@ -88,12 +88,7 @@ def compute_profit_after_costs(
     net = gross - sum(costs.values())
     base = max(0.0, _num(capital_base_usd))
     roi_bps = (net / base * 10_000.0) if base > 0.0 else 0.0
-    return ProfitAfterCosts(
-        gross_profit_usd=gross,
-        **costs,
-        net_profit_usd=net,
-        net_roi_bps=roi_bps,
-    )
+    return ProfitAfterCosts(gross_profit_usd=gross, **costs, net_profit_usd=net, net_roi_bps=roi_bps)
 
 
 def build_risk_budget(
@@ -162,20 +157,9 @@ def choose_adaptive_size(
 
     if not decision_id or not correlation:
         return RiskBudgetDecision(
-            decision_id,
-            correlation,
-            "",
-            False,
-            0.0,
-            hard_max,
-            budget,
-            0.0,
-            0.0,
-            min_profit,
-            min_roi,
-            "missing_canonical_identity",
-            ("canonical_decision_id_required", "correlation_id_required"),
-            (),
+            decision_id, correlation, "", False, 0.0, hard_max, budget, 0.0, 0.0,
+            min_profit, min_roi, "missing_canonical_identity",
+            ("canonical_decision_id_required", "correlation_id_required"), (),
         )
 
     eligible: list[dict[str, float]] = []
@@ -193,40 +177,24 @@ def choose_adaptive_size(
 
     if not eligible:
         return RiskBudgetDecision(
-            decision_id,
-            correlation,
-            "",
-            False,
-            0.0,
-            hard_max,
-            budget,
-            0.0,
-            0.0,
-            min_profit,
-            min_roi,
-            "no_size_passed_net_profit_and_risk_budget",
+            decision_id, correlation, "", False, 0.0, hard_max, budget, 0.0, 0.0,
+            min_profit, min_roi, "no_size_passed_net_profit_and_risk_budget",
             ("max_size_mult", "risk_budget", "minimum_net_profit", "minimum_net_roi_bps"),
             ("requested_size_mult",),
         )
 
-    # Primary objective is realized/expected net profit after costs; size is the
-    # secondary preference, so larger size wins only when economics support it.
+    # Net profit is primary; size is secondary. This prevents leverage from
+    # becoming the objective when the larger trade has weaker economics.
     winner = max(eligible, key=lambda x: (x["net_profit"], x["size"], -x["loss"]))
     size = min(winner["size"], hard_max)
     sizing_id = _sizing_id(decision_id, correlation, route_id, provider, size)
-    preference = ("maximize_net_profit_after_costs", "requested_size_supported" if size >= requested else "requested_size_reduced")
+    preference = (
+        "maximize_net_profit_after_costs",
+        "requested_size_supported" if size >= requested else "requested_size_reduced",
+    )
     return RiskBudgetDecision(
-        decision_id,
-        correlation,
-        sizing_id,
-        True,
-        round(size, 8),
-        hard_max,
-        budget,
-        round(winner["loss"], 8),
-        round(winner["net_profit"], 8),
-        min_profit,
-        min_roi,
+        decision_id, correlation, sizing_id, True, round(size, 8), hard_max, budget,
+        round(winner["loss"], 8), round(winner["net_profit"], 8), min_profit, min_roi,
         "largest_eligible_net_profit_candidate",
         ("max_size_mult", "risk_budget", "minimum_net_profit", "minimum_net_roi_bps"),
         preference,
@@ -240,4 +208,6 @@ def learning_reward_from_settled_outcome(outcome: Mapping[str, Any]) -> float:
     verified = bool(outcome.get("truth_verified", outcome.get("outcome_truth_verified", False)))
     if not verified:
         return 0.0
-    return _clip(net + 0.25 * (net - expected), -50.0, 50.0)
+    reward = net + 0.25 * (net - expected)
+    # Never turn a non-positive settled trade into positive reinforcement.
+    return _clip(min(0.0, reward) if net <= 0.0 else reward, -50.0, 50.0)
