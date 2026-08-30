@@ -3,14 +3,26 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
+from victor_ai_bot.runtime_services.canonical_settlement_interface import canonical_settled_outcome
 from victor_ai_bot.runtime_services.execution_service import ExecutionService
 from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+
+
+class _LedgerRepo:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+
+    def all_transactions(self, *, chain: str):
+        return [row for row in self.rows if row.get("chain", chain) == chain]
 
 
 def test_persist_execution_outcome_receives_complete_pending_lineage(monkeypatch):
     captured = {}
 
-    def original_persist(*, runtime, pending, status, submit_to_receipt_ms, realized_usd, expected_usd, reward_trace, capture_lane_pending):
+    def original_persist(
+        *, runtime, pending, status, submit_to_receipt_ms, realized_usd,
+        expected_usd, reward_trace, capture_lane_pending
+    ):
         captured["pending"] = dict(pending)
         return {"ok": True, "route_family": "flashloan_atomic", "strategy_family": "flashloan_atomic", "realized_usd": float(realized_usd), "expected_usd": float(expected_usd)}
 
@@ -25,6 +37,8 @@ def test_persist_execution_outcome_receives_complete_pending_lineage(monkeypatch
             "correlation_id": "corr-7",
             "opportunity_id": "opp-7",
             "route_id": "route-7",
+            "sizing_id": "sizing-7",
+            "aqe_action": "EXECUTE",
         },
         status=1,
         submit_to_receipt_ms=42,
@@ -40,19 +54,28 @@ def test_persist_execution_outcome_receives_complete_pending_lineage(monkeypatch
     assert persisted["canonical_decision_id"] == "decision-7"
     assert persisted["correlation_id"] == "corr-7"
     assert persisted["opportunity_id"] == "opp-7"
+    assert persisted["route_id"] == "route-7"
+    assert persisted["sizing_id"] == "sizing-7"
+    assert persisted["action"] == "EXECUTE"
     assert persisted["execution_id"]
     assert persisted["outcome_id"]
     assert persisted["canonical_lineage"]["decision_id"] == "decision-7"
     assert persisted["canonical_lineage"]["correlation_id"] == "corr-7"
     assert persisted["canonical_lineage"]["opportunity_id"] == "opp-7"
+    assert persisted["canonical_lineage"]["route_id"] == "route-7"
+    assert persisted["canonical_lineage"]["sizing_id"] == "sizing-7"
+    assert persisted["canonical_lineage"]["action"] == "EXECUTE"
     assert persisted["canonical_lineage"]["execution_id"] == persisted["execution_id"]
     assert persisted["canonical_lineage"]["outcome_id"] == persisted["outcome_id"]
 
 
-def test_actual_receipt_finalize_carries_pending_identity_to_settlement_and_persistence(monkeypatch):
+def test_actual_receipt_finalize_carries_complete_identity_to_settlement_and_persistence(monkeypatch):
     calls = []
 
-    def original_persist(*, runtime, pending, status, submit_to_receipt_ms, realized_usd, expected_usd, reward_trace, capture_lane_pending):
+    def original_persist(
+        *, runtime, pending, status, submit_to_receipt_ms, realized_usd,
+        expected_usd, reward_trace, capture_lane_pending
+    ):
         calls.append(("persist", dict(pending)))
         return {
             "ok": True,
@@ -85,6 +108,7 @@ def test_actual_receipt_finalize_carries_pending_identity_to_settlement_and_pers
         "correlation_id": "corr-7",
         "opportunity_id": "opp-7",
         "route_id": "route-7",
+        "sizing_id": "sizing-7",
         "amount_in": 100,
         "expected_after": 110,
         "latency_ms": 12,
@@ -121,11 +145,89 @@ def test_actual_receipt_finalize_carries_pending_identity_to_settlement_and_pers
     for row in (settlement, persisted):
         assert row["decision_id"] == "decision-7"
         assert row["correlation_id"] == "corr-7"
-        assert row["opportunity_id"] == "opp-7"
         assert row["execution_id"]
         assert row["outcome_id"]
+        assert row["opportunity_id"] == "opp-7"
+        assert row["route_id"] == "route-7"
+        assert row["sizing_id"] == "sizing-7"
+        assert row["action"] == "EXECUTE"
         assert row["canonical_lineage"]["decision_id"] == "decision-7"
         assert row["canonical_lineage"]["correlation_id"] == "corr-7"
+        assert row["canonical_lineage"]["execution_id"] == row["execution_id"]
+        assert row["canonical_lineage"]["outcome_id"] == row["outcome_id"]
+        assert row["canonical_lineage"]["sizing_id"] == "sizing-7"
+        assert row["canonical_lineage"]["action"] == "EXECUTE"
 
     assert settlement["execution_id"] == persisted["execution_id"]
     assert settlement["outcome_id"] == persisted["outcome_id"]
+
+
+def test_canonical_settlement_reader_requires_physical_complete_lineage():
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(chain=SimpleNamespace(name="ethereum")),
+        _ledger_repo=_LedgerRepo(
+            [
+                {
+                    "chain": "ethereum",
+                    "transaction_id": "settlement-7",
+                    "ts_ms": 100,
+                    "tx_type": "receipt_settlement",
+                    "receipt_id": "0xtx-7",
+                    "metadata": {
+                        "canonical_lineage": {
+                            "decision_id": "decision-7",
+                            "correlation_id": "corr-7",
+                            "execution_id": "execution-7",
+                            "outcome_id": "outcome-7",
+                            "sizing_id": "sizing-7",
+                            "opportunity_id": "opp-7",
+                            "route_id": "route-7",
+                            "action": "EXECUTE",
+                        },
+                        "canonical_decision_id": "decision-7",
+                        "correlation_id": "corr-7",
+                        "execution_id": "execution-7",
+                        "outcome_id": "outcome-7",
+                        "sizing_id": "sizing-7",
+                        "opportunity_id": "opp-7",
+                        "route_id": "route-7",
+                        "action": "EXECUTE",
+                        "truth_verified": True,
+                    },
+                }
+            ]
+        ),
+    )
+
+    outcome = canonical_settled_outcome(
+        runtime,
+        tx_hash="0xtx-7",
+        decision_id="decision-7",
+        correlation_id="corr-7",
+        opportunity_id="opp-7",
+    )
+
+    assert outcome is not None
+    assert outcome["lineage_persisted"] is True
+    assert outcome["canonical_lineage"] == {
+        "decision_id": "decision-7",
+        "correlation_id": "corr-7",
+        "execution_id": "execution-7",
+        "outcome_id": "outcome-7",
+        "sizing_id": "sizing-7",
+        "opportunity_id": "opp-7",
+        "route_id": "route-7",
+        "action": "EXECUTE",
+    }
+
+    runtime._ledger_repo.rows[0]["metadata"]["canonical_lineage"].pop("action")
+    runtime._ledger_repo.rows[0]["metadata"].pop("action")
+    incomplete = canonical_settled_outcome(
+        runtime,
+        tx_hash="0xtx-7",
+        decision_id="decision-7",
+        correlation_id="corr-7",
+        opportunity_id="opp-7",
+    )
+    assert incomplete is not None
+    assert incomplete["lineage_persisted"] is False
