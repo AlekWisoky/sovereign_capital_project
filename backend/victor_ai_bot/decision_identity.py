@@ -80,6 +80,7 @@ def ensure_decision_identity(
     brain["correlation_id"] = correlation_id
     meta["brain"] = brain
     meta["canonical_lineage"] = {
+        **lineage,
         "decision_id": decision_id,
         "correlation_id": correlation_id,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
