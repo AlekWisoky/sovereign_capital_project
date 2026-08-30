@@ -13,6 +13,7 @@ from .config import OmarConfig
 from .trainer import OmarTrainer
 from .metrics import compute_social_metrics, to_dict
 from .real_learning import OmarRealLearner, OmarRecommendation, ACTIONS
+from .lineage_identity import outcome_id as make_outcome_id
 
 
 class OmarRuntime:
@@ -60,6 +61,9 @@ class OmarRuntime:
             self.data_dir, "omar_learning", f"cursor_{chain_name}.json"
         )
         self._learning_cursor = self._load_learning_cursor()
+        self._seen_outcome_ids = set(
+            str(value) for value in list(self._learning_cursor.get("seen_outcomes") or []) if value
+        )
 
     @property
     def enabled(self) -> bool:
@@ -118,8 +122,6 @@ class OmarRuntime:
     ) -> None:
         if not self.enabled or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return
-        # A decision is historical evidence. Deep-copy nested human intent,
-        # wealth-goal, recommendation, and capital context at decision time.
         row = {
             "decision_id": str(decision_id),
             "opportunity_id": str(opportunity_id),
@@ -155,6 +157,9 @@ class OmarRuntime:
         tx_hash: str = "",
         outcome_truth_verified: bool = True,
         metadata: Mapping[str, Any] | None = None,
+        execution_id: str = "",
+        outcome_id: str = "",
+        settlement_status: str = "settled",
     ) -> Dict[str, Any]:
         if (
             not self.enabled
@@ -162,12 +167,60 @@ class OmarRuntime:
             or not bool(getattr(self.cfg, "real_learning_enabled", True))
         ):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
+        if str(settlement_status or "").strip().lower() != "settled":
+            return {
+                "ok": False,
+                "reason": "outcome_not_settled",
+                "decision_id": str(decision_id),
+            }
+
+        metadata_copy = copy.deepcopy(dict(metadata or {}))
+        ledger = metadata_copy.get("settlement") if isinstance(metadata_copy.get("settlement"), Mapping) else {}
+        lineage = metadata_copy.get("canonical_lineage") if isinstance(metadata_copy.get("canonical_lineage"), Mapping) else {}
+        transaction_id = str(
+            metadata_copy.get("transaction_id")
+            or ledger.get("transaction_id")
+            or ""
+        )
+        execution_identity = str(
+            execution_id
+            or metadata_copy.get("execution_id")
+            or ledger.get("execution_id")
+            or lineage.get("execution_id")
+            or ""
+        )
+        canonical_outcome_id = str(
+            outcome_id
+            or metadata_copy.get("outcome_id")
+            or ledger.get("outcome_id")
+            or lineage.get("outcome_id")
+            or ""
+        )
+        canonical_outcome_id = canonical_outcome_id or make_outcome_id(
+            decision_id=str(decision_id),
+            correlation_id=str(metadata_copy.get("canonical_lineage", {}).get("correlation_id", ""))
+            if isinstance(metadata_copy.get("canonical_lineage"), Mapping)
+            else "",
+            transaction_id=transaction_id,
+            tx_hash=str(tx_hash),
+        )
+
         with self._lock:
+            if canonical_outcome_id in self._seen_outcome_ids:
+                return {
+                    "ok": False,
+                    "reason": "duplicate_canonical_settlement",
+                    "decision_id": str(decision_id),
+                    "execution_id": execution_identity,
+                    "outcome_id": canonical_outcome_id,
+                }
             pending = copy.deepcopy(dict(self._pending_decisions.pop(str(decision_id), {}) or {}))
+
         state_key = str(pending.get("state_key") or "")
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
             return {"ok": False, "reason": "missing_decision_link", "decision_id": str(decision_id)}
+
         reward = float(realized_net_usd) - 0.25 * max(
             0.0, float(expected_net_usd) - float(realized_net_usd)
         )
@@ -180,6 +233,9 @@ class OmarRuntime:
         reward = float(np.clip(reward, -50.0, 50.0))
         outcome = {
             "decision_id": str(decision_id),
+            "execution_id": execution_identity,
+            "outcome_id": canonical_outcome_id,
+            "settlement_status": "settled",
             "route_id": str(route_id or pending.get("route_id") or ""),
             "tx_hash": str(tx_hash),
             "ok": bool(ok),
@@ -190,22 +246,41 @@ class OmarRuntime:
             "slippage_bps": float(slippage_bps),
             "latency_ms": int(latency_ms),
             "outcome_truth_verified": bool(outcome_truth_verified),
-            "metadata": copy.deepcopy(dict(metadata or {})),
+            "metadata": metadata_copy,
         }
         result = self._real_learner.observe(
             state_key=state_key, action=action, reward=reward, outcome=outcome
         )
+        if not result.get("ok"):
+            return result
         with self._lock:
-            self.last_outcome = {**dict(result), "decision_id": str(decision_id), "action": action}
+            self._seen_outcome_ids.add(canonical_outcome_id)
+            if len(self._seen_outcome_ids) > 4096:
+                self._seen_outcome_ids = set(sorted(self._seen_outcome_ids)[-4096:])
+            self._learning_cursor["seen_outcomes"] = sorted(self._seen_outcome_ids)[-4096:]
+            self._save_learning_cursor()
+            self.last_outcome = {
+                **dict(result),
+                "decision_id": str(decision_id),
+                "correlation_id": str(
+                    lineage.get("correlation_id") if isinstance(lineage, Mapping) else ""
+                ),
+                "execution_id": execution_identity,
+                "outcome_id": canonical_outcome_id,
+                "action": action,
+            }
         self._log(
             {
                 "event": "omar_real_learning_update",
                 **dict(result),
+                "decision_id": str(decision_id),
+                "execution_id": execution_identity,
+                "outcome_id": canonical_outcome_id,
                 "outcome": copy.deepcopy(outcome),
                 "decision_snapshot": pending,
             }
         )
-        return result
+        return {**dict(result), "execution_id": execution_identity, "outcome_id": canonical_outcome_id}
 
     def _load_learning_cursor(self) -> Dict[str, Any]:
         try:
@@ -216,7 +291,7 @@ class OmarRuntime:
                         return payload
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
-        return {"offset": 0, "seen": []}
+        return {"offset": 0, "seen": [], "seen_outcomes": []}
 
     def _save_learning_cursor(self) -> None:
         try:
@@ -268,9 +343,7 @@ class OmarRuntime:
                         amount_in = 0
                     expected = float(row.get("expected_after_costs_wei") or 0.0)
                     realized = float(row.get("realized_after_gas_wei") or 0.0)
-                    reward_trace = (
-                        row.get("reward_trace") if isinstance(row.get("reward_trace"), dict) else {}
-                    )
+                    reward_trace = row.get("reward_trace") if isinstance(row.get("reward_trace"), dict) else {}
                     reward = reward_trace.get("reward_scaled_float")
                     if reward is None:
                         denom = max(1.0, float(abs(amount_in)))
@@ -292,12 +365,12 @@ class OmarRuntime:
                     )
                     if result.get("ok"):
                         seen.add(decision_id)
-                        self.last_outcome = {
-                            **dict(result),
-                            "decision_id": decision_id,
-                            "tx_hash": tx_hash,
-                        }
-            self._learning_cursor = {"offset": offset, "seen": list(sorted(seen))[-2048:]}
+                        self.last_outcome = {**dict(result), "decision_id": decision_id, "tx_hash": tx_hash}
+            self._learning_cursor = {
+                "offset": offset,
+                "seen": list(sorted(seen))[-2048:],
+                "seen_outcomes": sorted(self._seen_outcome_ids)[-4096:],
+            }
             self._save_learning_cursor()
         except OSError:
             return
