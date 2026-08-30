@@ -4,6 +4,7 @@ import importlib
 import time
 from typing import Any, Awaitable, Callable, Tuple
 
+from ..decision_identity import ensure_sizing_identity
 from ..execution import try_execute_opportunity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
@@ -66,6 +67,15 @@ class RuntimeExecuteWrapperFacade:
         old_send_mode = str(prep.old_send_mode)
         read_url = str(prep.read_url)
         send_url = str(prep.send_url)
+
+        # The opportunity here is the final opportunity selected by the
+        # canonical dispatch/pre-execution path. Stamp the sizing identity at
+        # this boundary so it represents the concrete amount that is actually
+        # handed to the execution function, not merely the requested size.
+        try:
+            ensure_sizing_identity(opp, decision)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
 
         try:
             rpc_client_cls, execute_opportunity = _compat_execution_wrapper_symbols()
