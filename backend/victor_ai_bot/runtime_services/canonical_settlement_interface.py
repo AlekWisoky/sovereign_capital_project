@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from victor_ai_bot.omar.lineage_identity import execution_id, outcome_id
 
 _SETTLEMENT_TX_TYPE = "receipt_settlement"
 
@@ -35,17 +36,9 @@ def _transactions(runtime: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in list(rows or []) if isinstance(row, Mapping)]
 
 
-def _matches(
-    row: Mapping[str, Any],
-    *,
-    tx_hash: str,
-    decision_id: str,
-    correlation_id: str,
-    opportunity_id: str,
-) -> bool:
+def _matches(row: Mapping[str, Any], *, tx_hash: str, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
     if _text(row.get("tx_type")) != _SETTLEMENT_TX_TYPE:
         return False
-
     metadata = _dict(row.get("metadata"))
     candidates = {
         _text(row.get("receipt_id")),
@@ -57,7 +50,6 @@ def _matches(
     candidates.discard("")
     if tx_hash and tx_hash in candidates:
         return True
-
     lineage = _dict(metadata.get("canonical_lineage"))
     decision_candidates = {
         _text(metadata.get("canonical_decision_id")),
@@ -81,9 +73,7 @@ def _matches(
 
 def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     metadata = _dict(row.get("metadata"))
-    profitability = _dict(
-        metadata.get("terminalProfitability") or metadata.get("terminal_profitability")
-    )
+    profitability = _dict(metadata.get("terminalProfitability") or metadata.get("terminal_profitability"))
     chain = _dict(metadata.get("profitabilityChain") or metadata.get("profitability_chain"))
     capital_admission = _dict(metadata.get("capitalAdmission") or metadata.get("capital_admission"))
     lineage = _dict(metadata.get("canonical_lineage"))
@@ -96,25 +86,38 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
                     return value
         return default
 
+    decision = _text(first("canonical_decision_id", "decision_id", default=lineage.get("decision_id")))
+    correlation = _text(first("correlation_id", default=lineage.get("correlation_id")))
+    tx_hash = _text(row.get("receipt_id") or metadata.get("tx_hash") or metadata.get("txHash"))
+    route = _text(first("route_id", "routeId"))
+    existing_execution = _text(first("execution_id", "executionId", default=lineage.get("execution_id")))
+    existing_outcome = _text(first("outcome_id", "outcomeId", default=lineage.get("outcome_id")))
+    exec_id = execution_id(
+        decision_id=decision,
+        correlation_id=correlation,
+        tx_hash=tx_hash,
+        route_id=route,
+        existing=existing_execution,
+    )
+    out_id = existing_outcome or outcome_id(
+        decision_id=decision,
+        correlation_id=correlation,
+        transaction_id=_text(row.get("transaction_id")),
+        tx_hash=tx_hash,
+    )
     return {
         "status": "settled",
         "source": "phase2_canonical_outcome_ledger",
         "settlement_status": "settled",
         "transaction_id": _text(row.get("transaction_id")),
-        "tx_hash": _text(
-            row.get("receipt_id") or metadata.get("tx_hash") or metadata.get("txHash")
-        ),
+        "outcome_id": out_id,
+        "execution_id": exec_id,
+        "tx_hash": tx_hash,
         "settled_at_ms": int(row.get("ts_ms") or 0),
-        "decision_id": _text(
-            first(
-                "canonical_decision_id",
-                "decision_id",
-                default=lineage.get("decision_id"),
-            )
-        ),
-        "correlation_id": _text(first("correlation_id", default=lineage.get("correlation_id"))),
+        "decision_id": decision,
+        "correlation_id": correlation,
         "opportunity_id": _text(first("opportunity_id", "opportunityId")),
-        "route_id": _text(first("route_id", "routeId")),
+        "route_id": route,
         "strategy_family": _text(first("strategy_family", "strategyFamily", "family")),
         "ok": bool(first("ok", default=True)),
         "expected_net_usd": float(first("expected_net_usd", "expectedNetUsd", default=0.0) or 0.0),
@@ -123,17 +126,8 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "gas_cost_usd": float(first("gas_cost_usd", "gasCostUsd", default=0.0) or 0.0),
         "slippage_bps": float(first("slippage_bps", "slippageBps", default=0.0) or 0.0),
         "latency_ms": int(first("latency_ms", "latencyMs", default=0) or 0),
-        "truth_verified": bool(
-            first(
-                "truth_verified",
-                "outcome_truth_verified",
-                "verified",
-                default=True,
-            )
-        ),
-        "outcome_truth_reason_code": _text(
-            first("outcome_truth_reason_code", "truth_reason_code", default="ok")
-        ),
+        "truth_verified": bool(first("truth_verified", "outcome_truth_verified", "verified", default=True)),
+        "outcome_truth_reason_code": _text(first("outcome_truth_reason_code", "truth_reason_code", default="ok")),
         "terminal_profitability": profitability,
         "profitability_chain": chain,
         "capital_admission": capital_admission,
@@ -142,20 +136,8 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def canonical_settled_outcome(
-    runtime: Any,
-    *,
-    tx_hash: str = "",
-    decision_id: str = "",
-    correlation_id: str = "",
-    opportunity_id: str = "",
-) -> dict[str, Any] | None:
-    """Return the exact settled outcome recorded by the Phase 2 ledger.
-
-    This is deliberately ledger-only: PnL rows, receipts, runtime caches, and
-    guessed settlement state are not accepted as substitutes for the canonical
-    receipt_settlement transaction.
-    """
+def canonical_settled_outcome(runtime: Any, *, tx_hash: str = "", decision_id: str = "", correlation_id: str = "", opportunity_id: str = "") -> dict[str, Any] | None:
+    """Return one exact settled outcome from the Phase 2 ledger, with complete identity."""
     rows = _transactions(runtime)
     matches = [
         row
@@ -171,7 +153,23 @@ def canonical_settled_outcome(
     if not matches:
         return None
     matches.sort(key=lambda row: int(row.get("ts_ms") or 0), reverse=True)
-    return _normalize(matches[0])
+    normalized = _normalize(matches[0])
+    lineage = _dict(normalized.get("metadata", {}).get("canonical_lineage"))
+    normalized["lineage_complete"] = bool(
+        normalized.get("decision_id")
+        and normalized.get("correlation_id")
+        and normalized.get("execution_id")
+        and normalized.get("outcome_id")
+    )
+    normalized["canonical_lineage"] = {
+        "decision_id": normalized.get("decision_id", ""),
+        "correlation_id": normalized.get("correlation_id", ""),
+        "execution_id": normalized.get("execution_id", ""),
+        "outcome_id": normalized.get("outcome_id", ""),
+        "operator_intent": lineage.get("operator_intent"),
+        "intent_fingerprint": lineage.get("intent_fingerprint", ""),
+    }
+    return normalized
 
 
 def install_canonical_settlement_interface() -> None:
@@ -182,14 +180,7 @@ def install_canonical_settlement_interface() -> None:
     if existing is not None and getattr(existing, "_phase2_canonical_interface", False):
         return
 
-    def runtime_canonical_settled_outcome(
-        self: Any,
-        *,
-        tx_hash: str = "",
-        decision_id: str = "",
-        correlation_id: str = "",
-        opportunity_id: str = "",
-    ) -> dict[str, Any] | None:
+    def runtime_canonical_settled_outcome(self: Any, *, tx_hash: str = "", decision_id: str = "", correlation_id: str = "", opportunity_id: str = "") -> dict[str, Any] | None:
         return canonical_settled_outcome(
             self,
             tx_hash=tx_hash,
