@@ -44,12 +44,7 @@ def ensure_decision_identity(
     current_block: int,
     operator_intent: Mapping[str, Any] | None = None,
 ) -> DecisionExecutionIdentity:
-    """Create/preserve canonical identity and attach operator-intent attribution.
-
-    Identity creation is independent of OMAR. Operator intent is contextual
-    attribution only; it never grants execution, capital, signing, or governance
-    authority.
-    """
+    """Create/preserve canonical identity and attach operator-intent attribution."""
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
         meta = {}
@@ -126,13 +121,18 @@ def ensure_decision_identity(
 
 
 def lineage_from_opportunity(opp: Any) -> dict[str, str]:
+    """Return the stable two-field decision/execution lineage contract."""
     meta = _dict(getattr(opp, "meta", None))
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
     return {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
-        "operator_intent_fingerprint": _text(
-            brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint")
-        ),
     }
+
+
+def operator_intent_fingerprint_from_opportunity(opp: Any) -> str:
+    meta = _dict(getattr(opp, "meta", None))
+    brain = _dict(meta.get("brain"))
+    lineage = _dict(meta.get("canonical_lineage"))
+    return _text(brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint"))
