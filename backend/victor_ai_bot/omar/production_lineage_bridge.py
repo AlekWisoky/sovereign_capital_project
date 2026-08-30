@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
 from ..operator_intent import intent_fingerprint, resolve_operator_intent
+from .lineage_identity import execution_id, outcome_id
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 # Phase 6: preserve canonical lineage across production runtime seams.
@@ -18,9 +19,7 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _lineage_matches(
-    outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str
-) -> bool:
+def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
@@ -39,11 +38,7 @@ def _chain_name(obj: Any) -> str:
 
 
 def _patch_omar_context() -> None:
-    """Add immutable operator intent to OMAR's learning context.
-
-    Human controls, wealth-goal targets, and upstream AI recommendations are
-    learning features only. They never become execution authority.
-    """
+    """Add immutable operator intent to OMAR's learning context."""
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
     original = getattr(RuntimeDecisionFacade, "_omar_context", None)
@@ -94,15 +89,10 @@ def _patch_decision_identity() -> None:
         if isinstance(getattr(opp, "meta", None), dict):
             brain = dict(opp.meta.get("brain") or {})
             if lineage["decision_id"]:
-                # The canonical decision identity is the only learning identity.
-                # Keep the legacy field for compatibility, but point it at the
-                # canonical decision rather than minting a second OMAR decision.
                 brain["omar_decision_id"] = lineage["decision_id"]
             brain["omar_correlation_id"] = lineage["correlation_id"]
             opp.meta["brain"] = brain
-        if returned_decision is not None and isinstance(
-            getattr(returned_decision, "metadata", None), dict
-        ):
+        if returned_decision is not None and isinstance(getattr(returned_decision, "metadata", None), dict):
             returned_decision.metadata["omar_decision_id"] = lineage["decision_id"]
             returned_decision.metadata["omar_correlation_id"] = lineage["correlation_id"]
         return chosen, returned_decision
@@ -139,9 +129,17 @@ def _patch_execution_identity() -> None:
                 lineage = lineage_from_opportunity(opp)
                 if result is not None:
                     plan = _dict(getattr(result, "plan", None))
-                    plan["canonical_lineage"] = dict(lineage)
+                    exec_id = execution_id(
+                        decision_id=lineage["decision_id"],
+                        correlation_id=lineage["correlation_id"],
+                        tx_hash=_text(getattr(result, "tx_hash", "")),
+                        route_id=_text(getattr(opp, "route_id", "")),
+                        existing=_text(plan.get("execution_id") or plan.get("executionId")),
+                    )
+                    plan["canonical_lineage"] = {**dict(lineage), "execution_id": exec_id}
                     plan["canonical_decision_id"] = lineage["decision_id"]
                     plan["correlation_id"] = lineage["correlation_id"]
+                    plan["execution_id"] = exec_id
                     result.plan = plan
             except _SAFE:
                 pass
@@ -170,7 +168,27 @@ def _patch_settlement_resolution() -> None:
             opportunity_id=_text(getattr(opp, "id", "")),
         ):
             return None
-        return outcome
+        row = dict(outcome)
+        exec_id = _text(row.get("execution_id") or _dict(row.get("canonical_lineage")).get("execution_id"))
+        if not exec_id:
+            exec_id = execution_id(
+                decision_id=lineage["decision_id"],
+                correlation_id=lineage["correlation_id"],
+                tx_hash=_text(row.get("tx_hash") or getattr(result, "tx_hash", "")),
+                route_id=_text(row.get("route_id") or getattr(opp, "route_id", "")),
+            )
+        out_id = _text(row.get("outcome_id") or _dict(row.get("canonical_lineage")).get("outcome_id"))
+        if not out_id:
+            out_id = outcome_id(
+                decision_id=lineage["decision_id"],
+                correlation_id=lineage["correlation_id"],
+                transaction_id=_text(row.get("transaction_id")),
+                tx_hash=_text(row.get("tx_hash") or getattr(result, "tx_hash", "")),
+            )
+        row["execution_id"] = exec_id
+        row["outcome_id"] = out_id
+        row["canonical_lineage"] = {**lineage, "execution_id": exec_id, "outcome_id": out_id}
+        return row
 
     wrapped._production_identity_patched = True
     lifecycle_bridge._canonical_settled_outcome = wrapped
