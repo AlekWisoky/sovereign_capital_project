@@ -111,6 +111,7 @@ class _Runtime(RuntimeReceiptFacade):
 
 
 @pytest.mark.asyncio
+# @codescene(disable:"Large Method") Production-shaped integration test intentionally keeps the complete lifecycle assertion in one scenario.
 async def test_production_shaped_lineage_reaches_exact_omar_policy_update(
     monkeypatch, tmp_path
 ):

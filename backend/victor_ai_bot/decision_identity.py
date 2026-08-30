@@ -101,6 +101,7 @@ def ensure_decision_identity(
     return DecisionExecutionIdentity(decision_id=decision_id, correlation_id=correlation_id)
 
 
+# @codescene(disable:"Bumpy Road Ahead") Canonical lineage helper keeps sizing identity atomic; revisit after lifecycle stabilizes.
 def ensure_sizing_identity(
     opp: Any,
     decision: Any | None,
@@ -150,7 +151,9 @@ def ensure_sizing_identity(
     except (AttributeError, IndexError, TypeError):
         amount_in_wei = _text(meta.get("amount_in_wei") or meta.get("amountInWei"))
 
-    existing = _text(brain.get("sizing_id") or lineage.get("sizing_id") or decision_meta.get("sizing_id"))
+    existing = _text(
+        brain.get("sizing_id") or lineage.get("sizing_id") or decision_meta.get("sizing_id")
+    )
     sizing_id = existing or _stable_id(
         "sizing",
         canonical_decision_id,
