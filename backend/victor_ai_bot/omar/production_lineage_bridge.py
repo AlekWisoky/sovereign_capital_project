@@ -4,10 +4,15 @@ import inspect
 import os
 from typing import Any, Mapping
 
-from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
+from ..decision_identity import (
+    ensure_decision_identity,
+    lineage_from_opportunity,
+    snapshot_operator_intent,
+)
 from ..operator_intent import resolve_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
+_ACTIONS = {"WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE"}
 
 
 def _text(value: Any) -> str:
@@ -22,7 +27,7 @@ def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opp
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
-    if decision_id and _text(row.get("decision_id")) != decision_id:
+    if decision_id and _text(row.get("decision_id") or row.get("canonical_decision_id")) != decision_id:
         return False
     if correlation_id and _text(row.get("correlation_id")) != correlation_id:
         return False
@@ -32,7 +37,7 @@ def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opp
 
 
 def _patch_omar_context() -> None:
-    """Feed operator intent into OMAR without changing its authority boundary."""
+    """Feed the canonical operator-intent snapshot into OMAR decision context."""
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
     original = getattr(RuntimeDecisionFacade, "_omar_context", None)
@@ -41,11 +46,15 @@ def _patch_omar_context() -> None:
 
     def wrapped(self: Any, opp: Any, *, p_success: float, ev_wei: int):
         context = dict(original(self, opp, p_success=p_success, ev_wei=ev_wei) or {})
-        intent = resolve_operator_intent(self)
+        intent = context.get("operator_intent")
+        if not isinstance(intent, Mapping):
+            intent = snapshot_operator_intent(self)
+        intent = dict(intent)
         goal = _dict(intent.get("goal"))
         recommendation = _dict(intent.get("ai_recommendation"))
         context.update(
             {
+                "operator_intent": intent,
                 "aggression_mode": _text(intent.get("aggression_mode")) or "balanced",
                 "risk_multiplier": float(intent.get("risk_multiplier") or 1.0),
                 "goal_horizon_compatibility": float(goal.get("horizon_compatibility") or 1.0),
@@ -64,28 +73,139 @@ def _patch_omar_context() -> None:
 
 
 def _patch_decision_identity() -> None:
+    """Replace the old OMAR-generated identity path with the canonical production path."""
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
     original = getattr(RuntimeDecisionFacade, "_apply_omar_to_candidate", None)
-    if original is None or getattr(original, "_production_identity_patched", False):
+    if original is None or getattr(original, "_canonical_identity_patched", False):
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
-        intent = resolve_operator_intent(self)
-        ensure_decision_identity(
+        # This is the canonical decision boundary: capture operator intent once,
+        # then create/preserve the identity before OMAR can observe the decision.
+        intent = snapshot_operator_intent(self)
+        chain_cfg = getattr(getattr(self, "cfg", None), "chain", None)
+        chain_name = _text(getattr(chain_cfg, "name", "chain")) or "chain"
+        identity = ensure_decision_identity(
             opp,
             decision,
-            chain_name=_text(
-                getattr(getattr(self, "cfg", None), "chain", None).name
-                if getattr(getattr(self, "cfg", None), "chain", None) is not None
-                else "chain"
-            ),
+            chain_name=chain_name,
             current_block=int(current_block),
             operator_intent=intent,
         )
-        return original(self, opp, decision, current_block=current_block)
 
-    wrapped._production_identity_patched = True
+        omar = getattr(self, "_omar", None)
+        if omar is None or not bool(getattr(omar, "enabled", False)):
+            return opp, decision
+
+        try:
+            bm = _dict(_dict(getattr(opp, "meta", None)).get("brain"))
+            p_success = float(bm.get("p_success") or getattr(decision, "p_success", 0.0) or 0.0)
+            ev_wei = int(bm.get("ev_wei") or getattr(decision, "ev_wei", 0) or 0)
+            context = dict(self._omar_context(opp, p_success=p_success, ev_wei=ev_wei) or {})
+            context["operator_intent"] = dict(intent)
+            context["canonical_decision_id"] = identity.decision_id
+            context["correlation_id"] = identity.correlation_id
+
+            rec = omar.recommend(context)
+            learning_action = _text(getattr(rec, "action", ""))
+            if learning_action not in _ACTIONS:
+                learning_action = "EXECUTE"
+
+            if isinstance(getattr(opp, "meta", None), dict):
+                brain = _dict(opp.meta.get("brain"))
+                brain["canonical_decision_id"] = identity.decision_id
+                brain["correlation_id"] = identity.correlation_id
+                brain.pop("omar_decision_id", None)
+                brain["omar_action"] = learning_action
+                brain["omar_state_key"] = str(getattr(rec, "state_key", ""))
+                brain["omar_confidence"] = float(getattr(rec, "confidence", 0.0) or 0.0)
+                brain["omar_trained"] = bool(getattr(rec, "trained", False))
+                brain["omar_observations"] = int(getattr(rec, "observations", 0) or 0)
+                brain["omar_reason"] = _text(getattr(rec, "reason", ""))
+                brain["operator_intent"] = dict(intent)
+                opp.meta["brain"] = brain
+                opp.meta["omar"] = rec.to_dict()
+
+            metadata = {
+                "current_block": int(current_block),
+                "ev_wei": int(ev_wei),
+                "p_success": float(p_success),
+                "canonical_decision_id": identity.decision_id,
+                "correlation_id": identity.correlation_id,
+                "operator_intent": dict(intent),
+                "recommendation": rec.to_dict(),
+            }
+
+            if bool(getattr(rec, "veto", False)):
+                omar.observe_decision(
+                    decision_id=identity.decision_id,
+                    opportunity_id=_text(getattr(opp, "id", "")),
+                    route_id=_text(getattr(opp, "route_id", "")),
+                    action=learning_action,
+                    state_key=str(getattr(rec, "state_key", "")),
+                    context=context,
+                    metadata=metadata,
+                )
+                return None, decision
+
+            if decision is None:
+                decision = TradeDecision(
+                    action="trade",
+                    opp_id=_text(getattr(opp, "id", "")),
+                    route_id=_text(getattr(opp, "route_id", "")),
+                    size_mult=float(getattr(rec, "size_mult", 1.0) or 1.0),
+                    borrow_mult=1.0,
+                    gas_mode=_text(getattr(rec, "gas_mode", "standard")) or "standard",
+                    p_success=p_success,
+                    ev_wei=ev_wei,
+                    reason="omar_selected",
+                    rl_state="",
+                    rl_action_index=-1,
+                    portfolio=[_text(getattr(opp, "id", ""))],
+                )
+            else:
+                decision.size_mult = min(float(getattr(decision, "size_mult", 1.0) or 1.0), float(getattr(rec, "size_mult", 1.0) or 1.0))
+                decision.borrow_mult = min(float(getattr(decision, "borrow_mult", 1.0) or 1.0), 1.0)
+                if _text(getattr(rec, "gas_mode", "")) in {"standard", "fast", "instant"}:
+                    decision.gas_mode = _text(getattr(rec, "gas_mode"))
+
+            ensure_decision_identity(
+                opp,
+                decision,
+                chain_name=chain_name,
+                current_block=int(current_block),
+                operator_intent=intent,
+            )
+            decision.metadata["canonical_decision_id"] = identity.decision_id
+            decision.metadata["correlation_id"] = identity.correlation_id
+            decision.metadata["operator_intent"] = dict(intent)
+
+            if isinstance(getattr(opp, "meta", None), dict):
+                brain = _dict(opp.meta.get("brain"))
+                brain["size_mult_omar"] = float(getattr(decision, "size_mult", 1.0) or 1.0)
+                brain["gas_mode_omar"] = _text(getattr(decision, "gas_mode", "standard")) or "standard"
+                brain["canonical_decision_id"] = identity.decision_id
+                brain["correlation_id"] = identity.correlation_id
+                brain["operator_intent"] = dict(intent)
+                opp.meta["brain"] = brain
+
+            omar.observe_decision(
+                decision_id=identity.decision_id,
+                opportunity_id=_text(getattr(opp, "id", "")),
+                route_id=_text(getattr(opp, "route_id", "")),
+                action=learning_action,
+                state_key=str(getattr(rec, "state_key", "")),
+                context=context,
+                metadata=metadata,
+            )
+            return opp, decision
+        except _SAFE:
+            return opp, decision
+
+    from ..decision_engine import TradeDecision
+
+    wrapped._canonical_identity_patched = True
     RuntimeDecisionFacade._apply_omar_to_candidate = wrapped
 
 
@@ -114,7 +234,7 @@ def _patch_execution_identity() -> None:
                         else "chain"
                     ),
                     current_block=int(bound.arguments.get("bn") or 0),
-                    operator_intent=resolve_operator_intent(runtime),
+                    operator_intent=snapshot_operator_intent(runtime),
                 )
                 lineage = lineage_from_opportunity(opp)
                 if result is not None:
@@ -153,6 +273,7 @@ def _patch_settlement_resolution() -> None:
             return None
         try:
             if isinstance(outcome, dict):
+                outcome["canonical_decision_id"] = lineage["decision_id"]
                 outcome["operator_intent_fingerprint"] = lineage["operator_intent_fingerprint"]
         except (AttributeError, TypeError):
             pass
@@ -223,19 +344,12 @@ def _patch_learning_identity() -> None:
         outcome.update(
             {
                 "status": _text(settlement.get("status")) or "settled",
-                "decision_id": _text(settlement.get("decision_id")) or decision_id,
-                "correlation_id": _text(settlement.get("correlation_id"))
-                or _text(canonical_lineage.get("correlation_id")),
-                "opportunity_id": _text(settlement.get("opportunity_id"))
-                or _text(pending.get("opportunity_id")),
+                "decision_id": _text(settlement.get("decision_id") or settlement.get("canonical_decision_id")) or decision_id,
+                "correlation_id": _text(settlement.get("correlation_id")) or _text(canonical_lineage.get("correlation_id")),
+                "opportunity_id": _text(settlement.get("opportunity_id")) or _text(pending.get("opportunity_id")),
                 "action": _text(settlement.get("action")) or _text(pending.get("action")),
                 "route_id": _text(settlement.get("route_id")) or _text(kwargs.get("route_id") or pending.get("route_id")),
-                "outcome_truth_verified": bool(
-                    settlement.get(
-                        "truth_verified",
-                        settlement.get("outcome_truth_verified", kwargs.get("outcome_truth_verified", False)),
-                    )
-                ),
+                "outcome_truth_verified": bool(settlement.get("truth_verified", settlement.get("outcome_truth_verified", kwargs.get("outcome_truth_verified", False)))),
                 "source": _text(settlement.get("source")) or _text(metadata.get("source")),
                 "canonical_lineage": {
                     "decision_id": _text(canonical_lineage.get("decision_id")) or decision_id,
@@ -246,14 +360,7 @@ def _patch_learning_identity() -> None:
 
         gate = validate_learning_transition(pending, outcome, decision_id=decision_id)
         if not gate.allowed:
-            self._log(
-                {
-                    "event": "omar_learning_integrity_rejected",
-                    "decision_id": decision_id,
-                    "reason": gate.reason,
-                    "lineage": gate.to_dict(),
-                }
-            )
+            self._log({"event": "omar_learning_integrity_rejected", "decision_id": decision_id, "reason": gate.reason, "lineage": gate.to_dict()})
             return {"ok": False, "learned": False, "reason": gate.reason, "decision_id": decision_id}
 
         result = original_outcome(self, **kwargs)
@@ -276,12 +383,7 @@ def _patch_learning_identity() -> None:
 
 
 def install_production_lineage_bridge() -> None:
-    """Install identity propagation even when OMAR's numerical runtime is unavailable.
-
-    The decision/execution/settlement identity layer is useful independently of
-    the learning runtime. In constrained environments such as Termux, NumPy may
-    be unavailable; that must not disable canonical lineage propagation.
-    """
+    """Install production decision/execution/settlement identity propagation."""
     try:
         _patch_omar_context()
         _patch_decision_identity()
