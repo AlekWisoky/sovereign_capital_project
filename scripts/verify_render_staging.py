@@ -20,7 +20,10 @@ READ_ENDPOINTS = ("/health", "/api/deploy/info", "/api/state")
 
 def get_json(base_url: str, path: str) -> Any:
     url = base_url.rstrip("/") + path
-    req = urllib.request.Request(url, headers={"User-Agent": "sovereign-capital-render-smoke/1"})
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "sovereign-capital-render-smoke/1"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             if response.status != 200:
@@ -34,15 +37,16 @@ def get_json(base_url: str, path: str) -> Any:
 
 def find_key_values(obj: Any, wanted: set[str]) -> list[tuple[str, Any]]:
     found: list[tuple[str, Any]] = []
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            normalized = str(key).lower()
-            if normalized in wanted:
-                found.append((str(key), value))
-            found.extend(find_key_values(value, wanted))
-    elif isinstance(obj, list):
-        for item in obj:
-            found.extend(find_key_values(item, wanted))
+    stack = [obj]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            for key, value in current.items():
+                if str(key).lower() in wanted:
+                    found.append((str(key), value))
+                stack.append(value)
+        elif isinstance(current, list):
+            stack.extend(current)
     return found
 
 
