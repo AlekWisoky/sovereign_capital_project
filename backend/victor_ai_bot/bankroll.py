@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque
 
+from .money_loop_accounting import SettledReceiptEconomics
 from .persistence.repositories.bankroll_repository import BankrollEventRepository
 from .persistence.repositories.capital_event_repository import CapitalEventRepository
 
@@ -33,6 +34,12 @@ class BankrollConfig:
 @dataclass
 class BankrollState:
     realized_profit_wei: int = 0
+    realized_pnl_usd: float = 0.0
+    realized_loss_usd: float = 0.0
+    reinvestable_profit_usd: float = 0.0
+    last_settled_receipt_id: str = ""
+    last_settled_transaction_id: str = ""
+    last_settled_pnl_usd: float = 0.0
     last_amount_in_wei: int = 0
     success_streak: int = 0
     fail_streak: int = 0
@@ -79,6 +86,12 @@ class BankrollManager:
     def _state_payload(self) -> dict[str, Any]:
         return {
             "realized_profit_wei": int(self.state.realized_profit_wei),
+            "realized_pnl_usd": float(self.state.realized_pnl_usd),
+            "realized_loss_usd": float(self.state.realized_loss_usd),
+            "reinvestable_profit_usd": float(self.state.reinvestable_profit_usd),
+            "last_settled_receipt_id": str(self.state.last_settled_receipt_id or ""),
+            "last_settled_transaction_id": str(self.state.last_settled_transaction_id or ""),
+            "last_settled_pnl_usd": float(self.state.last_settled_pnl_usd),
             "last_amount_in_wei": int(self.state.last_amount_in_wei),
             "success_streak": int(self.state.success_streak),
             "fail_streak": int(self.state.fail_streak),
@@ -117,6 +130,12 @@ class BankrollManager:
             recent_returns = deque(maxlen=window)
         return BankrollState(
             realized_profit_wei=int(payload.get("realized_profit_wei") or 0),
+            realized_pnl_usd=float(payload.get("realized_pnl_usd") or 0.0),
+            realized_loss_usd=float(payload.get("realized_loss_usd") or 0.0),
+            reinvestable_profit_usd=float(payload.get("reinvestable_profit_usd") or 0.0),
+            last_settled_receipt_id=str(payload.get("last_settled_receipt_id") or ""),
+            last_settled_transaction_id=str(payload.get("last_settled_transaction_id") or ""),
+            last_settled_pnl_usd=float(payload.get("last_settled_pnl_usd") or 0.0),
             last_amount_in_wei=int(payload.get("last_amount_in_wei") or 0),
             success_streak=int(payload.get("success_streak") or 0),
             fail_streak=int(payload.get("fail_streak") or 0),
@@ -191,6 +210,12 @@ class BankrollManager:
         state_payload = self._state_payload()
         keys = (
             "realized_profit_wei",
+            "realized_pnl_usd",
+            "realized_loss_usd",
+            "reinvestable_profit_usd",
+            "last_settled_receipt_id",
+            "last_settled_transaction_id",
+            "last_settled_pnl_usd",
             "last_amount_in_wei",
             "success_streak",
             "fail_streak",
@@ -218,17 +243,12 @@ class BankrollManager:
         amount_in_wei: int | None = None,
     ) -> dict[str, Any]:
         payload = self._state_payload()
-        amt_in = (
-            int(amount_in_wei)
-            if amount_in_wei is not None
-            else int(payload.get("last_amount_in_wei") or 0)
-        )
+        amt_in = int(amount_in_wei) if amount_in_wei is not None else int(payload.get("last_amount_in_wei") or 0)
         amt_in = max(1, amt_in)
         payload["last_amount_in_wei"] = int(amt_in)
         if bool(success):
-            payload["realized_profit_wei"] = int(payload.get("realized_profit_wei") or 0) + max(
-                0, int(realized_profit_after_gas_wei)
-            )
+            realized = max(0, int(realized_profit_after_gas_wei))
+            payload["realized_profit_wei"] = int(payload.get("realized_profit_wei") or 0) + realized
             payload["success_streak"] = int(payload.get("success_streak") or 0) + 1
             payload["fail_streak"] = 0
         else:
@@ -244,9 +264,8 @@ class BankrollManager:
         results = [int(v) for v in list(self.state.recent_results)]
         returns = [float(v) for v in list(self.state.recent_returns)]
         if bool(success):
-            realized = max(0, int(realized_profit_after_gas_wei))
             results.append(1)
-            returns.append(float(realized) / float(amt_in))
+            returns.append(float(max(0, int(realized_profit_after_gas_wei))) / float(amt_in))
         else:
             results.append(0)
             returns.append(0.0)
@@ -255,23 +274,73 @@ class BankrollManager:
         payload["recent_returns"] = returns[-window:]
         return payload
 
+    def project_settled_outcome_state(self, economics: SettledReceiptEconomics) -> dict[str, Any]:
+        """Project bankroll from canonical signed settlement economics."""
+        payload = self._state_payload()
+        pnl = float(economics.signed_pnl_usd)
+        amount_in = max(1, int(economics.amount_in_wei or payload.get("last_amount_in_wei") or 0))
+        payload["last_amount_in_wei"] = amount_in
+        payload["realized_pnl_usd"] = float(payload.get("realized_pnl_usd") or 0.0) + pnl
+        payload["realized_loss_usd"] = float(payload.get("realized_loss_usd") or 0.0) + economics.loss_usd
+        payload["reinvestable_profit_usd"] = float(payload.get("reinvestable_profit_usd") or 0.0) + economics.reinvestable_profit_usd
+        payload["last_settled_receipt_id"] = str(economics.receipt_id or "")
+        payload["last_settled_transaction_id"] = str(economics.transaction_id or "")
+        payload["last_settled_pnl_usd"] = pnl
+        if economics.realized_after_gas_usd > 0 and economics.success:
+            payload["realized_profit_wei"] = int(payload.get("realized_profit_wei") or 0)
+        if pnl > 0:
+            payload["success_streak"] = int(payload.get("success_streak") or 0) + 1
+            payload["fail_streak"] = 0
+        else:
+            payload["fail_streak"] = int(payload.get("fail_streak") or 0) + 1
+            payload["success_streak"] = 0
+        now_ms = self._now_ms()
+        payload["updated_ts_ms"] = int(now_ms)
+        payload["profit_updated_ts_ms"] = int(now_ms)
+        payload["sizing_updated_ts_ms"] = int(now_ms)
+        results = [int(v) for v in list(self.state.recent_results)]
+        returns = [float(v) for v in list(self.state.recent_returns)]
+        results.append(1 if pnl > 0 else 0)
+        returns.append(float(pnl) / float(amount_in))
+        window = max(1, int(getattr(self.cfg, "kelly_window", 50) or 50))
+        payload["recent_results"] = results[-window:]
+        payload["recent_returns"] = returns[-window:]
+        return payload
+
+    def record_settled_outcome(self, economics: SettledReceiptEconomics) -> None:
+        state_payload = self.project_settled_outcome_state(economics)
+        self.apply_state_payload(state_payload)
+        self._record_history(
+            event_type="settled_outcome_recorded",
+            payload={
+                "receipt_id": str(economics.receipt_id),
+                "transaction_id": str(economics.transaction_id),
+                "signed_pnl_usd": float(economics.signed_pnl_usd),
+                "loss_usd": float(economics.loss_usd),
+                "reinvestable_profit_usd": float(economics.reinvestable_profit_usd),
+                "source": str(economics.source),
+            },
+        )
+
     def apply_state_payload(self, payload: dict[str, Any]) -> None:
         state_payload = dict(payload or {})
         window = max(1, int(getattr(self.cfg, "kelly_window", 50) or 50))
         self.state = BankrollState(
             realized_profit_wei=int(state_payload.get("realized_profit_wei") or 0),
+            realized_pnl_usd=float(state_payload.get("realized_pnl_usd") or 0.0),
+            realized_loss_usd=float(state_payload.get("realized_loss_usd") or 0.0),
+            reinvestable_profit_usd=float(state_payload.get("reinvestable_profit_usd") or 0.0),
+            last_settled_receipt_id=str(state_payload.get("last_settled_receipt_id") or ""),
+            last_settled_transaction_id=str(state_payload.get("last_settled_transaction_id") or ""),
+            last_settled_pnl_usd=float(state_payload.get("last_settled_pnl_usd") or 0.0),
             last_amount_in_wei=int(state_payload.get("last_amount_in_wei") or 0),
             success_streak=int(state_payload.get("success_streak") or 0),
             fail_streak=int(state_payload.get("fail_streak") or 0),
             updated_ts_ms=int(state_payload.get("updated_ts_ms") or self._now_ms()),
             profit_updated_ts_ms=int(state_payload.get("profit_updated_ts_ms") or self._now_ms()),
             sizing_updated_ts_ms=int(state_payload.get("sizing_updated_ts_ms") or self._now_ms()),
-            recent_results=deque(
-                [int(v) for v in list(state_payload.get("recent_results") or [])], maxlen=window
-            ),
-            recent_returns=deque(
-                [float(v) for v in list(state_payload.get("recent_returns") or [])], maxlen=window
-            ),
+            recent_results=deque([int(v) for v in list(state_payload.get("recent_results") or [])], maxlen=window),
+            recent_returns=deque([float(v) for v in list(state_payload.get("recent_returns") or [])], maxlen=window),
         )
         self._save_state()
 
@@ -293,10 +362,8 @@ class BankrollManager:
             self._record_history(
                 event_type="override",
                 payload={
-                    "kelly_enabled": (None if kelly_enabled is None else bool(kelly_enabled)),
-                    "auto_reinvest_enabled": (
-                        None if auto_reinvest_enabled is None else bool(auto_reinvest_enabled)
-                    ),
+                    "kelly_enabled": None if kelly_enabled is None else bool(kelly_enabled),
+                    "auto_reinvest_enabled": None if auto_reinvest_enabled is None else bool(auto_reinvest_enabled),
                 },
             )
         except _SAFE_BANKROLL_OVERRIDE_EXCEPTIONS:
@@ -333,9 +400,7 @@ class BankrollManager:
         if not self.cfg.auto_reinvest_enabled or self.cfg.reinvest_rate_pct <= 0:
             amt = int(base)
         else:
-            reinvest = (
-                int(self.state.realized_profit_wei) * int(self.cfg.reinvest_rate_pct)
-            ) // 100
+            reinvest = (int(self.state.realized_profit_wei) * int(self.cfg.reinvest_rate_pct)) // 100
             amt = int(base + reinvest)
 
         if bool(self.cfg.kelly_enabled) and len(self.state.recent_returns) >= int(
@@ -351,17 +416,13 @@ class BankrollManager:
         self.state.last_amount_in_wei = amt
         self._touch(sizing=True)
         self._save_state()
-        self._record_history(
-            event_type="sizing_decision",
-            payload={"recommended_amount_in_wei": int(amt)},
-        )
+        self._record_history(event_type="sizing_decision", payload={"recommended_amount_in_wei": int(amt)})
         return amt
 
     def _kelly_fraction(self) -> float:
         rets = list(self.state.recent_returns)
         if not rets:
             return float(self.cfg.kelly_min_fraction)
-
         mu = sum(float(r) for r in rets) / float(len(rets))
         var = sum((float(r) - mu) ** 2 for r in rets) / float(max(1, len(rets) - 1))
         p = float(sum(1 for r in rets if float(r) > 0.0)) / float(len(rets))
@@ -372,6 +433,4 @@ class BankrollManager:
             f = (mu / var) * (0.5 + 0.5 * p)
         f = max(0.0, f)
         f = f * (1.0 - max(0.0, min(0.80, vd)))
-        return float(
-            max(float(self.cfg.kelly_min_fraction), min(float(self.cfg.kelly_cap_fraction), f))
-        )
+        return float(max(float(self.cfg.kelly_min_fraction), min(float(self.cfg.kelly_cap_fraction), f)))
