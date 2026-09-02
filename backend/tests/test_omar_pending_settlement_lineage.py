@@ -23,8 +23,16 @@ def test_persist_execution_outcome_receives_complete_pending_lineage(monkeypatch
     captured = {}
 
     def original_persist(
-        *, runtime, pending, status, submit_to_receipt_ms, realized_usd,
-        expected_usd, reward_trace, capture_lane_pending
+        _self,
+        *,
+        runtime,
+        pending,
+        status,
+        submit_to_receipt_ms,
+        realized_usd,
+        expected_usd,
+        reward_trace,
+        capture_lane_pending,
     ):
         captured["pending"] = dict(pending)
         return {"ok": True, "route_family": "flashloan_atomic", "strategy_family": "flashloan_atomic", "realized_usd": float(realized_usd), "expected_usd": float(expected_usd)}
