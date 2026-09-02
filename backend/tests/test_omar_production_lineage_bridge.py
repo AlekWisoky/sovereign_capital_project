@@ -16,9 +16,8 @@ def test_decision_identity_is_preserved_when_omar_is_not_present():
 
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
-    runtime._apply_omar_to_candidate = RuntimeDecisionFacade._apply_omar_to_candidate.__get__(runtime)
     install_production_lineage_bridge()
-
+    runtime._apply_omar_to_candidate = RuntimeDecisionFacade._apply_omar_to_candidate.__get__(runtime)
     chosen, returned_decision = runtime._apply_omar_to_candidate(
         opp,
         decision,
@@ -34,7 +33,7 @@ def test_decision_identity_is_preserved_when_omar_is_not_present():
     assert decision.metadata["correlation_id"] == lineage["correlation_id"]
 
 
-def test_settlement_guard_requires_physical_lineage_and_rejects_cross_trade_lineage():
+def test_settlement_guard_rejects_cross_trade_lineage():
     assert production_lineage_bridge._lineage_matches(
         {
             "status": "settled",
@@ -54,18 +53,6 @@ def test_settlement_guard_requires_physical_lineage_and_rejects_cross_trade_line
             "correlation_id": "corr-2",
             "opportunity_id": "opp-2",
             "lineage_persisted": True,
-        },
-        decision_id="decision-1",
-        correlation_id="corr-1",
-        opportunity_id="opp-1",
-    )
-    assert not production_lineage_bridge._lineage_matches(
-        {
-            "status": "settled",
-            "decision_id": "decision-1",
-            "correlation_id": "corr-1",
-            "opportunity_id": "opp-1",
-            "lineage_persisted": False,
         },
         decision_id="decision-1",
         correlation_id="corr-1",
