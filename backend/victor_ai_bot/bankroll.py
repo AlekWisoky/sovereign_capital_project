@@ -132,17 +132,19 @@ class BankrollManager:
         except _SAFE_BANKROLL_STATE_IO_EXCEPTIONS:
             recent_returns = deque(maxlen=window)
         legacy_profit = int(payload.get("realized_profit_wei") or 0)
-        signed_pnl = int(payload.get("realized_net_pnl_wei") or legacy_profit)
-        reinvestable = int(payload.get("reinvestable_profit_wei") or max(0, signed_pnl))
+        signed_raw = payload.get("realized_net_pnl_wei")
+        signed_pnl = legacy_profit if signed_raw is None else int(signed_raw)
+        reinvest_raw = payload.get("reinvestable_profit_wei")
+        reinvestable = max(0, signed_pnl) if reinvest_raw is None else int(reinvest_raw)
+        owned_delta_raw = payload.get("cumulative_owned_capital_delta_wei")
+        owned_delta = signed_pnl if owned_delta_raw is None else int(owned_delta_raw)
         return BankrollState(
             realized_profit_wei=signed_pnl,
             realized_net_pnl_wei=signed_pnl,
             bankroll_loss_wei=int(payload.get("bankroll_loss_wei") or 0),
             reinvestable_profit_wei=max(0, reinvestable),
             reinvested_profit_wei=int(payload.get("reinvested_profit_wei") or 0),
-            cumulative_owned_capital_delta_wei=int(
-                payload.get("cumulative_owned_capital_delta_wei") or signed_pnl
-            ),
+            cumulative_owned_capital_delta_wei=owned_delta,
             last_flashloan_principal_wei=int(payload.get("last_flashloan_principal_wei") or 0),
             last_flashloan_fee_wei=int(payload.get("last_flashloan_fee_wei") or 0),
             last_amount_in_wei=int(payload.get("last_amount_in_wei") or 0),
@@ -329,20 +331,20 @@ class BankrollManager:
     def apply_state_payload(self, payload: dict[str, Any]) -> None:
         state_payload = dict(payload or {})
         window = max(1, int(getattr(self.cfg, "kelly_window", 50) or 50))
-        signed_pnl = int(
-            state_payload.get("realized_net_pnl_wei")
-            or state_payload.get("realized_profit_wei")
-            or 0
-        )
+        signed_raw = state_payload.get("realized_net_pnl_wei")
+        legacy_raw = state_payload.get("realized_profit_wei")
+        signed_pnl = int(legacy_raw or 0) if signed_raw is None else int(signed_raw)
+        owned_delta_raw = state_payload.get("cumulative_owned_capital_delta_wei")
+        owned_delta = signed_pnl if owned_delta_raw is None else int(owned_delta_raw)
+        reinvestable_raw = state_payload.get("reinvestable_profit_wei")
+        reinvestable = max(0, signed_pnl) if reinvestable_raw is None else int(reinvestable_raw)
         self.state = BankrollState(
             realized_profit_wei=signed_pnl,
             realized_net_pnl_wei=signed_pnl,
             bankroll_loss_wei=max(0, int(state_payload.get("bankroll_loss_wei") or 0)),
-            reinvestable_profit_wei=max(0, int(state_payload.get("reinvestable_profit_wei") or 0)),
+            reinvestable_profit_wei=max(0, reinvestable),
             reinvested_profit_wei=max(0, int(state_payload.get("reinvested_profit_wei") or 0)),
-            cumulative_owned_capital_delta_wei=int(
-                state_payload.get("cumulative_owned_capital_delta_wei") or signed_pnl
-            ),
+            cumulative_owned_capital_delta_wei=owned_delta,
             last_flashloan_principal_wei=max(
                 0, int(state_payload.get("last_flashloan_principal_wei") or 0)
             ),
