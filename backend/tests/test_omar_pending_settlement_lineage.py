@@ -84,7 +84,9 @@ def test_actual_receipt_finalize_carries_complete_identity_to_settlement_and_per
     calls = []
 
     def original_persist(
-        *, runtime, pending, status, submit_to_receipt_ms, realized_usd,
+        _self,
+        *,
+        runtime, pending, status, submit_to_receipt_ms, realized_usd,
         expected_usd, reward_trace, capture_lane_pending
     ):
         calls.append(("persist", dict(pending)))
