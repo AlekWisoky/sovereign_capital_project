@@ -43,13 +43,9 @@ class RuntimeLoopTailFacade:
                 self.metrics.db_latency_ema_ms = float(st.get("ema_db_ms", 0.0) or 0.0)
                 self.metrics.db_errors = int(st.get("db_errors", 0) or 0)
                 self.metrics.pnl_summary_cache_hits = int(st.get("summary_cache_hits", 0) or 0)
-                self.metrics.pnl_summary_cache_misses = int(
-                    st.get("summary_cache_misses", 0) or 0
-                )
+                self.metrics.pnl_summary_cache_misses = int(st.get("summary_cache_misses", 0) or 0)
                 self.metrics.pnl_income_cache_hits = int(st.get("income_cache_hits", 0) or 0)
-                self.metrics.pnl_income_cache_misses = int(
-                    st.get("income_cache_misses", 0) or 0
-                )
+                self.metrics.pnl_income_cache_misses = int(st.get("income_cache_misses", 0) or 0)
                 return dict(st)
         except _SAFE_LOOP_TAIL_EXCEPTIONS:
             pass

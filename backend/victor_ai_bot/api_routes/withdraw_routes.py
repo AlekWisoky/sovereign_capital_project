@@ -20,7 +20,12 @@ from ..rpc import JsonRpcClient
 from ..withdraw_builder import build_convert_and_withdraw_calldata, build_withdraw_calldata
 from ..runtime_services.withdraw_control_contract import build_withdraw_control_view
 from ..runtime_services.withdraw_ledger_service import record_withdraw_lifecycle_event
-from ._route_helpers import attach_summary_contract, append_optional_audit, invalid_request_payload, unexpected_request_fields
+from ._route_helpers import (
+    attach_summary_contract,
+    append_optional_audit,
+    invalid_request_payload,
+    unexpected_request_fields,
+)
 
 router = APIRouter(tags=["withdraw"])
 
@@ -31,7 +36,20 @@ class WithdrawRpcPlan:
     send_url: str
 
 
-_INVALID_REASONS = {"invalid_numeric", "invalid_amount", "missing_token", "missing_destination", "invalid_token", "invalid_destination", "invalid_fee_tiers", "invalid_slippage_bps", "invalid_fee", "invalid_min_out", "invalid_deadline", "invalid_from_address"}
+_INVALID_REASONS = {
+    "invalid_numeric",
+    "invalid_amount",
+    "missing_token",
+    "missing_destination",
+    "invalid_token",
+    "invalid_destination",
+    "invalid_fee_tiers",
+    "invalid_slippage_bps",
+    "invalid_fee",
+    "invalid_min_out",
+    "invalid_deadline",
+    "invalid_from_address",
+}
 _UNAVAILABLE_REASONS = {
     "stable_not_configured",
     "executor_not_configured",
@@ -73,9 +91,7 @@ def _reject_unknown_fields(
     unexpected = unexpected_request_fields(payload, allowed_fields=allowed_fields)
     if not unexpected:
         return None
-    return invalid_request_payload(
-        "unknown_request_fields", details={"fields": unexpected}
-    )
+    return invalid_request_payload("unknown_request_fields", details={"fields": unexpected})
 
 
 async def _preview_request_body_error(request: Request) -> Dict[str, Any] | None:
@@ -747,12 +763,16 @@ async def convert_withdraw_prepare(request: Request, payload: Dict[str, Any] = B
     if requested_from_addr and not _is_evm_address(requested_from_addr):
         return reject(
             "invalid_from_address",
-            audit_payload=build_prepare_context(token_in=token_in, from_address=requested_from_addr),
+            audit_payload=build_prepare_context(
+                token_in=token_in, from_address=requested_from_addr
+            ),
         )
     if token_out_reason:
         return reject(
             token_out_reason,
-            audit_payload=build_prepare_context(token_in=token_in, requested_token_out=token_out_requested),
+            audit_payload=build_prepare_context(
+                token_in=token_in, requested_token_out=token_out_requested
+            ),
         )
     executor = _executor_address(cfg)
     if not executor:
@@ -862,7 +882,12 @@ async def convert_withdraw_prepare(request: Request, payload: Dict[str, Any] = B
         gas_limit = int(getattr(cfg.execution, "gas_limit", 250_000) or 250_000)
         nonce = None
         if estimate_from_addr:
-            tx_for_est = {"to": executor, "from": estimate_from_addr, "data": calldata, "value": hex(0)}
+            tx_for_est = {
+                "to": executor,
+                "from": estimate_from_addr,
+                "data": calldata,
+                "value": hex(0),
+            }
             try:
                 est = await rpc_r.estimate_gas(tx_for_est)
                 if est is not None:
@@ -954,11 +979,15 @@ async def convert_withdraw_quote(request: Request, payload: Dict[str, Any] = Bod
             payload.get("amount_in", payload.get("amount", "0")), reason="invalid_amount"
         )
     except ValueError as exc:
-        return reject(str(exc),
-            audit_payload=quote_context(amount_in=str(payload.get("amount_in", payload.get("amount", "0")) or "")),
+        return reject(
+            str(exc),
+            audit_payload=quote_context(
+                amount_in=str(payload.get("amount_in", payload.get("amount", "0")) or "")
+            ),
         )
     if amount_in <= 0:
-        return reject("invalid_amount",
+        return reject(
+            "invalid_amount",
             audit_payload=quote_context(amount_in=str(amount_in)),
         )
 
@@ -968,10 +997,10 @@ async def convert_withdraw_quote(request: Request, payload: Dict[str, Any] = Bod
     else:
         if not isinstance(raw_fee_tiers, list) or not raw_fee_tiers:
             return reject(
-                    "invalid_fee_tiers",
-                    audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=raw_fee_tiers),
-                    details={"field": "fee_tiers"},
-        )
+                "invalid_fee_tiers",
+                audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=raw_fee_tiers),
+                details={"field": "fee_tiers"},
+            )
         tiers = []
         for idx, value in enumerate(raw_fee_tiers):
             if isinstance(value, bool):
@@ -1008,40 +1037,55 @@ async def convert_withdraw_quote(request: Request, payload: Dict[str, Any] = Bod
     else:
         if isinstance(slip_bps, bool):
             return reject(
-                    "invalid_slippage_bps",
-                    audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=slip_bps),
-                    details={"field": "slippage_bps"},
-        )
+                "invalid_slippage_bps",
+                audit_payload=quote_context(
+                    amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=slip_bps
+                ),
+                details={"field": "slippage_bps"},
+            )
         try:
             slippage_bps = _parse_strict_int_like(slip_bps, reason="invalid_slippage_bps")
         except ValueError:
             return reject(
-                    "invalid_slippage_bps",
-                    audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=slip_bps),
-                    details={"field": "slippage_bps"},
-        )
+                "invalid_slippage_bps",
+                audit_payload=quote_context(
+                    amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=slip_bps
+                ),
+                details={"field": "slippage_bps"},
+            )
         if slippage_bps < 0 or slippage_bps > 2000:
             return reject(
-                    "invalid_slippage_bps",
-                    audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=slip_bps),
-                    details={"field": "slippage_bps"},
-        )
+                "invalid_slippage_bps",
+                audit_payload=quote_context(
+                    amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=slip_bps
+                ),
+                details={"field": "slippage_bps"},
+            )
 
     quoter = str(getattr(cfg.chain, "univ3_quoter_v2", "") or "")
     if not quoter:
-        return reject("quoter_not_configured",
-            audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)),
+        return reject(
+            "quoter_not_configured",
+            audit_payload=quote_context(
+                amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)
+            ),
         )
     if not _is_evm_address(quoter):
-        return reject("invalid_quoter_address",
-            audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)),
+        return reject(
+            "invalid_quoter_address",
+            audit_payload=quote_context(
+                amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)
+            ),
         )
 
     runtime = _runtime(request)
     read_url = runtime.rpc_manager.best_read()
     if not read_url:
-        return reject("no_rpc_endpoints",
-            audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)),
+        return reject(
+            "no_rpc_endpoints",
+            audit_payload=quote_context(
+                amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)
+            ),
         )
 
     best_fee = int(sorted(set(int(t) for t in tiers))[0])
@@ -1062,8 +1106,11 @@ async def convert_withdraw_quote(request: Request, payload: Dict[str, Any] = Bod
                 best_fee = int(fee)
 
     if best_out <= 0:
-        return reject("quote_failed",
-            audit_payload=quote_context(amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)),
+        return reject(
+            "quote_failed",
+            audit_payload=quote_context(
+                amount_in=str(amount_in), fee_tiers=tiers, slippage_bps=int(slippage_bps)
+            ),
         )
 
     min_out = best_out - (best_out * slippage_bps // 10_000)
@@ -1116,12 +1163,14 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
     )
 
     if is_public_mode():
-        return reject("withdraw_execute_disabled_in_public_mode",
+        return reject(
+            "withdraw_execute_disabled_in_public_mode",
         )
 
     cfg = _runtime_cfg(request)
     if str(getattr(cfg.execution, "withdraw_mode", "txdata")) != "backend":
-        return reject("withdraw_mode_not_backend",
+        return reject(
+            "withdraw_mode_not_backend",
         )
 
     token_in = str(payload.get("token_in", "") or "")
@@ -1135,36 +1184,48 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
     )
 
     if not to:
-        return reject("missing_destination",
+        return reject(
+            "missing_destination",
             audit_payload=build_pre_sign_context(),
         )
     if not _is_evm_address(to):
-        return reject("invalid_destination",
+        return reject(
+            "invalid_destination",
             audit_payload=build_pre_sign_context(),
         )
     if not _allowlisted_destination(cfg, to):
-        return reject("dest_not_in_allowlist",
+        return reject(
+            "dest_not_in_allowlist",
             audit_payload=build_pre_sign_context(),
         )
     if not token_in:
-        return reject("missing_token",
+        return reject(
+            "missing_token",
             audit_payload=build_pre_sign_context(token_in=""),
         )
     if not _is_evm_address(token_in):
-        return reject("invalid_token",
+        return reject(
+            "invalid_token",
             audit_payload=build_pre_sign_context(token_in=token_in),
         )
     if token_out_reason:
-        return reject(token_out_reason,
-            audit_payload=build_pre_sign_context(**_convert_token_out_context(token_in=token_in, token_out_requested=token_out_requested)),
+        return reject(
+            token_out_reason,
+            audit_payload=build_pre_sign_context(
+                **_convert_token_out_context(
+                    token_in=token_in, token_out_requested=token_out_requested
+                )
+            ),
         )
     executor = _executor_address(cfg)
     if not executor:
-        return reject("executor_not_configured",
+        return reject(
+            "executor_not_configured",
             audit_payload=build_pre_sign_context(token_in=token_in),
         )
     if not _is_evm_address(executor):
-        return reject("invalid_executor_address",
+        return reject(
+            "invalid_executor_address",
             audit_payload=build_pre_sign_context(executor=executor, token_in=token_in),
         )
 
@@ -1176,7 +1237,8 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
         fee = _parse_int(payload.get("fee", "3000"), reason="invalid_numeric")
         deadline = _parse_int(payload.get("deadline", ""), reason="invalid_numeric")
     except ValueError as exc:
-        return reject(str(exc),
+        return reject(
+            str(exc),
             audit_payload=build_pre_sign_context(
                 executor=executor,
                 token_in=token_in,
@@ -1204,20 +1266,24 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
     )
 
     if amount_in <= 0:
-        return reject("invalid_amount",
+        return reject(
+            "invalid_amount",
             audit_payload=execute_context,
         )
     if min_out < 0:
-        return reject("invalid_min_out",
+        return reject(
+            "invalid_min_out",
             audit_payload=execute_context,
         )
     if fee <= 0 or fee > _MAX_UNISWAP_V3_FEE:
-        return reject("invalid_fee",
+        return reject(
+            "invalid_fee",
             audit_payload=execute_context,
         )
     if "deadline" in payload:
         if deadline <= 0:
-            return reject("invalid_deadline",
+            return reject(
+                "invalid_deadline",
                 audit_payload=execute_context,
             )
     elif deadline <= 0:
@@ -1247,7 +1313,8 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
     )
     key_hex = os.environ.get(key_env, "").strip()
     if not key_hex:
-        return reject("missing_private_key_env",
+        return reject(
+            "missing_private_key_env",
             audit_payload=execute_context,
             private_key_env=key_env,
         )
@@ -1255,7 +1322,8 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
     try:
         acct = Account.from_key(key_hex)
     except (TypeError, ValueError):
-        return reject("invalid_private_key_env",
+        return reject(
+            "invalid_private_key_env",
             audit_payload=execute_context,
             private_key_env=key_env,
         )
@@ -1279,7 +1347,8 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
 
     rpc_plan = _withdraw_rpc_plan(request)
     if rpc_plan is None:
-        return reject("no_rpc_endpoints",
+        return reject(
+            "no_rpc_endpoints",
             audit_payload=signed_context,
         )
 
@@ -1291,7 +1360,8 @@ async def convert_withdraw_execute(request: Request, payload: Dict[str, Any] = B
             rpc_r, executor_address=executor, signer_address=from_addr
         )
         if owner_reason is not None:
-            return reject(owner_reason,
+            return reject(
+                owner_reason,
                 audit_payload=signed_context,
                 private_key_env=key_env,
                 signer_address=from_addr,
@@ -1447,7 +1517,9 @@ async def withdraw_prepare(request: Request, payload: Dict[str, Any] = Body(...)
     except ValueError as exc:
         return reject(
             str(exc),
-            audit_payload=build_prepare_context(executor=executor, token=token, amount=str(payload.get("amount", "0") or "")),
+            audit_payload=build_prepare_context(
+                executor=executor, token=token, amount=str(payload.get("amount", "0") or "")
+            ),
         )
     prepare_context = build_prepare_context(
         executor=executor,
@@ -1482,7 +1554,12 @@ async def withdraw_prepare(request: Request, payload: Dict[str, Any] = Body(...)
         gas_limit = int(getattr(cfg.execution, "gas_limit", 200_000) or 200_000)
         nonce = None
         if estimate_from_addr:
-            tx_for_est = {"to": executor, "from": estimate_from_addr, "data": calldata, "value": hex(0)}
+            tx_for_est = {
+                "to": executor,
+                "from": estimate_from_addr,
+                "data": calldata,
+                "value": hex(0),
+            }
             try:
                 est = await rpc_r.estimate_gas(tx_for_est)
                 if est is not None:
@@ -1539,51 +1616,61 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
     )
 
     if is_public_mode():
-        return reject("withdraw_execute_disabled_in_public_mode",
+        return reject(
+            "withdraw_execute_disabled_in_public_mode",
         )
 
     cfg = _runtime_cfg(request)
     if str(getattr(cfg.execution, "withdraw_mode", "txdata")) != "backend":
-        return reject("withdraw_mode_not_backend",
+        return reject(
+            "withdraw_mode_not_backend",
         )
 
     token = str(payload.get("token", "") or "")
     to = str(payload.get("to", "") or "")
     build_pre_sign_context = _bound_direct_request_context(to=to, token=token)
     if not to:
-        return reject("missing_destination",
+        return reject(
+            "missing_destination",
             audit_payload=build_pre_sign_context(),
         )
     if not _is_evm_address(to):
-        return reject("invalid_destination",
+        return reject(
+            "invalid_destination",
             audit_payload=build_pre_sign_context(),
         )
     if not _allowlisted_destination(cfg, to):
-        return reject("dest_not_in_allowlist",
+        return reject(
+            "dest_not_in_allowlist",
             audit_payload=build_pre_sign_context(),
         )
     if not token:
-        return reject("missing_token",
+        return reject(
+            "missing_token",
             audit_payload=build_pre_sign_context(),
         )
     if not _is_evm_address(token):
-        return reject("invalid_token",
+        return reject(
+            "invalid_token",
             audit_payload=build_pre_sign_context(token=token),
         )
     executor = _executor_address(cfg)
     if not executor:
-        return reject("executor_not_configured",
+        return reject(
+            "executor_not_configured",
             audit_payload=build_pre_sign_context(token=token),
         )
     if not _is_evm_address(executor):
-        return reject("invalid_executor_address",
+        return reject(
+            "invalid_executor_address",
             audit_payload=build_pre_sign_context(executor=executor, token=token),
         )
 
     try:
         amount = _parse_int(payload.get("amount", "0"), reason="invalid_amount")
     except ValueError as exc:
-        return reject(str(exc),
+        return reject(
+            str(exc),
             audit_payload=build_pre_sign_context(
                 executor=executor,
                 token=token,
@@ -1602,7 +1689,8 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
     )
 
     if amount <= 0:
-        return reject("invalid_amount",
+        return reject(
+            "invalid_amount",
             audit_payload=execute_context,
         )
 
@@ -1628,7 +1716,8 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
     )
     key_hex = os.environ.get(key_env, "").strip()
     if not key_hex:
-        return reject("missing_private_key_env",
+        return reject(
+            "missing_private_key_env",
             audit_payload=execute_context,
             private_key_env=key_env,
         )
@@ -1636,7 +1725,8 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
     try:
         acct = Account.from_key(key_hex)
     except (TypeError, ValueError):
-        return reject("invalid_private_key_env",
+        return reject(
+            "invalid_private_key_env",
             audit_payload=execute_context,
             private_key_env=key_env,
         )
@@ -1648,7 +1738,8 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
     )
     rpc_plan = _withdraw_rpc_plan(request)
     if rpc_plan is None:
-        return reject("no_rpc_endpoints",
+        return reject(
+            "no_rpc_endpoints",
             audit_payload=signed_context,
         )
 
@@ -1660,7 +1751,8 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
             rpc_r, executor_address=executor, signer_address=from_addr
         )
         if owner_reason is not None:
-            return reject(owner_reason,
+            return reject(
+                owner_reason,
                 audit_payload=signed_context,
                 private_key_env=key_env,
                 signer_address=from_addr,
@@ -1741,4 +1833,3 @@ async def withdraw_execute(request: Request, payload: Dict[str, Any] = Body(...)
             tx_result=tx_result,
             extra=extra,
         )
-

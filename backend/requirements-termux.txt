@@ -1,0 +1,15 @@
+# Termux/Android development and integration-test dependencies.
+# Keep production requirements.txt unchanged; FastAPI 0.111.0 pulls
+# orjson/ujson by default, and those native packages are not required by
+# this project's test/runtime path.
+fastapi==0.111.1
+uvicorn==0.40.0
+pydantic==2.12.5
+aiohttp==3.13.3
+PyYAML==6.0.3
+eth-hash[pycryptodome]==0.7.1
+eth-account==0.11.3
+numpy>=2.1,<3
+httpx==0.28.1
+pytest
+pytest-asyncio

@@ -73,7 +73,6 @@ def _canonical_strategy_projection(value: Any) -> Dict[str, Any]:
     }
 
 
-
 def _family_hardening_service_state(family_hardening: Dict[str, Any] | None) -> Dict[str, Any]:
     payload = _safe_dict(family_hardening)
     status = (
@@ -1534,7 +1533,11 @@ class OperatorSummaryService:
         }
         services = self.state_summary.service_health(runtime)
         v1_focus_info = _family_identity_payload(
-            getattr(getattr(getattr(runtime, "cfg", None), "execution", None), "v1_focus", "flashloan_atomic")
+            getattr(
+                getattr(getattr(runtime, "cfg", None), "execution", None),
+                "v1_focus",
+                "flashloan_atomic",
+            )
         )
         v1_strategy_projection = _canonical_strategy_projection(v1_focus_info.get("runtimeFamily"))
         execution_lifecycles = build_execution_lifecycle_projections(

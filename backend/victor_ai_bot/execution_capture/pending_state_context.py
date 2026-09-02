@@ -90,7 +90,9 @@ def _venue_path_from_legs(legs: Sequence[Any], runtime_state: Dict[str, Any]) ->
         return []
 
 
-def _safe_runtime_state_call(runtime: Any, attr: str, bucket: str, runtime_state: Dict[str, Any]) -> Dict[str, Any]:
+def _safe_runtime_state_call(
+    runtime: Any, attr: str, bucket: str, runtime_state: Dict[str, Any]
+) -> Dict[str, Any]:
     method = getattr(runtime, attr, None)
     if method is None or not callable(method):
         return {}
@@ -109,7 +111,9 @@ def _safe_pending_map(runtime: Any, runtime_state: Dict[str, Any]) -> Dict[str, 
     try:
         pending_map = getattr(runtime, "_pending", {}) or {}
     except _SAFE_ROUTE_EXCEPTIONS as exc:
-        _mark_runtime(runtime_state, "runtime_pending", "pending_runtime_pending_failed", type(exc).__name__)
+        _mark_runtime(
+            runtime_state, "runtime_pending", "pending_runtime_pending_failed", type(exc).__name__
+        )
         return {}
     if isinstance(pending_map, dict):
         return pending_map
@@ -218,9 +222,7 @@ def build_pending_state_context(
             source="runtime_pending",
         )
 
-    blockspace = _safe_runtime_state_call(
-        runtime, "blockspace_state", "blockspace", runtime_state
-    )
+    blockspace = _safe_runtime_state_call(runtime, "blockspace_state", "blockspace", runtime_state)
     pending_rate = _safe_float(
         (blockspace.get("summary") or {}).get("competition_pressure") or 0.0, 0.0
     )

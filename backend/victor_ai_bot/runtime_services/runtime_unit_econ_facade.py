@@ -91,9 +91,7 @@ class RuntimeUnitEconFacade:
             if usd_gas is not None:
                 unit["gas_cost_usd_micro"] = str(int(usd_gas))
             if usd_gross is not None and usd_gas is not None:
-                unit["profit_after_gas_usd_micro"] = str(
-                    int(max(0, int(usd_gross) - int(usd_gas)))
-                )
+                unit["profit_after_gas_usd_micro"] = str(int(max(0, int(usd_gross) - int(usd_gas))))
 
             if not isinstance(opportunity.meta, dict):
                 opportunity.meta = {}

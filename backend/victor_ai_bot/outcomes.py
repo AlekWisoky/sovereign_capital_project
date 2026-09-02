@@ -12,6 +12,28 @@ class ExecutionOutcome:
     degraded_mode: str = ""
     tx_hash: str = ""
     details: Dict[str, Any] = field(default_factory=dict)
+    # First-class canonical lifecycle identity. These remain optional for
+    # legacy/non-trade outcomes and are resolved from details when available.
+    decision_id: str = ""
+    correlation_id: str = ""
+    execution_id: str = ""
+    settlement_id: str = ""
+
+    def __post_init__(self) -> None:
+        lineage = self.details.get("lineage") if isinstance(self.details, dict) else {}
+        identity = self.details.get("identity") if isinstance(self.details, dict) else {}
+        lineage = lineage if isinstance(lineage, dict) else {}
+        identity = identity if isinstance(identity, dict) else {}
+        for name in ("decision_id", "correlation_id", "execution_id", "settlement_id"):
+            current = str(getattr(self, name) or "")
+            if current:
+                continue
+            value = identity.get(name) or identity.get(
+                {"decision_id": "decisionId", "correlation_id": "correlationId", "execution_id": "executionId", "settlement_id": "settlementId"}[name]
+            ) or lineage.get(name) or lineage.get(
+                {"decision_id": "decisionId", "correlation_id": "correlationId", "execution_id": "executionId", "settlement_id": "settlementId"}[name]
+            )
+            object.__setattr__(self, name, str(value or ""))
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

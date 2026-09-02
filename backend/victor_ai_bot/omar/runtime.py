@@ -1,39 +1,48 @@
 from __future__ import annotations
-from dataclasses import asdict
-from typing import Dict, Any, Optional
-import threading
-import time
+
 import json
 import os
+import threading
+import time
+from dataclasses import asdict
+from typing import Any, Dict, Optional
+
 import numpy as np
 
+from ..learning.outcome_ledger import CanonicalOutcomeLedger
+from ..pathing import canonical_data_dir
 from .config import OmarConfig
-from .trainer import OmarTrainer
 from .metrics import compute_social_metrics, to_dict
+from .trainer import OmarTrainer
 
 
 class OmarRuntime:
-    """Non-breaking OMAR runtime.
+    """First-class OMAR learning runtime.
 
-    - Runs self-play training (offline style) only when enabled.
-    - Exposes social intelligence metrics on a 1s loop.
-    - Writes audit logs to JSONL.
+    OMAR remains downstream of execution truth: finalized outcomes are read from
+    the canonical PnL ledger, joined to the transaction-linked learning context,
+    and then used for bounded online policy updates. Governance/execution remain
+    authoritative and are never bypassed by this subsystem.
     """
 
     def __init__(self, cfg: OmarConfig, chain_name: str = "default"):
         self.cfg = cfg
-        self.chain_name = chain_name
+        self.chain_name = str(chain_name or "default")
         self._trainer: Optional[OmarTrainer] = None
+        self._ledger: Optional[CanonicalOutcomeLedger] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
 
         self.last_social: Dict[str, Any] = {}
         self.last_train: Dict[str, Any] = {}
+        self.last_real_learning: Dict[str, Any] = {}
         self._cycle = 0
 
-        self.data_dir = os.path.join("data", "superstructure")
-        os.makedirs(self.data_dir, exist_ok=True)
-        self.audit_path = os.path.join(self.data_dir, f"omar_audit_{chain_name}.jsonl")
+        self.data_dir = canonical_data_dir(os.environ.get("VICTOR_DATA_DIR", "backend/data"))
+        self.omar_dir = os.path.join(self.data_dir, "omar")
+        os.makedirs(self.omar_dir, exist_ok=True)
+        self.audit_path = os.path.join(self.omar_dir, f"omar_audit_{self.chain_name}.jsonl")
+        self.policy_path = os.path.join(self.omar_dir, f"policy_{self.chain_name}.json")
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -52,32 +61,64 @@ class OmarRuntime:
             "cycle": self._cycle,
             "last_social": self.last_social,
             "last_train": self.last_train,
+            "real_learning": dict(self.last_real_learning),
+            "ledger": self._ledger.state() if self._ledger is not None else {},
+            "policy": self._trainer.policy.state() if self._trainer is not None else {},
         }
 
     def _log(self, obj: Dict[str, Any]):
-        obj = dict(obj)
-        obj["ts"] = time.time()
+        payload = dict(obj)
+        payload["ts"] = time.time()
         try:
             with open(self.audit_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (OSError, TypeError, ValueError):
             pass
 
-    def _loop(self):
-        # training first (if enabled)
-        if self.cfg.enabled and self.cfg.self_play_enabled:
-            self._trainer = OmarTrainer(self.cfg)
-            stats = self._trainer.train()
-            if stats:
-                self.last_train = asdict(stats[-1])
-            self._log({"event": "omar_training_complete", "last_train": self.last_train})
+    def _learn_real_outcomes(self) -> None:
+        if not self._ledger or not self._trainer:
+            return
+        outcomes = self._ledger.poll(limit=self.cfg.real_outcome_batch_size)
+        if not outcomes:
+            return
+        stats = self._trainer.learn_from_real_outcomes(outcomes)
+        self.last_real_learning = dict(stats)
+        self._log(
+            {
+                "event": "omar_real_outcomes_learned",
+                "outcome_count": len(outcomes),
+                "learning": dict(stats),
+                "tx_hashes": [str(x.tx_hash) for x in outcomes],
+            }
+        )
 
-        # social metrics loop
+    def _loop(self):
+        if self.cfg.enabled:
+            self._ledger = CanonicalOutcomeLedger(
+                data_dir=self.data_dir,
+                chain=self.chain_name,
+                bootstrap_history=self.cfg.outcome_bootstrap_history,
+            )
+            checkpoint = self.policy_path if self.cfg.policy_checkpoint_enabled else None
+            self._trainer = OmarTrainer(self.cfg, checkpoint_path=checkpoint)
+
+            if self.cfg.self_play_enabled:
+                stats = self._trainer.train()
+                if stats:
+                    self.last_train = asdict(stats[-1])
+                self._log(
+                    {
+                        "event": "omar_training_complete",
+                        "last_train": self.last_train,
+                        "policy": self._trainer.policy.state(),
+                    }
+                )
+
         coord_hist = []
         conflict_hist = []
         cap_alloc = {r: 1.0 for r in (self.cfg.roles or [])}
+        next_learning_at = 0.0
         while not self._stop.is_set():
-            # best-effort: update from last training stats
             if self._trainer and self._trainer.last_stats:
                 st = self._trainer.last_stats
                 coord_hist.append(st.mean_coordination)
@@ -85,13 +126,30 @@ class OmarRuntime:
                 coord_hist[:] = coord_hist[-200:]
                 conflict_hist[:] = conflict_hist[-200:]
 
+            now = time.monotonic()
+            if (
+                self.cfg.enabled
+                and self.cfg.real_outcome_learning_enabled
+                and self._trainer
+                and self._ledger
+                and now >= next_learning_at
+            ):
+                self._learn_real_outcomes()
+                next_learning_at = now + self.cfg.real_outcome_poll_seconds
+
             m = compute_social_metrics(
                 coord_hist=np.array(coord_hist, dtype=float),
                 conflict_hist=np.array(conflict_hist, dtype=float),
                 capital_alloc=cap_alloc,
             )
             self.last_social = to_dict(m)
-            self._log({"event": "omar_social_metrics", **self.last_social})
+            self._log(
+                {
+                    "event": "omar_social_metrics",
+                    **self.last_social,
+                    "real_learning": dict(self.last_real_learning),
+                }
+            )
 
             self._cycle += 1
-            time.sleep(1.0)
+            self._stop.wait(1.0)
