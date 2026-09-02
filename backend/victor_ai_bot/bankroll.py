@@ -32,7 +32,16 @@ class BankrollConfig:
 
 @dataclass
 class BankrollState:
+    # Canonical signed economics. This may move below zero after a real loss.
     realized_profit_wei: int = 0
+    realized_net_pnl_wei: int = 0
+    bankroll_loss_wei: int = 0
+    reinvestable_profit_wei: int = 0
+    reinvested_profit_wei: int = 0
+    cumulative_owned_capital_delta_wei: int = 0
+    # Borrowed principal is tracked independently and is never profit.
+    last_flashloan_principal_wei: int = 0
+    last_flashloan_fee_wei: int = 0
     last_amount_in_wei: int = 0
     success_streak: int = 0
     fail_streak: int = 0
@@ -79,6 +88,13 @@ class BankrollManager:
     def _state_payload(self) -> dict[str, Any]:
         return {
             "realized_profit_wei": int(self.state.realized_profit_wei),
+            "realized_net_pnl_wei": int(self.state.realized_net_pnl_wei),
+            "bankroll_loss_wei": int(self.state.bankroll_loss_wei),
+            "reinvestable_profit_wei": int(self.state.reinvestable_profit_wei),
+            "reinvested_profit_wei": int(self.state.reinvested_profit_wei),
+            "cumulative_owned_capital_delta_wei": int(self.state.cumulative_owned_capital_delta_wei),
+            "last_flashloan_principal_wei": int(self.state.last_flashloan_principal_wei),
+            "last_flashloan_fee_wei": int(self.state.last_flashloan_fee_wei),
             "last_amount_in_wei": int(self.state.last_amount_in_wei),
             "success_streak": int(self.state.success_streak),
             "fail_streak": int(self.state.fail_streak),
@@ -115,8 +131,22 @@ class BankrollManager:
             )
         except _SAFE_BANKROLL_STATE_IO_EXCEPTIONS:
             recent_returns = deque(maxlen=window)
+        legacy_profit = int(payload.get("realized_profit_wei") or 0)
+        signed_raw = payload.get("realized_net_pnl_wei")
+        signed_pnl = legacy_profit if signed_raw is None else int(signed_raw)
+        reinvest_raw = payload.get("reinvestable_profit_wei")
+        reinvestable = max(0, signed_pnl) if reinvest_raw is None else int(reinvest_raw)
+        owned_delta_raw = payload.get("cumulative_owned_capital_delta_wei")
+        owned_delta = signed_pnl if owned_delta_raw is None else int(owned_delta_raw)
         return BankrollState(
-            realized_profit_wei=int(payload.get("realized_profit_wei") or 0),
+            realized_profit_wei=signed_pnl,
+            realized_net_pnl_wei=signed_pnl,
+            bankroll_loss_wei=int(payload.get("bankroll_loss_wei") or 0),
+            reinvestable_profit_wei=max(0, reinvestable),
+            reinvested_profit_wei=int(payload.get("reinvested_profit_wei") or 0),
+            cumulative_owned_capital_delta_wei=owned_delta,
+            last_flashloan_principal_wei=int(payload.get("last_flashloan_principal_wei") or 0),
+            last_flashloan_fee_wei=int(payload.get("last_flashloan_fee_wei") or 0),
             last_amount_in_wei=int(payload.get("last_amount_in_wei") or 0),
             success_streak=int(payload.get("success_streak") or 0),
             fail_streak=int(payload.get("fail_streak") or 0),
@@ -191,9 +221,11 @@ class BankrollManager:
         state_payload = self._state_payload()
         keys = (
             "realized_profit_wei",
-            "last_amount_in_wei",
-            "success_streak",
-            "fail_streak",
+            "realized_net_pnl_wei",
+            "bankroll_loss_wei",
+            "reinvestable_profit_wei",
+            "reinvested_profit_wei",
+            "cumulative_owned_capital_delta_wei",
             "updated_ts_ms",
             "profit_updated_ts_ms",
             "sizing_updated_ts_ms",
@@ -213,10 +245,19 @@ class BankrollManager:
     def project_trade_state(
         self,
         *,
-        success: bool,
-        realized_profit_after_gas_wei: int,
+        success: bool | None = None,
+        realized_profit_after_gas_wei: int = 0,
         amount_in_wei: int | None = None,
+        signed_net_pnl_wei: int | None = None,
+        flashloan_principal_wei: int = 0,
+        flashloan_fee_wei: int = 0,
     ) -> dict[str, Any]:
+        """Project bankroll from a settled economic result.
+
+        New callers should provide ``signed_net_pnl_wei`` from the canonical
+        settled-outcome authority. The success flag is retained only for
+        backwards compatibility and is never allowed to erase a signed loss.
+        """
         payload = self._state_payload()
         amt_in = (
             int(amount_in_wei)
@@ -225,31 +266,63 @@ class BankrollManager:
         )
         amt_in = max(1, amt_in)
         payload["last_amount_in_wei"] = int(amt_in)
-        if bool(success):
-            payload["realized_profit_wei"] = int(payload.get("realized_profit_wei") or 0) + max(
-                0, int(realized_profit_after_gas_wei)
-            )
+
+        if signed_net_pnl_wei is None:
+            # Legacy compatibility: successful legacy calls remain positive;
+            # failed legacy calls remain unknown rather than fabricating a loss.
+            signed_pnl = int(realized_profit_after_gas_wei) if bool(success) else 0
+        else:
+            signed_pnl = int(signed_net_pnl_wei)
+
+        previous_signed = int(payload.get("realized_net_pnl_wei") or 0)
+        previous_reinvestable = max(0, int(payload.get("reinvestable_profit_wei") or 0))
+        payload["realized_net_pnl_wei"] = previous_signed + signed_pnl
+        # Keep the legacy field aligned with the canonical signed quantity.
+        payload["realized_profit_wei"] = payload["realized_net_pnl_wei"]
+        payload["bankroll_loss_wei"] = int(payload.get("bankroll_loss_wei") or 0) + max(
+            0, -signed_pnl
+        )
+        payload["cumulative_owned_capital_delta_wei"] = int(
+            payload.get("cumulative_owned_capital_delta_wei") or 0
+        ) + signed_pnl
+        payload["reinvestable_profit_wei"] = previous_reinvestable + max(0, signed_pnl)
+        payload["last_flashloan_principal_wei"] = max(0, int(flashloan_principal_wei))
+        payload["last_flashloan_fee_wei"] = max(0, int(flashloan_fee_wei))
+
+        if signed_net_pnl_wei is not None:
+            profitable = signed_pnl > 0
+            if profitable:
+                payload["success_streak"] = int(payload.get("success_streak") or 0) + 1
+                payload["fail_streak"] = 0
+            elif signed_pnl < 0:
+                payload["fail_streak"] = int(payload.get("fail_streak") or 0) + 1
+                payload["success_streak"] = 0
+            else:
+                payload["success_streak"] = 0
+        elif bool(success):
             payload["success_streak"] = int(payload.get("success_streak") or 0) + 1
             payload["fail_streak"] = 0
         else:
             payload["fail_streak"] = int(payload.get("fail_streak") or 0) + 1
             payload["success_streak"] = 0
+
         now_ms = self._now_ms()
         payload["updated_ts_ms"] = int(now_ms)
         payload["sizing_updated_ts_ms"] = int(now_ms)
-        if bool(success):
+        if signed_net_pnl_wei != 0 or bool(success):
             payload["profit_updated_ts_ms"] = int(now_ms)
         else:
             payload["profit_updated_ts_ms"] = int(payload.get("profit_updated_ts_ms") or now_ms)
+
         results = [int(v) for v in list(self.state.recent_results)]
         returns = [float(v) for v in list(self.state.recent_returns)]
-        if bool(success):
-            realized = max(0, int(realized_profit_after_gas_wei))
+        if signed_pnl > 0:
             results.append(1)
-            returns.append(float(realized) / float(amt_in))
-        else:
+        elif signed_pnl < 0:
             results.append(0)
-            returns.append(0.0)
+        else:
+            results.append(1 if bool(success) else 0)
+        returns.append(float(signed_pnl) / float(amt_in))
         window = max(1, int(getattr(self.cfg, "kelly_window", 50) or 50))
         payload["recent_results"] = results[-window:]
         payload["recent_returns"] = returns[-window:]
@@ -258,8 +331,24 @@ class BankrollManager:
     def apply_state_payload(self, payload: dict[str, Any]) -> None:
         state_payload = dict(payload or {})
         window = max(1, int(getattr(self.cfg, "kelly_window", 50) or 50))
+        signed_raw = state_payload.get("realized_net_pnl_wei")
+        legacy_raw = state_payload.get("realized_profit_wei")
+        signed_pnl = int(legacy_raw or 0) if signed_raw is None else int(signed_raw)
+        owned_delta_raw = state_payload.get("cumulative_owned_capital_delta_wei")
+        owned_delta = signed_pnl if owned_delta_raw is None else int(owned_delta_raw)
+        reinvestable_raw = state_payload.get("reinvestable_profit_wei")
+        reinvestable = max(0, signed_pnl) if reinvestable_raw is None else int(reinvestable_raw)
         self.state = BankrollState(
-            realized_profit_wei=int(state_payload.get("realized_profit_wei") or 0),
+            realized_profit_wei=signed_pnl,
+            realized_net_pnl_wei=signed_pnl,
+            bankroll_loss_wei=max(0, int(state_payload.get("bankroll_loss_wei") or 0)),
+            reinvestable_profit_wei=max(0, reinvestable),
+            reinvested_profit_wei=max(0, int(state_payload.get("reinvested_profit_wei") or 0)),
+            cumulative_owned_capital_delta_wei=owned_delta,
+            last_flashloan_principal_wei=max(
+                0, int(state_payload.get("last_flashloan_principal_wei") or 0)
+            ),
+            last_flashloan_fee_wei=max(0, int(state_payload.get("last_flashloan_fee_wei") or 0)),
             last_amount_in_wei=int(state_payload.get("last_amount_in_wei") or 0),
             success_streak=int(state_payload.get("success_streak") or 0),
             fail_streak=int(state_payload.get("fail_streak") or 0),
@@ -303,22 +392,55 @@ class BankrollManager:
             pass
 
     def record_trade(
-        self, *, success: bool, realized_profit_after_gas_wei: int, amount_in_wei: int | None = None
+        self,
+        *,
+        success: bool,
+        realized_profit_after_gas_wei: int,
+        amount_in_wei: int | None = None,
+        signed_net_pnl_wei: int | None = None,
+        flashloan_principal_wei: int = 0,
+        flashloan_fee_wei: int = 0,
     ) -> None:
         state_payload = self.project_trade_state(
             success=bool(success),
             realized_profit_after_gas_wei=int(realized_profit_after_gas_wei),
             amount_in_wei=amount_in_wei,
+            signed_net_pnl_wei=signed_net_pnl_wei,
+            flashloan_principal_wei=flashloan_principal_wei,
+            flashloan_fee_wei=flashloan_fee_wei,
         )
         self.apply_state_payload(state_payload)
         self._record_history(
             event_type="trade_recorded",
             payload={
                 "success": bool(success),
+                "signed_net_pnl_wei": int(
+                    signed_net_pnl_wei
+                    if signed_net_pnl_wei is not None
+                    else realized_profit_after_gas_wei
+                ),
                 "realized_profit_after_gas_wei": int(realized_profit_after_gas_wei),
+                "flashloan_principal_wei": int(flashloan_principal_wei),
+                "flashloan_fee_wei": int(flashloan_fee_wei),
                 "amount_in_wei": int(state_payload.get("last_amount_in_wei") or 0),
             },
         )
+
+    def record_reinvestment(self, amount_wei: int) -> int:
+        """Consume only the current reinvestable-profit pool."""
+        amount = max(0, int(amount_wei))
+        consumed = min(amount, max(0, int(self.state.reinvestable_profit_wei)))
+        if consumed <= 0:
+            return 0
+        self.state.reinvestable_profit_wei -= consumed
+        self.state.reinvested_profit_wei += consumed
+        self._touch(sizing=True)
+        self._save_state()
+        self._record_history(
+            event_type="profit_reinvested",
+            payload={"amount_wei": int(consumed)},
+        )
+        return consumed
 
     def success_rate_pct(self) -> float:
         if not self.state.recent_results:
@@ -334,7 +456,7 @@ class BankrollManager:
             amt = int(base)
         else:
             reinvest = (
-                int(self.state.realized_profit_wei) * int(self.cfg.reinvest_rate_pct)
+                int(self.state.reinvestable_profit_wei) * int(self.cfg.reinvest_rate_pct)
             ) // 100
             amt = int(base + reinvest)
 
@@ -348,12 +470,18 @@ class BankrollManager:
             amt = min(amt, cap)
         if self.state.fail_streak >= 2:
             amt = max(base, amt // 2)
+        if cap > 0:
+            amt = min(amt, cap)
         self.state.last_amount_in_wei = amt
         self._touch(sizing=True)
         self._save_state()
         self._record_history(
             event_type="sizing_decision",
-            payload={"recommended_amount_in_wei": int(amt)},
+            payload={
+                "recommended_amount_in_wei": int(amt),
+                "reinvestable_profit_wei": int(self.state.reinvestable_profit_wei),
+                "flashloan_principal_excluded": True,
+            },
         )
         return amt
 
