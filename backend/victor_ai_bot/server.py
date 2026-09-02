@@ -53,6 +53,7 @@ from .deploy_mode import enforce_public_defaults
 from .logging_utils import configure_logging
 from .ratelimit import RateLimitMiddleware
 from .runtime_core import attach_runtime, build_runtime, load_runtime_configs, make_runtime_lifespan
+from .sentry_config import init_sentry
 
 log = logging.getLogger(__name__)
 
@@ -184,6 +185,9 @@ def _maybe_attach_omar(
 
 def create_app() -> FastAPI:
     configure_logging()
+    # Observability is initialized before the FastAPI/runtime graph is built,
+    # but it remains non-critical: no DSN or missing SDK means a no-op.
+    init_sentry()
 
     lifespan = make_runtime_lifespan()
     app = FastAPI(title="x∆v — Sovereign Capital", lifespan=lifespan)
