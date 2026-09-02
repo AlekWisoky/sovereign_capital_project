@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from ..capital_compounding import resolve_profit_promotion
 from ..capital_family_policy import build_family_capital_plan
 
 
@@ -28,6 +29,7 @@ class CapitalTruthDerivedStateBundle:
     reserved_collateral_usd: float
     collateralization_ratio: float
     prime_locked_wei_estimate: int
+    profit_promotion: Dict[str, Any]
     categories: Dict[str, str]
     family_allocations: Dict[str, float]
     family_capital_plan: List[Dict[str, Any]]
@@ -107,6 +109,14 @@ def build_capital_truth_derived_state(
     locked_capital_wei = max(0, reserved_capital_wei)
     total_capital_wei = max(0, treasury_balance_wei + retained_profit_wei)
 
+    previous_promoted_profit_wei = _int_like(capital_engine.get("promoted_profit_wei"))
+    profit_promotion = resolve_profit_promotion(
+        capital_engine=capital_engine,
+        realized_profit_wei=realized_profit_wei,
+        reinvestment_policy=reinvestment,
+        previous_promoted_profit_wei=previous_promoted_profit_wei,
+    )
+
     prime_state_ready = bool(internal_prime_state.get("stateReady", True))
     prime_state_reason = str(
         internal_prime_state.get("stateReasonCode")
@@ -135,6 +145,9 @@ def build_capital_truth_derived_state(
         "withdrawable_balance_wei": str(max(0, withdrawable_balance_wei)),
         "treasury_balance_wei": str(max(0, treasury_balance_wei)),
         "capital_locked_wei": str(max(0, locked_capital_wei)),
+        "promotable_profit_wei": str(int(profit_promotion["eligible_profit_wei"])),
+        "promoted_profit_wei": str(int(profit_promotion["promoted_profit_wei"])),
+        "promotion_delta_wei": str(int(profit_promotion["promoted_profit_delta_wei"])),
     }
     family_allocations = _family_allocations(capital_engine)
     family_capital_plan = build_family_capital_plan(
@@ -162,6 +175,7 @@ def build_capital_truth_derived_state(
         reserved_collateral_usd=reserved_collateral_usd,
         collateralization_ratio=collateralization_ratio,
         prime_locked_wei_estimate=prime_locked_wei_estimate,
+        profit_promotion=profit_promotion,
         categories=categories,
         family_allocations=family_allocations,
         family_capital_plan=family_capital_plan,
