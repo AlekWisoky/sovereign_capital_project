@@ -30,7 +30,7 @@ def _lineage_matches(
     if opportunity_id and _text(row.get("opportunity_id")) != opportunity_id:
         return False
     # A settled row is eligible for learning only when the physical ledger
-    # record itself carried the complete production lineage.  The canonical
+    # record itself carried the complete production lineage. The canonical
     # read interface may derive compatibility IDs, but that must never hide a
     # persistence gap from the learner.
     return bool(row.get("lineage_persisted", False))
@@ -234,9 +234,12 @@ def _patch_execution_identity() -> None:
 
 def _patch_persisted_outcome_lineage() -> None:
     """Carry the complete canonical identity into the physical settlement write."""
-    from victor_ai_bot.runtime_services.execution_service import ExecutionService
+    from victor_ai_bot.runtime_services.receipt_service import ReceiptService
 
-    original = getattr(ExecutionService, "persist_execution_outcome", None)
+    # ReceiptService owns persist_execution_outcome in the canonical runtime
+    # chain. Patching ExecutionService here was a dead compatibility path and
+    # left the actual receipt -> ledger boundary unprotected.
+    original = getattr(ReceiptService, "persist_execution_outcome", None)
     if original is None or getattr(original, "_production_lineage_patched", False):
         return
 
@@ -260,7 +263,7 @@ def _patch_persisted_outcome_lineage() -> None:
         return original(*args, **kwargs)
 
     wrapped._production_lineage_patched = True
-    ExecutionService.persist_execution_outcome = wrapped
+    ReceiptService.persist_execution_outcome = wrapped
 
 
 def _patch_settlement_resolution() -> None:
