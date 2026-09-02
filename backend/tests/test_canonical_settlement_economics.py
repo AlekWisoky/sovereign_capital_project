@@ -40,6 +40,15 @@ def test_bankroll_signed_loss_controls_reinvestment():
     assert b.next_amount_in() == 1000
 
 
+def test_positive_settled_profit_can_compound():
+    b = BankrollManager(BankrollConfig(auto_reinvest_enabled=True, reinvest_rate_pct=100, base_borrow_amount_wei=1000, max_borrow_amount_wei=10000))
+    b.record_settled_outcome(MoneyLoopAccounting.from_ledger_transaction(_tx("win", 1, 1.15)))
+    assert b.state.realized_pnl_usd == 1.15
+    assert b.state.reinvestable_profit_usd == 1.15
+    assert b.state.realized_profit_wei == 250
+    assert b.next_amount_in() == 1250
+
+
 def test_canonical_writer_passes_settled_economics_to_bankroll(monkeypatch):
     captured = {}
     def fake_commit(self, runtime, **kwargs):
