@@ -8,6 +8,7 @@ from victor_ai_bot.runtime_services.canonical_settlement_interface import (
     install_canonical_settlement_bridge,
     install_canonical_settlement_interface,
 )
+from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
 
 
 class _Repo:
@@ -110,7 +111,9 @@ def test_canonical_settled_outcome_returns_none_without_settlement_transaction()
 
 def test_runtime_interface_exposes_the_same_canonical_ledger_record():
     install_canonical_settlement_interface()
-    runtime = _Runtime([_settlement(canonical_decision_id="decision-1")])
+    runtime = object.__new__(RuntimeReceiptFacade)
+    runtime.cfg = _Runtime._Cfg()
+    runtime._ledger_repo = _Repo([_settlement(canonical_decision_id="decision-1")])
 
     outcome = runtime.canonical_settled_outcome(
         tx_hash="0xabc", decision_id="decision-1"
@@ -126,7 +129,11 @@ def test_phase4_bridge_uses_runtime_canonical_interface(monkeypatch):
 
     def canonical_settled_outcome(**kwargs):
         calls.append(kwargs)
-        return {"status": "settled", "realized_net_usd": 2.0}
+        return {
+            "status": "settled",
+            "realized_net_usd": 2.0,
+            "lineage_persisted": True,
+        }
 
     runtime = SimpleNamespace(canonical_settled_outcome=canonical_settled_outcome)
     opp = SimpleNamespace(
