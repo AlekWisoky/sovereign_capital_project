@@ -2,60 +2,22 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from victor_ai_bot.decision_identity import ensure_decision_identity, lineage_from_opportunity
+from victor_ai_bot.decision_identity import lineage_from_opportunity
 from victor_ai_bot.omar import production_lineage_bridge
-from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
 
 
-def test_identity_is_created_before_omar_and_preserved_on_decision_and_opportunity():
-    opp = SimpleNamespace(id="opp-1", route_id="route-1", meta={})
-    decision = SimpleNamespace(metadata={})
-
-    identity = ensure_decision_identity(
-        opp,
-        decision,
-        chain_name="ethereum",
-        current_block=123,
-    )
-
-    assert identity.decision_id
-    assert identity.correlation_id
-    assert opp.meta["brain"]["canonical_decision_id"] == identity.decision_id
-    assert opp.meta["brain"]["correlation_id"] == identity.correlation_id
-    assert decision.metadata["canonical_decision_id"] == identity.decision_id
-    assert decision.metadata["correlation_id"] == identity.correlation_id
-    assert lineage_from_opportunity(opp) == {
-        "decision_id": identity.decision_id,
-        "correlation_id": identity.correlation_id,
-    }
-
-
-def test_identity_is_stable_when_the_same_decision_is_reentered():
-    opp = SimpleNamespace(id="opp-1", route_id="route-1", meta={})
-    decision = SimpleNamespace(metadata={})
-
-    first = ensure_decision_identity(
-        opp,
-        decision,
-        chain_name="ethereum",
-        current_block=123,
-    )
-    second = ensure_decision_identity(
-        opp,
-        decision,
-        chain_name="ethereum",
-        current_block=123,
-    )
-
-    assert second == first
-
-
-def test_runtime_decision_boundary_creates_identity_even_when_omar_is_disabled():
-    runtime = object.__new__(RuntimeDecisionFacade)
+def test_decision_identity_is_preserved_when_omar_is_not_present():
+    runtime = SimpleNamespace()
     runtime.cfg = SimpleNamespace(chain=SimpleNamespace(name="ethereum"))
     runtime._omar = None
     opp = SimpleNamespace(id="opp-1", route_id="route-1", meta={})
     decision = SimpleNamespace(metadata={})
+
+    from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+
+    runtime._apply_omar_to_candidate = RuntimeDecisionFacade._apply_omar_to_candidate.__get__(runtime)
+    install_production_lineage_bridge()
 
     chosen, returned_decision = runtime._apply_omar_to_candidate(
         opp,
@@ -72,13 +34,14 @@ def test_runtime_decision_boundary_creates_identity_even_when_omar_is_disabled()
     assert decision.metadata["correlation_id"] == lineage["correlation_id"]
 
 
-def test_settlement_guard_rejects_cross_trade_lineage():
+def test_settlement_guard_requires_physical_lineage_and_rejects_cross_trade_lineage():
     assert production_lineage_bridge._lineage_matches(
         {
             "status": "settled",
             "decision_id": "decision-1",
             "correlation_id": "corr-1",
             "opportunity_id": "opp-1",
+            "lineage_persisted": True,
         },
         decision_id="decision-1",
         correlation_id="corr-1",
@@ -90,6 +53,19 @@ def test_settlement_guard_rejects_cross_trade_lineage():
             "decision_id": "decision-2",
             "correlation_id": "corr-2",
             "opportunity_id": "opp-2",
+            "lineage_persisted": True,
+        },
+        decision_id="decision-1",
+        correlation_id="corr-1",
+        opportunity_id="opp-1",
+    )
+    assert not production_lineage_bridge._lineage_matches(
+        {
+            "status": "settled",
+            "decision_id": "decision-1",
+            "correlation_id": "corr-1",
+            "opportunity_id": "opp-1",
+            "lineage_persisted": False,
         },
         decision_id="decision-1",
         correlation_id="corr-1",
