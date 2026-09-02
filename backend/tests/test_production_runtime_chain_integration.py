@@ -45,6 +45,7 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
     runtime.rpc_manager.best_read = lambda: "read://test"
     runtime.rpc_manager.best_send = lambda: "send://test"
     runtime.rpc_manager.best_private = lambda: ""
+    runtime._cb = SimpleNamespace(allow_auto_trading=lambda: True, remaining_cooldown_s=lambda: 0)
 
     route = Route(
         legs=[
@@ -91,6 +92,15 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
     async def annotate(*args, **kwargs):
         return None
 
+    async def postdecision_analytics(*args, **kwargs):
+        return None
+
+    async def post_tick_tails(*args, **kwargs):
+        return None
+
+    async def loop_iteration_tail(*args, **kwargs):
+        return None
+
     runtime._scan_primary_opportunities = scan_primary
     runtime._safe_annotate_can_execute = annotate
     runtime._gas_signal_snapshot = lambda rpc: {
@@ -110,7 +120,9 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
         "behave_state": {"regime_label": "balanced"},
     }
     runtime._run_predecision_additive_state = lambda **kwargs: {"mev_snap": {}}
-    runtime._run_postdecision_analytics_state = lambda **kwargs: None
+    runtime._run_postdecision_analytics_state = postdecision_analytics
+    runtime._run_post_tick_tails = post_tick_tails
+    runtime._run_loop_iteration_tail = loop_iteration_tail
 
     from victor_ai_bot.decision_engine import TradeDecision
 
@@ -236,13 +248,17 @@ async def test_production_runtime_chain_keeps_execution_identity_per_attempt(mon
         decision=decision,
         prep=prep,
     )
-    first = identity_from(runtime_execute_wrapper_facade._ensure_execution_identity(
-        ExecResult(ok=True, dry_run=True, reason="test", plan={}), decision
-    ))
+    first = identity_from(
+        runtime_execute_wrapper_facade._ensure_execution_identity(
+            ExecResult(ok=True, dry_run=True, reason="test", plan={}), decision
+        )
+    )
 
-    second = identity_from(runtime_execute_wrapper_facade._ensure_execution_identity(
-        ExecResult(ok=True, dry_run=True, reason="test", plan={}), decision
-    ))
+    second = identity_from(
+        runtime_execute_wrapper_facade._ensure_execution_identity(
+            ExecResult(ok=True, dry_run=True, reason="test", plan={}), decision
+        )
+    )
 
     assert len(calls) == 1
     assert first is not None and second is not None
