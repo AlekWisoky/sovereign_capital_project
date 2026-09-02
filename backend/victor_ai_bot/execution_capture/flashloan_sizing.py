@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from ..capital_family_policy import family_alias_candidates, resolve_family_target as resolve_canonical_family_target
+from ..capital_family_policy import (
+    family_alias_candidates,
+    resolve_family_target as resolve_canonical_family_target,
+)
 from ..runtime_services.treasury_governance_truth import treasury_governance_view
 from .models import OpportunityEnvelope, SafeSizePoint
 
@@ -18,7 +21,6 @@ _PROVIDER_LIMITS = {
     "uniswap_flash": 2.5,
     "default": 3.0,
 }
-
 
 
 def _provider_limit(provider: str) -> float:

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from ._common import ensure_proposal, get_primary_opportunity, make_component, opportunity_after_costs_wei, opportunity_after_gas_usd_micro
+from ._common import (
+    ensure_proposal,
+    get_primary_opportunity,
+    make_component,
+    opportunity_after_costs_wei,
+    opportunity_after_gas_usd_micro,
+)
 
 
 def grade_profit(ctx, proposal):

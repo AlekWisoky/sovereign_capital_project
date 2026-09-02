@@ -117,7 +117,8 @@ def build_capital_truth_derived_state(
     prime_utilization = _float_like(internal_prime_state.get("utilization"))
     prime_family_exposure = _prime_family_exposure(internal_prime_state)
     prime_open_loan_count = _int_like(
-        internal_prime_state.get("loanCount") or len(list(internal_prime_state.get("openLoans") or []))
+        internal_prime_state.get("loanCount")
+        or len(list(internal_prime_state.get("openLoans") or []))
     )
     reserved_collateral_usd = _reserved_collateral_usd(internal_prime_state)
     collateralization_ratio = _float_like(internal_prime_state.get("collateralizationRatio"))

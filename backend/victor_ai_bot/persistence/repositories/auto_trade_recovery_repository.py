@@ -160,7 +160,9 @@ class AutoTradeRecoveryRepository:
                 ),
                 "history_stage": str(payload.get("history_stage") or payload.get("stage") or "ok"),
                 "history_reason_code": str(payload.get("history_reason_code") or ""),
-                "history_reason_codes": self._string_list(payload.get("history_reason_codes") or []),
+                "history_reason_codes": self._string_list(
+                    payload.get("history_reason_codes") or []
+                ),
                 "history_next_action": str(payload.get("history_next_action") or ""),
                 "reliability_class": str(payload.get("reliability_class") or "stable"),
                 "reliability_reason_code": str(payload.get("reliability_reason_code") or "ok"),

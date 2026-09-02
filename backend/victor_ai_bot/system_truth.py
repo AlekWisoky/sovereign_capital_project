@@ -205,8 +205,12 @@ def build_system_truth() -> Dict[str, Any]:
         "runtime_legacy_lines": _line_count(BACKEND_ROOT / "victor_ai_bot" / "runtime_legacy.py"),
         "api_legacy_lines": _line_count(BACKEND_ROOT / "victor_ai_bot" / "api_legacy.py"),
         "runtime_bundle_definition_count": _runtime_bundle_definition_count(),
-        "runtime_legacy_broad_except_count": exception_inventory["legacy_files"].get("backend/victor_ai_bot/runtime_legacy.py", 0),
-        "api_legacy_broad_except_count": exception_inventory["legacy_files"].get("backend/victor_ai_bot/api_legacy.py", 0),
+        "runtime_legacy_broad_except_count": exception_inventory["legacy_files"].get(
+            "backend/victor_ai_bot/runtime_legacy.py", 0
+        ),
+        "api_legacy_broad_except_count": exception_inventory["legacy_files"].get(
+            "backend/victor_ai_bot/api_legacy.py", 0
+        ),
         "legacy_broad_except_count": exception_inventory["legacy_total"],
         "backend_broad_except_count": exception_inventory["backend_total"],
         "legacy_broad_exception_sites": exception_inventory["legacy_sites"],
@@ -314,7 +318,9 @@ def render_system_truth_markdown(truth: Dict[str, Any]) -> str:
     ]
     backend_sites = truth.get("backend_broad_exception_sites") or []
     if backend_sites:
-        lines.extend([f"- {site['path']}:{site['lineno']} {site['line']}" for site in backend_sites])
+        lines.extend(
+            [f"- {site['path']}:{site['lineno']} {site['line']}" for site in backend_sites]
+        )
     else:
         lines.append("- none")
     lines.extend(["", "## Runtime services"])

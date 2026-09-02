@@ -16,7 +16,9 @@ class CapitalTruthRuntimeStateAdapterBundle:
     bankroll_state: Any
 
 
-def build_capital_truth_runtime_state_adapters(runtime: Any) -> CapitalTruthRuntimeStateAdapterBundle:
+def build_capital_truth_runtime_state_adapters(
+    runtime: Any,
+) -> CapitalTruthRuntimeStateAdapterBundle:
     treasury_state = safe_call(runtime, "treasury_state", default={})
     capital_state = safe_call(runtime, "capital_engine_state", default={})
     internal_prime_state = safe_call(runtime, "internal_prime_state", default={})

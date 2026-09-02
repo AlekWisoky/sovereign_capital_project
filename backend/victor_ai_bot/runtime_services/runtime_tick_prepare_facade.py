@@ -54,9 +54,7 @@ class RuntimeTickPrepareFacade:
                                 "breaker_trip",
                                 {
                                     "kind": "rpc_error_storm",
-                                    "threshold": int(
-                                        os.environ.get("VICTOR_RPC_ERR_STREAK", "5")
-                                    ),
+                                    "threshold": int(os.environ.get("VICTOR_RPC_ERR_STREAK", "5")),
                                 },
                                 actor="system",
                                 reason="rpc_error_storm",

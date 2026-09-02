@@ -127,7 +127,9 @@ def _reference_action(bundle: Dict[str, Any]) -> ReferenceAction:
             return ReferenceAction(quality="none")
         return ReferenceAction(
             proposal=ProposalOutput(
-                opportunity_id=str(primary.get("opportunity_id") or bundle.get("opportunity_id") or ""),
+                opportunity_id=str(
+                    primary.get("opportunity_id") or bundle.get("opportunity_id") or ""
+                ),
                 strategy_id=str(primary.get("strategy_id") or "flashloan_atomic"),
                 notional_usd_micro=max(
                     0,

@@ -57,7 +57,14 @@ from .runtime_core import attach_runtime, build_runtime, load_runtime_configs, m
 log = logging.getLogger(__name__)
 
 _OMAR_IMPORT_EXCEPTIONS = (ImportError, ModuleNotFoundError, AttributeError)
-_OMAR_RAW_SETTINGS_EXCEPTIONS = (ImportError, ModuleNotFoundError, OSError, UnicodeError, TypeError, ValueError)
+_OMAR_RAW_SETTINGS_EXCEPTIONS = (
+    ImportError,
+    ModuleNotFoundError,
+    OSError,
+    UnicodeError,
+    TypeError,
+    ValueError,
+)
 _OMAR_ATTACH_EXCEPTIONS = (RuntimeError, AttributeError, TypeError, ValueError)
 _PUBLIC_DEFAULTS_EXCEPTIONS = (AttributeError, TypeError, ValueError)
 
@@ -128,7 +135,9 @@ def _maybe_attach_omar(
       export VICTOR_ENABLE_OMAR=1
     """
 
-    omar_status = boot_status.setdefault("omar", {"enabled": False, **_boot_bucket(reason="disabled")})
+    omar_status = boot_status.setdefault(
+        "omar", {"enabled": False, **_boot_bucket(reason="disabled")}
+    )
 
     if (os.environ.get("VICTOR_ENABLE_OMAR", "") or "").strip() != "1":
         _set_boot(omar_status, ok=True, reason="disabled")

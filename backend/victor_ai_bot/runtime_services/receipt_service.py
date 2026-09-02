@@ -2078,15 +2078,16 @@ class ReceiptService:
         )
         settlement_borrowing = dict(settlement.get("borrowing") or {})
         latest_flash = (
-            dict(latest.get("flashloan") or {})
-            if isinstance(latest.get("flashloan"), dict)
-            else {}
+            dict(latest.get("flashloan") or {}) if isinstance(latest.get("flashloan"), dict) else {}
         )
         payload = {
             "ok": True,
             "lastTxHash": str(settlement.get("receiptId") or latest.get("txHash") or ""),
             "lastRouteFamily": str(
-                settlement.get("routeFamily") or settlement.get("lastRouteFamily") or latest.get("routeFamily") or ""
+                settlement.get("routeFamily")
+                or settlement.get("lastRouteFamily")
+                or latest.get("routeFamily")
+                or ""
             ),
             "lastFamily": str(
                 settlement.get("family") or settlement_family_info.get("launchFamily") or ""
@@ -2103,17 +2104,13 @@ class ReceiptService:
             "lastFamilyAliases": list(
                 settlement.get("familyAliases") or settlement_family_info.get("aliases") or []
             ),
-            "lastFamilyIdentity": dict(
-                settlement.get("familyIdentity") or settlement_family_info
-            ),
+            "lastFamilyIdentity": dict(settlement.get("familyIdentity") or settlement_family_info),
             "lastTerminalProfitabilityAuthority": dict(
                 settlement.get("terminalProfitabilityAuthority") or {}
             ),
             "lastCapitalAdmission": capital_admission,
             "lastProvider": str(
-                settlement_borrowing.get("provider")
-                or latest_flash.get("selectedProvider")
-                or ""
+                settlement_borrowing.get("provider") or latest_flash.get("selectedProvider") or ""
             ),
             "lastFlashloanFeeWei": int(
                 settlement_borrowing.get("flashloanFeeWei")

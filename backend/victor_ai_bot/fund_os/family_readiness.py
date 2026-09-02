@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from victor_ai_bot.capital_family_policy import family_alias_candidates, resolve_family_target as resolve_canonical_family_target
-from .family_identity import canonical_launch_family_id, family_alias_candidates as launch_family_alias_candidates, family_identity, is_core_launch_family
+from victor_ai_bot.capital_family_policy import (
+    family_alias_candidates,
+    resolve_family_target as resolve_canonical_family_target,
+)
+from .family_identity import (
+    canonical_launch_family_id,
+    family_alias_candidates as launch_family_alias_candidates,
+    family_identity,
+    is_core_launch_family,
+)
 from .health_states import HealthState, normalize_health_state
 from .launch_acceleration import family_launch_acceleration_signal
 from .launch_modes import DEFAULT_ACTIVATION_ORDER
@@ -27,8 +35,6 @@ _HEALTH_STATE_STRENGTH = {
     HealthState.DISABLED.value: 5,
     HealthState.QUARANTINED.value: 6,
 }
-
-
 
 
 def _prefer_stronger_health_state(current: str, candidate: str) -> str:
@@ -277,7 +283,9 @@ def build_family_readiness(
     family = str(identity.get("launchFamily") or requested_family)
     runtime_family = str(identity.get("runtimeFamily") or family)
     capital_family = str(identity.get("capitalFamily") or runtime_family or family)
-    family_aliases = launch_family_alias_candidates([requested_family, family, runtime_family, capital_family])
+    family_aliases = launch_family_alias_candidates(
+        [requested_family, family, runtime_family, capital_family]
+    )
     core_family = bool(identity.get("isCore", False))
 
     mandates = dict((fund_mandate_registry().get("families") or {}))
@@ -294,13 +302,15 @@ def build_family_readiness(
     drawdown = float(fam.get("drawdownPenalty") or 0.0)
     eng = _engine_row(family, engine_state)
     execution_signal = _execution_readiness_signal(family, engine_state)
-    active_family_ids = [canonical_launch_family_id(str(x or "")) for x in list(active_families or []) if str(x)]
-    state_map = {canonical_launch_family_id(str(k or "")): v for k, v in dict(family_states or {}).items()}
+    active_family_ids = [
+        canonical_launch_family_id(str(x or "")) for x in list(active_families or []) if str(x)
+    ]
+    state_map = {
+        canonical_launch_family_id(str(k or "")): v for k, v in dict(family_states or {}).items()
+    }
     current_state = normalize_health_state(
         state_map.get(family),
-        default=(
-            HealthState.LIVE.value if core_family else HealthState.OBSERVE_ONLY.value
-        ),
+        default=(HealthState.LIVE.value if core_family else HealthState.OBSERVE_ONLY.value),
     )
 
     cal_items = list((calibration or {}).get("items") or [])
@@ -340,9 +350,7 @@ def build_family_readiness(
     private_ready = family not in {"mev_search", "liquidation_capture"} or bool(
         (fund_summary or {}).get("privateRoutingReady", True)
     )
-    interaction_ok = (
-        family == "funding_arb" or family not in active_family_ids or core_family
-    )
+    interaction_ok = family == "funding_arb" or family not in active_family_ids or core_family
     capital_ready = bool((fund_summary or {}).get("capitalReady", True))
     internal_prime_ready = bool((fund_summary or {}).get("internalPrimeReady", True))
     capital_truth_reason_codes = [
@@ -962,9 +970,7 @@ def build_family_readiness(
     )
     receipt_outcome_truth_rollout_ready = bool(receipt_outcome_truth_rollout.get("ready", True))
     receipt_outcome_truth_rollout_reason_codes = [
-        str(x)
-        for x in list(receipt_outcome_truth_rollout.get("reasonCodes") or [])
-        if str(x)
+        str(x) for x in list(receipt_outcome_truth_rollout.get("reasonCodes") or []) if str(x)
     ]
     internal_prime_reliability_class = str(
         (fund_summary or {}).get("internalPrimeReliabilityClass")
@@ -1132,12 +1138,16 @@ def build_family_readiness(
             "continue_v1_learning",
             "restore_capital_truth",
         }:
-            recovery_next_action = str(receipt_outcome_truth_rollout.get("nextAction") or "restore_receipt_outcome_truth")
+            recovery_next_action = str(
+                receipt_outcome_truth_rollout.get("nextAction") or "restore_receipt_outcome_truth"
+            )
         if not suggested_next_action or suggested_next_action in {
             "activate_family",
             "continue_v1_learning",
         }:
-            suggested_next_action = str(receipt_outcome_truth_rollout.get("nextAction") or "restore_receipt_outcome_truth")
+            suggested_next_action = str(
+                receipt_outcome_truth_rollout.get("nextAction") or "restore_receipt_outcome_truth"
+            )
 
     recovery_reliability_rollout_ready = recovery_reliability_class in {"stable", "cautious"}
     if not core_family and not recovery_reliability_rollout_ready:
@@ -1235,12 +1245,25 @@ def build_family_readiness(
 
     effective_state = current_state
     state_alignment = "aligned"
-    if not core_family and family in active_family_ids and not bool(execution_signal.get("actualExecutionReady")):
+    if (
+        not core_family
+        and family in active_family_ids
+        and not bool(execution_signal.get("actualExecutionReady"))
+    ):
         effective_state = HealthState.DEGRADED.value
         state_alignment = "execution_truth_override"
     elif not core_family and not bool(execution_signal.get("executionEvidencePresent")):
         effective_state = HealthState.OBSERVE_ONLY.value
-        state_alignment = "execution_truth_override" if current_state not in {HealthState.OBSERVE_ONLY.value, HealthState.QUARANTINED.value, HealthState.DISABLED.value} else "aligned"
+        state_alignment = (
+            "execution_truth_override"
+            if current_state
+            not in {
+                HealthState.OBSERVE_ONLY.value,
+                HealthState.QUARANTINED.value,
+                HealthState.DISABLED.value,
+            }
+            else "aligned"
+        )
 
     return {
         "family": family,

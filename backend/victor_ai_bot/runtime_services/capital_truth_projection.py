@@ -78,12 +78,16 @@ def build_capital_truth_projection(
                 "deployable_wei": str(dict(categories or {}).get("deployable_capital_wei") or "0"),
                 "reserved_wei": str(dict(categories or {}).get("reserved_capital_wei") or "0"),
                 "locked_wei": str(dict(categories or {}).get("capital_locked_wei") or "0"),
-                "treasury_balance_wei": str(dict(categories or {}).get("treasury_balance_wei") or "0"),
+                "treasury_balance_wei": str(
+                    dict(categories or {}).get("treasury_balance_wei") or "0"
+                ),
             },
             "profit": {
                 "realized_wei": str(dict(categories or {}).get("realized_profit_wei") or "0"),
                 "retained_wei": str(dict(categories or {}).get("retained_profit_wei") or "0"),
-                "withdrawable_wei": str(dict(categories or {}).get("withdrawable_balance_wei") or "0"),
+                "withdrawable_wei": str(
+                    dict(categories or {}).get("withdrawable_balance_wei") or "0"
+                ),
             },
             "family_allocations": dict(family_allocations or {}),
             "family_capital_plan": list(family_capital_plan or []),
@@ -102,7 +106,9 @@ def build_capital_truth_projection(
         payload=truth,
         source_contracts={
             "receiptSettlement": _safe_dict(reconciliation_payload.get("receipt_settlement")),
-            "internalPrimeJournal": _safe_dict(reconciliation_payload.get("internal_prime_journal")),
+            "internalPrimeJournal": _safe_dict(
+                reconciliation_payload.get("internal_prime_journal")
+            ),
             "internalPrimeLedger": _safe_dict(reconciliation_payload.get("internal_prime_ledger")),
             "capitalConvergence": _safe_dict(reconciliation_payload.get("capital_convergence")),
         },
@@ -110,7 +116,6 @@ def build_capital_truth_projection(
         read_model=CAPITAL_TRUTH_SUMMARY_READ_MODEL,
     )
     return to_json_safe(truth)
-
 
 
 def build_compact_capital_truth_projection(capital_truth: Dict[str, Any] | None) -> Dict[str, Any]:
