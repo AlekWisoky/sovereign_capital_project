@@ -232,6 +232,32 @@ def _patch_execution_identity() -> None:
     ExecutionService.handle_post_execute_bookkeeping = wrapped
 
 
+def _patch_receipt_finalize_lineage() -> None:
+    """Resolve execution/outcome identity before the settlement side effects run."""
+    from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+
+    original = getattr(RuntimeReceiptFacade, "_safe_finalize_receipt_side_effects", None)
+    if original is None or getattr(original, "_production_lineage_patched", False):
+        return
+
+    def wrapped(self: Any, *args: Any, **kwargs: Any):
+        try:
+            signature = inspect.signature(original)
+            bound = signature.bind_partial(self, *args, **kwargs)
+            pending = bound.arguments.get("pending")
+            if isinstance(pending, Mapping):
+                bound.arguments["pending"] = _enrich_pending_lineage(
+                    pending, runtime=self
+                )
+                return original(*bound.args, **bound.kwargs)
+        except _SAFE:
+            pass
+        return original(self, *args, **kwargs)
+
+    wrapped._production_lineage_patched = True
+    RuntimeReceiptFacade._safe_finalize_receipt_side_effects = wrapped
+
+
 def _patch_persisted_outcome_lineage() -> None:
     """Carry the complete canonical identity into the physical settlement write."""
     from victor_ai_bot.runtime_services.receipt_service import ReceiptService
@@ -295,6 +321,7 @@ def install_production_lineage_bridge() -> None:
     try:
         _patch_decision_identity()
         _patch_execution_identity()
+        _patch_receipt_finalize_lineage()
         _patch_persisted_outcome_lineage()
         _patch_settlement_resolution()
     except _SAFE:
