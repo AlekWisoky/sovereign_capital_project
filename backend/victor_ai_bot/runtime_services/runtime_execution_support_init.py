@@ -14,7 +14,7 @@ from ..efficiency import EfficiencyTracker
 from ..governance import GovernanceRuntime
 from ..pnl import PnLStore
 from ..persistence.repositories.bankroll_repository import BankrollEventRepository
-from ..treasury import TreasuryRuntime
+from ..treasury.compounding_runtime import CompoundingTreasuryRuntime
 
 _SAFE_RUNTIME_EXCEPTIONS = (
     AttributeError,
@@ -103,7 +103,7 @@ def initialize_execution_support_stack(runtime: Any, cfg: Any, data_dir: str) ->
         runtime._behave = None
 
     try:
-        runtime._treasury = TreasuryRuntime(
+        runtime._treasury = CompoundingTreasuryRuntime(
             cfg=getattr(cfg.execution, "treasury", None),
             data_dir=data_dir,
             db=runtime._db,
