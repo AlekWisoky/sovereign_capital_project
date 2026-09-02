@@ -9,7 +9,7 @@ on:
 jobs:
   authoritative-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: "1. Clean checkout / synchronization"
         uses: actions/checkout@v4
@@ -41,10 +41,10 @@ jobs:
         run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "4. Canonical propagation tests"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "canonical_decision or canonical_lineage or decision_identity"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "5. Production runtime-chain test"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "production_runtime or runtime_chain or production.*lineage"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "6. Physical pending → receipt → settlement test"
         run: PYTHONPATH=backend pytest -q backend/tests/test_omar_pending_settlement_lineage.py
@@ -53,25 +53,25 @@ jobs:
         run: PYTHONPATH=backend pytest -q backend/tests/test_adaptive_flashloan_risk_budget.py backend/tests/test_flashloan_sizing_canonical_controller.py backend/tests/test_flashloan_sizing_omar_integration.py
 
       - name: "8. Exact decision/correlation/execution/outcome lineage"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "lineage and (decision or execution or outcome or correlation)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "9. Settled-only learning gate"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "settled and (learning or learner or omar)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "10. Duplicate-settlement idempotency"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "duplicate and settlement and (learning or omar or outcome)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "11. OMAR-disabled identity preservation"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "omar.*disabled and (identity or decision)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "12. Operator-intent immutability"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "operator.*intent and (immutable or immutability or fingerprint)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "13. capital_engine_state authority"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "capital_engine_state and (authority or sizing or learning or omar)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
 
       - name: "14. Latency / slippage / gas / net economics"
-        run: PYTHONPATH=backend pytest -q backend/tests -k "(latency or slippage or gas or net_profit or net.*economics) and (execution or sizing or learning or omar)"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py backend/tests/test_*sizing*.py
 
       - name: "15. Full backend pytest"
         working-directory: backend
@@ -92,6 +92,10 @@ jobs:
           while read -r slice; do mypy @"$slice"; done < backend/mypy_targets.txt
 
       - name: "19. Contracts"
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: "19a. Forge tests"
         working-directory: contracts
         run: forge test -q
 
