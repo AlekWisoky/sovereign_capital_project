@@ -28,21 +28,26 @@ def test_conversion_stale_invalid_ratio_and_zero_denominator_fail_closed():
 
 
 def test_demand_freshness_and_provider_capacity_are_independent_constraints():
-    value = demand()
-    assert value.validate(now=NOW).value == "valid"
-    assert value.provider_capacity_requirement.amount > 0
-    assert value.demand_expires_at > NOW
+    assert demand().validate(now=NOW) == demand().status
+    low_capacity = Capacity(9_000_000, "USDC", "aave", NOW, NOW + timedelta(minutes=5))
+    assert demand(provider_capacity_requirement=low_capacity).validate(now=NOW).value == "invalid"
+    expired_capacity = Capacity(12_000_000, "USDC", "aave", NOW - timedelta(minutes=10), NOW - timedelta(minutes=1))
+    assert demand(provider_capacity_requirement=expired_capacity).validate(now=NOW).value == "stale"
+    assert demand(demand_expires_at=NOW - timedelta(seconds=1)).validate(now=NOW).value == "stale"
 
 
-def test_aggressiveness_and_goal_caps_reduce_strategy_budget_only():
-    value = demand()
-    aggressive = apply_aggressiveness_cap(value, 0.5, now=NOW)
-    goal = apply_goal_cap(value, 0.5, now=NOW)
-    assert aggressive.strategy_budget_consumption.amount <= value.strategy_budget_consumption.amount
-    assert goal.strategy_budget_consumption.amount <= value.strategy_budget_consumption.amount
+def test_goal_and_aggressiveness_are_modifiers_not_authorizers():
+    with pytest.raises(CapitalDemandError):
+        apply_goal_cap(demand=demand(), cap=1, accepted=False, now=NOW)
+    reduced = apply_goal_cap(demand=demand(), cap=20, accepted=True, now=NOW)
+    assert reduced.strategy_budget_consumption.amount == 20
+    with pytest.raises(CapitalDemandError):
+        apply_aggressiveness_cap(demand=demand(gas_reserve=Money(0, "USD", 2, "USD")), multiplier=2, safety_approved=True, now=NOW)
 
 
-def test_live_family_requires_valid_demand():
-    value = demand()
-    assert live_eligible_family(value, now=NOW) is True
-    assert live_eligible_family(demand(status="unknown"), now=NOW) is False
+def test_phase_a_rollout_policy_is_contract_only():
+    assert live_eligible_family(family="flash_arb", ready=True, governed=True)
+    assert not live_eligible_family(family="stat_arb", ready=True, governed=True)
+    assert not live_eligible_family(family="flash_arb", ready=False, governed=True)
+    assert not live_eligible_family(family="flash_arb", ready=True, governed=False)
+    assert not live_eligible_family(family="stat_arb", mode="ai_managed", selected=("stat_arb",), ready=True, governed=True)
