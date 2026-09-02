@@ -1,0 +1,54 @@
+name: Production Runtime Gate
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-runtime:
+    name: Linux production runtime chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+
+      - name: Verify production runtime method chain
+        env:
+          PYTHONPATH: backend
+          VICTOR_DATA_DIR: ${{ runner.temp }}/victor-data
+        run: |
+          pytest -q backend/tests/test_production_runtime_chain_integration.py
+
+      - name: Verify execution-learning launch contracts
+        env:
+          PYTHONPATH: backend
+          VICTOR_DATA_DIR: ${{ runner.temp }}/victor-data
+        run: |
+          pytest -q backend/tests/test_execution_learning_launch.py
+
+      - name: Verify complete backend regression suite
+        env:
+          PYTHONPATH: backend
+          VICTOR_DATA_DIR: ${{ runner.temp }}/victor-data
+        run: |
+          cd backend
+          pytest -q
