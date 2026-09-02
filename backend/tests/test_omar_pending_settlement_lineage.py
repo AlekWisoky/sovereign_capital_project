@@ -7,7 +7,7 @@ from victor_ai_bot.omar.production_lineage_bridge import install_production_line
 from victor_ai_bot.persistence.db import PersistenceDB
 from victor_ai_bot.persistence.repositories.ledger_repository import LedgerRepository
 from victor_ai_bot.runtime_services.canonical_settlement_interface import canonical_settled_outcome
-from victor_ai_bot.runtime_services.execution_service import ExecutionService
+from victor_ai_bot.runtime_services.receipt_service import ReceiptService
 from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
 
 
@@ -29,10 +29,10 @@ def test_persist_execution_outcome_receives_complete_pending_lineage(monkeypatch
         captured["pending"] = dict(pending)
         return {"ok": True, "route_family": "flashloan_atomic", "strategy_family": "flashloan_atomic", "realized_usd": float(realized_usd), "expected_usd": float(expected_usd)}
 
-    monkeypatch.setattr(ExecutionService, "persist_execution_outcome", original_persist)
+    monkeypatch.setattr(ReceiptService, "persist_execution_outcome", original_persist)
     install_production_lineage_bridge()
 
-    result = ExecutionService().persist_execution_outcome(
+    result = ReceiptService().persist_execution_outcome(
         runtime=SimpleNamespace(),
         pending={
             "tx_hash": "0xtx-7",
@@ -88,14 +88,14 @@ def test_actual_receipt_finalize_carries_complete_identity_to_settlement_and_per
             "expected_usd": float(expected_usd),
         }
 
-    monkeypatch.setattr(ExecutionService, "persist_execution_outcome", original_persist)
+    monkeypatch.setattr(ReceiptService, "persist_execution_outcome", original_persist)
     install_production_lineage_bridge()
 
     service = SimpleNamespace()
     service.finalize_replay = lambda **kwargs: calls.append(("replay", kwargs))
     service.observe_outcome_truth_health = lambda **kwargs: calls.append(("truth_health", kwargs))
     service.synchronize_settlement_accounting = lambda **kwargs: calls.append(("settlement", dict(kwargs["pending"]))) or {"ok": True, "transaction_id": "settlement-7"}
-    service.persist_execution_outcome = ExecutionService().persist_execution_outcome
+    service.persist_execution_outcome = ReceiptService().persist_execution_outcome
     service.update_execution_learning = lambda **kwargs: calls.append(("learning", dict(kwargs["pending"])))
     service.observe_settlement_memory = lambda **kwargs: calls.append(("memory", dict(kwargs["pending"])))
     service.update_agent_performance = lambda **kwargs: calls.append(("performance", dict(kwargs["pending"])))
