@@ -6,6 +6,7 @@ on:
       - main
       - 'codex/**'
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -52,3 +53,18 @@ jobs:
         run: |
           cd backend
           pytest -q
+
+  render-staging:
+    name: Render staging runtime smoke
+    needs: production-runtime
+    if: ${{ github.event_name != 'pull_request' && secrets.RENDER_STAGING_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify deployed staging runtime
+        env:
+          RENDER_STAGING_URL: ${{ secrets.RENDER_STAGING_URL }}
+        run: python scripts/verify_render_staging.py
