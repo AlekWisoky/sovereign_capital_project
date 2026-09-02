@@ -110,6 +110,7 @@ def test_actual_receipt_finalize_carries_complete_identity_to_settlement_and_per
     service.observe_settlement_memory = lambda **kwargs: calls.append(("memory", dict(kwargs["pending"])))
     service.update_agent_performance = lambda **kwargs: calls.append(("performance", dict(kwargs["pending"])))
     service.observe_blockspace = lambda **kwargs: calls.append(("blockspace", kwargs))
+    service.notify_governance = lambda **kwargs: calls.append(("governance", kwargs))
     service.notify_narrative = lambda **kwargs: calls.append(("narrative", kwargs))
     service._realized_usd_from_wei = lambda value: float(value) / 1e18
 
