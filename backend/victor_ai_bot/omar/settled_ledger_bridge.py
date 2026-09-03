@@ -93,17 +93,32 @@ def ingest_settled_ledger_record(
             decision_id=lineage.decision_id,
             correlation_id=lineage.correlation_id,
             execution_id=lineage.execution_id,
-            status=str(_first(execution_meta.get("status"), source.get("execution_status"), "executed")),
+            status=str(
+                _first(
+                    execution_meta.get("status"),
+                    source.get("execution_status"),
+                    "executed",
+                )
+            ),
             action=lineage.action or "trade",
             tx_hash=lineage.receipt_id,
-            fill_quantity=_float(execution_meta.get("fill_quantity"), metadata.get("fill_quantity")),
-            fill_price=_float(execution_meta.get("fill_price"), metadata.get("fill_price")),
+            fill_quantity=_float(
+                execution_meta.get("fill_quantity"),
+                metadata.get("fill_quantity"),
+            ),
+            fill_price=_float(
+                execution_meta.get("fill_price"),
+                metadata.get("fill_price"),
+            ),
             slippage_bps=_float(
                 execution_meta.get("slippage_bps"),
                 metadata.get("realized_slippage_bps"),
                 source.get("realized_slippage_bps"),
             ),
-            gas_wei=_int(execution_meta.get("gas_wei"), metadata.get("gas_cost_wei")),
+            gas_wei=_int(
+                execution_meta.get("gas_wei"),
+                metadata.get("gas_cost_wei"),
+            ),
             latency_ms=lineage.latency_ms,
             metadata={
                 "source": "settled_ledger",
