@@ -161,18 +161,45 @@ def resolve_settled_lineage(row: Mapping[str, Any]) -> CanonicalSettledOutcomeLi
         correlation_id=correlation_id,
         execution_id=execution_id,
         settlement_id=settlement_id,
-        transaction_id=_first(source.get("transaction_id"), source.get("transactionId")),
-        receipt_id=_first(source.get("receipt_id"), source.get("receiptId"), metadata.get("tx_hash")),
-        action=_first(nested.get("action"), source.get("action"), metadata.get("action"), execution.get("action")),
-        opportunity_id=_first(
-            nested.get("opportunity_id"), nested.get("opportunityId"),
-            source.get("opportunity_id"), source.get("opportunityId"),
-            metadata.get("opportunity_id"), metadata.get("opportunityId"),
+        transaction_id=_first(
+            source.get("transaction_id"), source.get("transactionId")
         ),
-        route_id=_first(nested.get("route_id"), nested.get("routeId"), source.get("route_id"), source.get("routeId"), metadata.get("route_id")),
-        policy_version=_first(nested.get("policy_version"), nested.get("policyVersion"), source.get("policy_version"), metadata.get("policy_version")),
+        receipt_id=_first(
+            source.get("receipt_id"),
+            source.get("receiptId"),
+            metadata.get("tx_hash"),
+        ),
+        action=_first(
+            nested.get("action"),
+            source.get("action"),
+            metadata.get("action"),
+            execution.get("action"),
+        ),
+        opportunity_id=_first(
+            nested.get("opportunity_id"),
+            nested.get("opportunityId"),
+            source.get("opportunity_id"),
+            source.get("opportunityId"),
+            metadata.get("opportunity_id"),
+            metadata.get("opportunityId"),
+        ),
+        route_id=_first(
+            nested.get("route_id"),
+            nested.get("routeId"),
+            source.get("route_id"),
+            source.get("routeId"),
+            metadata.get("route_id"),
+        ),
+        policy_version=_first(
+            nested.get("policy_version"),
+            nested.get("policyVersion"),
+            source.get("policy_version"),
+            metadata.get("policy_version"),
+        ),
         chain=_first(source.get("chain"), metadata.get("chain")),
-        status=_first(source.get("status"), metadata.get("status"), outcome.get("status")),
+        status=_first(
+            source.get("status"), metadata.get("status"), outcome.get("status")
+        ),
         latency_ms=latency,
         latency_class=latency_class(latency),
         complete=not reasons,
@@ -196,5 +223,7 @@ def attach_settled_lineage(row: Mapping[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def settled_lineage_rows(rows: Iterable[Mapping[str, Any]]) -> list[CanonicalSettledOutcomeLineage]:
+def settled_lineage_rows(
+    rows: Iterable[Mapping[str, Any]],
+) -> list[CanonicalSettledOutcomeLineage]:
     return [resolve_settled_lineage(row) for row in rows if isinstance(row, Mapping)]
