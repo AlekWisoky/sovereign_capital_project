@@ -28,11 +28,15 @@ class ExecutionOutcome:
             current = str(getattr(self, name) or "")
             if current:
                 continue
-            value = identity.get(name) or identity.get(
-                {"decision_id": "decisionId", "correlation_id": "correlationId", "execution_id": "executionId", "settlement_id": "settlementId"}[name]
-            ) or lineage.get(name) or lineage.get(
-                {"decision_id": "decisionId", "correlation_id": "correlationId", "execution_id": "executionId", "settlement_id": "settlementId"}[name]
-            )
+            aliases = {
+                "decision_id": "decisionId",
+                "correlation_id": "correlationId",
+                "execution_id": "executionId",
+                "settlement_id": "settlementId",
+            }
+            alias = aliases[name]
+            value = identity.get(name) or identity.get(alias)
+            value = value or lineage.get(name) or lineage.get(alias)
             object.__setattr__(self, name, str(value or ""))
 
     def to_dict(self) -> Dict[str, Any]:
