@@ -30,15 +30,16 @@ jobs:
           new = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
           if old in s:
               s = s.replace(old, new, 1)
-          marker = '        preview_id = str(raw_payload.get("preview_id") or "")\n'
+          marker = '''        preview_id = str(raw_payload.get("preview_id") or "")\n        confirm_text = str(raw_payload.get("confirm_text") or "")'''
+          replacement = '''        preview_id = str(raw_payload.get("preview_id") or "")\n        result: Dict[str, Any]\n        confirm_text = str(raw_payload.get("confirm_text") or "")'''
           if marker not in s:
-              raise SystemExit('execute prelude marker not found')
-          if '        result: Dict[str, Any]\n' not in s:
-              s = s.replace(marker, marker + '        result: Dict[str, Any]\n', 1)
-          old = '        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'
-          new = '        result = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'
-          if old in s:
-              s = s.replace(old, new, 1)
+              raise SystemExit('execute identity marker not found')
+          s = s.replace(marker, replacement, 1)
+          old = '''        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'''
+          new = '''        result = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'''
+          if old not in s:
+              raise SystemExit('typed result block not found')
+          s = s.replace(old, new, 1)
           p.write_text(s, encoding='utf-8')
           PY
       - name: Format repaired file
