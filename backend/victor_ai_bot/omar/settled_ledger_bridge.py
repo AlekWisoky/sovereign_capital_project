@@ -66,6 +66,7 @@ def ingest_settled_ledger_record(
     metadata = _mapping(source.get("metadata"))
     execution_meta = _mapping(metadata.get("execution"))
     outcome_meta = _mapping(metadata.get("outcome"))
+    capital_demand = _mapping(metadata.get("capital_demand"))
     state = _mapping(metadata.get("state"))
     if not state:
         state = _mapping(metadata.get("decision_state"))
@@ -84,8 +85,11 @@ def ingest_settled_ledger_record(
                 "source": "settled_ledger",
                 "transaction_id": lineage.transaction_id,
                 "receipt_id": lineage.receipt_id,
+                "capital_demand": capital_demand,
             },
         )
+    elif capital_demand:
+        decision.metadata.setdefault("capital_demand", dict(capital_demand))
 
     execution = getattr(loop, "_executions", {}).get(lineage.execution_id)
     if execution is None:
@@ -113,6 +117,7 @@ def ingest_settled_ledger_record(
                 "source": "settled_ledger",
                 "latency_class": lineage.latency_class,
                 "transaction_id": lineage.transaction_id,
+                "capital_demand": capital_demand,
             },
         )
 
@@ -154,6 +159,7 @@ def ingest_settled_ledger_record(
             "receipt_id": lineage.receipt_id,
             "latency_ms": lineage.latency_ms,
             "latency_class": lineage.latency_class,
+            "capital_demand": capital_demand,
             "lineage": lineage.to_dict(),
         },
     )
@@ -161,6 +167,7 @@ def ingest_settled_ledger_record(
         "ok": True,
         "eligible_for_learning": bool(attribution.eligible_for_learning),
         "lineage": lineage.to_dict(),
+        "capital_demand": capital_demand,
         "attribution": attribution.to_dict(),
         "policy_update": dict(loop.last_update or {}),
     }
