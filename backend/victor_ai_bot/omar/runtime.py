@@ -10,9 +10,11 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from ..learning.outcome_ledger import CanonicalOutcomeLedger
+from ..learning.phase9_outcome_gate import prepare_real_outcome_for_omar
 from ..pathing import canonical_data_dir
 from .config import OmarConfig
 from .metrics import compute_social_metrics, to_dict
+from .phase7_context_store import Phase7ContextStore
 from .trainer import OmarTrainer
 
 
@@ -20,9 +22,9 @@ class OmarRuntime:
     """First-class OMAR learning runtime.
 
     OMAR remains downstream of execution truth: finalized outcomes are read from
-    the canonical PnL ledger, joined to the transaction-linked learning context,
-    and then used for bounded online policy updates. Governance/execution remain
-    authoritative and are never bypassed by this subsystem.
+    the canonical PnL ledger, enriched with the exact Phase 7 decision context,
+    checked for complete identity/action lineage, and only then used for bounded
+    online policy updates. Governance/execution remain authoritative.
     """
 
     def __init__(self, cfg: OmarConfig, chain_name: str = "default"):
@@ -43,6 +45,10 @@ class OmarRuntime:
         os.makedirs(self.omar_dir, exist_ok=True)
         self.audit_path = os.path.join(self.omar_dir, f"omar_audit_{self.chain_name}.jsonl")
         self.policy_path = os.path.join(self.omar_dir, f"policy_{self.chain_name}.json")
+        self._phase7_context_store = Phase7ContextStore(
+            data_dir=self.data_dir,
+            chain=self.chain_name,
+        )
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -63,6 +69,7 @@ class OmarRuntime:
             "last_train": self.last_train,
             "real_learning": dict(self.last_real_learning),
             "ledger": self._ledger.state() if self._ledger is not None else {},
+            "phase7_context": self._phase7_context_store.state(),
             "policy": self._trainer.policy.state() if self._trainer is not None else {},
         }
 
@@ -81,8 +88,41 @@ class OmarRuntime:
         outcomes = self._ledger.poll(limit=self.cfg.real_outcome_batch_size)
         if not outcomes:
             return
-        stats = self._trainer.learn_from_real_outcomes(outcomes)
-        self.last_real_learning = dict(stats)
+
+        eligible_outcomes = []
+        rejected = []
+        for outcome in outcomes:
+            eligible, reason_codes = prepare_real_outcome_for_omar(
+                outcome,
+                store=self._phase7_context_store,
+            )
+            if eligible:
+                eligible_outcomes.append(outcome)
+            else:
+                rejected.append(
+                    {
+                        "tx_hash": str(getattr(outcome, "tx_hash", "") or ""),
+                        "reason_codes": list(reason_codes),
+                    }
+                )
+
+        if eligible_outcomes:
+            stats = self._trainer.learn_from_real_outcomes(eligible_outcomes)
+        else:
+            stats = {
+                "seen": 0,
+                "learned": 0,
+                "skipped": 0,
+                "mean_reward_scaled": 0.0,
+                "last_tx_hash": "",
+                "policy_updates": int(self._trainer.policy.updates),
+            }
+        stats = dict(stats)
+        stats["phase9_seen"] = int(len(outcomes))
+        stats["phase9_eligible"] = int(len(eligible_outcomes))
+        stats["phase9_rejected"] = int(len(rejected))
+        stats["phase9_rejections"] = rejected[-25:]
+        self.last_real_learning = stats
         self._log(
             {
                 "event": "omar_real_outcomes_learned",
