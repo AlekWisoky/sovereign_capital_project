@@ -24,11 +24,19 @@ jobs:
           if old not in text:
               raise SystemExit("expected gas_cost assignment not found")
           text = text.replace(old, new, 1)
+
           old = "                action_obj, smmae_debug = self._smmae.choose_action(\n"
           new = "                action_obj, smmae_debug = self._require_smmae().choose_action(\n"
-          if text.count(old) != 2:
-              raise SystemExit(f"expected two SMMAE calls, found {text.count(old)}")
-          text = text.replace(old, new)
+          if old not in text:
+              raise SystemExit("expected primary SMMAE call not found")
+          text = text.replace(old, new, 1)
+
+          old = "                act, dbg = self._smmae.choose_action(state=state, state_key=str(state_key))\n"
+          new = "                act, dbg = self._require_smmae().choose_action(state=state, state_key=str(state_key))\n"
+          if old not in text:
+              raise SystemExit("expected secondary SMMAE call not found")
+          text = text.replace(old, new, 1)
+
           anchor = "    def set_brain_mode(self, mode: str) -> None:\n"
           helper = '''    def _require_smmae(self) -> Any:\n        smmae = self._smmae\n        if smmae is None:\n            raise RuntimeError("SMMAE policy is unavailable")\n        return smmae\n\n'''
           if anchor not in text:
