@@ -11,6 +11,7 @@ from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
 from .phase7_context import attach_phase7_execution_context, build_phase7_execution_context
+from .phase7_context_store import phase7_context_store
 from .runtime_execute_dispatch_facade import AutoExecutionDispatchContext
 
 
@@ -65,14 +66,12 @@ class RuntimeExecuteWrapperFacade:
 
     @staticmethod
     async def _persist_phase7_context(runtime: Any, res: Any, context: dict[str, Any]) -> None:
-        """Persist decision context after execution so submission latency is unaffected."""
+        """Persist decision context after execution without blocking submission."""
         tx_hash = str(getattr(res, "tx_hash", "") or "")
-        pnl = getattr(runtime, "_pnl", None)
-        updater = getattr(pnl, "update_trade_context", None) if pnl is not None else None
-        if not tx_hash or not callable(updater):
+        if not tx_hash:
             return
         try:
-            await updater(tx_hash, context)
+            phase7_context_store(runtime).put(tx_hash, context)
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return
 
@@ -195,8 +194,8 @@ class RuntimeExecuteWrapperFacade:
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
 
-                # Context persistence is intentionally after bookkeeping; it can
-                # never slow or bypass transaction submission.
+                # The context journal write happens only after canonical
+                # execution bookkeeping. It therefore cannot delay submission.
                 await self._persist_phase7_context(self, res, phase7_context)
         finally:
             execution_service = getattr(self, "_execution_service", None)
