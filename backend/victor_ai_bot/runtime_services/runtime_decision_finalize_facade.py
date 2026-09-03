@@ -41,14 +41,20 @@ class RuntimeDecisionFinalizeFacade:
         except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError):
             return None
 
-    def _record_omar_decision(self, opps: List[Opportunity], decision: Any, current_block: int) -> None:
+    def _record_omar_decision(
+        self, opps: List[Opportunity], decision: Any, current_block: int
+    ) -> None:
         if decision is None:
             return
         omar = self._ensure_omar_learning_runtime()
         if omar is None:
             return
         selected = next(
-            (opp for opp in opps if str(getattr(opp, "id", "")) == str(getattr(decision, "opp_id", ""))),
+            (
+                opp
+                for opp in opps
+                if str(getattr(opp, "id", "")) == str(getattr(decision, "opp_id", ""))
+            ),
             opps[0] if opps else None,
         )
         if selected is None:

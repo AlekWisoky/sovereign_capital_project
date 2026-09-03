@@ -114,14 +114,22 @@ class RuntimeExecuteWrapperFacade:
 
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
-                    bookkeeping_handler = getattr(execution_service, "handle_post_execute_bookkeeping", None)
+                    bookkeeping_handler = getattr(
+                        execution_service, "handle_post_execute_bookkeeping", None
+                    )
                     if callable(bookkeeping_handler):
                         await bookkeeping_handler(
                             self, opp, res, bn=bn, latency_ms=latency_ms, mode="auto"
                         )
                     else:
                         await ExecutionService.handle_post_execute_bookkeeping(
-                            execution_service, self, opp, res, bn=bn, latency_ms=latency_ms, mode="auto"
+                            execution_service,
+                            self,
+                            opp,
+                            res,
+                            bn=bn,
+                            latency_ms=latency_ms,
+                            mode="auto",
                         )
                 else:
                     await self._record_exec(res, opp, latency_ms=latency_ms, mode="auto")

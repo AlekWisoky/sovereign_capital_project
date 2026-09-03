@@ -89,16 +89,31 @@ def _timestamp(value: Any) -> float | None:
 def _stable_cagr(outcomes: Sequence[Mapping[str, Any]], current_capital: float) -> float:
     if len(outcomes) < 2 or current_capital <= 0:
         return 0.0
-    ordered = sorted(outcomes, key=lambda row: _timestamp(row.get("ts") or row.get("timestamp")) or 0.0)
+    ordered = sorted(
+        outcomes, key=lambda row: _timestamp(row.get("ts") or row.get("timestamp")) or 0.0
+    )
     start = _first_number(ordered[0], "equity_usd", "equityUsd", "capital_usd", "capitalUsd")
     end = _first_number(ordered[-1], "equity_usd", "equityUsd", "capital_usd", "capitalUsd")
     if start <= 0 or end <= 0:
-        pnl = sum(_first_number(row, "realized_pnl_usd", "realizedPnlUsd", "realized_profit_after_gas_usd", "realizedProfitAfterGasUsd") for row in ordered)
+        pnl = sum(
+            _first_number(
+                row,
+                "realized_pnl_usd",
+                "realizedPnlUsd",
+                "realized_profit_after_gas_usd",
+                "realizedProfitAfterGasUsd",
+            )
+            for row in ordered
+        )
         start = max(0.0, current_capital - pnl)
         end = current_capital
     first_ts = _timestamp(ordered[0].get("ts") or ordered[0].get("timestamp"))
     last_ts = _timestamp(ordered[-1].get("ts") or ordered[-1].get("timestamp"))
-    years = ((last_ts - first_ts) / (365.25 * 24.0 * 3600.0)) if first_ts is not None and last_ts is not None else 0.0
+    years = (
+        ((last_ts - first_ts) / (365.25 * 24.0 * 3600.0))
+        if first_ts is not None and last_ts is not None
+        else 0.0
+    )
     if start <= 0 or end <= 0 or years <= 0.01:
         return 0.0
     return (end / start) ** (1.0 / years) - 1.0
@@ -110,12 +125,20 @@ def _drawdown(outcomes: Sequence[Mapping[str, Any]], current_capital: float) -> 
     equity = current_capital
     peak = equity
     max_dd = 0.0
-    for row in sorted(outcomes, key=lambda item: _timestamp(item.get("ts") or item.get("timestamp")) or 0.0):
+    for row in sorted(
+        outcomes, key=lambda item: _timestamp(item.get("ts") or item.get("timestamp")) or 0.0
+    ):
         explicit = _first_number(row, "equity_usd", "equityUsd")
         if explicit > 0:
             equity = explicit
         else:
-            equity += _first_number(row, "realized_pnl_usd", "realizedPnlUsd", "realized_profit_after_gas_usd", "realizedProfitAfterGasUsd")
+            equity += _first_number(
+                row,
+                "realized_pnl_usd",
+                "realizedPnlUsd",
+                "realized_profit_after_gas_usd",
+                "realizedProfitAfterGasUsd",
+            )
         peak = max(peak, equity)
         if peak > 0:
             max_dd = max(max_dd, (peak - equity) / peak)
@@ -127,11 +150,30 @@ def _execution_realism(outcomes: Sequence[Mapping[str, Any]]) -> float:
         return 0.0
     scores: list[float] = []
     for row in outcomes:
-        expected = _first_number(row, "expected_profit_after_costs_usd", "expectedProfitAfterCostsUsd", "expected_profit_usd")
-        realized = _first_number(row, "realized_profit_after_gas_usd", "realizedProfitAfterGasUsd", "realized_pnl_usd", "realizedPnlUsd")
+        expected = _first_number(
+            row,
+            "expected_profit_after_costs_usd",
+            "expectedProfitAfterCostsUsd",
+            "expected_profit_usd",
+        )
+        realized = _first_number(
+            row,
+            "realized_profit_after_gas_usd",
+            "realizedProfitAfterGasUsd",
+            "realized_pnl_usd",
+            "realizedPnlUsd",
+        )
         slippage = abs(_first_number(row, "slippage_bps", "slippageBps", "realized_slippage_bps"))
         latency = max(0.0, _first_number(row, "latency_ms", "latencyMs", "submit_to_receipt_ms"))
-        cost_evidence = sum(key in row for key in ("realized_gas_cost_wei", "realizedGasCostWei", "realized_gas_cost_usd_micro", "realizedGasCostUsdMicro"))
+        cost_evidence = sum(
+            key in row
+            for key in (
+                "realized_gas_cost_wei",
+                "realizedGasCostWei",
+                "realized_gas_cost_usd_micro",
+                "realizedGasCostUsdMicro",
+            )
+        )
         if expected != 0:
             economics = _clamp(1.0 - abs(realized - expected) / max(abs(expected), 1e-9))
         else:
@@ -139,7 +181,9 @@ def _execution_realism(outcomes: Sequence[Mapping[str, Any]]) -> float:
         slippage_score = _clamp(1.0 - slippage / 100.0)
         latency_score = _clamp(1.0 - latency / 5000.0)
         completeness = 0.5 + 0.5 * _clamp(cost_evidence / 2.0)
-        scores.append(economics * 0.45 + slippage_score * 0.2 + latency_score * 0.15 + completeness * 0.2)
+        scores.append(
+            economics * 0.45 + slippage_score * 0.2 + latency_score * 0.15 + completeness * 0.2
+        )
     return _clamp(sum(scores) / len(scores))
 
 
@@ -169,16 +213,39 @@ def build_goal_evidence_snapshot(
     goal = _dict(wealth_goal)
 
     engine = _dict(capital.get("capital_engine"))
-    current_capital = _first_number(capital, "current_capital_usd", "currentCapitalUsd", "available_usd", "availableUsd") or _first_number(engine, "current_capital_usd", "currentCapitalUsd", "available_usd", "availableUsd")
+    current_capital = _first_number(
+        capital, "current_capital_usd", "currentCapitalUsd", "available_usd", "availableUsd"
+    ) or _first_number(
+        engine, "current_capital_usd", "currentCapitalUsd", "available_usd", "availableUsd"
+    )
     if current_capital <= 0:
         current_capital = _first_number(capital, "available_wei", "availableWei") / 1e18
 
     stable_cagr = _stable_cagr(outcomes, current_capital)
     drawdown = _drawdown(outcomes, current_capital)
     execution_realism = _execution_realism(outcomes)
-    strategy_capacity = _first_number(strategy, "capacity_usd", "capacityUsd", "allocatable_usd", "allocatableUsd", "capacity_ratio", "capacityRatio")
-    treasury_reserves = _first_number(treasury, "reserves_usd", "reservesUsd", "available_usd", "availableUsd")
-    omar_confidence = _clamp(_first_number(omar, "confidence", "omar_confidence", "omarConfidence", "policy_confidence", "policyConfidence"))
+    strategy_capacity = _first_number(
+        strategy,
+        "capacity_usd",
+        "capacityUsd",
+        "allocatable_usd",
+        "allocatableUsd",
+        "capacity_ratio",
+        "capacityRatio",
+    )
+    treasury_reserves = _first_number(
+        treasury, "reserves_usd", "reservesUsd", "available_usd", "availableUsd"
+    )
+    omar_confidence = _clamp(
+        _first_number(
+            omar,
+            "confidence",
+            "omar_confidence",
+            "omarConfidence",
+            "policy_confidence",
+            "policyConfidence",
+        )
+    )
     prime_contract = _prime_contract(prime)
 
     blocks: list[str] = []
@@ -199,7 +266,13 @@ def build_goal_evidence_snapshot(
 
     requested_goal = _first_number(goal, "target_usd", "targetUsd", "goal_usd", "goalUsd")
     timeframe_days = max(0.0, _first_number(goal, "timeframe_days", "timeframeDays", "days"))
-    aggressiveness = _clamp(_first_number(goal, "aggressiveness", "aggressiveness_multiplier", "aggressivenessMultiplier"), 0.0, 2.0)
+    aggressiveness = _clamp(
+        _first_number(
+            goal, "aggressiveness", "aggressiveness_multiplier", "aggressivenessMultiplier"
+        ),
+        0.0,
+        2.0,
+    )
     if aggressiveness == 0.0:
         aggressiveness = 1.0
 
@@ -214,7 +287,13 @@ def build_goal_evidence_snapshot(
     if requested_goal > 0:
         recommended_goal = min(recommended_goal, max(current_capital, requested_goal))
 
-    readiness = execution_realism * 0.35 + _clamp(strategy_capacity / max(current_capital, 1e-9)) * 0.2 + omar_confidence * 0.2 + _clamp(treasury_reserves / max(current_capital, 1e-9)) * 0.15 + _clamp(1.0 - drawdown / 0.2) * 0.1
+    readiness = (
+        execution_realism * 0.35
+        + _clamp(strategy_capacity / max(current_capital, 1e-9)) * 0.2
+        + omar_confidence * 0.2
+        + _clamp(treasury_reserves / max(current_capital, 1e-9)) * 0.15
+        + _clamp(1.0 - drawdown / 0.2) * 0.1
+    )
     if blocks or readiness < 0.55:
         risk_posture = "defensive"
     elif readiness < 0.75:

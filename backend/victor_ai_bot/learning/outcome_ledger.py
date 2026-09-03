@@ -94,9 +94,7 @@ class CanonicalOutcomeLedger:
         self.training_path = os.path.join(
             self.data_dir, "training", f"rl_training_{self.chain}.jsonl"
         )
-        self.cursor_path = os.path.join(
-            self.data_dir, "omar", f"outcome_cursor_{self.chain}.json"
-        )
+        self.cursor_path = os.path.join(self.data_dir, "omar", f"outcome_cursor_{self.chain}.json")
         self.bootstrap_history = max(1, int(bootstrap_history))
         self._seen: set[str] = set()
         self.last_error = ""
@@ -185,33 +183,73 @@ class CanonicalOutcomeLedger:
         context = {
             "trainingTs": self._int(training.get("ts"), 0),
             "strategy": str(training_extra.get("strategy") or ""),
-            "opportunityId": str(training_extra.get("opportunity_id") or row.get("opportunity_id") or ""),
+            "opportunityId": str(
+                training_extra.get("opportunity_id") or row.get("opportunity_id") or ""
+            ),
             "mode": str(training_extra.get("mode") or row.get("mode") or ""),
             "brain": dict(brain),
-            "aqeDebug": dict(training_extra.get("aqe_debug") or {}) if isinstance(training_extra.get("aqe_debug"), dict) else {},
-            "wealthGoal": dict(training_extra.get("wealth_goal") or {}) if isinstance(training_extra.get("wealth_goal"), dict) else {},
-            "treasury": dict(training_extra.get("treasury") or {}) if isinstance(training_extra.get("treasury"), dict) else {},
-            "governance": dict(training_extra.get("governance") or {}) if isinstance(training_extra.get("governance"), dict) else {},
-            "capture": dict(training_extra.get("capture") or {}) if isinstance(training_extra.get("capture"), dict) else {},
+            "aqeDebug": (
+                dict(training_extra.get("aqe_debug") or {})
+                if isinstance(training_extra.get("aqe_debug"), dict)
+                else {}
+            ),
+            "wealthGoal": (
+                dict(training_extra.get("wealth_goal") or {})
+                if isinstance(training_extra.get("wealth_goal"), dict)
+                else {}
+            ),
+            "treasury": (
+                dict(training_extra.get("treasury") or {})
+                if isinstance(training_extra.get("treasury"), dict)
+                else {}
+            ),
+            "governance": (
+                dict(training_extra.get("governance") or {})
+                if isinstance(training_extra.get("governance"), dict)
+                else {}
+            ),
+            "capture": (
+                dict(training_extra.get("capture") or {})
+                if isinstance(training_extra.get("capture"), dict)
+                else {}
+            ),
         }
         return LearningOutcome(
-            ledger_id=self._int(row.get("id"), 0), ts=self._int(row.get("ts"), 0),
-            chain=str(row.get("chain") or self.chain), opportunity_id=str(row.get("opportunity_id") or ""),
-            route_id=str(row.get("route_id") or ""), tx_hash=tx_hash, mode=str(row.get("mode") or ""),
-            ok=bool(ok), receipt_status=receipt_status, amount_in_wei=amount_in,
-            expected_profit_after_costs_wei=expected_after, estimated_gas_cost_wei=self._int(row.get("estimated_gas_cost_wei")),
-            flashloan_fee_wei=self._int(row.get("flashloan_fee_wei")), realized_gas_cost_wei=self._int(row.get("realized_gas_cost_wei")),
-            realized_profit_after_gas_wei=realized_after, realized_profit_token=str(row.get("realized_profit_token") or ""),
+            ledger_id=self._int(row.get("id"), 0),
+            ts=self._int(row.get("ts"), 0),
+            chain=str(row.get("chain") or self.chain),
+            opportunity_id=str(row.get("opportunity_id") or ""),
+            route_id=str(row.get("route_id") or ""),
+            tx_hash=tx_hash,
+            mode=str(row.get("mode") or ""),
+            ok=bool(ok),
+            receipt_status=receipt_status,
+            amount_in_wei=amount_in,
+            expected_profit_after_costs_wei=expected_after,
+            estimated_gas_cost_wei=self._int(row.get("estimated_gas_cost_wei")),
+            flashloan_fee_wei=self._int(row.get("flashloan_fee_wei")),
+            realized_gas_cost_wei=self._int(row.get("realized_gas_cost_wei")),
+            realized_profit_after_gas_wei=realized_after,
+            realized_profit_token=str(row.get("realized_profit_token") or ""),
             realized_profit_token_wei=self._int(row.get("realized_profit_token_wei")),
-            realized_gas_cost_in_profit_token_wei=self._int(row.get("realized_gas_cost_in_profit_token_wei")),
+            realized_gas_cost_in_profit_token_wei=self._int(
+                row.get("realized_gas_cost_in_profit_token_wei")
+            ),
             realized_profit_usd_micro=self._int(row.get("realized_profit_usd_micro")),
             realized_gas_cost_usd_micro=self._int(row.get("realized_gas_cost_usd_micro")),
-            realized_profit_after_gas_usd_micro=self._int(row.get("realized_profit_after_gas_usd_micro")),
-            strategy_type=str(row.get("strategy_type") or ""), income_stream=str(row.get("income_stream") or ""),
-            venue_path=str(row.get("venue_path") or ""), rl_state=str(training.get("rl_state") or brain.get("state") or ""),
-            rl_action_index=self._int(training.get("rl_action_index"), -1), aqe_action=str(training_extra.get("aqe_action") or ""),
-            reward_scaled_ppm=reward_num * 1_000_000 // denom, reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
-            latency_ms=self._int(training_extra.get("latency_ms")), submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms")),
+            realized_profit_after_gas_usd_micro=self._int(
+                row.get("realized_profit_after_gas_usd_micro")
+            ),
+            strategy_type=str(row.get("strategy_type") or ""),
+            income_stream=str(row.get("income_stream") or ""),
+            venue_path=str(row.get("venue_path") or ""),
+            rl_state=str(training.get("rl_state") or brain.get("state") or ""),
+            rl_action_index=self._int(training.get("rl_action_index"), -1),
+            aqe_action=str(training_extra.get("aqe_action") or ""),
+            reward_scaled_ppm=reward_num * 1_000_000 // denom,
+            reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
+            latency_ms=self._int(training_extra.get("latency_ms")),
+            submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms")),
             context=context,
         )
 
@@ -239,6 +277,10 @@ class CanonicalOutcomeLedger:
 
     def state(self) -> Dict[str, Any]:
         return {
-            "ok": not bool(self.last_error), "chain": self.chain, "pnlPath": self.pnl_path,
-            "trainingPath": self.training_path, "seenOutcomeCount": len(self._seen), "lastError": self.last_error,
+            "ok": not bool(self.last_error),
+            "chain": self.chain,
+            "pnlPath": self.pnl_path,
+            "trainingPath": self.training_path,
+            "seenOutcomeCount": len(self._seen),
+            "lastError": self.last_error,
         }

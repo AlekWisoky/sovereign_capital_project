@@ -24,7 +24,13 @@ class UnifiedRolePolicy:
 
     CHECKPOINT_VERSION = 1
 
-    def __init__(self, state_dim: int, role_dim: int, action_keys: Tuple[str, ...], checkpoint_path: str | None = None):
+    def __init__(
+        self,
+        state_dim: int,
+        role_dim: int,
+        action_keys: Tuple[str, ...],
+        checkpoint_path: str | None = None,
+    ):
         self.state_dim = int(state_dim)
         self.role_dim = int(role_dim)
         self.action_keys = tuple(action_keys)
@@ -55,7 +61,9 @@ class UnifiedRolePolicy:
         idx = int(rng.choice(len(self.action_keys), p=ps / ps.sum()))
         return self.action_keys[idx]
 
-    def update_ppo(self, batch: Dict[str, np.ndarray], lr: float, clip_eps: float) -> Dict[str, float]:
+    def update_ppo(
+        self, batch: Dict[str, np.ndarray], lr: float, clip_eps: float
+    ) -> Dict[str, float]:
         X = batch["X"].astype(np.float32)
         A = batch["A"].astype(np.int64)
         ADV = batch["ADV"].astype(np.float32)
@@ -80,9 +88,22 @@ class UnifiedRolePolicy:
         self.Wv += lr * (X.T @ dv)
         self.bv += lr * float(dv.sum())
         self.updates += int(len(A))
-        return {"mean_adv": float(ADV.mean()), "mean_ratio": float(ratio.mean()), "mean_new_p": float(new_p.mean())}
+        return {
+            "mean_adv": float(ADV.mean()),
+            "mean_ratio": float(ratio.mean()),
+            "mean_new_p": float(new_p.mean()),
+        }
 
-    def update_from_real_outcome(self, *, role_vec: np.ndarray, state_vec: np.ndarray, action_index: int, reward_scaled: float, learning_rate: float, clip_epsilon: float) -> Dict[str, float]:
+    def update_from_real_outcome(
+        self,
+        *,
+        role_vec: np.ndarray,
+        state_vec: np.ndarray,
+        action_index: int,
+        reward_scaled: float,
+        learning_rate: float,
+        clip_epsilon: float,
+    ) -> Dict[str, float]:
         idx = int(action_index)
         if idx < 0 or idx >= len(self.action_keys):
             return {"updated": 0.0, "reason": 0.0}
@@ -107,7 +128,17 @@ class UnifiedRolePolicy:
             return False
         try:
             os.makedirs(os.path.dirname(self.checkpoint_path), exist_ok=True)
-            payload = {"version": self.CHECKPOINT_VERSION, "state_dim": self.state_dim, "role_dim": self.role_dim, "action_keys": list(self.action_keys), "W": self.W.tolist(), "b": self.b.tolist(), "Wv": self.Wv.tolist(), "bv": float(self.bv), "updates": int(self.updates)}
+            payload = {
+                "version": self.CHECKPOINT_VERSION,
+                "state_dim": self.state_dim,
+                "role_dim": self.role_dim,
+                "action_keys": list(self.action_keys),
+                "W": self.W.tolist(),
+                "b": self.b.tolist(),
+                "Wv": self.Wv.tolist(),
+                "bv": float(self.bv),
+                "updates": int(self.updates),
+            }
             tmp = f"{self.checkpoint_path}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False)
@@ -124,9 +155,15 @@ class UnifiedRolePolicy:
         try:
             with open(self.checkpoint_path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
-            if not isinstance(payload, dict) or int(payload.get("version", 0)) != self.CHECKPOINT_VERSION:
+            if (
+                not isinstance(payload, dict)
+                or int(payload.get("version", 0)) != self.CHECKPOINT_VERSION
+            ):
                 raise ValueError("invalid_policy_checkpoint")
-            if int(payload.get("state_dim", -1)) != self.state_dim or int(payload.get("role_dim", -1)) != self.role_dim:
+            if (
+                int(payload.get("state_dim", -1)) != self.state_dim
+                or int(payload.get("role_dim", -1)) != self.role_dim
+            ):
                 raise ValueError("policy_dimension_mismatch")
             if tuple(payload.get("action_keys") or []) != self.action_keys:
                 raise ValueError("policy_action_space_mismatch")
@@ -142,4 +179,9 @@ class UnifiedRolePolicy:
             return False
 
     def state(self) -> Dict[str, Any]:
-        return {"checkpointPath": self.checkpoint_path, "updates": int(self.updates), "loadError": self.load_error, "saveError": self.save_error}
+        return {
+            "checkpointPath": self.checkpoint_path,
+            "updates": int(self.updates),
+            "loadError": self.load_error,
+            "saveError": self.save_error,
+        }

@@ -87,16 +87,36 @@ def identity_from(value: Any) -> TradeIdentity | None:
     lineage = _mapping(source.get("lineage"))
     return TradeIdentity(
         decision_id=_text(
-            source.get("decision_id") or source.get("decisionId") or nested.get("decision_id") or nested.get("decisionId") or lineage.get("decision_id") or lineage.get("decisionId")
+            source.get("decision_id")
+            or source.get("decisionId")
+            or nested.get("decision_id")
+            or nested.get("decisionId")
+            or lineage.get("decision_id")
+            or lineage.get("decisionId")
         ),
         correlation_id=_text(
-            source.get("correlation_id") or source.get("correlationId") or nested.get("correlation_id") or nested.get("correlationId") or lineage.get("correlation_id") or lineage.get("correlationId")
+            source.get("correlation_id")
+            or source.get("correlationId")
+            or nested.get("correlation_id")
+            or nested.get("correlationId")
+            or lineage.get("correlation_id")
+            or lineage.get("correlationId")
         ),
         execution_id=_text(
-            source.get("execution_id") or source.get("executionId") or nested.get("execution_id") or nested.get("executionId") or lineage.get("execution_id") or lineage.get("executionId")
+            source.get("execution_id")
+            or source.get("executionId")
+            or nested.get("execution_id")
+            or nested.get("executionId")
+            or lineage.get("execution_id")
+            or lineage.get("executionId")
         ),
         settlement_id=_text(
-            source.get("settlement_id") or source.get("settlementId") or nested.get("settlement_id") or nested.get("settlementId") or lineage.get("settlement_id") or lineage.get("settlementId")
+            source.get("settlement_id")
+            or source.get("settlementId")
+            or nested.get("settlement_id")
+            or nested.get("settlementId")
+            or lineage.get("settlement_id")
+            or lineage.get("settlementId")
         ),
     )
 

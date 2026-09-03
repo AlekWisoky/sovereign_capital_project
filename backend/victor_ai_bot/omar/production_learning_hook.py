@@ -46,7 +46,9 @@ def _install_execution_hook() -> None:
     if original is None or getattr(original, "_omar_real_learning_hook", False):
         return
 
-    async def wrapped(self: Any, runtime: Any, opp: Any, result: Any, *, bn: int, latency_ms: int, mode: str) -> None:
+    async def wrapped(
+        self: Any, runtime: Any, opp: Any, result: Any, *, bn: int, latency_ms: int, mode: str
+    ) -> None:
         await original(self, runtime, opp, result, bn=bn, latency_ms=latency_ms, mode=mode)
         if not _enabled():
             return
@@ -58,18 +60,24 @@ def _install_execution_hook() -> None:
             if identity is None or not identity.decision_id or not identity.correlation_id:
                 return
             execution_id = _text(identity.execution_id) or canonical_id(
-                "exec", {"decision_id": identity.decision_id, "tx_hash": _text(getattr(result, "tx_hash", ""))}
+                "exec",
+                {
+                    "decision_id": identity.decision_id,
+                    "tx_hash": _text(getattr(result, "tx_hash", "")),
+                },
             )
             pending = getattr(runtime, "_pending", {}).get(_text(getattr(result, "tx_hash", "")))
             if isinstance(pending, dict):
                 pending["canonical_decision_id"] = identity.decision_id
                 pending["correlation_id"] = identity.correlation_id
                 pending["execution_id"] = execution_id
-                pending.setdefault("canonical_lineage", {}).update({
-                    "decision_id": identity.decision_id,
-                    "correlation_id": identity.correlation_id,
-                    "execution_id": execution_id,
-                })
+                pending.setdefault("canonical_lineage", {}).update(
+                    {
+                        "decision_id": identity.decision_id,
+                        "correlation_id": identity.correlation_id,
+                        "execution_id": execution_id,
+                    }
+                )
                 meta = _mapping(getattr(opp, "meta", None))
                 if isinstance(meta.get("capital_demand"), dict):
                     pending["capital_demand"] = dict(meta["capital_demand"])
@@ -86,7 +94,11 @@ def _install_execution_hook() -> None:
                 slippage_bps=float(metadata.get("slippage_bps") or 0.0),
                 gas_wei=int(metadata.get("gas_cost_wei") or 0),
                 latency_ms=float(latency_ms),
-                metadata={"source": "production_execution_boundary", "block_number": int(bn), "mode": _text(mode)},
+                metadata={
+                    "source": "production_execution_boundary",
+                    "block_number": int(bn),
+                    "mode": _text(mode),
+                },
             )
         except _SAFE:
             return
@@ -103,19 +115,62 @@ def _install_settlement_hook() -> None:
     if original is None or getattr(original, "_omar_real_learning_hook", False):
         return
 
-    def wrapped(self: Any, service: Any, *, tx_hash: str, receipt: Any, decoded: Any, pending: dict, status: int, submit_to_receipt_ms: int, expected_after: int, realized_after: int, amount_in: int, gas_est_wei: int, route_id: str, reward_trace: dict, capture_lane_pending: str, capture_relay_pending: str, outcome_truth: dict) -> None:
-        original(self, service, tx_hash=tx_hash, receipt=receipt, decoded=decoded, pending=pending, status=status, submit_to_receipt_ms=submit_to_receipt_ms, expected_after=expected_after, realized_after=realized_after, amount_in=amount_in, gas_est_wei=gas_est_wei, route_id=route_id, reward_trace=reward_trace, capture_lane_pending=capture_lane_pending, capture_relay_pending=capture_relay_pending, outcome_truth=outcome_truth)
+    def wrapped(
+        self: Any,
+        service: Any,
+        *,
+        tx_hash: str,
+        receipt: Any,
+        decoded: Any,
+        pending: dict,
+        status: int,
+        submit_to_receipt_ms: int,
+        expected_after: int,
+        realized_after: int,
+        amount_in: int,
+        gas_est_wei: int,
+        route_id: str,
+        reward_trace: dict,
+        capture_lane_pending: str,
+        capture_relay_pending: str,
+        outcome_truth: dict,
+    ) -> None:
+        original(
+            self,
+            service,
+            tx_hash=tx_hash,
+            receipt=receipt,
+            decoded=decoded,
+            pending=pending,
+            status=status,
+            submit_to_receipt_ms=submit_to_receipt_ms,
+            expected_after=expected_after,
+            realized_after=realized_after,
+            amount_in=amount_in,
+            gas_est_wei=gas_est_wei,
+            route_id=route_id,
+            reward_trace=reward_trace,
+            capture_lane_pending=capture_lane_pending,
+            capture_relay_pending=capture_relay_pending,
+            outcome_truth=outcome_truth,
+        )
         if not _enabled() or int(status) != 1:
             return
         try:
             omar = _omar(self)
             if omar is None or not bool(getattr(omar.cfg, "enabled", False)):
                 return
-            identity = identity_from(pending) or identity_from(_mapping(pending.get("canonical_lineage")))
+            identity = identity_from(pending) or identity_from(
+                _mapping(pending.get("canonical_lineage"))
+            )
             if identity is None or not identity.decision_id or not identity.correlation_id:
                 return
-            execution_id = _text(identity.execution_id) or canonical_id("exec", {"decision_id": identity.decision_id, "tx_hash": str(tx_hash)})
-            settlement_id = _text(identity.settlement_id) or canonical_id("settle", {"execution_id": execution_id, "tx_hash": str(tx_hash)})
+            execution_id = _text(identity.execution_id) or canonical_id(
+                "exec", {"decision_id": identity.decision_id, "tx_hash": str(tx_hash)}
+            )
+            settlement_id = _text(identity.settlement_id) or canonical_id(
+                "settle", {"execution_id": execution_id, "tx_hash": str(tx_hash)}
+            )
             from ..learning.outcome_ledger import CanonicalOutcomeLedger
 
             ledger = CanonicalOutcomeLedger(
@@ -128,23 +183,40 @@ def _install_settlement_hook() -> None:
             if not isinstance(row, dict):
                 return
             metadata = _mapping(row.get("context"))
-            metadata.update({
-                "execution": {"execution_id": execution_id, "status": "settled", "gas_wei": int(max(0, gas_est_wei))},
-                "outcome": {"settlement_id": settlement_id, "realized_pnl_wei": int(realized_after), "realized_gas_wei": int(max(0, row.get("realizedGasCostWei", 0) or 0))},
-                "capital_demand": _mapping(pending.get("capital_demand")),
-                "latency_ms": float(submit_to_receipt_ms),
-            })
-            row.update({
-                "decision_id": identity.decision_id,
-                "correlation_id": identity.correlation_id,
-                "execution_id": execution_id,
-                "settlement_id": settlement_id,
-                "action": _text(pending.get("action")) or "trade",
-                "route_id": str(route_id or row.get("routeId") or ""),
-                "status": "settled",
-                "metadata": metadata,
-                "lineage": {"decision_id": identity.decision_id, "correlation_id": identity.correlation_id, "execution_id": execution_id, "settlement_id": settlement_id},
-            })
+            metadata.update(
+                {
+                    "execution": {
+                        "execution_id": execution_id,
+                        "status": "settled",
+                        "gas_wei": int(max(0, gas_est_wei)),
+                    },
+                    "outcome": {
+                        "settlement_id": settlement_id,
+                        "realized_pnl_wei": int(realized_after),
+                        "realized_gas_wei": int(max(0, row.get("realizedGasCostWei", 0) or 0)),
+                    },
+                    "capital_demand": _mapping(pending.get("capital_demand")),
+                    "latency_ms": float(submit_to_receipt_ms),
+                }
+            )
+            row.update(
+                {
+                    "decision_id": identity.decision_id,
+                    "correlation_id": identity.correlation_id,
+                    "execution_id": execution_id,
+                    "settlement_id": settlement_id,
+                    "action": _text(pending.get("action")) or "trade",
+                    "route_id": str(route_id or row.get("routeId") or ""),
+                    "status": "settled",
+                    "metadata": metadata,
+                    "lineage": {
+                        "decision_id": identity.decision_id,
+                        "correlation_id": identity.correlation_id,
+                        "execution_id": execution_id,
+                        "settlement_id": settlement_id,
+                    },
+                }
+            )
             omar.observe_settled_ledger_record(row)
         except _SAFE:
             return

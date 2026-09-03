@@ -84,12 +84,20 @@ def ingest_settled_ledger_record(
             decision_id=lineage.decision_id,
             correlation_id=lineage.correlation_id,
             execution_id=lineage.execution_id,
-            status=str(_first(execution_meta.get("status"), source.get("execution_status"), "executed")),
+            status=str(
+                _first(execution_meta.get("status"), source.get("execution_status"), "executed")
+            ),
             action=lineage.action or "trade",
             tx_hash=lineage.receipt_id,
-            fill_quantity=_float(execution_meta.get("fill_quantity"), metadata.get("fill_quantity")),
+            fill_quantity=_float(
+                execution_meta.get("fill_quantity"), metadata.get("fill_quantity")
+            ),
             fill_price=_float(execution_meta.get("fill_price"), metadata.get("fill_price")),
-            slippage_bps=_float(execution_meta.get("slippage_bps"), metadata.get("realized_slippage_bps"), source.get("realized_slippage_bps")),
+            slippage_bps=_float(
+                execution_meta.get("slippage_bps"),
+                metadata.get("realized_slippage_bps"),
+                source.get("realized_slippage_bps"),
+            ),
             gas_wei=_int(execution_meta.get("gas_wei"), metadata.get("gas_cost_wei")),
             latency_ms=lineage.latency_ms,
             metadata={
@@ -106,9 +114,18 @@ def ingest_settled_ledger_record(
         execution_id=lineage.execution_id,
         settlement_id=lineage.settlement_id,
         status=lineage.status or "settled",
-        realized_pnl_wei=_int(outcome_meta.get("realized_pnl_wei"), metadata.get("realized_profit_after_gas_wei"), metadata.get("realized_after_gas_wei")),
-        realized_pnl_usd_micro=_int(outcome_meta.get("realized_pnl_usd_micro"), metadata.get("realized_profit_after_gas_usd_micro")),
-        realized_slippage_bps=_float(outcome_meta.get("realized_slippage_bps"), metadata.get("realized_slippage_bps")),
+        realized_pnl_wei=_int(
+            outcome_meta.get("realized_pnl_wei"),
+            metadata.get("realized_profit_after_gas_wei"),
+            metadata.get("realized_after_gas_wei"),
+        ),
+        realized_pnl_usd_micro=_int(
+            outcome_meta.get("realized_pnl_usd_micro"),
+            metadata.get("realized_profit_after_gas_usd_micro"),
+        ),
+        realized_slippage_bps=_float(
+            outcome_meta.get("realized_slippage_bps"), metadata.get("realized_slippage_bps")
+        ),
         realized_gas_wei=_int(outcome_meta.get("realized_gas_wei"), metadata.get("gas_cost_wei")),
         risk_cost_wei=_int(outcome_meta.get("risk_cost_wei"), metadata.get("risk_cost_wei")),
         metadata={

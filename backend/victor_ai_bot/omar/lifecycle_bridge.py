@@ -19,15 +19,27 @@ def _observe_settled_outcome(
     o = _mapping(outcome)
     brain = _mapping(p.get("brain"))
     lineage = _mapping(p.get("canonical_lineage"))
-    decision_id = str(lineage.get("decision_id") or brain.get("canonical_decision_id") or p.get("decision_id") or "")
-    correlation_id = str(lineage.get("correlation_id") or brain.get("correlation_id") or p.get("correlation_id") or "")
+    decision_id = str(
+        lineage.get("decision_id")
+        or brain.get("canonical_decision_id")
+        or p.get("decision_id")
+        or ""
+    )
+    correlation_id = str(
+        lineage.get("correlation_id")
+        or brain.get("correlation_id")
+        or p.get("correlation_id")
+        or ""
+    )
     canonical_lineage = {"decision_id": decision_id, "correlation_id": correlation_id}
     operator_intent = _mapping(lineage.get("operator_intent") or p.get("operator_intent"))
     metadata = {
         "source": "phase2_canonical_outcome_ledger",
         "canonical_lineage": canonical_lineage,
         "operator_intent": operator_intent,
-        "intent_fingerprint": str(lineage.get("intent_fingerprint") or p.get("intent_fingerprint") or ""),
+        "intent_fingerprint": str(
+            lineage.get("intent_fingerprint") or p.get("intent_fingerprint") or ""
+        ),
         "outcome_status": str(o.get("status") or ""),
         "truth_verified": bool(o.get("truth_verified")),
     }
@@ -37,7 +49,9 @@ def _observe_settled_outcome(
         "route_id": str(o.get("route_id") or p.get("route_id") or ""),
         "tx_hash": str(o.get("tx_hash") or ""),
         "latency_ms": o.get("latency_ms"),
-        "reward": float(o.get("realized_net_usd") if o.get("realized_net_usd") is not None else 0.0),
+        "reward": float(
+            o.get("realized_net_usd") if o.get("realized_net_usd") is not None else 0.0
+        ),
         "outcome_truth_verified": bool(o.get("truth_verified")),
         "metadata": metadata,
     }

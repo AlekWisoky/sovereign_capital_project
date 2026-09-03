@@ -129,9 +129,9 @@ class OmarTrainer:
 
     @staticmethod
     def _state_vector(rl_state: str, state_dim: int) -> np.ndarray:
-        return encode_role_vector(
-            f"OMAR_STATE:{str(rl_state or 'unknown')}", state_dim
-        ).astype(np.float32)
+        return encode_role_vector(f"OMAR_STATE:{str(rl_state or 'unknown')}", state_dim).astype(
+            np.float32
+        )
 
     @staticmethod
     def _target_action_index(outcome: Any) -> int:
@@ -173,9 +173,7 @@ class OmarTrainer:
                 role_vec=role_vec,
                 state_vec=self._state_vector(rl_state, self.state_dim),
                 action_index=action_index,
-                reward_scaled=float(
-                    getattr(outcome, "reward_scaled_float", 0.0) or 0.0
-                ),
+                reward_scaled=float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0),
                 learning_rate=float(self.cfg.learning_rate),
                 clip_epsilon=float(self.cfg.clip_epsilon),
             )
@@ -198,10 +196,7 @@ class OmarTrainer:
         return dict(self.last_real_learning)
 
     def train(self) -> List[OmarTrainStats]:
-        all_stats = [
-            self.run_episode(ep)
-            for ep in range(1, self.cfg.self_play_episodes + 1)
-        ]
+        all_stats = [self.run_episode(ep) for ep in range(1, self.cfg.self_play_episodes + 1)]
         if self.cfg.policy_checkpoint_enabled:
             self.policy.save()
         return all_stats

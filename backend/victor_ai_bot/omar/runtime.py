@@ -121,30 +121,79 @@ class OmarRuntime:
             "capital_authority_source": authority.source,
         }
 
-    def observe_decision(self, *, decision_id: str, correlation_id: str, action: str, opp_id: str = "", route_id: str = "", policy_version: str = "", state: Optional[Dict[str, Any]] = None, operator_intent: Optional[OperatorIntentSnapshot] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def observe_decision(
+        self,
+        *,
+        decision_id: str,
+        correlation_id: str,
+        action: str,
+        opp_id: str = "",
+        route_id: str = "",
+        policy_version: str = "",
+        state: Optional[Dict[str, Any]] = None,
+        operator_intent: Optional[OperatorIntentSnapshot] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if not self.cfg.enabled or self._real_learning is None:
             return {"ok": False, "reason_code": "omar_real_learning_disabled"}
         record = self._real_learning.record_decision(
-            decision_id=decision_id, correlation_id=correlation_id, action=action,
-            opp_id=opp_id, route_id=route_id, policy_version=policy_version,
-            state=state or {}, operator_intent=operator_intent, metadata=metadata or {},
+            decision_id=decision_id,
+            correlation_id=correlation_id,
+            action=action,
+            opp_id=opp_id,
+            route_id=route_id,
+            policy_version=policy_version,
+            state=state or {},
+            operator_intent=operator_intent,
+            metadata=metadata or {},
         )
-        return {"ok": True, "decision_id": record.decision_id, "correlation_id": record.correlation_id}
+        return {
+            "ok": True,
+            "decision_id": record.decision_id,
+            "correlation_id": record.correlation_id,
+        }
 
-    def observe_execution(self, *, decision_id: str, correlation_id: str, execution_id: str, status: str, action: str, tx_hash: str = "", fill_quantity: float = 0.0, fill_price: float = 0.0, slippage_bps: float = 0.0, gas_wei: int = 0, latency_ms: float = 0.0, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def observe_execution(
+        self,
+        *,
+        decision_id: str,
+        correlation_id: str,
+        execution_id: str,
+        status: str,
+        action: str,
+        tx_hash: str = "",
+        fill_quantity: float = 0.0,
+        fill_price: float = 0.0,
+        slippage_bps: float = 0.0,
+        gas_wei: int = 0,
+        latency_ms: float = 0.0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if not self.cfg.enabled or self._real_learning is None:
             return {"ok": False, "reason_code": "omar_real_learning_disabled"}
         record = self._real_learning.bind_execution(
-            decision_id=decision_id, correlation_id=correlation_id, execution_id=execution_id,
-            status=status, action=action, tx_hash=tx_hash, fill_quantity=fill_quantity,
-            fill_price=fill_price, slippage_bps=slippage_bps, gas_wei=gas_wei,
-            latency_ms=latency_ms, metadata=metadata or {},
+            decision_id=decision_id,
+            correlation_id=correlation_id,
+            execution_id=execution_id,
+            status=status,
+            action=action,
+            tx_hash=tx_hash,
+            fill_quantity=fill_quantity,
+            fill_price=fill_price,
+            slippage_bps=slippage_bps,
+            gas_wei=gas_wei,
+            latency_ms=latency_ms,
+            metadata=metadata or {},
         )
         return {"ok": True, "execution_id": record.execution_id, "decision_id": record.decision_id}
 
     def observe_settled_ledger_record(self, row: Dict[str, Any]) -> Dict[str, Any]:
         if not self.cfg.enabled or self._real_learning is None:
-            return {"ok": False, "eligible_for_learning": False, "reason_code": "omar_real_learning_disabled"}
+            return {
+                "ok": False,
+                "eligible_for_learning": False,
+                "reason_code": "omar_real_learning_disabled",
+            }
         from .settled_ledger_bridge import ingest_settled_ledger_record
 
         result = ingest_settled_ledger_record(self._real_learning, row)
@@ -200,14 +249,24 @@ class OmarRuntime:
 
     def _loop(self):
         if self.cfg.enabled:
-            self._ledger = CanonicalOutcomeLedger(data_dir=self.data_dir, chain=self.chain_name, bootstrap_history=self.cfg.outcome_bootstrap_history)
+            self._ledger = CanonicalOutcomeLedger(
+                data_dir=self.data_dir,
+                chain=self.chain_name,
+                bootstrap_history=self.cfg.outcome_bootstrap_history,
+            )
             checkpoint = self.policy_path if self.cfg.policy_checkpoint_enabled else None
             self._trainer = OmarTrainer(self.cfg, checkpoint_path=checkpoint)
             if self.cfg.self_play_enabled:
                 stats = self._trainer.train()
                 if stats:
                     self.last_train = asdict(stats[-1])
-                self._log({"event": "omar_training_complete", "last_train": self.last_train, "policy": self._trainer.policy.state()})
+                self._log(
+                    {
+                        "event": "omar_training_complete",
+                        "last_train": self.last_train,
+                        "policy": self._trainer.policy.state(),
+                    }
+                )
 
         coord_hist, conflict_hist = [], []
         next_learning_at = 0.0
@@ -219,11 +278,27 @@ class OmarRuntime:
                 coord_hist[:] = coord_hist[-200:]
                 conflict_hist[:] = conflict_hist[-200:]
             now = time.monotonic()
-            if self.cfg.enabled and self.cfg.real_outcome_learning_enabled and self._trainer and self._ledger and now >= next_learning_at:
+            if (
+                self.cfg.enabled
+                and self.cfg.real_outcome_learning_enabled
+                and self._trainer
+                and self._ledger
+                and now >= next_learning_at
+            ):
                 self._learn_real_outcomes()
                 next_learning_at = now + self.cfg.real_outcome_poll_seconds
-            m = compute_social_metrics(coord_hist=np.array(coord_hist, dtype=float), conflict_hist=np.array(conflict_hist, dtype=float), capital_alloc={r: 1.0 for r in (self.cfg.roles or [])})
+            m = compute_social_metrics(
+                coord_hist=np.array(coord_hist, dtype=float),
+                conflict_hist=np.array(conflict_hist, dtype=float),
+                capital_alloc={r: 1.0 for r in (self.cfg.roles or [])},
+            )
             self.last_social = to_dict(m)
-            self._log({"event": "omar_social_metrics", **self.last_social, "real_learning": dict(self.last_real_learning)})
+            self._log(
+                {
+                    "event": "omar_social_metrics",
+                    **self.last_social,
+                    "real_learning": dict(self.last_real_learning),
+                }
+            )
             self._cycle += 1
             self._stop.wait(1.0)
