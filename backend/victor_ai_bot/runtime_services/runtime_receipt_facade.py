@@ -33,13 +33,17 @@ class RuntimeReceiptFacade:
             learning_state = {
                 "executed": True,
                 "ok": bool(learning_ok),
-                "reasonCode": ("ok" if learning_ok else "receipt_finalize_update_execution_learning_failed"),
+                "reasonCode": (
+                    "ok" if learning_ok else "receipt_finalize_update_execution_learning_failed"
+                ),
             }
         if memory_ok is not None:
             memory_state = {
                 "executed": True,
                 "ok": bool(memory_ok),
-                "reasonCode": ("ok" if memory_ok else "receipt_finalize_observe_settlement_memory_failed"),
+                "reasonCode": (
+                    "ok" if memory_ok else "receipt_finalize_observe_settlement_memory_failed"
+                ),
             }
         sync["learningSync"] = learning_state
         sync["memorySync"] = memory_state
@@ -47,9 +51,13 @@ class RuntimeReceiptFacade:
         memory_done = bool(memory_state.get("executed")) and bool(memory_state.get("ok"))
         reason_codes = []
         if not learning_done:
-            reason_codes.append(str(learning_state.get("reasonCode") or "pending_receipt_followthrough"))
+            reason_codes.append(
+                str(learning_state.get("reasonCode") or "pending_receipt_followthrough")
+            )
         if not memory_done:
-            reason_codes.append(str(memory_state.get("reasonCode") or "pending_receipt_followthrough"))
+            reason_codes.append(
+                str(memory_state.get("reasonCode") or "pending_receipt_followthrough")
+            )
         sync["closedLoop"] = {
             "settlementAccounting": bool(sync.get("ok", False)),
             "learningRecorded": learning_done,

@@ -42,7 +42,9 @@ class RuntimeEngineFacade:
         dex_depths: Dict[str, float] = {}
         for so in list(getattr(self, "_spread_opps", []) or [])[:50]:
             meta_so = (
-                dict(getattr(so, "meta", {}) or {}) if isinstance(getattr(so, "meta", None), dict) else {}
+                dict(getattr(so, "meta", {}) or {})
+                if isinstance(getattr(so, "meta", None), dict)
+                else {}
             )
             sym = str(getattr(so, "symbol", "") or meta_so.get("symbol") or "")
             if sym and "dex_price" in meta_so:
@@ -91,7 +93,11 @@ class RuntimeEngineFacade:
 
     @staticmethod
     def _engine_chain_inventory(treasury_state: Dict[str, Any] | None) -> Dict[str, float]:
-        capital = ((treasury_state or {}).get("capital_engine") or {}) if isinstance(treasury_state, dict) else {}
+        capital = (
+            ((treasury_state or {}).get("capital_engine") or {})
+            if isinstance(treasury_state, dict)
+            else {}
+        )
         return {
             "ethereum": float((capital.get("deployable_bankroll_wei") or 0) / 1e18),
             "arbitrum": float((capital.get("experimental_bankroll_wei") or 0) / 1e18),

@@ -43,7 +43,11 @@ def _blocked_detail_reason_codes(detail: Dict[str, Any]) -> list[str]:
             *[str(x) for x in list(detail.get("capital_truth_reason_codes") or []) if str(x)],
             *[str(x) for x in list(detail.get("internal_prime_reason_codes") or []) if str(x)],
             *[str(x) for x in list(detail.get("launch_acceleration_reason_codes") or []) if str(x)],
-            *[str(x) for x in list(detail.get("launch_acceleration_stability_reason_codes") or []) if str(x)],
+            *[
+                str(x)
+                for x in list(detail.get("launch_acceleration_stability_reason_codes") or [])
+                if str(x)
+            ],
         ]
     )
 
@@ -438,7 +442,9 @@ class StagedRolloutManager:
         fund_summary: Dict[str, Any],
         capital_state: Dict[str, Any] | None = None,
     ) -> List[Dict[str, Any]]:
-        active = [canonical_launch_family_id(str(x or "")) for x in list(self.profile.active_families)]
+        active = [
+            canonical_launch_family_id(str(x or "")) for x in list(self.profile.active_families)
+        ]
         return [
             build_family_readiness(
                 family=f,
@@ -569,7 +575,11 @@ class StagedRolloutManager:
     def pause_family(self, family: str, *, actor: str = "operator") -> Dict[str, Any]:
         family = canonical_launch_family_id(str(family or ""))
         if not is_core_launch_family(family):
-            self.profile.active_families = [canonical_launch_family_id(f) for f in self.profile.active_families if canonical_launch_family_id(f) != family]
+            self.profile.active_families = [
+                canonical_launch_family_id(f)
+                for f in self.profile.active_families
+                if canonical_launch_family_id(f) != family
+            ]
         transition = self._apply_family_state(
             family, HealthState.OBSERVE_ONLY.value, actor=actor, reason_code="family_paused"
         )
@@ -587,7 +597,11 @@ class StagedRolloutManager:
             family, target, actor=actor, reason_code="family_reverted"
         )
         if not is_core_launch_family(family):
-            self.profile.active_families = [canonical_launch_family_id(f) for f in self.profile.active_families if canonical_launch_family_id(f) != family]
+            self.profile.active_families = [
+                canonical_launch_family_id(f)
+                for f in self.profile.active_families
+                if canonical_launch_family_id(f) != family
+            ]
         self._touch(f"family_reverted:{family}")
         return {"ok": True, "profile": self.profile.to_dict(), "transition": transition}
 
@@ -596,7 +610,11 @@ class StagedRolloutManager:
     ) -> Dict[str, Any]:
         family = canonical_launch_family_id(str(family or ""))
         if not is_core_launch_family(family):
-            self.profile.active_families = [canonical_launch_family_id(f) for f in self.profile.active_families if canonical_launch_family_id(f) != family]
+            self.profile.active_families = [
+                canonical_launch_family_id(f)
+                for f in self.profile.active_families
+                if canonical_launch_family_id(f) != family
+            ]
         transition = self._apply_family_state(
             family, HealthState.QUARANTINED.value, actor=actor, reason_code=reason_code
         )
@@ -625,7 +643,10 @@ class StagedRolloutManager:
             capital_state=capital_state,
         )
         family = canonical_launch_family_id(str(family or ""))
-        item = next((x for x in items if canonical_launch_family_id(str(x.get("family") or "")) == family), None)
+        item = next(
+            (x for x in items if canonical_launch_family_id(str(x.get("family") or "")) == family),
+            None,
+        )
         return {
             "ok": bool(item),
             "family": family,
@@ -653,7 +674,9 @@ class StagedRolloutManager:
             fund_summary=fund_summary,
             capital_state=capital_state,
         )
-        active = [canonical_launch_family_id(str(x or "")) for x in list(self.profile.active_families)]
+        active = [
+            canonical_launch_family_id(str(x or "")) for x in list(self.profile.active_families)
+        ]
         locked = [i for i in items if not i["active"]]
         acceleration = build_launch_acceleration_summary(
             profile=self.profile.to_dict(), readiness_items=items
@@ -685,7 +708,10 @@ class StagedRolloutManager:
             reasons = ["v1_unstable", "protect_core_execution"]
         elif acceleration.get("phase") == "stabilize_active_multi_strategy":
             recommended_next_family = ""
-            reasons = ["stabilize_active_multi_strategy", *list(acceleration.get("reasonCodes") or [])]
+            reasons = [
+                "stabilize_active_multi_strategy",
+                *list(acceleration.get("reasonCodes") or []),
+            ]
         elif acceleration.get("phase") == "stabilize_v1_core":
             recommended_next_family = ""
             reasons = ["v1_unstable", *list(acceleration.get("reasonCodes") or [])]
@@ -816,8 +842,12 @@ class StagedRolloutManager:
                 "recovery_recovered_fragile": bool(i.get("recoveryRecoveredFragile", False)),
                 "status": str(i.get("status") or "blocked"),
                 "degraded_state": str(i.get("degradedState") or ""),
-                "launch_acceleration_reason_codes": list(i.get("launchAccelerationReasonCodes") or []),
-                "launch_acceleration_stability_reason_codes": list(i.get("launchAccelerationStabilityReasonCodes") or []),
+                "launch_acceleration_reason_codes": list(
+                    i.get("launchAccelerationReasonCodes") or []
+                ),
+                "launch_acceleration_stability_reason_codes": list(
+                    i.get("launchAccelerationStabilityReasonCodes") or []
+                ),
                 "launch_acceleration_next_action": str(i.get("launchAccelerationNextAction") or ""),
             }
             for i in locked
@@ -838,7 +868,8 @@ class StagedRolloutManager:
             not recommended_next_family
             and acceleration.get("phase") == "stabilize_active_multi_strategy"
             and acceleration_reason_codes
-            and str(hold_summary.get("hold_reason_code") or "") in {"", "no_execution_evidence", "execution_not_ready"}
+            and str(hold_summary.get("hold_reason_code") or "")
+            in {"", "no_execution_evidence", "execution_not_ready"}
         ):
             hold_summary["hold_reason_code"] = acceleration_reason_codes[0]
             hold_summary["hold_reason_codes"] = acceleration_reason_codes

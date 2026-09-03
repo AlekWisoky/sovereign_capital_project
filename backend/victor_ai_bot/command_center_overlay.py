@@ -279,7 +279,9 @@ class CommandCenterOverlay:
         for k, v in dict(raw).items():
             if hasattr(cs, k):
                 setattr(cs, k, v)
-        self._controls_load_status = _storage_status(True, "controls_loaded", path=self.controls_path)
+        self._controls_load_status = _storage_status(
+            True, "controls_loaded", path=self.controls_path
+        )
         return cs
 
     def _persist_controls_state(self, controls: ControlState) -> bool:
@@ -359,66 +361,78 @@ class CommandCenterOverlay:
             if field in self._BOOL_FIELDS:
                 ok, coerced = self._coerce_bool(field, value)
                 if not ok:
-                    errors.append({
-                        "field": field,
-                        "reason_code": "invalid_boolean_value",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "field": field,
+                            "reason_code": "invalid_boolean_value",
+                            "value": value,
+                        }
+                    )
                     continue
                 normalized[field] = coerced
                 continue
             if field == "control_mode":
                 mode = str(value or "").strip().lower()
                 if mode not in self._VALID_CONTROL_MODES:
-                    errors.append({
-                        "field": field,
-                        "reason_code": "invalid_control_mode",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "field": field,
+                            "reason_code": "invalid_control_mode",
+                            "value": value,
+                        }
+                    )
                     continue
                 normalized[field] = mode
                 continue
             if field == "aggression_mode":
                 mode = str(value or "balanced").strip().lower()
                 if mode not in self._VALID_AGGRESSION_MODES:
-                    errors.append({
-                        "field": field,
-                        "reason_code": "invalid_aggression_mode",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "field": field,
+                            "reason_code": "invalid_aggression_mode",
+                            "value": value,
+                        }
+                    )
                     continue
                 normalized[field] = mode
                 continue
             if field == "force_send_mode":
                 mode = str(value or "").strip().lower()
                 if mode not in self._VALID_FORCE_SEND_MODES:
-                    errors.append({
-                        "field": field,
-                        "reason_code": "invalid_force_send_mode",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "field": field,
+                            "reason_code": "invalid_force_send_mode",
+                            "value": value,
+                        }
+                    )
                     continue
                 normalized[field] = mode
                 continue
             if field == "force_gas_mode":
                 mode = str(value or "").strip().lower()
                 if mode not in self._VALID_FORCE_GAS_MODES:
-                    errors.append({
-                        "field": field,
-                        "reason_code": "invalid_force_gas_mode",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "field": field,
+                            "reason_code": "invalid_force_gas_mode",
+                            "value": value,
+                        }
+                    )
                     continue
                 normalized[field] = mode
                 continue
             if field == "brain_mode":
                 mode = str(value or "").strip().lower()
                 if mode not in self._VALID_BRAIN_MODES:
-                    errors.append({
-                        "field": field,
-                        "reason_code": "invalid_brain_mode",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "field": field,
+                            "reason_code": "invalid_brain_mode",
+                            "value": value,
+                        }
+                    )
                     continue
                 normalized[field] = mode
                 continue
