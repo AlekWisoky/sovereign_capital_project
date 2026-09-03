@@ -114,9 +114,9 @@ def _latency_from_bundle(bundle: Dict[str, Any]) -> LatencyProfile:
 
 def _capital_demand_from_bundle(bundle: Dict[str, Any]) -> CapitalDemand:
     raw_execution = bundle.get("execution")
-    execution: Dict[str, Any] = (
-        dict(raw_execution) if isinstance(raw_execution, dict) else {}
-    )
+    execution: Dict[str, Any] = {}
+    if isinstance(raw_execution, dict):
+        execution = raw_execution
     demand = bundle.get("capital_demand") or bundle.get("capitalDemand")
     payload: Dict[str, Any] = {
         "capital_demand": demand,
@@ -136,9 +136,9 @@ def _capital_demand_from_bundle(bundle: Dict[str, Any]) -> CapitalDemand:
 
 def _reference_action(bundle: Dict[str, Any]) -> ReferenceAction:
     raw_execution = bundle.get("execution")
-    execution: Dict[str, Any] = (
-        dict(raw_execution) if isinstance(raw_execution, dict) else {}
-    )
+    execution: Dict[str, Any] = {}
+    if isinstance(raw_execution, dict):
+        execution = raw_execution
     opps = list(bundle.get("opportunities") or [])
     primary = _best_ranked_opportunity(opps)
     reason_bits = [
