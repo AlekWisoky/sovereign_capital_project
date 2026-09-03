@@ -62,10 +62,14 @@ class RuntimeDecisionFacade:
     def capital_engine_state(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    async def _execute_auto(self, opp: Opportunity, bn: int, decision: Any = None) -> Any:
+    async def _execute_auto(
+        self, opp: Opportunity, bn: int, decision: Any = None
+    ) -> Any:
         raise NotImplementedError
 
-    async def _annotate_can_execute(self, rpc: JsonRpcClient, opps: List[Opportunity]) -> None:
+    async def _annotate_can_execute(
+        self, rpc: JsonRpcClient, opps: List[Opportunity]
+    ) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -124,16 +128,26 @@ class RuntimeDecisionFacade:
         capital_budget_remaining_wei = None
         family_capital_remaining_wei: dict[str, int] = {}
         try:
-            capital_state = self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
+            capital_state = (
+                self.capital_engine_state()
+                if hasattr(self, "capital_engine_state")
+                else {}
+            )
             capital_engine = dict((capital_state or {}).get("capital_engine") or {})
             raw_capital_budget = capital_engine.get("deployable_bankroll_wei")
             if raw_capital_budget not in (None, ""):
-                capital_budget_remaining_wei = _coerce_nonnegative_int(raw_capital_budget, None)
+                capital_budget_remaining_wei = _coerce_nonnegative_int(
+                    raw_capital_budget, None
+                )
             family_capital_remaining_wei = {
                 str(k): int(parsed_value)
-                for k, raw_value in dict(capital_engine.get("family_allocations_wei") or {}).items()
+                for k, raw_value in dict(
+                    capital_engine.get("family_allocations_wei") or {}
+                ).items()
                 if str(k or "")
-                if (parsed_value := _coerce_nonnegative_int(raw_value, None)) is not None
+                if (
+                    parsed_value := _coerce_nonnegative_int(raw_value, None)
+                ) is not None
             }
         except _SAFE_DECISION_EXCEPTIONS:
             capital_budget_remaining_wei = None
@@ -153,7 +167,9 @@ class RuntimeDecisionFacade:
             self._errors.append(f"decision_engine_failed:{e}")
             return None
 
-    async def _safe_annotate_can_execute(self, rpc: JsonRpcClient, opps: List[Opportunity]) -> None:
+    async def _safe_annotate_can_execute(
+        self, rpc: JsonRpcClient, opps: List[Opportunity]
+    ) -> None:
         try:
             await self._annotate_can_execute(rpc, opps)
         except _SAFE_DECISION_EXCEPTIONS as e:
@@ -161,7 +177,9 @@ class RuntimeDecisionFacade:
 
     def _simple_auto_trade_candidate(self) -> Optional[Opportunity]:
         try:
-            max_pending = int(getattr(self.cfg.execution, "max_pending_txs", 1) or 1)
+            max_pending = int(
+                getattr(self.cfg.execution, "max_pending_txs", 1) or 1
+            )
         except _SAFE_DECISION_EXCEPTIONS:
             max_pending = 1
         if max_pending > 0 and len(self._pending) >= max_pending:
@@ -175,8 +193,17 @@ class RuntimeDecisionFacade:
     def _decision_auto_trade_candidate(self, decision: Any) -> Optional[Opportunity]:
         chosen = None
         try:
-            for oid in list(getattr(decision, "portfolio", []) or self._auto_queue):
-                cand = next((o for o in self._opps if o.id == oid and self._opp_is_exec_ready(o)), None)
+            for oid in list(
+                getattr(decision, "portfolio", []) or self._auto_queue
+            ):
+                cand = next(
+                    (
+                        o
+                        for o in self._opps
+                        if o.id == oid and self._opp_is_exec_ready(o)
+                    ),
+                    None,
+                )
                 if cand is not None:
                     chosen = cand
                     break
@@ -184,7 +211,11 @@ class RuntimeDecisionFacade:
             chosen = None
         if chosen is None:
             chosen = next(
-                (o for o in self._opps if o.id == decision.opp_id and self._opp_is_exec_ready(o)),
+                (
+                    o
+                    for o in self._opps
+                    if o.id == decision.opp_id and self._opp_is_exec_ready(o)
+                ),
                 None,
             )
         return chosen
@@ -194,12 +225,18 @@ class RuntimeDecisionFacade:
             service = getattr(self, "_wealth_goal_service", None)
             if service is not None and hasattr(service, "state"):
                 state = service.state(self)
-                return dict(state.get("state") or {}) if isinstance(state, dict) else {}
+                return (
+                    dict(state.get("state") or {})
+                    if isinstance(state, dict)
+                    else {}
+                )
         except _SAFE_DECISION_EXCEPTIONS:
             pass
         return {}
 
-    def _omar_context(self, opp: Opportunity, *, p_success: float, ev_wei: int) -> dict[str, Any]:
+    def _omar_context(
+        self, opp: Opportunity, *, p_success: float, ev_wei: int
+    ) -> dict[str, Any]:
         feats = build_features(opp)
         goal = self._wealth_goal_learning_context()
         regime = getattr(self, "_market_regime", {})
@@ -210,26 +247,60 @@ class RuntimeDecisionFacade:
             "drawdown_pct": float(goal.get("drawdownPct") or 0.0),
             "execution_realism": float(goal.get("executionRealismScore") or 0.0),
             "stability": float(goal.get("stabilityScore") or 0.0),
-            "goal_gap_pct": max(0.0, float(goal.get("targetReturnPct") or 0.0) - float(goal.get("currentReturnPct") or 0.0)),
-            "volatility": float(regime.get("volatility", 0.0) or 0.0) if isinstance(regime, dict) else 0.0,
+            "goal_gap_pct": max(
+                0.0,
+                float(goal.get("targetReturnPct") or 0.0)
+                - float(goal.get("currentReturnPct") or 0.0),
+            ),
+            "volatility": (
+                float(regime.get("volatility", 0.0) or 0.0)
+                if isinstance(regime, dict)
+                else 0.0
+            ),
             "legs": int(feats.legs),
             "ev_wei": int(ev_wei),
             "route_id": str(getattr(opp, "route_id", "") or ""),
-            "strategy_family": str((getattr(opp, "meta", {}) or {}).get("strategy_family") or (getattr(opp, "meta", {}) or {}).get("route_family") or ""),
+            "strategy_family": str(
+                (getattr(opp, "meta", {}) or {}).get("strategy_family")
+                or (getattr(opp, "meta", {}) or {}).get("route_family")
+                or ""
+            ),
         }
 
-    def _apply_omar_to_candidate(self, opp: Opportunity, decision: Any | None, *, current_block: int) -> tuple[Opportunity | None, Any | None]:
+    def _apply_omar_to_candidate(
+        self, opp: Opportunity, decision: Any | None, *, current_block: int
+    ) -> tuple[Opportunity | None, Any | None]:
         omar = getattr(self, "_omar", None)
         if omar is None or not bool(getattr(omar, "enabled", False)):
             return opp, decision
         try:
             bm = (getattr(opp, "meta", {}) or {}).get("brain") or {}
-            p_success = float(bm.get("p_success") or getattr(decision, "p_success", 0.0) or 0.0)
-            ev_wei = int(bm.get("ev_wei") or getattr(decision, "ev_wei", 0) or 0)
+            p_success = float(
+                bm.get("p_success") or getattr(decision, "p_success", 0.0) or 0.0
+            )
+            ev_wei = int(
+                bm.get("ev_wei") or getattr(decision, "ev_wei", 0) or 0
+            )
             context = self._omar_context(opp, p_success=p_success, ev_wei=ev_wei)
             rec = omar.recommend(context)
-            learning_action = str(rec.action) if str(rec.action) in {"WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE"} else "EXECUTE"
-            decision_id = f"omar-{getattr(self.cfg.chain, 'name', 'chain')}-{int(current_block)}-{str(getattr(opp, 'id', '') or '')}-{time.time_ns()}"
+            learning_action = (
+                str(rec.action)
+                if str(rec.action)
+                in {
+                    "WAIT",
+                    "DEFEND",
+                    "SEEK_OPP",
+                    "INCREASE_RISK",
+                    "DECREASE_RISK",
+                    "EXECUTE",
+                }
+                else "EXECUTE"
+            )
+            decision_id = (
+                f"omar-{getattr(self.cfg.chain, 'name', 'chain')}-"
+                f"{int(current_block)}-{str(getattr(opp, 'id', '') or '')}-"
+                f"{time.time_ns()}"
+            )
             if isinstance(getattr(opp, "meta", None), dict):
                 brain = dict(opp.meta.get("brain") or {})
                 brain["omar_decision_id"] = decision_id
@@ -243,44 +314,84 @@ class RuntimeDecisionFacade:
                 opp.meta["omar"] = rec.to_dict()
             if rec.veto:
                 omar.observe_decision(
-                    decision_id=decision_id, opportunity_id=str(getattr(opp, "id", "") or ""), route_id=str(getattr(opp, "route_id", "") or ""),
-                    action=learning_action, state_key=str(rec.state_key), context=context,
-                    metadata={"current_block": int(current_block), "ev_wei": int(ev_wei), "p_success": float(p_success), "recommendation": rec.to_dict()},
+                    decision_id=decision_id,
+                    opportunity_id=str(getattr(opp, "id", "") or ""),
+                    route_id=str(getattr(opp, "route_id", "") or ""),
+                    action=learning_action,
+                    state_key=str(rec.state_key),
+                    context=context,
+                    metadata={
+                        "current_block": int(current_block),
+                        "ev_wei": int(ev_wei),
+                        "p_success": float(p_success),
+                        "recommendation": rec.to_dict(),
+                    },
                 )
                 return None, decision
             if decision is None:
                 decision = TradeDecision(
-                    action="trade", opp_id=str(getattr(opp, "id", "")), route_id=str(getattr(opp, "route_id", "")),
-                    size_mult=float(rec.size_mult), borrow_mult=1.0, gas_mode=str(rec.gas_mode),
-                    p_success=p_success, ev_wei=ev_wei, reason="omar_selected", rl_state="", rl_action_index=-1,
+                    action="trade",
+                    opp_id=str(getattr(opp, "id", "")),
+                    route_id=str(getattr(opp, "route_id", "")),
+                    size_mult=float(rec.size_mult),
+                    borrow_mult=1.0,
+                    gas_mode=str(rec.gas_mode),
+                    p_success=p_success,
+                    ev_wei=ev_wei,
+                    reason="omar_selected",
+                    rl_state="",
+                    rl_action_index=-1,
                     portfolio=[str(getattr(opp, "id", ""))],
                 )
             else:
-                decision.size_mult = min(float(getattr(decision, "size_mult", 1.0) or 1.0), float(rec.size_mult))
-                decision.borrow_mult = min(float(getattr(decision, "borrow_mult", 1.0) or 1.0), 1.0)
+                decision.size_mult = min(
+                    float(getattr(decision, "size_mult", 1.0) or 1.0),
+                    float(rec.size_mult),
+                )
+                decision.borrow_mult = min(
+                    float(getattr(decision, "borrow_mult", 1.0) or 1.0),
+                    1.0,
+                )
                 if str(rec.gas_mode) in {"standard", "fast", "instant"}:
                     decision.gas_mode = str(rec.gas_mode)
             if isinstance(getattr(opp, "meta", None), dict):
                 brain = dict(opp.meta.get("brain") or {})
-                brain["size_mult_omar"] = float(getattr(decision, "size_mult", 1.0) or 1.0)
-                brain["gas_mode_omar"] = str(getattr(decision, "gas_mode", "standard") or "standard")
+                brain["size_mult_omar"] = float(
+                    getattr(decision, "size_mult", 1.0) or 1.0
+                )
+                brain["gas_mode_omar"] = str(
+                    getattr(decision, "gas_mode", "standard") or "standard"
+                )
                 opp.meta["brain"] = brain
             omar.observe_decision(
-                decision_id=decision_id, opportunity_id=str(getattr(opp, "id", "") or ""), route_id=str(getattr(opp, "route_id", "") or ""),
-                action=learning_action, state_key=str(rec.state_key), context=context,
-                metadata={"current_block": int(current_block), "ev_wei": int(ev_wei), "p_success": float(p_success), "recommendation": rec.to_dict()},
+                decision_id=decision_id,
+                opportunity_id=str(getattr(opp, "id", "") or ""),
+                route_id=str(getattr(opp, "route_id", "") or ""),
+                action=learning_action,
+                state_key=str(rec.state_key),
+                context=context,
+                metadata={
+                    "current_block": int(current_block),
+                    "ev_wei": int(ev_wei),
+                    "p_success": float(p_success),
+                    "recommendation": rec.to_dict(),
+                },
             )
             return opp, decision
         except _SAFE_DECISION_EXCEPTIONS:
             return opp, decision
 
-    def _maybe_dispatch_auto_trade(self, *, current_block: int, decision: Any = None) -> bool:
+    def _maybe_dispatch_auto_trade(
+        self, *, current_block: int, decision: Any = None
+    ) -> bool:
         if not self._auto_trading or not self._opps or not self._cb.allow_auto_trading():
             return False
         if self._exec_task is not None and not self._exec_task.done():
             return False
 
-        brain_mode = str(getattr(self.cfg.execution, "brain_mode", "off") or "off")
+        brain_mode = str(
+            getattr(self.cfg.execution, "brain_mode", "off") or "off"
+        )
         chosen = None
         if brain_mode == "off":
             chosen = self._simple_auto_trade_candidate()
@@ -289,9 +400,15 @@ class RuntimeDecisionFacade:
         if chosen is None:
             return False
 
-        chosen, decision = self._apply_omar_to_candidate(chosen, decision if brain_mode != "off" else None, current_block=int(current_block))
+        chosen, decision = self._apply_omar_to_candidate(
+            chosen,
+            decision if brain_mode != "off" else None,
+            current_block=int(current_block),
+        )
         if chosen is None:
             return False
 
-        self._exec_task = asyncio.create_task(self._execute_auto(chosen, int(current_block), decision=decision))
+        self._exec_task = asyncio.create_task(
+            self._execute_auto(chosen, int(current_block), decision=decision)
+        )
         return True
