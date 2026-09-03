@@ -221,7 +221,9 @@ class OmarRuntime:
             if not identity:
                 identity = plan.get("lineage") if isinstance(plan.get("lineage"), Mapping) else {}
             if not identity:
-                identity = entry.get("identity") if isinstance(entry.get("identity"), Mapping) else {}
+                identity = (
+                    entry.get("identity") if isinstance(entry.get("identity"), Mapping) else {}
+                )
             if not identity:
                 identity = entry.get("lineage") if isinstance(entry.get("lineage"), Mapping) else {}
             return {

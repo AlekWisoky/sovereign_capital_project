@@ -526,7 +526,9 @@ class DecisionEngine:
                         or ""
                     ),
                 }
-                act, dbg = self._require_smmae().choose_action(state=state, state_key=str(state_key))
+                act, dbg = self._require_smmae().choose_action(
+                    state=state, state_key=str(state_key)
+                )
                 bm["gas_mode"] = str(act.gas_mode)
                 bm["size_mult"] = float(act.size_mult)
                 bm["borrow_mult"] = float(act.borrow_mult)
