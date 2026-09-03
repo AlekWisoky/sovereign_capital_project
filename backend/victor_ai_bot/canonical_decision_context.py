@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Canonical decision context for the production decision/execution/learning path.
 
-The context is deliberately transport-oriented: it carries intent and authority
-through the lifecycle without granting any field execution authority by itself.
+The context is transport-oriented: it carries intent and authority through the
+lifecycle without granting any field execution authority by itself.
 Governance remains the final execution gate.
 """
 
@@ -13,7 +13,7 @@ from typing import Any, Dict, Mapping, Optional
 
 
 def _decimal_string(value: Any) -> str:
-    """Return a canonical finite decimal string without using binary floats."""
+    """Return a canonical finite decimal string without binary-float amounts."""
     if value in (None, ""):
         return "0"
     try:
@@ -27,8 +27,6 @@ def _decimal_string(value: Any) -> str:
 
 @dataclass(frozen=True)
 class WealthObjective:
-    """Human/business objective used as decision context, not an execution gate."""
-
     target_amount: str = "0"
     currency: str = ""
     timeframe_seconds: int = 0
@@ -42,23 +40,18 @@ class WealthObjective:
 
 @dataclass(frozen=True)
 class HumanIntent:
-    """Explicit operator intent that influenced a decision."""
-
     instruction: str = ""
     aggressiveness: str = "normal"
     risk_multiplier: float = 1.0
     source: str = "human"
 
     def __post_init__(self) -> None:
-        level = str(self.aggressiveness or "normal").strip().lower()
-        object.__setattr__(self, "aggressiveness", level)
+        object.__setattr__(self, "aggressiveness", str(self.aggressiveness or "normal").strip().lower())
         object.__setattr__(self, "risk_multiplier", max(0.0, min(1.0, float(self.risk_multiplier))))
 
 
 @dataclass(frozen=True)
 class AIRecommendation:
-    """AI recommendation metadata; advisory unless separately authorized."""
-
     action: str = ""
     rationale: str = ""
     confidence: float = 0.0
@@ -71,7 +64,7 @@ class AIRecommendation:
 
 @dataclass(frozen=True)
 class CapitalAuthority:
-    """Snapshot of actual capital authority available to this decision."""
+    """Actual capital authority snapshot; amounts remain exact decimal strings."""
 
     deployable_bankroll_wei: str = "0"
     internal_prime_wei: str = "0"
@@ -84,18 +77,14 @@ class CapitalAuthority:
         object.__setattr__(self, "deployable_bankroll_wei", _decimal_string(self.deployable_bankroll_wei))
         object.__setattr__(self, "internal_prime_wei", _decimal_string(self.internal_prime_wei))
         object.__setattr__(self, "external_borrow_capacity_wei", _decimal_string(self.external_borrow_capacity_wei))
-        object.__setattr__(
-            self,
-            "family_allocations_wei",
-            {str(k): _decimal_string(v) for k, v in dict(self.family_allocations_wei or {}).items()},
-        )
+        object.__setattr__(self, "family_allocations_wei", {
+            str(k): _decimal_string(v) for k, v in dict(self.family_allocations_wei or {}).items()
+        })
         object.__setattr__(self, "as_of_block", max(0, int(self.as_of_block or 0)))
 
 
 @dataclass(frozen=True)
 class LatencyContext:
-    """Timing facts available when the decision was made."""
-
     observed_at_ns: int = 0
     market_data_age_ms: float = 0.0
     decision_latency_ms: float = 0.0
@@ -136,7 +125,6 @@ class CanonicalDecisionContext:
         return asdict(self)
 
     def lineage(self) -> Dict[str, str]:
-        """Stable identity fields copied onto execution/outcome/learning records."""
         return {
             "decision_id": self.decision_id,
             "correlation_id": self.correlation_id,
@@ -146,7 +134,6 @@ class CanonicalDecisionContext:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "CanonicalDecisionContext":
-        """Build a context from transport data while keeping missing fields explicit."""
         raw = dict(data or {})
         human = dict(raw.get("human_intent") or {})
         wealth = dict(raw.get("wealth_objective") or {})
@@ -171,12 +158,15 @@ class CanonicalDecisionContext:
 
 def capital_authority_from_engine_state(state: Optional[Mapping[str, Any]]) -> CapitalAuthority:
     """Normalize the existing capital_engine_state() contract into canonical context."""
-    engine = dict((state or {}).get("capital_engine") or {})
+    state_map = dict(state or {})
+    engine = dict(state_map.get("capital_engine") or {})
     return CapitalAuthority(
         deployable_bankroll_wei=engine.get("deployable_bankroll_wei", "0"),
         internal_prime_wei=engine.get("internal_prime_wei", engine.get("internal_prime", "0")),
-        external_borrow_capacity_wei=engine.get("external_borrow_capacity_wei", engine.get("borrow_capacity_wei", "0")),
+        external_borrow_capacity_wei=engine.get(
+            "external_borrow_capacity_wei", engine.get("borrow_capacity_wei", "0")
+        ),
         family_allocations_wei=engine.get("family_allocations_wei") or {},
         authority_source=str(engine.get("authority_source") or "capital_engine"),
-        as_of_block=int(engine.get("as_of_block") or state.get("current_block") or 0),
+        as_of_block=int(engine.get("as_of_block") or state_map.get("current_block") or 0),
     )
