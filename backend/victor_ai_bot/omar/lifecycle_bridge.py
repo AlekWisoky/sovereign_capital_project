@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .real_learning import OmarRealLearningLoop
+from .settled_ledger_bridge import ingest_settled_ledger_record
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -10,12 +11,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def _resolve_real_learning_loop(runtime: Any) -> OmarRealLearningLoop | None:
-    """Resolve the actual production OMAR real-learning loop.
-
-    The bridge deliberately avoids test doubles and the legacy observer surface.
-    Production callbacks may reach OMAR through the runtime-bound OmarRuntime or
-    through the active singleton created by OMAR integration.
-    """
+    """Resolve the actual production OMAR real-learning loop."""
     direct = getattr(runtime, "_real_learning", None)
     if isinstance(direct, OmarRealLearningLoop):
         return direct
@@ -116,12 +112,5 @@ def _observe_settled_outcome(
             "lineage": canonical_lineage,
         }
     )
-    return {
-        **dict(
-            __import__(
-                "victor_ai_bot.omar.settled_ledger_bridge",
-                fromlist=["ingest_settled_ledger_record"],
-            ).ingest_settled_ledger_record(loop, settled_row)
-        ),
-        "canonical_lineage": canonical_lineage,
-    }
+    result = ingest_settled_ledger_record(loop, settled_row)
+    return {**dict(result), "canonical_lineage": canonical_lineage}
