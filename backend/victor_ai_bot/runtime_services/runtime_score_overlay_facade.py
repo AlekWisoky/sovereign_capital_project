@@ -58,9 +58,11 @@ class RuntimeScoreOverlayFacade:
             baseline = 1.0 / 9.0  # matches default number of strategy types in workflow.py
             ag_mult = float(
                 (
-                    (((treasury_state or {}).get("aggressiveness") or {}).get(
-                        "aggressiveness_multiplier"
-                    ))
+                    (
+                        ((treasury_state or {}).get("aggressiveness") or {}).get(
+                            "aggressiveness_multiplier"
+                        )
+                    )
                     or 1.0
                 )
             )

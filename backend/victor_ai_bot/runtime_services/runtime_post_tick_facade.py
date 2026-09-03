@@ -38,15 +38,15 @@ class RuntimePostTickFacade:
             "market": BUS.get("market") or {},
             "treasury": BUS.get("treasury") or {},
             "behaveagent": BUS.get("behaveagent") or {},
-            "governance": (
-                self._gov.snapshot() if getattr(self, "_gov", None) is not None else {}
-            ),
+            "governance": (self._gov.snapshot() if getattr(self, "_gov", None) is not None else {}),
             "pnl": {},
             "circuit_breaker": (
                 self._cb.snapshot() if getattr(self, "_cb", None) is not None else {}
             ),
             "agent_perf": (
-                self._agent_perf.snapshot() if getattr(self, "_agent_perf", None) is not None else {}
+                self._agent_perf.snapshot()
+                if getattr(self, "_agent_perf", None) is not None
+                else {}
             ),
         }
 

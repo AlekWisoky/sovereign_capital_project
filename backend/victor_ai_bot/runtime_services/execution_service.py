@@ -2637,7 +2637,9 @@ class ExecutionService:
                         },
                     )
                 family_info = _canonical_family_identity(
-                    pending.get("strategy_family") or pending.get("route_family") or "flashloan_atomic"
+                    pending.get("strategy_family")
+                    or pending.get("route_family")
+                    or "flashloan_atomic"
                 )
                 items.append(
                     {
@@ -2815,7 +2817,9 @@ class ExecutionService:
             "lastDisplayFamily": str(latest.get("displayFamily") or ""),
             "lastFamilyAliases": list(latest.get("familyAliases") or []),
             "lastFamilyIdentity": (
-                family_identity(str(latest.get("runtimeFamily") or latest.get("family") or "flashloan_atomic"))
+                family_identity(
+                    str(latest.get("runtimeFamily") or latest.get("family") or "flashloan_atomic")
+                )
                 if isinstance(latest, dict)
                 else family_identity("flashloan_atomic")
             ),

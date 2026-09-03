@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: sovereign-capital
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: VICTOR_DEPLOYMENT_MODE
+        value: public
+      - key: VICTOR_PUBLIC_ALLOW_BROADCAST
+        value: "0"
+      - key: VICTOR_AUTOSTART
+        value: "1"
+      - key: VICTOR_ENABLE_OMAR
+        value: "1"
+      - key: VICTOR_CONFIG
+        value: /app/backend/config/ethereum.yaml
+      - key: VICTOR_ADMIN_KEY
+        sync: false
+    disk:
+      name: sovereign-capital-data
+      mountPath: /app/backend/data
+      sizeGB: 1

@@ -24,8 +24,6 @@ def _safe_int(x: Any, default: int = 0) -> int:
         return int(default)
 
 
-
-
 def _summary_rank_key(item: Dict[str, Any]) -> tuple[int, int, int, str]:
     verified = bool(item.get("profit_after_costs_verified", False))
     profit_after = _safe_int(item.get("expected_profit_after_costs_wei") or 0)
@@ -43,9 +41,17 @@ def _summary_rank_key(item: Dict[str, Any]) -> tuple[int, int, int, str]:
         bucket = 4
     else:
         bucket = 5
-    return (bucket, -profit_after, -after_gas, str(item.get("route_id") or item.get("opportunity_id") or ""))
+    return (
+        bucket,
+        -profit_after,
+        -after_gas,
+        str(item.get("route_id") or item.get("opportunity_id") or ""),
+    )
 
-def _profit_after_costs_info(opp: Any) -> tuple[int, bool, str, int, Dict[str, Any], Dict[str, Any]]:
+
+def _profit_after_costs_info(
+    opp: Any,
+) -> tuple[int, bool, str, int, Dict[str, Any], Dict[str, Any]]:
     projection = profitability_summary_projection(opp)
     return (
         _safe_int(projection.get("displayProfitAfterCostsWeiInt") or 0),
@@ -306,7 +312,14 @@ class ReplayBundleStore:
             try:
                 meta = getattr(o, "meta", None) if o is not None else None
                 brain = meta.get("brain") if isinstance(meta, dict) else {}
-                profit_after, profit_after_verified, profit_after_reason, profit_after_usd, post_mutation, state_contract = _profit_after_costs_info(o)
+                (
+                    profit_after,
+                    profit_after_verified,
+                    profit_after_reason,
+                    profit_after_usd,
+                    post_mutation,
+                    state_contract,
+                ) = _profit_after_costs_info(o)
                 route_ready, route_reason, route_reason_codes = opportunity_route_ready(o)
                 projection = profitability_summary_projection(o)
                 why = (
@@ -335,9 +348,7 @@ class ReplayBundleStore:
                     ),
                     send_mode_hint=str((brain or {}).get("gas_mode") or ""),
                     competition=(
-                        "high"
-                        if float((brain or {}).get("p_success") or 1.0) < 0.65
-                        else "medium"
+                        "high" if float((brain or {}).get("p_success") or 1.0) < 0.65 else "medium"
                     ),
                     venue_tags=[
                         str(getattr(leg, "dex", ""))

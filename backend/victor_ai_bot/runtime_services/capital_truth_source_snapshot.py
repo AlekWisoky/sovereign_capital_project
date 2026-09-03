@@ -113,7 +113,9 @@ def capital_commit_id_from_payload(payload: Any) -> str:
     return ""
 
 
-def state_field_mismatches(current: Dict[str, Any], recorded: Dict[str, Any], fields: list[str]) -> list[str]:
+def state_field_mismatches(
+    current: Dict[str, Any], recorded: Dict[str, Any], fields: list[str]
+) -> list[str]:
     mismatches: list[str] = []
     for field in fields:
         if current.get(field) != recorded.get(field):
@@ -250,8 +252,7 @@ def build_capital_truth_source_snapshots(
     )
 
     family_targets = {
-        str(k): float(v or 0.0)
-        for k, v in dict(capital_engine.get("family_targets") or {}).items()
+        str(k): float(v or 0.0) for k, v in dict(capital_engine.get("family_targets") or {}).items()
     }
     family_allocations_wei = {
         str(k): int(v or 0)
@@ -324,7 +325,9 @@ def build_capital_truth_source_snapshots(
 
     internal_prime_updated_ts_ms = internal_prime_ts_ms(internal_prime_state)
     internal_prime_material = bool(borrowed_usd > 0.0 or prime_open_loan_count > 0)
-    internal_prime_runtime_commit_id = capital_commit_id_from_payload(dict(internal_prime_state or {}))
+    internal_prime_runtime_commit_id = capital_commit_id_from_payload(
+        dict(internal_prime_state or {})
+    )
     sources["internal_prime"] = build_source_snapshot(
         name="internal_prime",
         now_ms=now_ms,
@@ -339,7 +342,9 @@ def build_capital_truth_source_snapshots(
         append_reason=append_reason,
     )
 
-    internal_prime_history_payload = dict(internal_prime_state_history_snapshot.get("payload") or {})
+    internal_prime_history_payload = dict(
+        internal_prime_state_history_snapshot.get("payload") or {}
+    )
     internal_prime_history_ts_ms = max_ts_ms(
         [
             internal_prime_state_history_snapshot.get("ts_ms"),
@@ -347,7 +352,9 @@ def build_capital_truth_source_snapshots(
             internal_prime_history_payload.get("updated_ts_ms"),
         ]
     )
-    internal_prime_history_commit_id = capital_commit_id_from_payload(internal_prime_history_payload)
+    internal_prime_history_commit_id = capital_commit_id_from_payload(
+        internal_prime_history_payload
+    )
     sources["internal_prime_state_history"] = build_source_snapshot(
         name="internal_prime_state_history",
         now_ms=now_ms,
@@ -395,8 +402,12 @@ def build_capital_truth_source_snapshots(
         or not bool(bankroll_material and bankroll_history_enabled),
         details={
             "event_type": str(bankroll_history_event.get("event_type") or ""),
-            "realized_profit_wei": str(max(0, int(bankroll_history_payload.get("realized_profit_wei") or 0))),
-            "last_amount_in_wei": str(max(0, int(bankroll_history_payload.get("last_amount_in_wei") or 0))),
+            "realized_profit_wei": str(
+                max(0, int(bankroll_history_payload.get("realized_profit_wei") or 0))
+            ),
+            "last_amount_in_wei": str(
+                max(0, int(bankroll_history_payload.get("last_amount_in_wei") or 0))
+            ),
             "capital_commit_id": str(capital_commit_id_from_payload(bankroll_history_event) or ""),
         },
         append_reason=append_reason,
@@ -416,7 +427,9 @@ def build_capital_truth_source_snapshots(
         details={
             "state_type": str(treasury_history_snapshot.get("state_type") or ""),
             "observed_ts_ms": int(treasury_history_payload.get("observed_ts_ms") or 0),
-            "capital_commit_id": str(capital_commit_id_from_payload(treasury_history_payload) or ""),
+            "capital_commit_id": str(
+                capital_commit_id_from_payload(treasury_history_payload) or ""
+            ),
         },
         append_reason=append_reason,
     )
@@ -519,9 +532,13 @@ def build_capital_truth_source_snapshots(
         name="capital_event_internal_prime",
         now_ms=now_ms,
         ts_ms=prime_event_ts_ms,
-        material=bool(capital_event_enabled and (prime_open_loan_count > 0 or capital_event_internal_prime)),
+        material=bool(
+            capital_event_enabled and (prime_open_loan_count > 0 or capital_event_internal_prime)
+        ),
         available=bool(capital_event_internal_prime)
-        or not bool(capital_event_enabled and (prime_open_loan_count > 0 or capital_event_internal_prime)),
+        or not bool(
+            capital_event_enabled and (prime_open_loan_count > 0 or capital_event_internal_prime)
+        ),
         details={
             "event_type": str(capital_event_internal_prime.get("event_type") or ""),
             "transaction_id": str(capital_event_internal_prime.get("transaction_id") or ""),

@@ -19,9 +19,7 @@ class RuntimeLoopEntryFacade:
             await self._sleep(1.0)
             return
 
-        async with JsonRpcClient(
-            read_url, timeout_s=10.0, max_concurrency=30, max_batch=80
-        ) as rpc:
+        async with JsonRpcClient(read_url, timeout_s=10.0, max_concurrency=30, max_batch=80) as rpc:
             bn = await self._prepare_tick_iteration(rpc=rpc)
             if bn is None:
                 return
@@ -33,4 +31,5 @@ class RuntimeLoopEntryFacade:
 
     async def _sleep(self, seconds: float) -> None:
         import asyncio
+
         await asyncio.sleep(seconds)
