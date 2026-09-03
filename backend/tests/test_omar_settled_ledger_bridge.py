@@ -37,6 +37,15 @@ def test_omar_ingests_complete_settled_ledger_lineage(tmp_path):
                 "realized_profit_after_gas_wei": 700,
                 "gas_cost_wei": 100,
                 "submit_to_receipt_ms": 250,
+                "capital_demand": {
+                    "schema_version": "capital_demand.v1",
+                    "requested_capital_wei": "500",
+                    "authorized_capital_wei": "500",
+                    "authority_source": "capital_engine_state",
+                    "capital_source": "internal_prime",
+                    "goal_posture": {"risk_posture": "moderate"},
+                    "ultimately_deployed_capital_wei": "500",
+                },
             },
         },
     )
@@ -46,8 +55,12 @@ def test_omar_ingests_complete_settled_ledger_lineage(tmp_path):
     assert result["lineage"]["decision_id"] == "decision-1"
     assert result["lineage"]["latency_class"] == "fast"
     assert result["attribution"]["reward_wei"] == 600
+    assert result["capital_demand"]["requested_capital_wei"] == "500"
+    assert result["capital_demand"]["authority_source"] == "capital_engine_state"
+    assert result["capital_demand"]["goal_posture"]["risk_posture"] == "moderate"
     assert updates and updates[0]["decision_id"] == "decision-1"
     assert loop._decisions["decision-1"].capital_authority.authority_id == "prime-1"
+    assert loop._decisions["decision-1"].metadata["capital_demand"]["authorized_capital_wei"] == "500"
 
 
 def test_omar_refuses_incomplete_settled_lineage(tmp_path):
