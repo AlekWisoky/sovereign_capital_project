@@ -42,20 +42,14 @@ def capital_authority_context(runtime: Any) -> dict[str, Any]:
             "capital_family_allocations_wei": {
                 str(k): max(0, int(v or 0)) for k, v in allocations.items()
             },
-            "capital_authority_status": _text(
-                cap.get("status") or root.get("status")
-            )
-            or "unknown",
+            "capital_authority_status": _text(cap.get("status") or root.get("status")) or "unknown",
             "capital_authority_freshness": _text(
                 cap.get("freshness_class") or root.get("freshness_class")
             )
             or "unknown",
-            "capital_authority_id": _text(
-                cap.get("authority_id") or root.get("authority_id")
-            )
+            "capital_authority_id": _text(cap.get("authority_id") or root.get("authority_id"))
             or "unknown",
-            "capital_source": _text(cap.get("source") or root.get("source"))
-            or "runtime_capital",
+            "capital_source": _text(cap.get("source") or root.get("source")) or "runtime_capital",
             "internal_prime_available": bool(
                 cap.get("internal_prime_available", cap.get("prime_available", False))
             ),
@@ -64,8 +58,7 @@ def capital_authority_context(runtime: Any) -> dict[str, Any]:
                 or 0.0
             ),
             "prime_cost_bps": float(
-                cap.get("prime_cost_bps", cap.get("internal_prime_cost_bps", 0.0))
-                or 0.0
+                cap.get("prime_cost_bps", cap.get("internal_prime_cost_bps", 0.0)) or 0.0
             ),
         }
     except _SAFE:
@@ -88,9 +81,7 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
     """Persist canonical decision/correlation IDs on both decision and opportunity."""
     meta = getattr(opp, "meta", None)
     brain = _dict(meta.get("brain")) if isinstance(meta, dict) else {}
-    decision_id = _text(
-        brain.get("canonical_decision_id") or brain.get("omar_decision_id")
-    )
+    decision_id = _text(brain.get("canonical_decision_id") or brain.get("omar_decision_id"))
     if not decision_id:
         decision_id = _stable_id(
             "decision",
@@ -98,9 +89,7 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
             getattr(opp, "id", ""),
             getattr(opp, "route_id", ""),
         )
-    correlation_id = _text(
-        brain.get("correlation_id") or brain.get("omar_correlation_id")
-    )
+    correlation_id = _text(brain.get("correlation_id") or brain.get("omar_correlation_id"))
     if not correlation_id:
         correlation_id = _stable_id("corr", decision_id)
     brain["canonical_decision_id"] = decision_id
@@ -133,9 +122,7 @@ def _patch_decision_context() -> None:
     if original is None or getattr(original, "_omar_capital_patched", False):
         return
 
-    def wrapped(
-        self: Any, opp: Any, *, p_success: float, ev_wei: int
-    ) -> dict[str, Any]:
+    def wrapped(self: Any, opp: Any, *, p_success: float, ev_wei: int) -> dict[str, Any]:
         context = _dict(original(self, opp, p_success=p_success, ev_wei=ev_wei))
         context.update(capital_authority_context(self))
         return context
@@ -151,9 +138,7 @@ def _patch_decision_lineage() -> None:
     if original is None or getattr(original, "_omar_lineage_patched", False):
         return
 
-    def wrapped(
-        self: Any, opp: Any, decision: Any | None, *, current_block: int
-    ):
+    def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
         chosen, selected = original(self, opp, decision, current_block=current_block)
         if chosen is not None and selected is not None:
             ensure_lineage(chosen, selected, int(current_block))
@@ -163,9 +148,7 @@ def _patch_decision_lineage() -> None:
     RuntimeDecisionFacade._apply_omar_to_candidate = wrapped
 
 
-def _canonical_settled_outcome(
-    runtime: Any, result: Any, opp: Any
-) -> dict[str, Any] | None:
+def _canonical_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str, Any] | None:
     """Return only an outcome already marked settled by the canonical ledger."""
     ledgers = [
         getattr(runtime, "canonical_outcome_ledger", None),
@@ -241,9 +224,7 @@ def _patch_settlement_learning() -> None:
                 return result
             meta = _dict(getattr(opp, "meta", None))
             brain = _dict(meta.get("brain"))
-            decision_id = _text(
-                brain.get("canonical_decision_id") or brain.get("omar_decision_id")
-            )
+            decision_id = _text(brain.get("canonical_decision_id") or brain.get("omar_decision_id"))
             correlation_id = _text(brain.get("correlation_id"))
             if not decision_id or not correlation_id:
                 return result
@@ -275,19 +256,13 @@ def _patch_settlement_learning() -> None:
                     or 0
                 ),
                 gas_cost_usd=float(
-                    outcome.get("gas_cost_usd", outcome.get("gasCostUsd", 0.0))
-                    or 0.0
+                    outcome.get("gas_cost_usd", outcome.get("gasCostUsd", 0.0)) or 0.0
                 ),
                 slippage_bps=float(
-                    outcome.get("slippage_bps", outcome.get("slippageBps", 0.0))
-                    or 0.0
+                    outcome.get("slippage_bps", outcome.get("slippageBps", 0.0)) or 0.0
                 ),
-                latency_ms=int(
-                    outcome.get("latency_ms", outcome.get("latencyMs", 0)) or 0
-                ),
-                route_id=_text(
-                    outcome.get("route_id") or getattr(opp, "route_id", "")
-                ),
+                latency_ms=int(outcome.get("latency_ms", outcome.get("latencyMs", 0)) or 0),
+                route_id=_text(outcome.get("route_id") or getattr(opp, "route_id", "")),
                 tx_hash=_text(outcome.get("tx_hash") or outcome.get("txHash")),
                 outcome_truth_verified=bool(
                     outcome.get(

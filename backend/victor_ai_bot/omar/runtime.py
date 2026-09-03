@@ -43,9 +43,7 @@ class OmarRuntime:
         base_data_dir = str(os.environ.get("VICTOR_DATA_DIR", "data") or "data")
         self.data_dir = os.path.join(base_data_dir, "superstructure")
         os.makedirs(self.data_dir, exist_ok=True)
-        self.audit_path = os.path.join(
-            self.data_dir, f"omar_audit_{chain_name}.jsonl"
-        )
+        self.audit_path = os.path.join(self.data_dir, f"omar_audit_{chain_name}.jsonl")
         self.learning_path = os.path.join(
             self.data_dir, "omar_learning", f"real_policy_{chain_name}.json"
         )
@@ -55,9 +53,7 @@ class OmarRuntime:
                 path=self.learning_path,
                 alpha=float(getattr(cfg, "real_learning_alpha", 0.12)),
                 epsilon=float(getattr(cfg, "live_exploration_epsilon", 0.0)),
-                min_observations=int(
-                    getattr(cfg, "real_learning_min_observations", 20)
-                ),
+                min_observations=int(getattr(cfg, "real_learning_min_observations", 20)),
             )
         self._pending_decisions: Dict[str, Dict[str, Any]] = {}
         self._learning_cursor_path = os.path.join(
@@ -86,9 +82,7 @@ class OmarRuntime:
                 "policy_model": self.cfg.policy_model,
                 "cycle": self._cycle,
                 "real_learning": (
-                    self._real_learner.summary()
-                    if self._real_learner
-                    else {"enabled": False}
+                    self._real_learner.summary() if self._real_learner else {"enabled": False}
                 ),
                 "last_decision": dict(self.last_decision),
                 "last_outcome": dict(self.last_outcome),
@@ -98,9 +92,7 @@ class OmarRuntime:
 
     def recommend(self, context: Mapping[str, Any]) -> OmarRecommendation:
         """Return a bounded recommendation for the next real decision."""
-        if not self.enabled or not bool(
-            getattr(self.cfg, "live_influence_enabled", True)
-        ):
+        if not self.enabled or not bool(getattr(self.cfg, "live_influence_enabled", True)):
             return OmarRecommendation(
                 "",
                 "DISABLED",
@@ -140,9 +132,7 @@ class OmarRuntime:
         context: Mapping[str, Any],
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        if not self.enabled or not bool(
-            getattr(self.cfg, "real_learning_enabled", True)
-        ):
+        if not self.enabled or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return
         row = {
             "decision_id": str(decision_id),
@@ -181,14 +171,14 @@ class OmarRuntime:
         outcome_truth_verified: bool = True,
         metadata: Mapping[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        if not self.enabled or self._real_learner is None or not bool(
-            getattr(self.cfg, "real_learning_enabled", True)
+        if (
+            not self.enabled
+            or self._real_learner is None
+            or not bool(getattr(self.cfg, "real_learning_enabled", True))
         ):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
         with self._lock:
-            pending = dict(
-                self._pending_decisions.pop(str(decision_id), {}) or {}
-            )
+            pending = dict(self._pending_decisions.pop(str(decision_id), {}) or {})
         state_key = str(pending.get("state_key") or "")
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
@@ -245,9 +235,7 @@ class OmarRuntime:
     def _load_learning_cursor(self) -> Dict[str, Any]:
         try:
             if os.path.exists(self._learning_cursor_path):
-                with open(
-                    self._learning_cursor_path, "r", encoding="utf-8"
-                ) as handle:
+                with open(self._learning_cursor_path, "r", encoding="utf-8") as handle:
                     payload = json.load(handle)
                     if isinstance(payload, dict):
                         return payload
@@ -287,14 +275,10 @@ class OmarRuntime:
                 f"rl_training_{self.chain_name}.jsonl",
             ),
         ]
-        training_path = next(
-            (path for path in candidates if os.path.exists(path)), candidates[0]
-        )
+        training_path = next((path for path in candidates if os.path.exists(path)), candidates[0])
         try:
             offset = max(0, int(self._learning_cursor.get("offset") or 0))
-            seen = set(
-                str(x) for x in list(self._learning_cursor.get("seen") or [])
-            )
+            seen = set(str(x) for x in list(self._learning_cursor.get("seen") or []))
             with open(training_path, "r", encoding="utf-8") as handle:
                 handle.seek(offset)
                 while True:
@@ -308,16 +292,8 @@ class OmarRuntime:
                         continue
                     if not isinstance(row, dict):
                         continue
-                    extra = (
-                        row.get("extra")
-                        if isinstance(row.get("extra"), dict)
-                        else {}
-                    )
-                    brain = (
-                        extra.get("brain")
-                        if isinstance(extra.get("brain"), dict)
-                        else {}
-                    )
+                    extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+                    brain = extra.get("brain") if isinstance(extra.get("brain"), dict) else {}
                     action = str(brain.get("omar_action") or "")
                     state_key = str(brain.get("omar_state_key") or "")
                     tx_hash = str(row.get("tx_hash") or "")
@@ -331,9 +307,7 @@ class OmarRuntime:
                     expected = float(row.get("expected_after_costs_wei") or 0.0)
                     realized = float(row.get("realized_after_gas_wei") or 0.0)
                     reward_trace = (
-                        row.get("reward_trace")
-                        if isinstance(row.get("reward_trace"), dict)
-                        else {}
+                        row.get("reward_trace") if isinstance(row.get("reward_trace"), dict) else {}
                     )
                     reward = reward_trace.get("reward_scaled_float")
                     if reward is None:

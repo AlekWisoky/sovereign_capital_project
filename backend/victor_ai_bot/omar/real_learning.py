@@ -44,22 +44,12 @@ def _prime_context(context: Mapping[str, Any]) -> str:
     the learning state. Prime *economics* can influence the state through
     stable buckets such as source, availability, capacity, and cost.
     """
-    source = _text(
-        context, "capital_source", "prime_source", "internal_prime_source"
-    ).lower()
-    available = bool(
-        context.get("internal_prime_available", context.get("prime_available", False))
-    )
+    source = _text(context, "capital_source", "prime_source", "internal_prime_source").lower()
+    available = bool(context.get("internal_prime_available", context.get("prime_available", False)))
     capacity = float(
-        context.get("prime_capacity_ratio")
-        or context.get("internal_prime_capacity_ratio")
-        or 0.0
+        context.get("prime_capacity_ratio") or context.get("internal_prime_capacity_ratio") or 0.0
     )
-    cost_bps = float(
-        context.get("prime_cost_bps")
-        or context.get("internal_prime_cost_bps")
-        or 0.0
-    )
+    cost_bps = float(context.get("prime_cost_bps") or context.get("internal_prime_cost_bps") or 0.0)
     source_bucket = (
         "internal" if "internal" in source or "prime" in source else (source or "unknown")
     )
@@ -138,17 +128,17 @@ class OmarRealLearner:
             (
                 _bucket(
                     margin,
-                    (0.0, .0005, .001, .002),
+                    (0.0, 0.0005, 0.001, 0.002),
                     ("m_neg", "m_tiny", "m_low", "m_mid", "m_hi"),
                 ),
                 _bucket(
                     gas,
-                    (.0002, .0005, .001),
+                    (0.0002, 0.0005, 0.001),
                     ("g_vlow", "g_low", "g_mid", "g_hi"),
                 ),
                 _bucket(
                     p,
-                    (.70, .80, .90),
+                    (0.70, 0.80, 0.90),
                     ("p_low", "p_mid", "p_high", "p_very_high"),
                 ),
                 _bucket(
@@ -158,12 +148,12 @@ class OmarRealLearner:
                 ),
                 _bucket(
                     realism,
-                    (.55, .70, .85),
+                    (0.55, 0.70, 0.85),
                     ("r_low", "r_mid", "r_high", "r_strong"),
                 ),
                 _bucket(
                     stability,
-                    (.55, .70, .85),
+                    (0.55, 0.70, 0.85),
                     ("s_low", "s_mid", "s_high", "s_strong"),
                 ),
                 _bucket(
@@ -178,7 +168,7 @@ class OmarRealLearner:
                 ),
                 _bucket(
                     vol,
-                    (.10, .20, .35),
+                    (0.10, 0.20, 0.35),
                     ("v_low", "v_mid", "v_high", "v_extreme"),
                 ),
                 _prime_context(context),
@@ -210,9 +200,7 @@ class OmarRealLearner:
                 )
                 self.last_recommendation = rec.to_dict()
                 return rec
-            ranked = sorted(
-                self.q[key].items(), key=lambda item: (-float(item[1]), item[0])
-            )
+            ranked = sorted(self.q[key].items(), key=lambda item: (-float(item[1]), item[0]))
             action, top = ranked[0]
             second = float(ranked[1][1]) if len(ranked) > 1 else 0.0
             confidence = _clip(
@@ -379,15 +367,11 @@ class OmarRealLearner:
                 self.min_observations = max(
                     1, int(payload.get("min_observations", self.min_observations))
                 )
-                self.total_observations = max(
-                    0, int(payload.get("total_observations", 0))
-                )
+                self.total_observations = max(0, int(payload.get("total_observations", 0)))
                 raw_q = payload.get("q")
                 if isinstance(raw_q, dict):
                     self.q = {
-                        str(state): {
-                            a: float(values.get(a, 0.0)) for a in ACTIONS
-                        }
+                        str(state): {a: float(values.get(a, 0.0)) for a in ACTIONS}
                         for state, values in raw_q.items()
                         if isinstance(values, dict)
                     }
