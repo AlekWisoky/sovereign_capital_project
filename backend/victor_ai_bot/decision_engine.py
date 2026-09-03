@@ -292,9 +292,9 @@ class DecisionEngine:
 
                 denom = max(1.0, _mf(cur))
                 mult = _mf(action.gas_mode) / denom
-                gas_cost = int(float(gas_cost) * float(mult))
+                gas_cost = float(gas_cost) * float(mult)
             except _SAFE_METADATA_EXCEPTIONS:
-                gas_cost = feats.gas_cost_wei
+                gas_cost = float(feats.gas_cost_wei or 0.0)
 
             # EV in wei (simple): p*profit - (1-p)*gas_cost
             ev = int(p_base * profit_after - (1.0 - p_base) * gas_cost)
