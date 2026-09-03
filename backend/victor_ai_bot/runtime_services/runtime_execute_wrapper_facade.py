@@ -76,6 +76,24 @@ class RuntimeExecuteWrapperFacade:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return
 
+    @staticmethod
+    def _finalize_phase7_identity(context: dict[str, Any], res: Any) -> dict[str, Any]:
+        payload = dict(context or {})
+        decision = dict(payload.get("decision") or {})
+        execution = dict(payload.get("execution") or {})
+        identity = identity_from(res)
+        if identity is not None:
+            decision["decision_id"] = identity.decision_id
+            decision["correlation_id"] = identity.correlation_id
+            execution["execution_id"] = identity.execution_id
+        payload["decision"] = decision
+        payload["execution"] = execution
+        payload["latency"] = {
+            **dict(payload.get("latency") or {}),
+            "observed_ms": int(max(0, int(execution.get("latency_ms") or 0))),
+        }
+        return payload
+
     async def _run_prepared_auto_execution(
         self,
         *,
@@ -90,12 +108,15 @@ class RuntimeExecuteWrapperFacade:
         read_url = str(prep.read_url)
         send_url = str(prep.send_url)
 
-        # Phase 7 context is captured once at the decision/execution boundary.
-        # If the decision already owns a snapshot, the helper reuses it without
-        # extra runtime reads; otherwise it performs one best-effort snapshot.
+        # Capture once before execution. When Phase 7 already attached its
+        # decision-time snapshot, this is a zero-extra-read path. Otherwise this
+        # is the single fallback snapshot, never repeated after execution.
+        context_started = time.perf_counter()
         phase7_context = build_phase7_execution_context(self, opp, decision)
-        context_capture_started = time.perf_counter()
-        phase7_context["latency"]["capture_started_ms"] = int(time.time() * 1000.0)
+        phase7_context["latency"]["capture_ms"] = int(
+            (time.perf_counter() - context_started) * 1000.0
+        )
+        attach_phase7_execution_context(opp, phase7_context)
 
         try:
             rpc_client_cls, execute_opportunity = _compat_execution_wrapper_symbols()
@@ -137,25 +158,13 @@ class RuntimeExecuteWrapperFacade:
                 else:
                     res = await _core()
 
-                # The execution boundary is where the execution_id is minted;
-                # the decision/correlation pair remains the decision authority.
                 res = self._ensure_execution_identity(res, decision)
-                phase7_context = build_phase7_execution_context(
-                    self,
-                    opp,
-                    decision,
-                    latency_ms=int((time.perf_counter() - t1) * 1000.0),
-                    result=res,
-                )
-                phase7_context["latency"]["capture_ms"] = int(
-                    (time.perf_counter() - context_capture_started) * 1000.0
-                )
-                attach_phase7_execution_context(opp, phase7_context)
-                attach_phase7_execution_context(res, phase7_context)
-
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
+                phase7_context = self._finalize_phase7_identity(phase7_context, res)
                 phase7_context["execution"]["latency_ms"] = latency_ms
                 phase7_context["latency"]["observed_ms"] = latency_ms
+                attach_phase7_execution_context(opp, phase7_context)
+                attach_phase7_execution_context(res, phase7_context)
 
                 if execution_service is not None:
                     bookkeeping_handler = getattr(
@@ -186,8 +195,8 @@ class RuntimeExecuteWrapperFacade:
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
 
-                # Post-bookkeeping persistence keeps the submission-critical path
-                # free of an additional database write.
+                # Context persistence is intentionally after bookkeeping; it can
+                # never slow or bypass transaction submission.
                 await self._persist_phase7_context(self, res, phase7_context)
         finally:
             execution_service = getattr(self, "_execution_service", None)
