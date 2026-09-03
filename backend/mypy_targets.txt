@@ -4,3 +4,4 @@ backend/mypy_targets/governance_reporting.txt
 backend/mypy_targets/auxiliary_dashboard_readiness.txt
 backend/mypy_targets/dashboard_auxiliary_capital_lifecycle.txt
 backend/mypy_targets/optional_family_aux_reads.txt
+backend/mypy_targets/capital_demand.txt
