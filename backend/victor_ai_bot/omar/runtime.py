@@ -15,7 +15,7 @@ from .config import OmarConfig
 from .metrics import compute_social_metrics, to_dict
 from .operator_intent import OperatorIntentSnapshot
 from .real_learning import ActionAttribution, OmarRealLearningLoop
-from .trainer import OmarTrainer
+from .trainer import DEFAULT_ACTION_KEYS, OmarTrainer
 
 
 class OmarRuntime:
@@ -33,6 +33,7 @@ class OmarRuntime:
         self._trainer: Optional[OmarTrainer] = None
         self._ledger: Optional[CanonicalOutcomeLedger] = None
         self._real_learning: Optional[OmarRealLearningLoop] = None
+        self._direct_settlement_learning = False
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._bound_runtime: Any = None
@@ -51,6 +52,7 @@ class OmarRuntime:
     def bind_runtime(self, runtime: Any) -> None:
         """Bind the production runtime as a read-only authority provider."""
         self._bound_runtime = runtime
+        self._direct_settlement_learning = True
         self._real_learning = OmarRealLearningLoop(
             chain_name=self.chain_name,
             data_dir=self.omar_dir,
@@ -74,14 +76,11 @@ class OmarRuntime:
 
     @staticmethod
     def _action_index(action: str) -> int:
-        keys = tuple(OmarTrainer.__dict__.get("DEFAULT_ACTION_KEYS", ()))
-        if not keys:
-            keys = ("WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE")
         text = str(action or "").strip().upper()
         aliases = {"TRADE": "EXECUTE", "EXECUTE": "EXECUTE"}
         text = aliases.get(text, text)
         try:
-            return keys.index(text)
+            return DEFAULT_ACTION_KEYS.index(text)
         except ValueError:
             return -1
 
@@ -201,7 +200,11 @@ class OmarRuntime:
         complete decision/execution/settlement lineage.
         """
         if not self.cfg.enabled or self._real_learning is None:
-            return {"ok": False, "eligible_for_learning": False, "reason_code": "omar_real_learning_disabled"}
+            return {
+                "ok": False,
+                "eligible_for_learning": False,
+                "reason_code": "omar_real_learning_disabled",
+            }
         from .settled_ledger_bridge import ingest_settled_ledger_record
 
         result = ingest_settled_ledger_record(self._real_learning, row)
@@ -247,6 +250,8 @@ class OmarRuntime:
             pass
 
     def _learn_real_outcomes(self) -> None:
+        if self._direct_settlement_learning:
+            return
         if not self._ledger or not self._trainer:
             return
         outcomes = self._ledger.poll(limit=self.cfg.real_outcome_batch_size)
@@ -273,7 +278,7 @@ class OmarRuntime:
             checkpoint = self.policy_path if self.cfg.policy_checkpoint_enabled else None
             self._trainer = OmarTrainer(self.cfg, checkpoint_path=checkpoint)
 
-            if self.self_play_enabled:
+            if self.cfg.self_play_enabled:
                 stats = self._trainer.train()
                 if stats:
                     self.last_train = asdict(stats[-1])
