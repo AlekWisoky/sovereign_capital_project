@@ -276,7 +276,7 @@ class DecisionEngine:
             profit_after = int(feats.profit_after_costs_wei * notional_mult)
 
             # Approximate gas cost for alternate gas modes using preset max_fee ratios.
-            gas_cost = feats.gas_cost_wei
+            gas_cost: float = float(feats.gas_cost_wei or 0.0)
             try:
                 p = getattr(cfg.execution, "gas_presets", None)
                 cur = str(getattr(cfg.execution, "gas_mode", "standard") or "standard")
@@ -403,7 +403,7 @@ class DecisionEngine:
                     "chain": str(self.chain),
                     "route_id": str(getattr(o_best, "route_id", "") or ""),
                 }
-                action_obj, smmae_debug = self._smmae.choose_action(
+                action_obj, smmae_debug = self._require_smmae().choose_action(
                     state=state, state_key=str(s_best)
                 )
                 # Attach debug to the best opp (additive metadata).
@@ -526,7 +526,7 @@ class DecisionEngine:
                         or ""
                     ),
                 }
-                act, dbg = self._smmae.choose_action(state=state, state_key=str(state_key))
+                act, dbg = self._require_smmae().choose_action(state=state, state_key=str(state_key))
                 bm["gas_mode"] = str(act.gas_mode)
                 bm["size_mult"] = float(act.size_mult)
                 bm["borrow_mult"] = float(act.borrow_mult)
@@ -717,6 +717,12 @@ class DecisionEngine:
                 "routes": int(len(self._route_stats)),
             },
         }
+
+    def _require_smmae(self) -> Any:
+        smmae = self._smmae
+        if smmae is None:
+            raise RuntimeError("SMMAE policy is unavailable")
+        return smmae
 
     def set_brain_mode(self, mode: str) -> None:
         """Additive operator override for brain mode.
