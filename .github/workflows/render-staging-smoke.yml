@@ -1,0 +1,30 @@
+name: Render Staging Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - codex/omar-canonical-capital-lineage
+
+permissions:
+  contents: read
+
+jobs:
+  render-staging:
+    name: Read-only Render runtime verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify deployed staging runtime
+        env:
+          RENDER_STAGING_URL: ${{ secrets.RENDER_STAGING_URL }}
+        run: |
+          if [ -z "$RENDER_STAGING_URL" ]; then
+            echo "RENDER_STAGING_URL is not configured; staging verification is skipped."
+            exit 0
+          fi
+          python scripts/verify_render_staging.py
