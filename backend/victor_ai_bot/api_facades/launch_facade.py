@@ -68,19 +68,33 @@ def guard_launch_mutation(*, runtime: Any, family: str, action: str) -> Governan
             allowed=False, reason_code="family_required", review_required=False
         )
 
-    known_families = {canonical_launch_family_id(str(x or "")) for x in (getattr(getattr(rollout, "profile", None), "rollout_order", []) or [])}
+    known_families = {
+        canonical_launch_family_id(str(x or ""))
+        for x in (getattr(getattr(rollout, "profile", None), "rollout_order", []) or [])
+    }
     known_families.update(
-        {canonical_launch_family_id(str(x or "")) for x in (getattr(getattr(rollout, "profile", None), "family_states", {}).keys() or [])}
+        {
+            canonical_launch_family_id(str(x or ""))
+            for x in (getattr(getattr(rollout, "profile", None), "family_states", {}).keys() or [])
+        }
     )
     if family and known_families and family not in known_families:
         return GovernanceOutcome(allowed=False, reason_code="unknown_family", review_required=False)
 
     controls = getattr(getattr(runtime, "_cc", None), "controls", None)
     if action == "enable_next":
-        launch_policy = dict((capital_policy or {}).get("launch") or {}) if isinstance(capital_policy, dict) else {}
+        launch_policy = (
+            dict((capital_policy or {}).get("launch") or {})
+            if isinstance(capital_policy, dict)
+            else {}
+        )
         if launch_policy and not bool(launch_policy.get("enableAllowed", True)):
             blockers = list(launch_policy.get("enableBlockers") or [])
-            return GovernanceOutcome(allowed=False, reason_code=str(blockers[0] if blockers else "capital_nav_unavailable"), review_required=False)
+            return GovernanceOutcome(
+                allowed=False,
+                reason_code=str(blockers[0] if blockers else "capital_nav_unavailable"),
+                review_required=False,
+            )
         if controls is not None and bool(getattr(controls, "paused", False)):
             return GovernanceOutcome(
                 allowed=False, reason_code="command_center_paused", review_required=False
@@ -89,17 +103,30 @@ def guard_launch_mutation(*, runtime: Any, family: str, action: str) -> Governan
             return GovernanceOutcome(
                 allowed=False, reason_code="allocations_frozen", review_required=False
             )
-        family_states = {canonical_launch_family_id(str(k or "")): v for k, v in (getattr(getattr(rollout, "profile", None), "family_states", {}) or {}).items()}
+        family_states = {
+            canonical_launch_family_id(str(k or "")): v
+            for k, v in (
+                getattr(getattr(rollout, "profile", None), "family_states", {}) or {}
+            ).items()
+        }
         if family and str(family_states.get(family) or "") == HealthState.QUARANTINED.value:
             return GovernanceOutcome(
                 allowed=False, reason_code="family_quarantined", review_required=True
             )
 
     if action == "set_mode":
-        launch_policy = dict((capital_policy or {}).get("launch") or {}) if isinstance(capital_policy, dict) else {}
+        launch_policy = (
+            dict((capital_policy or {}).get("launch") or {})
+            if isinstance(capital_policy, dict)
+            else {}
+        )
         if launch_policy and not bool(launch_policy.get("modeChangeAllowed", True)):
             blockers = list(launch_policy.get("modeChangeBlockers") or [])
-            return GovernanceOutcome(allowed=False, reason_code=str(blockers[0] if blockers else "capital_nav_unavailable"), review_required=False)
+            return GovernanceOutcome(
+                allowed=False,
+                reason_code=str(blockers[0] if blockers else "capital_nav_unavailable"),
+                review_required=False,
+            )
     return GovernanceOutcome(allowed=True, reason_code="allowed", review_required=False)
 
 

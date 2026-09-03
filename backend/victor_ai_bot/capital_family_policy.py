@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, Dict, List, Tuple
 
-from victor_ai_bot.fund_os.family_identity import family_alias_candidates as identity_alias_candidates
+from victor_ai_bot.fund_os.family_identity import (
+    family_alias_candidates as identity_alias_candidates,
+)
 from victor_ai_bot.fund_os.family_identity import family_identity
 
 FAMILY_CAPITAL_PLAN_VERSION = "family_capital_plan_v1"
@@ -16,13 +18,11 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-
 def _safe_int(value: Any) -> int:
     try:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
 
 
 def _unique(values: Iterable[str]) -> List[str]:
@@ -34,16 +34,13 @@ def _unique(values: Iterable[str]) -> List[str]:
     return out
 
 
-
 def canonical_family_id(family: str) -> str:
     info = family_identity(family)
     return str(info.get("capitalFamily") or str(family or ""))
 
 
-
 def family_alias_candidates(families: str | Iterable[str]) -> List[str]:
     return _unique(identity_alias_candidates(families))
-
 
 
 def resolve_family_target(
@@ -56,7 +53,6 @@ def resolve_family_target(
     return "", 0.0, False
 
 
-
 def resolve_family_allocation(
     *, family_allocations_wei: Mapping[str, Any] | None, family: str | Iterable[str]
 ) -> tuple[str, int, bool]:
@@ -65,7 +61,6 @@ def resolve_family_allocation(
         if candidate in allocations:
             return candidate, max(0, _safe_int(allocations.get(candidate))), True
     return "", 0, False
-
 
 
 def resolve_family_capital_limit(
@@ -94,10 +89,11 @@ def resolve_family_capital_limit(
         "resolved_allocation_key": allocation_key,
         "family_allocation_wei": int(max(0, allocation_wei)),
         "aliases": [
-            alias for alias in family_alias_candidates(requested_family) if alias != requested_family
+            alias
+            for alias in family_alias_candidates(requested_family)
+            if alias != requested_family
         ],
     }
-
 
 
 def build_family_capital_plan(
@@ -107,7 +103,10 @@ def build_family_capital_plan(
     deployable_usd: float = 0.0,
 ) -> List[Dict[str, Any]]:
     engine = dict(capital_engine or {})
-    targets = {str(k): max(0.0, _safe_float(v)) for k, v in dict(engine.get("family_targets") or {}).items()}
+    targets = {
+        str(k): max(0.0, _safe_float(v))
+        for k, v in dict(engine.get("family_targets") or {}).items()
+    }
     allocations = {
         str(k): max(0, _safe_int(v))
         for k, v in dict(engine.get("family_allocations_wei") or {}).items()
@@ -127,8 +126,12 @@ def build_family_capital_plan(
     for canonical, raw_keys in grouped.items():
         candidates = family_alias_candidates([canonical, *raw_keys])
         target_key = next((candidate for candidate in candidates if candidate in targets), "")
-        allocation_key = next((candidate for candidate in candidates if candidate in allocations), "")
-        metric_key = next((candidate for candidate in candidates if candidate in metrics_by_family), "")
+        allocation_key = next(
+            (candidate for candidate in candidates if candidate in allocations), ""
+        )
+        metric_key = next(
+            (candidate for candidate in candidates if candidate in metrics_by_family), ""
+        )
         display_id = target_key or allocation_key or metric_key or canonical
         target = max(0.0, _safe_float(targets.get(target_key))) if target_key else 0.0
         allocation_wei = max(0, _safe_int(allocations.get(allocation_key))) if allocation_key else 0
@@ -152,7 +155,9 @@ def build_family_capital_plan(
         else:
             status = "unplanned"
         metrics = dict(metrics_by_family.get(metric_key or display_id) or {})
-        aliases = _unique([*raw_keys, *[candidate for candidate in candidates if candidate != display_id]])
+        aliases = _unique(
+            [*raw_keys, *[candidate for candidate in candidates if candidate != display_id]]
+        )
         aliases = [alias for alias in aliases if alias != display_id]
         plan.append(
             {
@@ -173,7 +178,16 @@ def build_family_capital_plan(
                 "roiPct": _safe_float(metrics.get("gasEfficiency")),
                 "volPct": _safe_float(metrics.get("competitionPressure")),
                 "riskScore": int(
-                    max(0.0, min(100.0, _safe_float(metrics.get("stability"),) * 100.0))
+                    max(
+                        0.0,
+                        min(
+                            100.0,
+                            _safe_float(
+                                metrics.get("stability"),
+                            )
+                            * 100.0,
+                        ),
+                    )
                 ),
             }
         )

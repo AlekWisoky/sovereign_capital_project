@@ -1,10 +1,38 @@
-"""OMAR-style unified multi-role self-play training overlay.
+"""OMAR learning subsystem.
 
-Non-breaking overlay:
-- Does NOT change core trading/MEV logic.
-- Provides optional offline/self-play training loop and metrics.
-- Integrates with Governance (GMAO) and Superstructure via wrappers.
+OMAR may learn from simulated and settled real outcomes, but it never
+bypasses governance, execution, or capital authority.
 """
 
 from .config import OmarConfig
+from .operator_intent import OperatorIntentSnapshot, capture_operator_intent
+from .real_learning import (
+    ActionAttribution,
+    CapitalAuthoritySnapshot,
+    DecisionLearningRecord,
+    ExecutionLearningRecord,
+    OmarRealLearningLoop,
+    SettledOutcomeRecord,
+)
 from .runtime import OmarRuntime
+
+try:
+    from .production_learning_hook import install_production_learning_hooks
+
+    install_production_learning_hooks()
+except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
+    pass
+
+__all__ = [
+    "OmarConfig",
+    "OmarRuntime",
+    "OmarRealLearningLoop",
+    "CapitalAuthoritySnapshot",
+    "DecisionLearningRecord",
+    "ExecutionLearningRecord",
+    "SettledOutcomeRecord",
+    "ActionAttribution",
+    "OperatorIntentSnapshot",
+    "capture_operator_intent",
+    "install_production_learning_hooks",
+]

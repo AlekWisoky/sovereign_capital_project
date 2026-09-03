@@ -35,7 +35,10 @@ def build_capital_truth_service_adapters(
         )
 
     def prime_ledger_reconciliation_builder(
-        *, internal_prime_state: Dict[str, Any], account_balances: Dict[str, Any], accounting: Dict[str, Any]
+        *,
+        internal_prime_state: Dict[str, Any],
+        account_balances: Dict[str, Any],
+        accounting: Dict[str, Any],
     ) -> Dict[str, Any]:
         return prime_ledger_reconciliation(
             internal_prime_state=internal_prime_state,

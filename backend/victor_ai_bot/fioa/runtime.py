@@ -18,7 +18,12 @@ _SAFE_RUNTIME_EXCEPTIONS: Tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
 )
-_SAFE_CFG_EXCEPTIONS: Tuple[type[BaseException], ...] = (AttributeError, RuntimeError, TypeError, ValueError)
+_SAFE_CFG_EXCEPTIONS: Tuple[type[BaseException], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class FIOARuntime:
@@ -42,7 +47,9 @@ class FIOARuntime:
     RISK_LIMIT_ENFORCEMENT = "RISK_LIMIT_ENFORCEMENT"
     POLICY_MONITORING = "POLICY_MONITORING"
 
-    def __init__(self, *, cfg: Optional[FIOAConfig], chain: str, data_dir: str, superstructure: Any = None):
+    def __init__(
+        self, *, cfg: Optional[FIOAConfig], chain: str, data_dir: str, superstructure: Any = None
+    ):
         self.cfg = cfg or FIOAConfig(enabled=False)
         self.chain = str(chain)
         self._super = superstructure
@@ -157,7 +164,9 @@ class FIOARuntime:
         self._registry_sync_state["last_action"] = str(action or "")
         self._mark_state(self._registry_sync_state, ok=True, ts_key="last_sync_ts")
 
-    def _mark_registry_sync_error(self, code: str, exc: BaseException, *, agent_id: str, action: str) -> None:
+    def _mark_registry_sync_error(
+        self, code: str, exc: BaseException, *, agent_id: str, action: str
+    ) -> None:
         self._registry_sync_state["last_agent"] = str(agent_id or "")
         self._registry_sync_state["last_action"] = str(action or "")
         self._mark_state(self._registry_sync_state, ok=False, code=code, error=str(exc))
@@ -175,7 +184,9 @@ class FIOARuntime:
         self._sizing_state["last_new_base"] = int(new_base)
         self._mark_state(self._sizing_state, ok=True, ts_key="last_update_ts")
 
-    def _mark_sizing_error(self, code: str, exc: BaseException, *, old_base: int = 0, new_base: int = 0) -> None:
+    def _mark_sizing_error(
+        self, code: str, exc: BaseException, *, old_base: int = 0, new_base: int = 0
+    ) -> None:
         self._sizing_state["last_old_base"] = int(old_base)
         self._sizing_state["last_new_base"] = int(new_base)
         self._mark_state(self._sizing_state, ok=False, code=code, error=str(exc))
@@ -184,7 +195,9 @@ class FIOARuntime:
         self._stress_state["components"] = dict(components)
         self._mark_state(self._stress_state, ok=True, ts_key="last_compute_ts")
 
-    def _mark_stress_error(self, code: str, exc: BaseException, *, components: Dict[str, float]) -> None:
+    def _mark_stress_error(
+        self, code: str, exc: BaseException, *, components: Dict[str, float]
+    ) -> None:
         self._stress_state["components"] = dict(components)
         self._mark_state(self._stress_state, ok=False, code=code, error=str(exc))
 
@@ -319,7 +332,9 @@ class FIOARuntime:
             return False
         return True
 
-    def enforce_resource_limits(self, agent_id: str, requested_capital: float, requested_risk: float) -> bool:
+    def enforce_resource_limits(
+        self, agent_id: str, requested_capital: float, requested_risk: float
+    ) -> bool:
         if not self.cfg.enabled:
             return True
         aid = str(agent_id or "")
@@ -328,11 +343,21 @@ class FIOARuntime:
 
         if cap > float(self.cfg.max_capital_per_agent):
             self.op_conflicts += 1
-            self.audit.append("CapitalLimitExceeded", agent_id=aid, requested=cap, cap=float(self.cfg.max_capital_per_agent))
+            self.audit.append(
+                "CapitalLimitExceeded",
+                agent_id=aid,
+                requested=cap,
+                cap=float(self.cfg.max_capital_per_agent),
+            )
             return False
         if risk > float(self.cfg.max_risk_exposure):
             self.op_conflicts += 1
-            self.audit.append("RiskLimitExceeded", agent_id=aid, requested=risk, cap=float(self.cfg.max_risk_exposure))
+            self.audit.append(
+                "RiskLimitExceeded",
+                agent_id=aid,
+                requested=risk,
+                cap=float(self.cfg.max_risk_exposure),
+            )
             return False
         return True
 
@@ -364,7 +389,9 @@ class FIOARuntime:
                 self._super.registry.set_suspended(aid, True, reason=str(reason or "fioa_restrict"))
                 self._mark_registry_sync_ok(aid, "restrict")
             except _SAFE_RUNTIME_EXCEPTIONS as exc:
-                self._mark_registry_sync_error("registry_suspend_failed", exc, agent_id=aid, action="restrict")
+                self._mark_registry_sync_error(
+                    "registry_suspend_failed", exc, agent_id=aid, action="restrict"
+                )
 
     def resume_agent(self, agent_id: str) -> bool:
         if not self.cfg.enabled:
@@ -380,7 +407,9 @@ class FIOARuntime:
                 self._super.registry.set_suspended(aid, False, reason="fioa_resume")
                 self._mark_registry_sync_ok(aid, "resume")
             except _SAFE_RUNTIME_EXCEPTIONS as exc:
-                self._mark_registry_sync_error("registry_resume_failed", exc, agent_id=aid, action="resume")
+                self._mark_registry_sync_error(
+                    "registry_resume_failed", exc, agent_id=aid, action="resume"
+                )
         return existed
 
     # -------------------------
@@ -399,10 +428,16 @@ class FIOARuntime:
         interval = int(getattr(self.cfg, "strategy_review_interval", 300) or 300)
         if interval <= 0:
             interval = 300
-        if (self.system_cycle % interval) == 0 and self.system_cycle != self.last_strategy_review_cycle:
+        if (
+            self.system_cycle % interval
+        ) == 0 and self.system_cycle != self.last_strategy_review_cycle:
             self.last_strategy_review_cycle = int(self.system_cycle)
             self.last_strategy_review_ts = float(time.time())
-            self.audit.append("StrategyDirectorPeriodicRebalance", cycle=int(self.system_cycle), risk_profile=risk_profile)
+            self.audit.append(
+                "StrategyDirectorPeriodicRebalance",
+                cycle=int(self.system_cycle),
+                risk_profile=risk_profile,
+            )
             self._rebalance_capital_allocation(rt)
 
     def _rebalance_capital_allocation(self, rt: Any) -> None:
@@ -438,7 +473,9 @@ class FIOARuntime:
             try:
                 rt.set_settings(base_borrow_amount=str(new_base))
             except _SAFE_RUNTIME_EXCEPTIONS as exc:
-                self._mark_sizing_error("sizing_update_failed", exc, old_base=base, new_base=new_base)
+                self._mark_sizing_error(
+                    "sizing_update_failed", exc, old_base=base, new_base=new_base
+                )
                 return
             self.last_sizing_step_ts = now
             self.audit.append(
@@ -467,12 +504,21 @@ class FIOARuntime:
             return
         if on:
             now = int(time.time())
-            ttl = int(max(1, ttl_s)) if ttl_s else int(getattr(self.cfg, "safe_mode_default_ttl_s", 120.0) or 120.0)
+            ttl = (
+                int(max(1, ttl_s))
+                if ttl_s
+                else int(getattr(self.cfg, "safe_mode_default_ttl_s", 120.0) or 120.0)
+            )
             self.safe_mode = True
             self.safe_mode_until_ts = now + ttl
             self.safe_mode_reason = str(reason or "")
             self.require_human_review = True
-            self.audit.append("SafeModeOn", ttl_s=int(ttl), until=int(self.safe_mode_until_ts), reason=str(reason or ""))
+            self.audit.append(
+                "SafeModeOn",
+                ttl_s=int(ttl),
+                until=int(self.safe_mode_until_ts),
+                reason=str(reason or ""),
+            )
         else:
             self.safe_mode = False
             self.safe_mode_until_ts = 0
@@ -485,7 +531,9 @@ class FIOARuntime:
             rt.set_settings(auto_trading=False)
             self._mark_settings_update_ok(reason or "limit_agent_autonomy")
         except _SAFE_RUNTIME_EXCEPTIONS as exc:
-            self._mark_settings_update_error("settings_auto_trading_failed", exc, reason=reason or "limit_agent_autonomy")
+            self._mark_settings_update_error(
+                "settings_auto_trading_failed", exc, reason=reason or "limit_agent_autonomy"
+            )
 
         if hasattr(rt, "superstructure_force_safe_mode"):
             try:
@@ -495,7 +543,11 @@ class FIOARuntime:
                 )
                 self._mark_settings_update_ok(reason or "superstructure_safe_mode")
             except _SAFE_RUNTIME_EXCEPTIONS as exc:
-                self._mark_settings_update_error("settings_superstructure_safe_mode_failed", exc, reason=reason or "superstructure_safe_mode")
+                self._mark_settings_update_error(
+                    "settings_superstructure_safe_mode_failed",
+                    exc,
+                    reason=reason or "superstructure_safe_mode",
+                )
         self.audit.append("LimitAgentAutonomy", reason=str(reason or ""))
 
     def _calculate_system_stress(self, rt: Any) -> float:
@@ -588,13 +640,19 @@ class FIOARuntime:
             conflict_rate=float(conflict_rate),
         )
 
-        if self.safe_mode and self.safe_mode_until_ts and int(time.time()) >= int(self.safe_mode_until_ts):
+        if (
+            self.safe_mode
+            and self.safe_mode_until_ts
+            and int(time.time()) >= int(self.safe_mode_until_ts)
+        ):
             self._set_safe_mode(False)
 
     # -------------------------
     # Trade-context helpers
     # -------------------------
-    def estimate_trade_context(self, rt: Any, opp: Any, decision: Any = None) -> Tuple[float, float]:
+    def estimate_trade_context(
+        self, rt: Any, opp: Any, decision: Any = None
+    ) -> Tuple[float, float]:
         amt = 0
         try:
             route = getattr(opp, "route", None)
@@ -609,7 +667,9 @@ class FIOARuntime:
                 size_mult = float(getattr(decision, "size_mult", 1.0) or 1.0)
                 borrow_mult = float(getattr(decision, "borrow_mult", 1.0) or 1.0)
             else:
-                bm = (opp.meta.get("brain") if isinstance(getattr(opp, "meta", None), dict) else {}) or {}
+                bm = (
+                    opp.meta.get("brain") if isinstance(getattr(opp, "meta", None), dict) else {}
+                ) or {}
                 size_mult = float(bm.get("size_mult") or 1.0)
                 borrow_mult = float(bm.get("borrow_mult") or 1.0)
             mult = max(0.10, float(size_mult) * float(borrow_mult))
@@ -738,7 +798,9 @@ class FIOARuntime:
                 self.submitted = False
 
         self.op_conflicts += 1
-        self.audit.append("ExecutionDenied", core_command=str(core_command or ""), reason=str(reason))
+        self.audit.append(
+            "ExecutionDenied", core_command=str(core_command or ""), reason=str(reason)
+        )
         return _R(reason)
 
     # -------------------------

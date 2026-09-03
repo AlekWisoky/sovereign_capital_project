@@ -27,7 +27,6 @@ _CANONICAL_GOAL_FIELDS = (
 )
 
 
-
 def clamp_float(x: Any, lo: float, hi: float, default: float) -> float:
     try:
         v = float(x)
@@ -76,7 +75,9 @@ def normalize_goal_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def resolve_goal_patch_payload(payload: Dict[str, Any], *, current_goal: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def resolve_goal_patch_payload(
+    payload: Dict[str, Any], *, current_goal: Dict[str, Any] | None = None
+) -> Dict[str, Any]:
     current = dict(current_goal or {})
     normalized = normalize_goal_payload(payload)
 
@@ -115,7 +116,11 @@ def resolve_goal_patch_payload(payload: Dict[str, Any], *, current_goal: Dict[st
     target_return_percentage = (
         float(normalized["target_return_percentage"])
         if update_target
-        else _current_float("target_return_percentage", "target_return_pct", default=float(normalized["target_return_percentage"]))
+        else _current_float(
+            "target_return_percentage",
+            "target_return_pct",
+            default=float(normalized["target_return_percentage"]),
+        )
     )
     time_horizon_seconds = (
         int(normalized["time_horizon_seconds"])
@@ -135,7 +140,9 @@ def resolve_goal_patch_payload(payload: Dict[str, Any], *, current_goal: Dict[st
     capital_commitment_pct = (
         float(normalized["capital_commitment_pct"])
         if update_commitment
-        else _current_float("capital_commitment_pct", default=float(normalized["capital_commitment_pct"]))
+        else _current_float(
+            "capital_commitment_pct", default=float(normalized["capital_commitment_pct"])
+        )
     )
 
     timeframe_days = max(1, int(round(time_horizon_seconds / 86400.0)))

@@ -35,7 +35,9 @@ def finalize_capital_truth_summary(
             component="capital_truth",
             degraded=bool(str(initial_bundle.reconciliation_payload.get("status") or "ok") != "ok"),
             ts_ms=int(coordination.now_ms),
-            reason_code=str(initial_bundle.reconciliation_payload.get("status_reason_code") or "ok"),
+            reason_code=str(
+                initial_bundle.reconciliation_payload.get("status_reason_code") or "ok"
+            ),
         )
     except (AttributeError, KeyError, TypeError, ValueError, RuntimeError, OSError):
         recovery_history = dict(recovery_history or {})

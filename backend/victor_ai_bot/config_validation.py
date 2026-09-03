@@ -30,7 +30,7 @@ def _coerce_intish(x: Any, *, default: int = 0) -> Tuple[int, bool]:
     if isinstance(x, int):
         return x, False
     if isinstance(x, float):
-        if x != x or x in {float('inf'), float('-inf')}:
+        if x != x or x in {float("inf"), float("-inf")}:
             return int(default), True
         return int(x), False
     if isinstance(x, bytes):
@@ -64,7 +64,9 @@ def validate_config(cfg: Any) -> Tuple[bool, List[str]]:
         issues.append("chain.rpc_send is empty but execution.dry_run=false (cannot send txs)")
 
     send_mode = str(getattr(exec_cfg, "send_mode", "public") or "public")
-    rpc_private, warns = _coerce_listlike(getattr(chain, "rpc_private", []), field="chain.rpc_private")
+    rpc_private, warns = _coerce_listlike(
+        getattr(chain, "rpc_private", []), field="chain.rpc_private"
+    )
     issues.extend(warns)
     if send_mode in {"private", "protected_rpc"} and not rpc_private:
         # warning only

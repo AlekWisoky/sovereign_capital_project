@@ -137,7 +137,9 @@ class LaunchService:
             fund_summary=ctx["fund_summary"],
             capital_state=ctx["capital_state"],
         )
-        family = canonical_launch_family_id(str(requested_family or launch.get("recommended_next_family") or ""))
+        family = canonical_launch_family_id(
+            str(requested_family or launch.get("recommended_next_family") or "")
+        )
         if not family:
             return {
                 "ok": False,

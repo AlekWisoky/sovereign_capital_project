@@ -85,20 +85,38 @@ async def assess_submitted_tx(
                 )
             if receipt not in {None, ""}:
                 if normalized_send_mode in {"private", "protected_rpc"}:
-                    return SubmittedTxStatus(tx_hash=tx_hash, tx_status="sent", proof_reason="receipt_lookup_degraded")
-                return SubmittedTxStatus(tx_hash=tx_hash, tx_status="receipt_unavailable", proof_reason="receipt_lookup_degraded")
+                    return SubmittedTxStatus(
+                        tx_hash=tx_hash, tx_status="sent", proof_reason="receipt_lookup_degraded"
+                    )
+                return SubmittedTxStatus(
+                    tx_hash=tx_hash,
+                    tx_status="receipt_unavailable",
+                    proof_reason="receipt_lookup_degraded",
+                )
         elif normalized_send_mode in {"private", "protected_rpc"}:
-            return SubmittedTxStatus(tx_hash=tx_hash, tx_status="sent", proof_reason="receipt_lookup_degraded")
+            return SubmittedTxStatus(
+                tx_hash=tx_hash, tx_status="sent", proof_reason="receipt_lookup_degraded"
+            )
         else:
-            return SubmittedTxStatus(tx_hash=tx_hash, tx_status="receipt_unavailable", proof_reason="receipt_lookup_degraded")
+            return SubmittedTxStatus(
+                tx_hash=tx_hash,
+                tx_status="receipt_unavailable",
+                proof_reason="receipt_lookup_degraded",
+            )
 
     if normalized_send_mode in {"private", "protected_rpc"}:
-        return SubmittedTxStatus(tx_hash=tx_hash, tx_status="sent", proof_reason="private_no_public_receipt")
+        return SubmittedTxStatus(
+            tx_hash=tx_hash, tx_status="sent", proof_reason="private_no_public_receipt"
+        )
 
     get_tx_by_hash = getattr(rpc, "get_tx_by_hash", None)
     if callable(get_tx_by_hash):
         tx = await get_tx_by_hash(tx_hash)
         if isinstance(tx, Mapping):
-            return SubmittedTxStatus(tx_hash=tx_hash, tx_status="pending", proof_reason="tx_visible")
+            return SubmittedTxStatus(
+                tx_hash=tx_hash, tx_status="pending", proof_reason="tx_visible"
+            )
 
-    return SubmittedTxStatus(tx_hash=tx_hash, tx_status="receipt_unavailable", proof_reason="tx_not_visible")
+    return SubmittedTxStatus(
+        tx_hash=tx_hash, tx_status="receipt_unavailable", proof_reason="tx_not_visible"
+    )

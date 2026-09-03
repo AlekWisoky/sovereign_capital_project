@@ -143,8 +143,12 @@ def build_capital_truth_reconciliation_payload(
                 else "ok"
             ),
             "updated_ts_ms": int((receipt_outcome_truth or {}).get("updated_ts_ms") or 0),
-            "degraded_since_ts_ms": int((receipt_outcome_truth or {}).get("degraded_since_ts_ms") or 0),
-            "last_recovered_ts_ms": int((receipt_outcome_truth or {}).get("last_recovered_ts_ms") or 0),
+            "degraded_since_ts_ms": int(
+                (receipt_outcome_truth or {}).get("degraded_since_ts_ms") or 0
+            ),
+            "last_recovered_ts_ms": int(
+                (receipt_outcome_truth or {}).get("last_recovered_ts_ms") or 0
+            ),
             "degraded_count": int((receipt_outcome_truth or {}).get("degraded_count") or 0),
             "last_healthy_ts_ms": int((receipt_outcome_truth or {}).get("last_healthy_ts_ms") or 0),
         },
@@ -161,7 +165,9 @@ def build_capital_truth_reconciliation_payload(
         "reason_codes": (
             ["ok"]
             if withdrawal_available
-            else ([status_reason_code] if status_reason_code != "ok" else ["no_withdrawable_balance"])
+            else (
+                [status_reason_code] if status_reason_code != "ok" else ["no_withdrawable_balance"]
+            )
         ),
         "previewable": bool(withdrawable_balance_wei > 0),
         "profit_destination": str(profit_destination or ""),
