@@ -238,17 +238,38 @@ class DecisionEngine:
             last_r = self._last_trade_block_by_route.get(rid, 0)
             if rid and (current_block - last_r) < cooldown_blocks:
                 self._set_brain(
-                    o, feats, p_base, ev, action="skip", reason="cooldown", rl_state=s, rl_action=a_idx
+                    o,
+                    feats,
+                    p_base,
+                    ev,
+                    action="skip",
+                    reason="cooldown",
+                    rl_state=s,
+                    rl_action=a_idx,
                 )
                 continue
             if p_base < min_p:
                 self._set_brain(
-                    o, feats, p_base, ev, action="skip", reason="p_below_min", rl_state=s, rl_action=a_idx
+                    o,
+                    feats,
+                    p_base,
+                    ev,
+                    action="skip",
+                    reason="p_below_min",
+                    rl_state=s,
+                    rl_action=a_idx,
                 )
                 continue
             if ev <= 0:
                 self._set_brain(
-                    o, feats, p_base, ev, action="skip", reason="ev_nonpositive", rl_state=s, rl_action=a_idx
+                    o,
+                    feats,
+                    p_base,
+                    ev,
+                    action="skip",
+                    reason="ev_nonpositive",
+                    rl_state=s,
+                    rl_action=a_idx,
                 )
                 continue
             self._set_brain(
@@ -699,7 +720,10 @@ class DecisionEngine:
 
     def _log_training(self, row: Dict[str, Any]) -> None:
         try:
-            if os.path.exists(self._log_path) and os.path.getsize(self._log_path) > self._log_max_bytes:
+            if (
+                os.path.exists(self._log_path)
+                and os.path.getsize(self._log_path) > self._log_max_bytes
+            ):
                 base = self._log_path
                 rot = base + f".{int(time.time())}.bak"
                 os.replace(base, rot)
