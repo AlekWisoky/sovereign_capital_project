@@ -15,9 +15,9 @@ from ..learning.phase9_outcome_gate import (
     prepare_real_outcome_for_omar,
 )
 from ..pathing import canonical_data_dir
+from ..runtime_services.phase7_context_store import Phase7ContextStore
 from .config import OmarConfig
 from .metrics import compute_social_metrics, to_dict
-from .phase7_context_store import Phase7ContextStore
 from .trainer import OmarTrainer
 
 
