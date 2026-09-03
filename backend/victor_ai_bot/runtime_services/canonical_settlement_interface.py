@@ -86,9 +86,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         metadata.get("terminalProfitability") or metadata.get("terminal_profitability")
     )
     chain = _dict(metadata.get("profitabilityChain") or metadata.get("profitability_chain"))
-    capital_admission = _dict(
-        metadata.get("capitalAdmission") or metadata.get("capital_admission")
-    )
+    capital_admission = _dict(metadata.get("capitalAdmission") or metadata.get("capital_admission"))
     lineage = _dict(metadata.get("canonical_lineage"))
 
     def first(*keys: str, default: Any = None) -> Any:
@@ -99,7 +97,9 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
                     return value
         return default
 
-    decision = _text(first("canonical_decision_id", "decision_id", default=lineage.get("decision_id")))
+    decision = _text(
+        first("canonical_decision_id", "decision_id", default=lineage.get("decision_id"))
+    )
     correlation = _text(first("correlation_id", default=lineage.get("correlation_id")))
     opportunity = _text(
         first("opportunity_id", "opportunityId", default=lineage.get("opportunity_id"))
@@ -139,7 +139,9 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "source": "phase2_canonical_outcome_ledger",
         "settlement_status": "settled",
         "transaction_id": _text(row.get("transaction_id")),
-        "tx_hash": _text(row.get("receipt_id") or metadata.get("tx_hash") or metadata.get("txHash")),
+        "tx_hash": _text(
+            row.get("receipt_id") or metadata.get("tx_hash") or metadata.get("txHash")
+        ),
         "settled_at_ms": int(row.get("ts_ms") or 0),
         "decision_id": decision,
         "correlation_id": correlation,

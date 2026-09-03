@@ -40,9 +40,7 @@ def _pending_lineage(pending: Mapping[str, Any]) -> dict[str, str]:
     row = dict(pending or {})
     canonical = _dict(row.get("canonical_lineage"))
     decision_id = _text(
-        row.get("canonical_decision_id")
-        or row.get("decision_id")
-        or canonical.get("decision_id")
+        row.get("canonical_decision_id") or row.get("decision_id") or canonical.get("decision_id")
     )
     correlation_id = _text(row.get("correlation_id") or canonical.get("correlation_id"))
     opportunity_id = _text(row.get("opportunity_id") or canonical.get("opportunity_id"))
@@ -85,11 +83,7 @@ def _pending_lineage(pending: Mapping[str, Any]) -> dict[str, str]:
 
 def _resolve_learning_action(runtime: Any, pending: Mapping[str, Any]) -> str:
     row = dict(pending or {})
-    direct = _text(
-        row.get("learning_action")
-        or row.get("action")
-        or row.get("aqe_action")
-    )
+    direct = _text(row.get("learning_action") or row.get("action") or row.get("aqe_action"))
     if direct:
         return direct
     decision_id = _text(
@@ -205,10 +199,13 @@ def _patch_execution_identity() -> None:
                         or _dict(getattr(opp, "meta", None)).get("sizing_id")
                         or _dict(_dict(getattr(opp, "meta", None)).get("brain")).get("sizing_id")
                     )
-                    action = _resolve_learning_action(runtime, {
-                        "canonical_decision_id": lineage["decision_id"],
-                        "aqe_action": _dict(getattr(opp, "meta", None)).get("aqe_action"),
-                    })
+                    action = _resolve_learning_action(
+                        runtime,
+                        {
+                            "canonical_decision_id": lineage["decision_id"],
+                            "aqe_action": _dict(getattr(opp, "meta", None)).get("aqe_action"),
+                        },
+                    )
                     plan["canonical_lineage"] = {
                         **dict(lineage),
                         "route_id": _text(getattr(opp, "route_id", "")),
