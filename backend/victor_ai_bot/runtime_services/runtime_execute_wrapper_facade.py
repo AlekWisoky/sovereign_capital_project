@@ -21,17 +21,7 @@ _DEFAULT_TRY_EXECUTE = try_execute_opportunity
 
 
 def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryExecute]:
-    """Return the canonical execution-wrapper patch seam.
-
-    Legacy/runtime harnesses historically monkeypatched `victor_ai_bot.runtime_legacy`
-    to replace `JsonRpcClient` and `try_execute_opportunity`. The refactor moved the
-    hot wrapper into this facade, which broke that compatibility seam.
-
-    We intentionally preserve both seam locations now:
-    - patching this facade module continues to work for local extraction tests
-    - patching `runtime_legacy` continues to work for compatibility/runtime tests
-    """
-
+    """Return the canonical execution-wrapper patch seam."""
     rpc_cls = JsonRpcClient
     execute_fn = try_execute_opportunity
     try:
@@ -49,21 +39,11 @@ def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryE
 
 
 class RuntimeExecuteWrapperFacade:
-    """Compatibility facade for prepared auto-execution wrapper flow.
-
-    This isolates the prepared RPC execution wrapper and post-execution
-    bookkeeping from RuntimeBundle._execute_auto while preserving the
-    current execution semantics.
-    """
+    """Compatibility facade for prepared auto-execution wrapper flow."""
 
     @staticmethod
     def _ensure_execution_identity(res: Any, decision: Any) -> Any:
-        """Bind one execution-attempt identity to the execution result.
-
-        The decision/correlation pair is never regenerated here. Every actual
-        execution attempt receives its own execution_id, allowing retries to be
-        attributed separately while remaining under the same decision lineage.
-        """
+        """Bind one execution-attempt identity to the execution result."""
         decision_identity = identity_from(decision)
         if decision_identity is None or not decision_identity.decision_id or not decision_identity.correlation_id:
             return res
@@ -85,12 +65,7 @@ class RuntimeExecuteWrapperFacade:
 
     @staticmethod
     async def _persist_phase7_context(runtime: Any, res: Any, context: dict[str, Any]) -> None:
-        """Persist the same execution-time context used by the canonical record.
-
-        The SQLite PnL journal remains the canonical financial store. Context is
-        written by tx hash after the execution record is created, so the hot path
-        does not add another synchronous database operation before submission.
-        """
+        """Persist decision context after execution so submission latency is unaffected."""
         tx_hash = str(getattr(res, "tx_hash", "") or "")
         pnl = getattr(runtime, "_pnl", None)
         updater = getattr(pnl, "update_trade_context", None) if pnl is not None else None
@@ -99,8 +74,6 @@ class RuntimeExecuteWrapperFacade:
         try:
             await updater(tx_hash, context)
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-            # Context persistence is observability/learning metadata; execution
-            # authorization must never be delayed or altered by this write.
             return
 
     async def _run_prepared_auto_execution(
@@ -116,6 +89,13 @@ class RuntimeExecuteWrapperFacade:
         old_send_mode = str(prep.old_send_mode)
         read_url = str(prep.read_url)
         send_url = str(prep.send_url)
+
+        # Phase 7 context is captured once at the decision/execution boundary.
+        # If the decision already owns a snapshot, the helper reuses it without
+        # extra runtime reads; otherwise it performs one best-effort snapshot.
+        phase7_context = build_phase7_execution_context(self, opp, decision)
+        context_capture_started = time.perf_counter()
+        phase7_context["latency"]["capture_started_ms"] = int(time.time() * 1000.0)
 
         try:
             rpc_client_cls, execute_opportunity = _compat_execution_wrapper_symbols()
@@ -157,25 +137,19 @@ class RuntimeExecuteWrapperFacade:
                 else:
                     res = await _core()
 
-                # The execution boundary is the point at which decision identity
-                # becomes execution identity. This happens before bookkeeping so
-                # every downstream recorder sees the same IDs.
+                # The execution boundary is where the execution_id is minted;
+                # the decision/correlation pair remains the decision authority.
                 res = self._ensure_execution_identity(res, decision)
-
-                # Phase 7 is captured once, after execution identity exists but
-                # before the canonical execution record and PnL write. This keeps
-                # decision-time operator/wealth/capital context identical across
-                # execution, settlement, and learning without repeated hot-path
-                # state reads.
-                context_started = time.perf_counter()
                 phase7_context = build_phase7_execution_context(
                     self,
                     opp,
                     decision,
+                    latency_ms=int((time.perf_counter() - t1) * 1000.0),
                     result=res,
                 )
-                context_capture_ms = int((time.perf_counter() - context_started) * 1000.0)
-                phase7_context["latency"]["context_capture_ms"] = context_capture_ms
+                phase7_context["latency"]["capture_ms"] = int(
+                    (time.perf_counter() - context_capture_started) * 1000.0
+                )
                 attach_phase7_execution_context(opp, phase7_context)
                 attach_phase7_execution_context(res, phase7_context)
 
@@ -212,9 +186,8 @@ class RuntimeExecuteWrapperFacade:
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
 
-                # Persist by tx hash only after the canonical execution/PnL record
-                # exists. This is intentionally post-bookkeeping to minimize the
-                # submission-critical path latency.
+                # Post-bookkeeping persistence keeps the submission-critical path
+                # free of an additional database write.
                 await self._persist_phase7_context(self, res, phase7_context)
         finally:
             execution_service = getattr(self, "_execution_service", None)
