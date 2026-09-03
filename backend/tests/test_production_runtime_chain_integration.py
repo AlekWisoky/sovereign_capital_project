@@ -13,8 +13,9 @@ from victor_ai_bot.runtime_services import runtime_execute_wrapper_facade
 
 
 class _RpcContext:
-    def __init__(self, url: str):
+    def __init__(self, url: str, **kwargs):
         self.url = url
+        self.kwargs = kwargs
 
     async def __aenter__(self):
         return self
@@ -28,13 +29,7 @@ class _RpcContext:
 
 @pytest.mark.asyncio
 async def test_production_runtime_chain_reaches_execution_with_one_identity(monkeypatch, tmp_path):
-    """Walk the real RuntimeBundle/facade chain to the execution boundary.
-
-    External boundaries are deterministic: RPC transport, market scan, and the
-    actual wallet/chain execution call are replaced. The orchestration and
-    execution-service facades remain real, so this catches identity/ordering
-    gaps that unit extraction tests cannot see.
-    """
+    """Walk the real decision-finalize -> execution chain with controlled I/O."""
     monkeypatch.setenv("VICTOR_DATA_DIR", str(tmp_path))
     cfg = load_config("config/ethereum.yaml")
     cfg.execution.brain_mode = "auto"
@@ -70,10 +65,7 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
         route_id="route-production-chain",
         can_execute=True,
         meta={
-            "safety": {
-                "exec_ready": True,
-                "profit_after_costs_wei": "100",
-            },
+            "safety": {"exec_ready": True, "profit_after_costs_wei": "100"},
             "profitability": {
                 "valid": True,
                 "stale": False,
@@ -84,49 +76,16 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
         },
     )
 
-    # External market/quote boundary: deterministic candidate enters the real
-    # runtime scan -> decision -> dispatch orchestration.
-    async def scan_primary(*args, **kwargs):
-        return [opp]
-
-    async def annotate(*args, **kwargs):
-        return None
-
     async def postdecision_analytics(*args, **kwargs):
         return None
 
-    async def post_tick_tails(*args, **kwargs):
-        return None
-
-    async def loop_iteration_tail(*args, **kwargs):
-        return None
-
-    runtime._scan_primary_opportunities = scan_primary
-    runtime._safe_annotate_can_execute = annotate
-    runtime._gas_signal_snapshot = lambda rpc: {
-        "basefee_gwei": 20.0,
-        "priority_gwei": 1.0,
-    }
-    runtime._market_signal_snapshot = lambda opps: {
-        "mev_risk": 0.0,
-        "pending_rate": 0.0,
-        "avg_margin_ratio": 1.0,
-        "volatility_proxy": 0.01,
-    }
-    runtime._behave_regime_state = lambda **kwargs: {"regime_label": "balanced"}
-    runtime._resolve_market_regime = lambda **kwargs: {"regime_label": "balanced"}
-    runtime._apply_treasury_guidance = lambda **kwargs: {
-        "treasury_state": {},
-        "behave_state": {"regime_label": "balanced"},
-    }
-    runtime._run_predecision_additive_state = lambda **kwargs: {"mev_snap": {}}
     runtime._run_postdecision_analytics_state = postdecision_analytics
-    runtime._run_post_tick_tails = post_tick_tails
-    runtime._run_loop_iteration_tail = loop_iteration_tail
+    runtime._run_post_tick_tails = lambda *args, **kwargs: None
+    runtime._run_loop_iteration_tail = lambda *args, **kwargs: None
+    runtime._apply_treasury_borrow_overlay = lambda **kwargs: kwargs["decision"]
 
     from victor_ai_bot.decision_engine import TradeDecision
 
-    identity = None
     decision = TradeDecision(
         action="trade",
         opp_id=opp.id,
@@ -137,18 +96,18 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
     )
 
     def decide(*args, **kwargs):
-        from victor_ai_bot.identity import attach_identity, new_decision_identity
+        return decision
 
-        nonlocal identity
-        identity = new_decision_identity()
-        return attach_identity(decision, identity)
-
+    # This is the external decision-engine boundary; the canonical finalizer,
+    # identity attachment, queue refresh, and execution chain remain real.
     runtime._safe_decide_opportunities = decide
+    runtime._opps = [opp]
+    runtime._auto_trading = True
+    runtime._pending = {}
+    runtime._exec_task = None
+    runtime._last_submitted_block = 0
 
     execution_calls = []
-
-    class FakeRpc(_RpcContext):
-        pass
 
     async def fake_execute(*args, **kwargs):
         execution_calls.append(kwargs)
@@ -162,7 +121,7 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
             submitted=False,
         )
 
-    monkeypatch.setattr(runtime_execute_wrapper_facade, "JsonRpcClient", FakeRpc)
+    monkeypatch.setattr(runtime_execute_wrapper_facade, "JsonRpcClient", _RpcContext)
     monkeypatch.setattr(runtime_execute_wrapper_facade, "try_execute_opportunity", fake_execute)
 
     recorded = []
@@ -179,15 +138,26 @@ async def test_production_runtime_chain_reaches_execution_with_one_identity(monk
 
     runtime._record_exec = record_exec
 
-    # Start at the real production loop entry. Only external I/O boundaries
-    # above are controlled.
-    await runtime._run_loop_entry_iteration(loop_started_at=1.0)
-
+    # Enter through the real production decision finalizer instead of replacing
+    # the outer loop and then synchronously assert the real execution chain.
+    finalized = await runtime._run_decision_finalize(
+        opps=[opp],
+        rpc=_RpcContext("read://test"),
+        regime_label="balanced",
+        treasury_state={},
+        current_block=123,
+        loop_started_at=1.0,
+    )
+    identity = identity_from(finalized)
     assert identity is not None
+    assert identity.decision_id
+    assert identity.correlation_id
+
+    await runtime._execute_auto(opp, 123, decision=finalized)
+
     assert len(execution_calls) == 1
     assert len(recorded) == 1
     result = recorded[0]["result"]
-
     result_identity = identity_from(result)
     assert result_identity is not None
     assert result_identity.decision_id == identity.decision_id
@@ -222,14 +192,11 @@ async def test_production_runtime_chain_keeps_execution_identity_per_attempt(mon
 
     calls = []
 
-    class FakeRpc(_RpcContext):
-        pass
-
     async def fake_execute(*args, **kwargs):
         calls.append(1)
         return ExecResult(ok=True, dry_run=True, reason="integration_test", plan={})
 
-    monkeypatch.setattr(runtime_execute_wrapper_facade, "JsonRpcClient", FakeRpc)
+    monkeypatch.setattr(runtime_execute_wrapper_facade, "JsonRpcClient", _RpcContext)
     monkeypatch.setattr(runtime_execute_wrapper_facade, "try_execute_opportunity", fake_execute)
     runtime._record_exec = lambda *args, **kwargs: None
 
