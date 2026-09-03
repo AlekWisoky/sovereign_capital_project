@@ -119,7 +119,8 @@ def _capital_demand_from_bundle(bundle: Dict[str, Any]) -> CapitalDemand:
         "capital_demand": demand,
         "capitalAdmission": bundle.get("capitalAdmission") or execution.get("capitalAdmission"),
         "wealth_goal": bundle.get("wealth_goal") or bundle.get("wealthGoal"),
-        "deployed_usd_micro": execution.get("deployed_usd_micro") or execution.get("deployedUsdMicro"),
+        "deployed_usd_micro": execution.get("deployed_usd_micro")
+        or execution.get("deployedUsdMicro"),
         "deployedNotionalUsd": execution.get("deployedNotionalUsd"),
         "authority_source": execution.get("authority_source") or execution.get("authoritySource"),
         "capital_source": execution.get("capital_source") or execution.get("capitalSource"),
