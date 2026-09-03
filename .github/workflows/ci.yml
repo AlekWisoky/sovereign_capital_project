@@ -40,6 +40,14 @@ jobs:
             mypy @"$slice"
           done < backend/mypy_targets.txt
 
+      - name: Focused canonical lifecycle tests
+        run: |
+          cd backend
+          pytest -q \
+            tests/test_runtime_production_execution_path.py \
+            tests/test_execution_service_auto_trade_hold.py \
+            tests/test_omar_runtime.py
+
       - name: Pytest
         run: |
           cd backend
