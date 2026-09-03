@@ -60,6 +60,21 @@ def _install_execution_hook() -> None:
             execution_id = _text(identity.execution_id) or canonical_id(
                 "exec", {"decision_id": identity.decision_id, "tx_hash": _text(getattr(result, "tx_hash", ""))}
             )
+            pending = getattr(runtime, "_pending", {}).get(_text(getattr(result, "tx_hash", "")))
+            if isinstance(pending, dict):
+                pending["canonical_decision_id"] = identity.decision_id
+                pending["correlation_id"] = identity.correlation_id
+                pending["execution_id"] = execution_id
+                pending.setdefault("canonical_lineage", {}).update({
+                    "decision_id": identity.decision_id,
+                    "correlation_id": identity.correlation_id,
+                    "execution_id": execution_id,
+                })
+                meta = _mapping(getattr(opp, "meta", None))
+                if isinstance(meta.get("capital_demand"), dict):
+                    pending["capital_demand"] = dict(meta["capital_demand"])
+                if isinstance(meta.get("operator_intent_snapshot"), dict):
+                    pending["operator_intent"] = dict(meta["operator_intent_snapshot"])
             metadata = _mapping(getattr(result, "plan", None))
             omar.observe_execution(
                 decision_id=identity.decision_id,
@@ -96,18 +111,11 @@ def _install_settlement_hook() -> None:
             omar = _omar(self)
             if omar is None or not bool(getattr(omar.cfg, "enabled", False)):
                 return
-            identity = identity_from(pending)
-            if identity is None:
-                lineage = _mapping(pending.get("canonical_lineage"))
-                identity = identity_from(lineage)
+            identity = identity_from(pending) or identity_from(_mapping(pending.get("canonical_lineage")))
             if identity is None or not identity.decision_id or not identity.correlation_id:
                 return
-            execution_id = _text(identity.execution_id) or canonical_id(
-                "exec", {"decision_id": identity.decision_id, "tx_hash": str(tx_hash)}
-            )
-            settlement_id = _text(identity.settlement_id) or canonical_id(
-                "settle", {"execution_id": execution_id, "tx_hash": str(tx_hash)}
-            )
+            execution_id = _text(identity.execution_id) or canonical_id("exec", {"decision_id": identity.decision_id, "tx_hash": str(tx_hash)})
+            settlement_id = _text(identity.settlement_id) or canonical_id("settle", {"execution_id": execution_id, "tx_hash": str(tx_hash)})
             from ..learning.outcome_ledger import CanonicalOutcomeLedger
 
             ledger = CanonicalOutcomeLedger(
@@ -135,12 +143,7 @@ def _install_settlement_hook() -> None:
                 "route_id": str(route_id or row.get("routeId") or ""),
                 "status": "settled",
                 "metadata": metadata,
-                "lineage": {
-                    "decision_id": identity.decision_id,
-                    "correlation_id": identity.correlation_id,
-                    "execution_id": execution_id,
-                    "settlement_id": settlement_id,
-                },
+                "lineage": {"decision_id": identity.decision_id, "correlation_id": identity.correlation_id, "execution_id": execution_id, "settlement_id": settlement_id},
             })
             omar.observe_settled_ledger_record(row)
         except _SAFE:
