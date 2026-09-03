@@ -207,6 +207,183 @@ class OmarRuntime:
         self._log({"event": "omar_canonical_settled_outcome", **self.last_real_learning})
         return dict(result)
 
+    @staticmethod
+    def _find_execution_lineage(runtime: Any, tx_hash: str) -> Dict[str, Any]:
+        """Resolve execution identity from the production execution record."""
+        target = str(tx_hash or "")
+        if not target or runtime is None:
+            return {}
+        for entry in reversed(list(getattr(runtime, "_exec_log", []) or [])):
+            if not isinstance(entry, Mapping) or str(entry.get("tx_hash") or "") != target:
+                continue
+            plan = entry.get("plan") if isinstance(entry.get("plan"), Mapping) else {}
+            identity = plan.get("identity") if isinstance(plan.get("identity"), Mapping) else {}
+            if not identity:
+                identity = plan.get("lineage") if isinstance(plan.get("lineage"), Mapping) else {}
+            if not identity:
+                identity = entry.get("identity") if isinstance(entry.get("identity"), Mapping) else {}
+            if not identity:
+                identity = entry.get("lineage") if isinstance(entry.get("lineage"), Mapping) else {}
+            return {
+                "decision_id": str(identity.get("decision_id") or identity.get("decisionId") or ""),
+                "correlation_id": str(
+                    identity.get("correlation_id") or identity.get("correlationId") or ""
+                ),
+                "execution_id": str(
+                    identity.get("execution_id") or identity.get("executionId") or ""
+                ),
+                "opportunity_id": str(entry.get("opportunity_id") or ""),
+                "route_id": str(entry.get("route_id") or ""),
+                "plan": dict(plan),
+            }
+        return {}
+
+    @staticmethod
+    def _find_settlement_transaction(runtime: Any, tx_hash: str) -> Dict[str, Any]:
+        """Resolve the actual receipt_settlement ledger transaction for a receipt."""
+        target = str(tx_hash or "")
+        ledger = getattr(runtime, "_ledger", None) if runtime is not None else None
+        if not target or ledger is None or not hasattr(ledger, "transactions_all"):
+            return {}
+        try:
+            for tx in reversed(list(ledger.transactions_all() or [])):
+                if not isinstance(tx, Mapping):
+                    continue
+                if str(tx.get("receipt_id") or "") != target:
+                    continue
+                if str(tx.get("tx_type") or "") != "receipt_settlement":
+                    continue
+                return {
+                    "settlement_id": str(tx.get("transaction_id") or ""),
+                    "transaction_id": str(tx.get("transaction_id") or ""),
+                    "metadata": dict(tx.get("metadata") or {}),
+                }
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return {}
+        return {}
+
+    def _build_real_settled_row(self, outcome: Any) -> Dict[str, Any]:
+        """Join canonical PnL settlement truth to the production identity records."""
+        runtime = self._bound_runtime
+        tx_hash = str(getattr(outcome, "tx_hash", "") or "")
+        execution = self._find_execution_lineage(runtime, tx_hash)
+        settlement = self._find_settlement_transaction(runtime, tx_hash)
+        decision_id = str(execution.get("decision_id") or "")
+        correlation_id = str(execution.get("correlation_id") or "")
+        execution_id = str(execution.get("execution_id") or "")
+        settlement_id = str(settlement.get("settlement_id") or "")
+        if not all((decision_id, correlation_id, execution_id, settlement_id)):
+            return {
+                "decision_id": decision_id,
+                "correlation_id": correlation_id,
+                "execution_id": execution_id,
+                "settlement_id": settlement_id,
+                "receipt_id": tx_hash,
+                "status": "settled" if bool(getattr(outcome, "ok", False)) else "failed",
+                "complete": False,
+                "reason_codes": [
+                    name
+                    for name, value in (
+                        ("missing_decision_id", decision_id),
+                        ("missing_correlation_id", correlation_id),
+                        ("missing_execution_id", execution_id),
+                        ("missing_settlement_id", settlement_id),
+                    )
+                    if not value
+                ],
+            }
+
+        decision = self._real_learning._decisions.get(decision_id) if self._real_learning else None
+        action = str(getattr(decision, "action", "") or "")
+        if not action:
+            idx = int(getattr(outcome, "rl_action_index", -1) or -1)
+            if 0 <= idx < len(DEFAULT_ACTION_KEYS):
+                action = DEFAULT_ACTION_KEYS[idx]
+        if not action:
+            return {
+                "decision_id": decision_id,
+                "correlation_id": correlation_id,
+                "execution_id": execution_id,
+                "settlement_id": settlement_id,
+                "receipt_id": tx_hash,
+                "status": "settled" if bool(getattr(outcome, "ok", False)) else "failed",
+                "complete": False,
+                "reason_codes": ["missing_action_attribution"],
+            }
+
+        metadata = dict(getattr(outcome, "context", {}) or {})
+        metadata.update(
+            {
+                "outcome": {
+                    "realized_pnl_wei": int(getattr(outcome, "realized_profit_after_gas_wei", 0) or 0),
+                    "realized_pnl_usd_micro": int(
+                        getattr(outcome, "realized_profit_after_gas_usd_micro", 0) or 0
+                    ),
+                    "realized_gas_wei": int(getattr(outcome, "realized_gas_cost_wei", 0) or 0),
+                    "realized_slippage_bps": 0.0,
+                },
+                "execution": {
+                    "status": "executed" if bool(getattr(outcome, "ok", False)) else "failed",
+                    "gas_wei": int(getattr(outcome, "realized_gas_cost_wei", 0) or 0),
+                    "slippage_bps": 0.0,
+                },
+                "settlement": dict(settlement.get("metadata") or {}),
+            }
+        )
+        return {
+            "decision_id": decision_id,
+            "correlation_id": correlation_id,
+            "execution_id": execution_id,
+            "settlement_id": settlement_id,
+            "transaction_id": str(settlement.get("transaction_id") or ""),
+            "receipt_id": tx_hash,
+            "action": action,
+            "opportunity_id": str(
+                getattr(outcome, "opportunity_id", "") or execution.get("opportunity_id") or ""
+            ),
+            "route_id": str(getattr(outcome, "route_id", "") or execution.get("route_id") or ""),
+            "policy_version": str(getattr(decision, "policy_version", "") or ""),
+            "status": "settled" if bool(getattr(outcome, "ok", False)) else "failed",
+            "latency_ms": int(getattr(outcome, "latency_ms", 0) or 0),
+            "metadata": metadata,
+            "lineage": {
+                "decision_id": decision_id,
+                "correlation_id": correlation_id,
+                "execution_id": execution_id,
+                "settlement_id": settlement_id,
+            },
+            "complete": True,
+        }
+
+    def _learn_real_outcomes(self) -> None:
+        if not self._ledger or not self._trainer or not self._real_learning:
+            return
+        outcomes = self._ledger.poll(limit=self.cfg.real_outcome_batch_size)
+        if not outcomes:
+            return
+        processed = 0
+        for outcome in outcomes:
+            row = self._build_real_settled_row(outcome)
+            if not row.get("complete") and row.get("reason_codes"):
+                self.last_real_learning = {
+                    "source": "phase2_canonical_outcome_ledger",
+                    "eligible_for_learning": False,
+                    "reason_code": "incomplete_settled_lineage",
+                    "reason_codes": list(row.get("reason_codes") or []),
+                    "lineage": {
+                        "decision_id": str(row.get("decision_id") or ""),
+                        "correlation_id": str(row.get("correlation_id") or ""),
+                        "execution_id": str(row.get("execution_id") or ""),
+                        "settlement_id": str(row.get("settlement_id") or ""),
+                    },
+                }
+                self._log({"event": "omar_settled_lineage_gap", **self.last_real_learning})
+                continue
+            result = self.observe_settled_ledger_record(row)
+            processed += 1 if bool(result.get("ok")) else 0
+        if processed:
+            self.last_real_learning["processed_outcomes"] = processed
+
     def start(self):
         if self._thread and self._thread.is_alive():
             return
@@ -237,15 +414,6 @@ class OmarRuntime:
                 f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
         except (OSError, TypeError, ValueError):
             pass
-
-    def _learn_real_outcomes(self) -> None:
-        if not self._ledger or not self._trainer:
-            return
-        outcomes = self._ledger.poll(limit=self.cfg.real_outcome_batch_size)
-        if not outcomes:
-            return
-        stats = self._trainer.learn_from_real_outcomes(outcomes)
-        self.last_real_learning = dict(stats)
 
     def _loop(self):
         if self.cfg.enabled:
