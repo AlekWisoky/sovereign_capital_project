@@ -1,5 +1,6 @@
 name: Temporary Black Format
 
+# Trigger a fresh formatting artifact from the current branch head.
 on:
   push:
     branches:
@@ -26,7 +27,7 @@ jobs:
       - name: Upload formatted files
         uses: actions/upload-artifact@v4
         with:
-          name: phase-8-black-formatted
+          name: phase-8-black-formatted-current
           path: |
             backend/victor_ai_bot/omar/lifecycle_bridge.py
             backend/victor_ai_bot/omar/production_lineage_bridge.py
