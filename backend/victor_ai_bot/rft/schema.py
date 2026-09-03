@@ -4,6 +4,7 @@ from typing import Any, Dict, Final, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..capital_demand import CapitalDemand
 from ..version import __version__ as BACKEND_BUILDER_VERSION
 
 PROPOSAL_SCHEMA_VERSION: Final[Literal["1"]] = "1"
@@ -128,6 +129,7 @@ class EpisodeContext(BaseModel):
     top_opportunities: List[TopOpportunity] = Field(default_factory=list)
     controls: Dict[str, Any] = Field(default_factory=dict)
     wealth_goal: Dict[str, Any] = Field(default_factory=dict)
+    capital_demand: CapitalDemand = Field(default_factory=CapitalDemand)
     reward_trace: Dict[str, Any] = Field(default_factory=dict)
     execution_summary: Dict[str, Any] = Field(default_factory=dict)
 
@@ -157,6 +159,7 @@ class ReplayBundle(BaseModel):
     runtime: Dict[str, Any] = Field(default_factory=dict)
     controls: Dict[str, Any] = Field(default_factory=dict)
     wealth_goal: Dict[str, Any] = Field(default_factory=dict)
+    capital_demand: CapitalDemand = Field(default_factory=CapitalDemand)
     opportunities: List[TopOpportunity] = Field(default_factory=list)
     execution: Dict[str, Any] = Field(default_factory=dict)
     receipt: Dict[str, Any] = Field(default_factory=dict)
