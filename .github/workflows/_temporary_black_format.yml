@@ -6,7 +6,7 @@ on:
       - omar/phase-8-physical-settlement-lineage
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   format:
@@ -23,11 +23,15 @@ jobs:
       - name: Format Phase 8 files
         run: |
           black backend/victor_ai_bot/omar/lifecycle_bridge.py backend/victor_ai_bot/omar/production_lineage_bridge.py backend/victor_ai_bot/omar/real_learning.py backend/victor_ai_bot/omar/runtime.py backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py backend/victor_ai_bot/runtime_services/runtime_decision_facade.py
-      - name: Commit formatting changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/victor_ai_bot/omar/lifecycle_bridge.py backend/victor_ai_bot/omar/production_lineage_bridge.py backend/victor_ai_bot/omar/real_learning.py backend/victor_ai_bot/omar/runtime.py backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py backend/victor_ai_bot/runtime_services/runtime_decision_facade.py
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "style: format Phase 8 OMAR files"
-          git push
+      - name: Upload formatted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-8-black-formatted
+          path: |
+            backend/victor_ai_bot/omar/lifecycle_bridge.py
+            backend/victor_ai_bot/omar/production_lineage_bridge.py
+            backend/victor_ai_bot/omar/real_learning.py
+            backend/victor_ai_bot/omar/runtime.py
+            backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py
+            backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py
+            backend/victor_ai_bot/runtime_services/runtime_decision_facade.py
