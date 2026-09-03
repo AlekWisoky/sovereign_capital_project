@@ -1,6 +1,7 @@
 # mypy: disable-error-code=attr-defined
 from __future__ import annotations
 
+import asyncio
 import importlib
 import time
 from typing import Any, Awaitable, Callable, Tuple
@@ -66,12 +67,13 @@ class RuntimeExecuteWrapperFacade:
 
     @staticmethod
     async def _persist_phase7_context(runtime: Any, res: Any, context: dict[str, Any]) -> None:
-        """Persist decision context after execution without blocking submission."""
+        """Persist decision context off the event loop after execution."""
         tx_hash = str(getattr(res, "tx_hash", "") or "")
         if not tx_hash:
             return
         try:
-            phase7_context_store(runtime).put(tx_hash, context)
+            store = phase7_context_store(runtime)
+            await asyncio.to_thread(store.put, tx_hash, context)
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return
 
@@ -194,8 +196,8 @@ class RuntimeExecuteWrapperFacade:
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
 
-                # The context journal write happens only after canonical
-                # execution bookkeeping. It therefore cannot delay submission.
+                # Context persistence is post-bookkeeping and off-loop so it cannot
+                # slow transaction submission or starve other runtime tasks.
                 await self._persist_phase7_context(self, res, phase7_context)
         finally:
             execution_service = getattr(self, "_execution_service", None)
