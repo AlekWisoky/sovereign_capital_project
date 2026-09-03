@@ -59,7 +59,9 @@ def _pending_identity(pending: Mapping[str, Any]) -> Any:
                     or brain.get("correlation_id")
                 ),
                 "execution_id": _text(pending.get("execution_id") or lineage.get("execution_id")),
-                "settlement_id": _text(pending.get("settlement_id") or lineage.get("settlement_id")),
+                "settlement_id": _text(
+                    pending.get("settlement_id") or lineage.get("settlement_id")
+                ),
             }
         }
     )

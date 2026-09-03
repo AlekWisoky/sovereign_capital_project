@@ -16,10 +16,7 @@ def active_omar_runtime() -> OmarRuntime | None:
 
 def make_omar_from_settings(settings: Dict[str, Any], chain_name: str) -> OmarRuntime:
     global _ACTIVE_OMAR_RUNTIME
-    cfg_raw = (
-        (settings or {}).get("execution", {}).get("superstructure", {}).get("omar", {})
-        or {}
-    )
+    cfg_raw = (settings or {}).get("execution", {}).get("superstructure", {}).get("omar", {}) or {}
     cfg = OmarConfig(
         **{k: cfg_raw[k] for k in cfg_raw.keys() if k in OmarConfig.__dataclass_fields__}
     )

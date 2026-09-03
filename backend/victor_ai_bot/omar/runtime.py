@@ -157,7 +157,11 @@ class OmarRuntime:
             operator_intent=operator_intent,
             metadata=metadata or {},
         )
-        return {"ok": True, "decision_id": record.decision_id, "correlation_id": record.correlation_id}
+        return {
+            "ok": True,
+            "decision_id": record.decision_id,
+            "correlation_id": record.correlation_id,
+        }
 
     def observe_execution(
         self,
