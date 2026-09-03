@@ -16,6 +16,13 @@ from .real_learning import (
 )
 from .runtime import OmarRuntime
 
+try:
+    from .production_learning_hook import install_production_learning_hooks
+
+    install_production_learning_hooks()
+except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
+    pass
+
 __all__ = [
     "OmarConfig",
     "OmarRuntime",
@@ -27,4 +34,5 @@ __all__ = [
     "ActionAttribution",
     "OperatorIntentSnapshot",
     "capture_operator_intent",
+    "install_production_learning_hooks",
 ]
