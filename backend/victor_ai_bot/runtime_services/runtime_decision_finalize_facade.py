@@ -31,7 +31,11 @@ class RuntimeDecisionFinalizeFacade:
             return decision
         try:
             chosen = next(
-                (opp for opp in opps if str(getattr(opp, "id", "")) == str(getattr(decision, "opp_id", ""))),
+                (
+                    opp
+                    for opp in opps
+                    if str(getattr(opp, "id", "")) == str(getattr(decision, "opp_id", ""))
+                ),
                 None,
             )
             if chosen is None:
@@ -49,9 +53,7 @@ class RuntimeDecisionFinalizeFacade:
                     return 0
 
             legs = getattr(getattr(chosen, "route", None), "legs", []) or []
-            base_amount = _nonnegative_int(
-                getattr(legs[0], "amount_in", 0) if legs else 0
-            )
+            base_amount = _nonnegative_int(getattr(legs[0], "amount_in", 0) if legs else 0)
             size_mult = float(getattr(decision, "size_mult", 1.0) or 1.0)
             borrow_mult = float(getattr(decision, "borrow_mult", 1.0) or 1.0)
             requested = max(0, int(base_amount * max(0.0, size_mult) * max(0.0, borrow_mult)))
@@ -78,15 +80,14 @@ class RuntimeDecisionFinalizeFacade:
             status = (
                 "authorized"
                 if requested > 0 and authorized_for_decision >= requested
-                else ("constrained" if requested > 0 and authorized_for_decision > 0 else "unresolved")
+                else (
+                    "constrained" if requested > 0 and authorized_for_decision > 0 else "unresolved"
+                )
             )
 
             meta = self._safe_mapping(getattr(chosen, "meta", None))
             goal_posture = (
-                meta.get("goal_posture")
-                or meta.get("wealth_goal")
-                or meta.get("goal")
-                or {}
+                meta.get("goal_posture") or meta.get("wealth_goal") or meta.get("goal") or {}
             )
             if not isinstance(goal_posture, dict):
                 goal_posture = {"value": goal_posture}
