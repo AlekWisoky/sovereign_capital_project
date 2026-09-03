@@ -34,7 +34,11 @@ class CapitalDemand:
 def _float(value: Any, default: float = 0.0) -> float:
     try:
         value = float(value)
-        return value if value == value and value not in (float("inf"), float("-inf")) else default
+        return (
+            value
+            if value == value and value not in (float("inf"), float("-inf"))
+            else default
+        )
     except _SAFE_EXCEPTIONS:
         return default
 
@@ -90,7 +94,9 @@ def _opportunity_notional(opp: Any) -> float:
 
 def _goal_cap(wealth_goal_state: Dict[str, Any]) -> float:
     state = _mapping(wealth_goal_state.get("state"))
-    value = state.get("aggressivenessCap", wealth_goal_state.get("aggressivenessCap", 1.0))
+    value = state.get(
+        "aggressivenessCap", wealth_goal_state.get("aggressivenessCap", 1.0)
+    )
     return max(0.55, min(1.0, _float(value, 1.0)))
 
 
@@ -127,11 +133,17 @@ def compose_capital_demand(
     }
 
     prime_ready = bool(prime.get("stateReady", prime.get("state_ready", False)))
-    prime_capacity = max(0.0, _float(prime.get("capacityUsd", prime.get("capacity_usd", 0.0))))
-    prime_borrowed = max(0.0, _float(prime.get("borrowedUsd", prime.get("borrowed_usd", 0.0))))
+    prime_capacity = max(
+        0.0, _float(prime.get("capacityUsd", prime.get("capacity_usd", 0.0)))
+    )
+    prime_borrowed = max(
+        0.0, _float(prime.get("borrowedUsd", prime.get("borrowed_usd", 0.0)))
+    )
     prime_headroom = max(0.0, prime_capacity - prime_borrowed)
     prime_ratio = (
-        max(0.0, min(1.0, prime_headroom / prime_capacity)) if prime_capacity > 0 else 0.0
+        max(0.0, min(1.0, prime_headroom / prime_capacity))
+        if prime_capacity > 0
+        else 0.0
     )
 
     aggressiveness_cap = _goal_cap(goal)
@@ -168,7 +180,9 @@ def compose_capital_demand(
             constrained = True
             reasons.append(f"prime_family_blocked:{family}")
         else:
-            family_caps[family] = int(family_caps[family] * prime_ratio * aggressiveness_cap)
+            family_caps[family] = int(
+                family_caps[family] * prime_ratio * aggressiveness_cap
+            )
             if family_caps[family] <= 0:
                 constrained = True
                 reasons.append(f"prime_family_headroom_zero:{family}")
