@@ -38,10 +38,43 @@ def build_phase7_execution_context(
 ) -> Dict[str, Any]:
     """Capture the Phase 7 decision-time context once for execution and learning.
 
-    This is an attribution snapshot, not an authority layer. It deliberately
-    reuses the canonical runtime-access snapshot and operator-intent snapshot;
-    governance, capital authority, and execution gates remain authoritative.
+    Prefer a context already attached at the decision boundary. Only when that
+    snapshot is unavailable do we read the runtime state here. This keeps the
+    submission-critical path fast while preserving exact decision-time context.
     """
+    decision_meta = _safe_dict(getattr(decision, "metadata", None))
+    existing = decision_meta.get("phase7_context")
+    if isinstance(existing, dict):
+        payload = dict(existing)
+        decision_part = _safe_dict(payload.get("decision"))
+        identity = identity_from(decision) or identity_from(opp) or identity_from(result)
+        if identity is not None:
+            decision_part.update(
+                {
+                    "decision_id": identity.decision_id,
+                    "correlation_id": identity.correlation_id,
+                }
+            )
+            if identity.execution_id:
+                payload["execution"] = {
+                    **_safe_dict(payload.get("execution")),
+                    "execution_id": identity.execution_id,
+                }
+        decision_part["action"] = _action_from(decision, opp, result) or str(
+            decision_part.get("action") or ""
+        )
+        payload["decision"] = decision_part
+        payload["execution"] = {
+            **_safe_dict(payload.get("execution")),
+            "latency_ms": int(max(0, int(latency_ms or 0))),
+        }
+        payload["latency"] = {
+            **_safe_dict(payload.get("latency")),
+            "observed_ms": int(max(0, int(latency_ms or 0))),
+            "hot_path_snapshot": True,
+        }
+        return payload
+
     access = build_runtime_access_snapshot(runtime)
     intent = capture_operator_intent(runtime, decision=decision)
     identity = identity_from(decision) or identity_from(opp) or identity_from(result)
@@ -55,7 +88,7 @@ def build_phase7_execution_context(
             "action": action,
             "policy_version": str(
                 getattr(decision, "policy_version", "")
-                or _safe_dict(getattr(decision, "metadata", None)).get("policy_version")
+                or decision_meta.get("policy_version")
                 or ""
             ),
         },
