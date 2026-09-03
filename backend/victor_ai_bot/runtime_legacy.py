@@ -245,19 +245,30 @@ class RuntimeBundle(
             await entry(opp=opp, bn=int(bn), decision=decision)
             return
 
-        # Legacy unbound-call compatibility for lightweight test/runtime stubs.
-        prep = await RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch(
-            self,
-            opp=opp,
-            bn=int(bn),
-            decision=decision,
-        )
+        # Legacy unbound-call compatibility: prefer methods supplied by the
+        # harness itself, then fall back to the extracted facade implementation.
+        prep_fn = getattr(self, "_prepare_auto_execution_dispatch", None)
+        if not callable(prep_fn):
+            prep_fn = RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch
+        prep = await prep_fn(self, opp=opp, bn=int(bn), decision=decision) if prep_fn is RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch else await prep_fn(opp=opp, bn=int(bn), decision=decision)
         if prep is None:
             return
-        await RuntimeExecuteWrapperFacade._run_prepared_auto_execution(
-            self,
-            opp=prep.opportunity,
-            bn=int(bn),
-            decision=decision,
-            prep=prep,
-        )
+
+        wrapper_fn = getattr(self, "_run_prepared_auto_execution", None)
+        if not callable(wrapper_fn):
+            wrapper_fn = RuntimeExecuteWrapperFacade._run_prepared_auto_execution
+        if wrapper_fn is RuntimeExecuteWrapperFacade._run_prepared_auto_execution:
+            await wrapper_fn(
+                self,
+                opp=prep.opportunity,
+                bn=int(bn),
+                decision=decision,
+                prep=prep,
+            )
+        else:
+            await wrapper_fn(
+                opp=prep.opportunity,
+                bn=int(bn),
+                decision=decision,
+                prep=prep,
+            )
