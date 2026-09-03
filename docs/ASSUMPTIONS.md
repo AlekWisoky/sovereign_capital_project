@@ -44,6 +44,18 @@
   - pending-tx cap (`execution.max_pending_txs`, default 1)
   - per-route cooldown (`execution.trade_cooldown_blocks`, default 1)
 
+## Capital-demand composition
+
+- Capital demand is a **decision input**, not execution authority. It composes the amount that can be funded after hard constraints are applied.
+- Wealth-goal posture, bounded `aggression_mode`, and AI recommendation context may modify a valid demand; none may bypass governance, risk, exposure, conversion, execution-plan, latency/freshness, treasury, provider, or prime limits.
+- Treasury amounts carry both human denomination/decimals and exact integer base units for downstream accounting.
+- `v1_external_prime` is the canonical V1 posture: V1 may request external/internal-prime capital while the treasury is still being accumulated. A zero treasury balance therefore does not disable a valid V1 demand when prime/provider capacity is available.
+- `own_capital` is the post-accumulation posture: demand is funded from treasury allocatable capital and never silently falls back to prime.
+- `hybrid` is explicit and uses treasury first, then internal prime for residual demand.
+- The operator may select V1-only operation; the system must not silently promote to another strategy version or capital posture.
+- Prime/provider fees reduce economic capacity; they do not create permission to exceed hard limits.
+- Internal-prime authority is represented separately from treasury ownership so borrowed capital cannot be mistaken for owned fund capital.
+
 ## AQE / SMMAE defaults (Phases 1–4)
 
 - AQE is **opt-in** via `execution.brain_mode`:
@@ -90,7 +102,7 @@
 
 ## Phase 6 — MEV module assumptions
 - Many RPC providers do not support mempool subscriptions (`eth_subscribe` for `newPendingTransactions`). The module is best-effort and will report `no_ws_url` or reconnect errors if unsupported.
-- Risk scores are heuristics (calldata selector + gas tip + value). They are used only to *block unsafe public sends* when configured.
+- Risk scores are heuristics (calldata selector + gas tip + value). They are used only to **block unsafe public sends** when configured.
 - Private routing is supported via `eth_sendPrivateTransaction` when the configured send RPC implements it.
 - Hard policy: the system includes sandwich detection/avoidance, but does not implement sandwich attack execution.
 
