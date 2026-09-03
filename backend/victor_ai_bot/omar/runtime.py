@@ -323,6 +323,11 @@ class OmarRuntime:
                         getattr(outcome, "realized_profit_after_gas_usd_micro", 0) or 0
                     ),
                     "realized_gas_wei": int(getattr(outcome, "realized_gas_cost_wei", 0) or 0),
+                    "risk_cost_wei": (
+                        abs(int(getattr(outcome, "expected_profit_after_costs_wei", 0) or 0))
+                        if not bool(getattr(outcome, "ok", False))
+                        else 0
+                    ),
                     "realized_slippage_bps": 0.0,
                 },
                 "execution": {
