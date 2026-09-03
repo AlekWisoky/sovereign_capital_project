@@ -67,7 +67,13 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 
 
 def identity_from(value: Any) -> TradeIdentity | None:
-    """Read identity from an object or mapping without fabricating missing IDs."""
+    """Read identity without turning an empty payload into a valid identity.
+
+    Recovery and compatibility paths may inspect objects that have no lifecycle
+    identity at all. Returning ``TradeIdentity('', '', '', '')`` for those
+    objects is a false-positive: callers can mistake it for recovered identity
+    and skip creation/recovery of the canonical decision/correlation pair.
+    """
     if value is None:
         return None
     if isinstance(value, TradeIdentity):
@@ -85,7 +91,7 @@ def identity_from(value: Any) -> TradeIdentity | None:
 
     nested = _mapping(source.get("identity"))
     lineage = _mapping(source.get("lineage"))
-    return TradeIdentity(
+    identity = TradeIdentity(
         decision_id=_text(
             source.get("decision_id") or source.get("decisionId")
             or nested.get("decision_id") or nested.get("decisionId")
@@ -107,6 +113,9 @@ def identity_from(value: Any) -> TradeIdentity | None:
             or lineage.get("settlement_id") or lineage.get("settlementId")
         ),
     )
+    if not any((identity.decision_id, identity.correlation_id, identity.execution_id, identity.settlement_id)):
+        return None
+    return identity
 
 
 def attach_identity(target: Any, identity: TradeIdentity) -> Any:
