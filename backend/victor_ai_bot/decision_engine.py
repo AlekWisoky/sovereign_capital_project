@@ -237,13 +237,19 @@ class DecisionEngine:
             ev_score = int(float(ev) * float(score_mult))
             last_r = self._last_trade_block_by_route.get(rid, 0)
             if rid and (current_block - last_r) < cooldown_blocks:
-                self._set_brain(o, feats, p_base, ev, action="skip", reason="cooldown", rl_state=s, rl_action=a_idx)
+                self._set_brain(
+                    o, feats, p_base, ev, action="skip", reason="cooldown", rl_state=s, rl_action=a_idx
+                )
                 continue
             if p_base < min_p:
-                self._set_brain(o, feats, p_base, ev, action="skip", reason="p_below_min", rl_state=s, rl_action=a_idx)
+                self._set_brain(
+                    o, feats, p_base, ev, action="skip", reason="p_below_min", rl_state=s, rl_action=a_idx
+                )
                 continue
             if ev <= 0:
-                self._set_brain(o, feats, p_base, ev, action="skip", reason="ev_nonpositive", rl_state=s, rl_action=a_idx)
+                self._set_brain(
+                    o, feats, p_base, ev, action="skip", reason="ev_nonpositive", rl_state=s, rl_action=a_idx
+                )
                 continue
             self._set_brain(
                 o,
@@ -284,7 +290,12 @@ class DecisionEngine:
                     "legs": int(feats_best.legs),
                     "p_success": float(p_best),
                     "ev_wei": int(ev_best),
-                    "fail_streak": int(self._route_stats.get(str(getattr(o_best, "route_id", "") or ""), {}).get("fail_streak", 0) or 0),
+                    "fail_streak": int(
+                        self._route_stats.get(str(getattr(o_best, "route_id", "") or ""), {}).get(
+                            "fail_streak", 0
+                        )
+                        or 0
+                    ),
                     "chain": str(self.chain),
                     "route_id": str(getattr(o_best, "route_id", "") or ""),
                 }
@@ -346,9 +357,13 @@ class DecisionEngine:
         bm = (o.meta.get("brain") if isinstance(o.meta, dict) else {}) or {}
         ev = _int(bm.get("ev_wei") or 0)
         s = str(((bm.get("rl") or {}) if isinstance(bm, dict) else {}).get("state") or "")
-        a_idx = int(((bm.get("rl") or {}) if isinstance(bm, dict) else {}).get("action_index") or -1)
+        a_idx = int(
+            ((bm.get("rl") or {}) if isinstance(bm, dict) else {}).get("action_index") or -1
+        )
         if mode != "auto" or not auto_enabled:
-            return TradeDecision(action="skip", reason=f"brain_mode_{mode}", portfolio=portfolio_ids)
+            return TradeDecision(
+                action="skip", reason=f"brain_mode_{mode}", portfolio=portfolio_ids
+            )
         self._last_trade_block_by_route[rid] = int(current_block)
         self._last_trade_block_global = int(current_block)
         bm = (o.meta.get("brain") if isinstance(o.meta, dict) else {}) or {}
@@ -379,9 +394,18 @@ class DecisionEngine:
                     "route_id": str(rid),
                     "chain": str(self.chain),
                     "opportunity_id": str(getattr(o, "id", "")),
-                    "strategy": str(((o.meta.get("brain") or {}) if isinstance(getattr(o, "meta", None), dict) else {}).get("action") or ""),
+                    "strategy": str(
+                        (
+                            (o.meta.get("brain") or {})
+                            if isinstance(getattr(o, "meta", None), dict)
+                            else {}
+                        ).get("action")
+                        or ""
+                    ),
                 }
-                act, dbg = self._require_smmae().choose_action(state=state, state_key=str(state_key))
+                act, dbg = self._require_smmae().choose_action(
+                    state=state, state_key=str(state_key)
+                )
                 bm["gas_mode"] = str(act.gas_mode)
                 bm["size_mult"] = float(act.size_mult)
                 bm["borrow_mult"] = float(act.borrow_mult)
@@ -455,7 +479,10 @@ class DecisionEngine:
                     aqe_action = f"rl_idx:{int(rl_action_index)}"
                 r_team = float(realized_after_gas_wei) / float(max(1, amount_in_wei))
                 info = self._smmae.observe_trade_result(
-                    state_key=str(rl_state), action_key=str(aqe_action), r_team=float(r_team), ok=bool(ok)
+                    state_key=str(rl_state),
+                    action_key=str(aqe_action),
+                    r_team=float(r_team),
+                    ok=bool(ok),
                 )
                 self._last_smmae_reward = info
         except _SAFE_OPTIONAL_EXCEPTIONS:
