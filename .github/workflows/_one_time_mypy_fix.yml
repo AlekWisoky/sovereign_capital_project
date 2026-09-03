@@ -33,7 +33,7 @@ jobs:
           marker = '        preview_id = str(raw_payload.get("preview_id") or "")\n'
           if marker not in s:
               raise SystemExit('execute prelude marker not found')
-          if '        result: Dict[str, Any] = {\n            "ok": False,\n            "reason_code": "preview_id_mismatch"' in s:
+          if '        result: Dict[str, Any]\n' not in s:
               s = s.replace(marker, marker + '        result: Dict[str, Any]\n', 1)
           old = '        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'
           new = '        result = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'
