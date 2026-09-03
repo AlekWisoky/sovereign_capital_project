@@ -39,6 +39,32 @@ def _decision_state(opp: Any, decision: Any) -> dict[str, Any]:
     return state
 
 
+def _pending_identity(pending: Mapping[str, Any]) -> Any:
+    direct = identity_from(pending)
+    if direct is not None and direct.decision_id and direct.correlation_id:
+        return direct
+    lineage = _mapping(pending.get("canonical_lineage"))
+    brain = _mapping(pending.get("brain"))
+    return identity_from(
+        {
+            "identity": {
+                "decision_id": _text(
+                    pending.get("canonical_decision_id")
+                    or lineage.get("decision_id")
+                    or brain.get("canonical_decision_id")
+                ),
+                "correlation_id": _text(
+                    pending.get("correlation_id")
+                    or lineage.get("correlation_id")
+                    or brain.get("correlation_id")
+                ),
+                "execution_id": _text(pending.get("execution_id") or lineage.get("execution_id")),
+                "settlement_id": _text(pending.get("settlement_id") or lineage.get("settlement_id")),
+            }
+        }
+    )
+
+
 def _install_decision_hook() -> None:
     from ..runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
@@ -53,12 +79,12 @@ def _install_decision_hook() -> None:
 
             omar = active_omar_runtime()
             if omar is not None and bool(getattr(omar.cfg, "enabled", False)):
+                omar.bind_runtime(self)
                 identity = identity_from(selected)
                 if identity is not None and identity.decision_id and identity.correlation_id:
                     meta = _mapping(getattr(selected, "metadata", None))
                     intent = _operator_intent(
-                        meta.get("operator_intent_snapshot")
-                        or meta.get("operator_intent")
+                        meta.get("operator_intent_snapshot") or meta.get("operator_intent")
                     )
                     omar.observe_decision(
                         decision_id=identity.decision_id,
@@ -118,12 +144,10 @@ def _install_execution_hook() -> None:
             identity = identity_from(result)
             if identity is None or not identity.complete_for_execution:
                 return
-            decision = getattr(result, "decision", None)
-            action = _text(getattr(decision, "action", ""))
-            if not action:
-                action = _text(_mapping(getattr(result, "plan", None)).get("action")) or "trade"
             plan = _mapping(getattr(result, "plan", None))
-            await_result = omar.observe_execution(
+            decision = getattr(result, "decision", None)
+            action = _text(getattr(decision, "action", "")) or _text(plan.get("action")) or "trade"
+            omar.observe_execution(
                 decision_id=identity.decision_id,
                 correlation_id=identity.correlation_id,
                 execution_id=identity.execution_id,
@@ -140,7 +164,6 @@ def _install_execution_hook() -> None:
                     "ok": bool(getattr(result, "ok", False)),
                 },
             )
-            del await_result
         except _SAFE:
             return
 
@@ -186,7 +209,6 @@ def _install_settlement_hook() -> None:
             status=status,
             submit_to_receipt_ms=submit_to_receipt_ms,
             expected_after=expected_after,
-            realized_after=realized_after,
             amount_in=amount_in,
             gas_est_wei=gas_est_wei,
             route_id=route_id,
@@ -194,6 +216,7 @@ def _install_settlement_hook() -> None:
             capture_lane_pending=capture_lane_pending,
             capture_relay_pending=capture_relay_pending,
             outcome_truth=outcome_truth,
+            realized_after=realized_after,
         )
         try:
             from .integration import active_omar_runtime
@@ -206,7 +229,7 @@ def _install_settlement_hook() -> None:
             reader = getattr(self, "canonical_settled_outcome", None)
             if not callable(reader):
                 return
-            identity = identity_from(pending)
+            identity = _pending_identity(pending)
             if identity is None or not identity.decision_id or not identity.correlation_id:
                 return
             row = reader(
@@ -227,12 +250,7 @@ def _install_settlement_hook() -> None:
 
 
 def install_production_learning_hooks() -> None:
-    """Install the three production callbacks exactly once.
-
-    Decision and execution callbacks capture context; settlement callback is the
-    only callback allowed to trigger policy learning, and it reads the canonical
-    settled ledger after persistence has completed.
-    """
+    """Install canonical decision, execution, and settled-learning callbacks once."""
     _install_decision_hook()
     _install_execution_hook()
     _install_settlement_hook()
