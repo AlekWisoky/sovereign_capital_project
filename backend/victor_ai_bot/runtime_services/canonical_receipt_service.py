@@ -29,7 +29,9 @@ class CanonicalReceiptService(ReceiptService):
             return {}
         return {}
 
-    def synchronize_settlement_accounting(self, runtime: Any, **kwargs: Any) -> dict[str, Any]:
+    def synchronize_settlement_accounting(
+        self, runtime: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         """Commit canonical settlement, then hand that exact settlement to OMAR."""
         result = dict(super().synchronize_settlement_accounting(runtime, **kwargs) or {})
         if not bool(result.get("ok")) or bool(result.get("duplicate")):
@@ -50,7 +52,11 @@ class CanonicalReceiptService(ReceiptService):
         outcome = {
             "status": str(
                 result.get("status")
-                or ("settled" if int(kwargs.get("status") or 0) == 1 else "failed")
+                or (
+                    "settled"
+                    if int(kwargs.get("status") or 0) == 1
+                    else "failed"
+                )
             ),
             "ok": int(kwargs.get("status") or 0) == 1,
             "tx_hash": receipt_id,
@@ -70,13 +76,27 @@ class CanonicalReceiptService(ReceiptService):
         try:
             from ..omar.lifecycle_bridge import _observe_settled_outcome
 
-            learning = _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
+            learning = _observe_settled_outcome(
+                runtime, pending=pending, outcome=outcome
+            )
             result["learningSync"] = dict(learning or {})
             result["closedLoop"] = {
                 "settlementAccounting": True,
-                "learningRecorded": bool(learning.get("ok")) if isinstance(learning, Mapping) else False,
-                "completed": bool(learning.get("ok")) if isinstance(learning, Mapping) else False,
-                "reasonCodes": list(learning.get("reason_codes") or []) if isinstance(learning, Mapping) else ["omar_learning_callback_failed"],
+                "learningRecorded": (
+                    bool(learning.get("ok"))
+                    if isinstance(learning, Mapping)
+                    else False
+                ),
+                "completed": (
+                    bool(learning.get("ok"))
+                    if isinstance(learning, Mapping)
+                    else False
+                ),
+                "reasonCodes": (
+                    list(learning.get("reason_codes") or [])
+                    if isinstance(learning, Mapping)
+                    else ["omar_learning_callback_failed"]
+                ),
             }
         except _SAFE as exc:
             result["learningSync"] = {
@@ -116,12 +136,22 @@ class CanonicalReceiptService(ReceiptService):
         if economics:
             enriched_trace.update(
                 {
-                    "settled_net_pnl_usd": float(economics.get("signed_pnl_usd") or 0.0),
+                    "settled_net_pnl_usd": float(
+                        economics.get("signed_pnl_usd") or 0.0
+                    ),
                     "settled_loss_usd": float(economics.get("loss_usd") or 0.0),
-                    "reinvestable_profit_usd": float(economics.get("reinvestable_profit_usd") or 0.0),
-                    "settled_receipt_id": str(economics.get("receipt_id") or tx_hash),
-                    "settled_transaction_id": str(economics.get("transaction_id") or ""),
-                    "settlement_source": str(economics.get("source") or "canonical_receipt_settlement"),
+                    "reinvestable_profit_usd": float(
+                        economics.get("reinvestable_profit_usd") or 0.0
+                    ),
+                    "settled_receipt_id": str(
+                        economics.get("receipt_id") or tx_hash
+                    ),
+                    "settled_transaction_id": str(
+                        economics.get("transaction_id") or ""
+                    ),
+                    "settlement_source": str(
+                        economics.get("source") or "canonical_receipt_settlement"
+                    ),
                 }
             )
         return super().update_decision_learning(
