@@ -35,18 +35,26 @@ def get_json(base_url: str, path: str) -> Any:
         raise RuntimeError(f"{path}: connection failed: {exc.reason}") from exc
 
 
+def _children(obj: Any) -> list[Any]:
+    if isinstance(obj, dict):
+        return list(obj.values())
+    if isinstance(obj, list):
+        return obj
+    return []
+
+
 def find_key_values(obj: Any, wanted: set[str]) -> list[tuple[str, Any]]:
     found: list[tuple[str, Any]] = []
     stack = [obj]
     while stack:
         current = stack.pop()
         if isinstance(current, dict):
-            for key, value in current.items():
-                if str(key).lower() in wanted:
-                    found.append((str(key), value))
-                stack.append(value)
-        elif isinstance(current, list):
-            stack.extend(current)
+            found.extend(
+                (str(key), value)
+                for key, value in current.items()
+                if str(key).lower() in wanted
+            )
+        stack.extend(_children(current))
     return found
 
 
