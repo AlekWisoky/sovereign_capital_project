@@ -233,14 +233,19 @@ class RuntimeBundle(
             await self._run_loop_entry_iteration(loop_started_at=t0)
 
     async def _execute_auto(self, opp: Opportunity, bn: int, decision: Any = None) -> None:
-        """Compatibility wrapper for the canonical auto-execution entry flow.
+        """Compatibility wrapper delegating to the canonical entry facade.
 
-        RuntimeBundle instances inherit `_execute_auto_entry`, but legacy/runtime
-        harnesses still call `RuntimeBundle._execute_auto(...)` as an unbound
-        shell method on lightweight stubs. We therefore route through the
-        facade class methods explicitly so those harnesses keep working without
-        having to inherit the full runtime mixin graph.
+        Real RuntimeBundle instances use `_execute_auto_entry` from
+        RuntimeExecuteEntryFacade. Lightweight legacy harnesses may provide
+        only the lower-level facade methods, so the historical unbound-call
+        behavior remains available as a fallback.
         """
+        entry = getattr(self, "_execute_auto_entry", None)
+        if callable(entry):
+            await entry(opp=opp, bn=int(bn), decision=decision)
+            return
+
+        # Legacy unbound-call compatibility for lightweight test/runtime stubs.
         prep = await RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch(
             self,
             opp=opp,
