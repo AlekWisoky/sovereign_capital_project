@@ -10,6 +10,7 @@ from ..identity import attach_identity, identity_from, new_execution_identity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
+from .phase7_context import attach_phase7_execution_context, build_phase7_execution_context
 from .runtime_execute_dispatch_facade import AutoExecutionDispatchContext
 
 
@@ -82,6 +83,26 @@ class RuntimeExecuteWrapperFacade:
             pass
         return res
 
+    @staticmethod
+    async def _persist_phase7_context(runtime: Any, res: Any, context: dict[str, Any]) -> None:
+        """Persist the same execution-time context used by the canonical record.
+
+        The SQLite PnL journal remains the canonical financial store. Context is
+        written by tx hash after the execution record is created, so the hot path
+        does not add another synchronous database operation before submission.
+        """
+        tx_hash = str(getattr(res, "tx_hash", "") or "")
+        pnl = getattr(runtime, "_pnl", None)
+        updater = getattr(pnl, "update_trade_context", None) if pnl is not None else None
+        if not tx_hash or not callable(updater):
+            return
+        try:
+            await updater(tx_hash, context)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            # Context persistence is observability/learning metadata; execution
+            # authorization must never be delayed or altered by this write.
+            return
+
     async def _run_prepared_auto_execution(
         self,
         *,
@@ -140,7 +161,28 @@ class RuntimeExecuteWrapperFacade:
                 # becomes execution identity. This happens before bookkeeping so
                 # every downstream recorder sees the same IDs.
                 res = self._ensure_execution_identity(res, decision)
+
+                # Phase 7 is captured once, after execution identity exists but
+                # before the canonical execution record and PnL write. This keeps
+                # decision-time operator/wealth/capital context identical across
+                # execution, settlement, and learning without repeated hot-path
+                # state reads.
+                context_started = time.perf_counter()
+                phase7_context = build_phase7_execution_context(
+                    self,
+                    opp,
+                    decision,
+                    result=res,
+                )
+                context_capture_ms = int((time.perf_counter() - context_started) * 1000.0)
+                phase7_context["latency"]["context_capture_ms"] = context_capture_ms
+                attach_phase7_execution_context(opp, phase7_context)
+                attach_phase7_execution_context(res, phase7_context)
+
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
+                phase7_context["execution"]["latency_ms"] = latency_ms
+                phase7_context["latency"]["observed_ms"] = latency_ms
+
                 if execution_service is not None:
                     bookkeeping_handler = getattr(
                         execution_service, "handle_post_execute_bookkeeping", None
@@ -169,6 +211,11 @@ class RuntimeExecuteWrapperFacade:
                     if res.ok and (not res.dry_run) and getattr(res, "submitted", False):
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
+
+                # Persist by tx hash only after the canonical execution/PnL record
+                # exists. This is intentionally post-bookkeeping to minimize the
+                # submission-critical path latency.
+                await self._persist_phase7_context(self, res, phase7_context)
         finally:
             execution_service = getattr(self, "_execution_service", None)
             if execution_service is not None:
