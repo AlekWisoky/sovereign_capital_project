@@ -44,8 +44,14 @@ class CanonicalReceiptService(ReceiptService):
             or result.get("transaction_id")
             or ""
         )
+        decoded = dict(kwargs.get("decoded") or {})
+        gas_cost_wei = max(0, int(decoded.get("realized_gas_cost_wei") or 0))
+        realized_after_wei = max(0, int(kwargs.get("realized_after") or 0))
         outcome = {
-            "status": str(result.get("status") or ("settled" if int(kwargs.get("status") or 0) == 1 else "failed")),
+            "status": str(
+                result.get("status")
+                or ("settled" if int(kwargs.get("status") or 0) == 1 else "failed")
+            ),
             "ok": int(kwargs.get("status") or 0) == 1,
             "tx_hash": receipt_id,
             "receipt_id": receipt_id,
@@ -54,8 +60,10 @@ class CanonicalReceiptService(ReceiptService):
             "route_id": str(kwargs.get("route_id") or ""),
             "realized_net_usd": float(result.get("netRealizedUsd") or 0.0),
             "expected_net_usd": float(kwargs.get("expected_after") or 0.0),
-            "realized_pnl_wei": int(kwargs.get("realized_after") or 0),
-            "realized_gas_wei": int(result.get("borrowing", {}).get("gasCostWei") or kwargs.get("gas_cost_wei") or 0),
+            # The OMAR loop subtracts realized_gas_wei from realized_pnl_wei, so
+            # pass gross realized profit here to produce the canonical post-gas reward.
+            "realized_pnl_wei": int(realized_after_wei + gas_cost_wei),
+            "realized_gas_wei": int(gas_cost_wei),
             "latency_ms": int(kwargs.get("submit_to_receipt_ms") or 0),
             "truth_verified": bool(kwargs.get("outcome_truth_verified", True)),
         }
