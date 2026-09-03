@@ -231,13 +231,17 @@ def install_canonical_settlement_bridge() -> None:
     """Make the Phase 4 lifecycle bridge consume the stable runtime surface."""
     from victor_ai_bot.omar import lifecycle_bridge
 
-    def bridge_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str, Any] | None:
+    def bridge_settled_outcome(
+        runtime: Any, result: Any, opp: Any
+    ) -> dict[str, Any] | None:
         meta = _dict(getattr(opp, "meta", None))
         brain = _dict(meta.get("brain"))
         tx_hash = _text(getattr(result, "tx_hash", ""))
         return runtime.canonical_settled_outcome(
             tx_hash=tx_hash,
-            decision_id=_text(brain.get("canonical_decision_id") or brain.get("omar_decision_id")),
+            decision_id=_text(
+                brain.get("canonical_decision_id") or brain.get("omar_decision_id")
+            ),
             correlation_id=_text(brain.get("correlation_id")),
             opportunity_id=_text(getattr(opp, "id", "")),
         )
