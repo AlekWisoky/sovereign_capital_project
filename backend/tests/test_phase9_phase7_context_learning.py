@@ -135,3 +135,31 @@ def test_omar_bridge_reads_phase7_context_by_transaction_and_preserves_lineage(t
     assert result["phase7_context"]["operator_intent"]["aggression_mode"] == "aggressive"
     assert result["lineage"]["action"] == "EXECUTE"
     assert loop.calls[-1][0] == "outcome"
+
+
+def test_omar_bridge_refuses_missing_action_before_policy_update(tmp_path):
+    class Loop:
+        chain_name = "ethereum"
+        data_dir = str(tmp_path)
+        _decisions = {}
+        _executions = {}
+        last_update = {}
+
+        def record_decision(self, **kwargs):
+            raise AssertionError("policy ingress must stop before decision reconstruction")
+
+    result = ingest_settled_ledger_record(
+        Loop(),
+        {
+            "tx_hash": "0xbad",
+            "decision_id": "decision-1",
+            "correlation_id": "corr-1",
+            "execution_id": "exec-1",
+            "settlement_id": "settle-1",
+            "status": "settled",
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["eligible_for_learning"] is False
+    assert "missing_action" in result["reason_codes"]
