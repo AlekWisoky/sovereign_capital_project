@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from ..canonical_decision_context import CanonicalDecisionContext
 from ..execution import ExecResult
 from .execution_service import ExecutionService
 
@@ -24,6 +25,7 @@ class AutoExecutionDispatchContext:
     old_send_mode: str
     read_url: str
     send_url: str
+    decision_context: CanonicalDecisionContext | None = None
 
 
 class RuntimeExecuteDispatchFacade:
@@ -174,6 +176,12 @@ class RuntimeExecuteDispatchFacade:
                 await self._record_exec(blocked_result, opp, latency_ms=0, mode="auto")
                 return None
 
+        decision_context = getattr(decision, "decision_context", None)
+        if decision_context is not None and not isinstance(decision_context, CanonicalDecisionContext):
+            decision_context = None
+        if decision_context is not None and isinstance(getattr(opp, "meta", None), dict):
+            opp.meta["decision_context"] = decision_context.to_dict()
+
         return AutoExecutionDispatchContext(
             opportunity=opp,
             force_dry=bool(force_dry),
@@ -181,4 +189,5 @@ class RuntimeExecuteDispatchFacade:
             old_send_mode=str(old_send_mode),
             read_url=str(read_url),
             send_url=str(send_url),
+            decision_context=decision_context,
         )
