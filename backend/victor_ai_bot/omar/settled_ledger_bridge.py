@@ -7,6 +7,7 @@ from victor_ai_bot.runtime_services.settled_outcome_lineage import (
     resolve_settled_lineage,
 )
 
+from .operator_intent import OperatorIntentSnapshot
 from .real_learning import OmarRealLearningLoop
 
 
@@ -37,6 +38,17 @@ def _float(*values: Any) -> float:
         return 0.0
 
 
+def _operator_intent(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> OperatorIntentSnapshot:
+    raw = _mapping(metadata.get("operator_intent")) or _mapping(row.get("operator_intent"))
+    allowed = set(OperatorIntentSnapshot.__dataclass_fields__)
+    payload = {key: value for key, value in raw.items() if key in allowed}
+    if "desired_wealth_goal" not in payload:
+        payload["desired_wealth_goal"] = _mapping(raw.get("goal"))
+    if "ai_recommendation" not in payload:
+        payload["ai_recommendation"] = _mapping(raw.get("recommendation"))
+    return OperatorIntentSnapshot(**payload)
+
+
 def ingest_settled_ledger_record(
     loop: OmarRealLearningLoop, row: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -57,6 +69,7 @@ def ingest_settled_ledger_record(
     outcome_meta = _mapping(metadata.get("outcome"))
     capital_demand = _mapping(metadata.get("capital_demand"))
     state = _mapping(metadata.get("state")) or _mapping(metadata.get("decision_state"))
+    operator_intent = _operator_intent(source, metadata)
 
     decision = getattr(loop, "_decisions", {}).get(lineage.decision_id)
     if decision is None:
@@ -68,6 +81,7 @@ def ingest_settled_ledger_record(
             route_id=lineage.route_id,
             policy_version=lineage.policy_version,
             state=state,
+            operator_intent=operator_intent,
             metadata={
                 "source": "settled_ledger",
                 "transaction_id": lineage.transaction_id,
@@ -75,8 +89,11 @@ def ingest_settled_ledger_record(
                 "capital_demand": capital_demand,
             },
         )
-    elif capital_demand:
-        decision.metadata.setdefault("capital_demand", dict(capital_demand))
+    else:
+        if capital_demand:
+            decision.metadata.setdefault("capital_demand", dict(capital_demand))
+        if operator_intent != OperatorIntentSnapshot():
+            decision.operator_intent = operator_intent  # type: ignore[misc]
 
     execution = getattr(loop, "_executions", {}).get(lineage.execution_id)
     if execution is None:
@@ -135,6 +152,7 @@ def ingest_settled_ledger_record(
             "latency_ms": lineage.latency_ms,
             "latency_class": lineage.latency_class,
             "capital_demand": capital_demand,
+            "operator_intent": operator_intent.to_dict(),
             "lineage": lineage.to_dict(),
         },
     )
@@ -143,6 +161,7 @@ def ingest_settled_ledger_record(
         "eligible_for_learning": bool(attribution.eligible_for_learning),
         "lineage": lineage.to_dict(),
         "capital_demand": capital_demand,
+        "operator_intent": operator_intent.to_dict(),
         "attribution": attribution.to_dict(),
         "policy_update": dict(loop.last_update or {}),
     }
