@@ -315,7 +315,10 @@ class OmarRuntime:
         metadata.update(
             {
                 "outcome": {
-                    "realized_pnl_wei": int(getattr(outcome, "realized_profit_after_gas_wei", 0) or 0),
+                    "realized_pnl_wei": int(
+                        getattr(outcome, "realized_profit_after_gas_wei", 0) or 0
+                    )
+                    + int(getattr(outcome, "realized_gas_cost_wei", 0) or 0),
                     "realized_pnl_usd_micro": int(
                         getattr(outcome, "realized_profit_after_gas_usd_micro", 0) or 0
                     ),
