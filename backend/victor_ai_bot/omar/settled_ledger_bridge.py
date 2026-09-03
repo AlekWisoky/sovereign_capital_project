@@ -39,8 +39,12 @@ def _float(*values: Any) -> float:
         return 0.0
 
 
-def _operator_intent(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> OperatorIntentSnapshot:
-    raw = _mapping(metadata.get("operator_intent")) or _mapping(row.get("operator_intent"))
+def _operator_intent(
+    row: Mapping[str, Any], metadata: Mapping[str, Any]
+) -> OperatorIntentSnapshot:
+    raw = _mapping(metadata.get("operator_intent")) or _mapping(
+        row.get("operator_intent")
+    )
     allowed = set(OperatorIntentSnapshot.__dataclass_fields__)
     payload = {key: value for key, value in raw.items() if key in allowed}
     if "desired_wealth_goal" not in payload:
@@ -93,7 +97,10 @@ def ingest_settled_ledger_record(
     else:
         if capital_demand:
             decision.metadata.setdefault("capital_demand", dict(capital_demand))
-        if decision.operator_intent == OperatorIntentSnapshot() and operator_intent != OperatorIntentSnapshot():
+        if (
+            decision.operator_intent == OperatorIntentSnapshot()
+            and operator_intent != OperatorIntentSnapshot()
+        ):
             loop._decisions[lineage.decision_id] = replace(
                 decision, operator_intent=operator_intent
             )
@@ -112,7 +119,9 @@ def ingest_settled_ledger_record(
             fill_quantity=_float(
                 execution_meta.get("fill_quantity"), metadata.get("fill_quantity")
             ),
-            fill_price=_float(execution_meta.get("fill_price"), metadata.get("fill_price")),
+            fill_price=_float(
+                execution_meta.get("fill_price"), metadata.get("fill_price")
+            ),
             slippage_bps=_float(
                 execution_meta.get("slippage_bps"),
                 metadata.get("realized_slippage_bps"),
@@ -144,10 +153,15 @@ def ingest_settled_ledger_record(
             metadata.get("realized_profit_after_gas_usd_micro"),
         ),
         realized_slippage_bps=_float(
-            outcome_meta.get("realized_slippage_bps"), metadata.get("realized_slippage_bps")
+            outcome_meta.get("realized_slippage_bps"),
+            metadata.get("realized_slippage_bps"),
         ),
-        realized_gas_wei=_int(outcome_meta.get("realized_gas_wei"), metadata.get("gas_cost_wei")),
-        risk_cost_wei=_int(outcome_meta.get("risk_cost_wei"), metadata.get("risk_cost_wei")),
+        realized_gas_wei=_int(
+            outcome_meta.get("realized_gas_wei"), metadata.get("gas_cost_wei")
+        ),
+        risk_cost_wei=_int(
+            outcome_meta.get("risk_cost_wei"), metadata.get("risk_cost_wei")
+        ),
         metadata={
             "source": "settled_ledger",
             "transaction_id": lineage.transaction_id,
