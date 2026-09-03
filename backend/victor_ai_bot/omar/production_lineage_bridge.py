@@ -30,7 +30,7 @@ def _lineage_matches(
     if opportunity_id and _text(row.get("opportunity_id")) != opportunity_id:
         return False
     # A settled row is eligible for learning only when the physical ledger
-    # record itself carried the complete production lineage.  The canonical
+    # record itself carried the complete production lineage. The canonical
     # read interface may derive compatibility IDs, but that must never hide a
     # persistence gap from the learner.
     return bool(row.get("lineage_persisted", False))
@@ -229,11 +229,40 @@ def _patch_execution_identity() -> None:
     ExecutionService.handle_post_execute_bookkeeping = wrapped
 
 
+def _patch_receipt_finalize_lineage() -> None:
+    """Resolve execution/outcome identity before the settlement side effects run."""
+    from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+
+    original = getattr(RuntimeReceiptFacade, "_safe_finalize_receipt_side_effects", None)
+    if original is None or getattr(original, "_production_lineage_patched", False):
+        return
+
+    def wrapped(self: Any, *args: Any, **kwargs: Any):
+        try:
+            signature = inspect.signature(original)
+            bound = signature.bind_partial(self, *args, **kwargs)
+            pending = bound.arguments.get("pending")
+            if isinstance(pending, Mapping):
+                bound.arguments["pending"] = _enrich_pending_lineage(
+                    pending, runtime=self
+                )
+                return original(*bound.args, **bound.kwargs)
+        except _SAFE:
+            pass
+        return original(self, *args, **kwargs)
+
+    wrapped._production_lineage_patched = True
+    RuntimeReceiptFacade._safe_finalize_receipt_side_effects = wrapped
+
+
 def _patch_persisted_outcome_lineage() -> None:
     """Carry the complete canonical identity into the physical settlement write."""
-    from victor_ai_bot.runtime_services.execution_service import ExecutionService
+    from victor_ai_bot.runtime_services.receipt_service import ReceiptService
 
-    original = getattr(ExecutionService, "persist_execution_outcome", None)
+    # ReceiptService owns persist_execution_outcome in the canonical runtime
+    # chain. Patching ExecutionService here was a dead compatibility path and
+    # left the actual receipt -> ledger boundary unprotected.
+    original = getattr(ReceiptService, "persist_execution_outcome", None)
     if original is None or getattr(original, "_production_lineage_patched", False):
         return
 
@@ -257,7 +286,7 @@ def _patch_persisted_outcome_lineage() -> None:
         return original(*args, **kwargs)
 
     wrapped._production_lineage_patched = True
-    ExecutionService.persist_execution_outcome = wrapped
+    ReceiptService.persist_execution_outcome = wrapped
 
 
 def _patch_settlement_resolution() -> None:
@@ -289,6 +318,7 @@ def install_production_lineage_bridge() -> None:
     try:
         _patch_decision_identity()
         _patch_execution_identity()
+        _patch_receipt_finalize_lineage()
         _patch_persisted_outcome_lineage()
         _patch_settlement_resolution()
     except _SAFE:

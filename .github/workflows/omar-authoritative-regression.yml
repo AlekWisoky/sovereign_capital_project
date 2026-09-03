@@ -50,7 +50,7 @@ jobs:
         run: PYTHONPATH=backend pytest -q backend/tests/test_omar_pending_settlement_lineage.py
 
       - name: "7. Adaptive sizing → sizing_id test"
-        run: PYTHONPATH=backend pytest -q backend/tests/test_adaptive_flashloan_risk_budget.py backend/tests/test_flashloan_sizing_canonical_controller.py backend/tests/test_flashloan_sizing_omar_integration.py
+        run: PYTHONPATH=backend pytest -q backend/tests/test_flashloan_sizing.py backend/tests/test_flashloan_closed_loop_family_sync_maintenance.py
 
       - name: "8. Exact decision/correlation/execution/outcome lineage"
         run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py

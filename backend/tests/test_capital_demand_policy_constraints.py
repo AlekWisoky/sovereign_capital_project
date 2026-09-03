@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 
 from victor_ai_bot.capital_demand import Capacity, CapitalDemandError, ConversionEvidence, Money, apply_aggressiveness_cap, apply_goal_cap, live_eligible_family
-from test_capital_demand_contract import NOW, demand
+from tests.test_capital_demand_contract import NOW, demand
 
 
 def test_conversion_exact_fractional_rounding_and_direction():
