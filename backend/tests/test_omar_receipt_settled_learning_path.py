@@ -145,7 +145,10 @@ def _seed_trade(runtime: _Runtime) -> None:
         con = sqlite3.connect(runtime._pnl.path)
         try:
             con.execute(
-                "UPDATE trades SET receipt_status=?, realized_gas_cost_wei=?, realized_profit_after_gas_wei=?, realized_profit_token=?, realized_profit_token_wei=?, realized_profit_after_gas_usd_micro=? WHERE id=?",
+                "UPDATE trades SET receipt_status=?, realized_gas_cost_wei=?, "
+                "realized_profit_after_gas_wei=?, realized_profit_token=?, "
+                "realized_profit_token_wei=?, realized_profit_after_gas_usd_micro=? "
+                "WHERE id=?",
                 (1, "100", "1000", "USDC", "1100", "4250000", int(trade_id)),
             )
             con.commit()
