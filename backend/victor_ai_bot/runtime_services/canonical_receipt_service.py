@@ -74,7 +74,9 @@ class CanonicalReceiptService(ReceiptService):
             result["learningSync"] = dict(learning or {})
             result["closedLoop"] = {
                 "settlementAccounting": True,
-                "learningRecorded": bool(learning.get("ok")) if isinstance(learning, Mapping) else False,
+                "learningRecorded": (
+                    bool(learning.get("ok")) if isinstance(learning, Mapping) else False
+                ),
                 "completed": (bool(learning.get("ok")) if isinstance(learning, Mapping) else False),
                 "reasonCodes": (
                     list(learning.get("reason_codes") or [])
