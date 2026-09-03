@@ -5,6 +5,49 @@ on:
   pull_request:
 
 jobs:
+  pr60_typefix:
+    if: github.event_name == 'push' && github.ref_name == 'codex/omar-canonical-capital-lineage'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair pre-existing decision engine typing blockers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/victor_ai_bot/decision_engine.py")
+          text = path.read_text(encoding="utf-8")
+          old = "            gas_cost = feats.gas_cost_wei\n"
+          new = "            gas_cost: float = float(feats.gas_cost_wei or 0.0)\n"
+          if old not in text:
+              raise SystemExit("expected gas_cost assignment not found")
+          text = text.replace(old, new, 1)
+          old = "                action_obj, smmae_debug = self._smmae.choose_action(\n"
+          new = "                action_obj, smmae_debug = self._require_smmae().choose_action(\n"
+          if text.count(old) != 2:
+              raise SystemExit(f"expected two SMMAE calls, found {text.count(old)}")
+          text = text.replace(old, new)
+          anchor = "    def set_brain_mode(self, mode: str) -> None:\n"
+          helper = '''    def _require_smmae(self) -> Any:\n        smmae = self._smmae\n        if smmae is None:\n            raise RuntimeError("SMMAE policy is unavailable")\n        return smmae\n\n'''
+          if anchor not in text:
+              raise SystemExit("set_brain_mode anchor not found")
+          text = text.replace(anchor, helper + anchor, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/decision_engine.py
+          if git diff --cached --quiet; then
+            echo "Decision engine typing already repaired"
+            exit 0
+          fi
+          git commit -m "fix: repair decision engine typing blockers"
+          git push origin HEAD:codex/omar-canonical-capital-lineage
+
   backend:
     runs-on: ubuntu-latest
     steps:
