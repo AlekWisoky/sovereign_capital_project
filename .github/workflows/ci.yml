@@ -40,7 +40,11 @@ jobs:
             mapfile -t files < <(git ls-files 'backend/**/*.py' 'backend/*.py')
           fi
           if [ "${#files[@]}" -gt 0 ]; then
-            black --check "${files[@]}"
+            if ! black --check "${files[@]}"; then
+              echo "Black formatting diff:"
+              black --diff "${files[@]}"
+              exit 1
+            fi
           else
             echo "No backend Python files changed; Black gate has nothing to check."
           fi
