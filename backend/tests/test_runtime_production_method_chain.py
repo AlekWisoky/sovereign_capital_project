@@ -4,10 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import victor_ai_bot.runtime_legacy as runtime_legacy_module
+from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.decision_identity import lineage_from_opportunity
 from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
-from victor_ai_bot.runtime_legacy import RuntimeBundle
 
 
 class _Rpc:
@@ -70,23 +69,13 @@ async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(mo
     events = []
     execution_result = SimpleNamespace(ok=True, dry_run=False, submitted=True)
 
-    monkeypatch.setattr(runtime_legacy_module, "JsonRpcClient", _Rpc)
+    monkeypatch.setattr("victor_ai_bot.runtime_legacy.JsonRpcClient", _Rpc)
 
     async def fake_execute(rpc_r, rpc_s, cfg, opp, bn, last_submitted_block, **kwargs):
-        events.append(
-            (
-                "execution",
-                rpc_r.url,
-                rpc_s.url,
-                opp,
-                bn,
-                last_submitted_block,
-                kwargs.get("decision"),
-            )
-        )
+        events.append(("execution", rpc_r.url, rpc_s.url, opp, bn, last_submitted_block, kwargs.get("decision")))
         return execution_result
 
-    monkeypatch.setattr(runtime_legacy_module, "try_execute_opportunity", fake_execute)
+    monkeypatch.setattr("victor_ai_bot.runtime_legacy.try_execute_opportunity", fake_execute)
 
     async def record_exec(result, opp, *, latency_ms, mode):
         events.append(("record", result, opp, latency_ms, mode))
@@ -97,10 +86,7 @@ async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(mo
         id="opp-1",
         route_id="route-1",
         can_execute=True,
-        meta={
-            "safety": {"exec_ready": True, "profit_after_costs_wei": "10"},
-            "brain": {},
-        },
+        meta={"safety": {"exec_ready": True, "profit_after_costs_wei": "10"}, "brain": {}},
     )
     runtime._opps = [opp]
 
