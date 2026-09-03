@@ -20,7 +20,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-      - name: Apply validated typing fixes
+      - name: Apply minimal validated typing repair
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -30,8 +30,13 @@ jobs:
           new = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
           if old in s:
               s = s.replace(old, new, 1)
-          old = '''        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'''
-          new = '''        execute_result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'''
+          marker = '        preview_id = str(raw_payload.get("preview_id") or "")\n'
+          if marker not in s:
+              raise SystemExit('execute prelude marker not found')
+          if '        result: Dict[str, Any] = {\n            "ok": False,\n            "reason_code": "preview_id_mismatch"' in s:
+              s = s.replace(marker, marker + '        result: Dict[str, Any]\n', 1)
+          old = '        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'
+          new = '        result = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'
           if old in s:
               s = s.replace(old, new, 1)
           p.write_text(s, encoding='utf-8')
