@@ -27,8 +27,8 @@ jobs:
           pytest -q \
             tests/test_runtime_production_execution_path.py \
             tests/test_execution_service_auto_trade_hold.py \
-            tests/test_omar_runtime.py \
-            tests/test_sentry_config.py
+            tests/test_canonical_identity_outcome_lineage.py \
+            tests/test_omar_runtime.py
 
   execution-facade-typing:
     runs-on: ubuntu-latest
@@ -95,8 +95,8 @@ jobs:
           pytest -q \
             tests/test_runtime_production_execution_path.py \
             tests/test_execution_service_auto_trade_hold.py \
-            tests/test_omar_runtime.py \
-            tests/test_sentry_config.py
+            tests/test_canonical_identity_outcome_lineage.py \
+            tests/test_omar_runtime.py
 
       - name: Pytest
         run: |
