@@ -27,7 +27,6 @@ jobs:
           pytest -q \
             tests/test_runtime_production_execution_path.py \
             tests/test_execution_service_auto_trade_hold.py \
-            tests/test_runtime_method_chain_learning_attribution.py \
             tests/test_omar_runtime.py
 
   backend:
@@ -72,8 +71,8 @@ jobs:
           pytest -q \
             tests/test_runtime_production_execution_path.py \
             tests/test_execution_service_auto_trade_hold.py \
-            tests/test_runtime_method_chain_learning_attribution.py \
-            tests/test_omar_runtime.py
+            tests/test_omar_runtime.py \
+            tests/test_sentry_config.py
 
       - name: Pytest
         run: |
