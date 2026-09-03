@@ -9,7 +9,10 @@ from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services import runtime_constructor_facade
 from victor_ai_bot.runtime_services import runtime_execute_wrapper_facade
 from victor_ai_bot.runtime_services import runtime_institutional_init
-from victor_ai_bot.runtime_services.execution_service import ExecutionGateResult, ExecutionService
+from victor_ai_bot.runtime_services.execution_service import (
+    ExecutionGateResult,
+    ExecutionService,
+)
 
 
 class _Rpc:
@@ -80,13 +83,17 @@ class _RecordingExecutionService(_AllowingExecutionService):
             runtime, opp, decision, force_dry_run=force_dry_run
         )
 
-    def handle_superstructure_pre_execute(self, runtime, opp, decision, *, force_dry_run):
+    def handle_superstructure_pre_execute(
+        self, runtime, opp, decision, *, force_dry_run
+    ):
         self.events.append("superstructure")
         return super().handle_superstructure_pre_execute(
             runtime, opp, decision, force_dry_run=force_dry_run
         )
 
-    def handle_governance_pre_execute(self, runtime, opp, bn, decision, *, force_dry_run):
+    def handle_governance_pre_execute(
+        self, runtime, opp, bn, decision, *, force_dry_run
+    ):
         self.events.append("governance")
         return super().handle_governance_pre_execute(
             runtime, opp, bn, decision, force_dry_run=force_dry_run
@@ -94,7 +101,9 @@ class _RecordingExecutionService(_AllowingExecutionService):
 
     async def handle_fioa_execution_wrapper(self, runtime, opp, decision, core_coro):
         self.events.append("fioa")
-        return await super().handle_fioa_execution_wrapper(runtime, opp, decision, core_coro)
+        return await super().handle_fioa_execution_wrapper(
+            runtime, opp, decision, core_coro
+        )
 
     async def handle_post_execute_bookkeeping(
         self, runtime, opp, result, *, bn, latency_ms, mode
@@ -149,7 +158,10 @@ def _patch_constructor(monkeypatch):
         "CircuitBreaker": type(
             "_CircuitBreaker",
             (),
-            {"from_env": classmethod(lambda cls: cls()), "allow_auto_trading": lambda self: True},
+            {
+                "from_env": classmethod(lambda cls: cls()),
+                "allow_auto_trading": lambda self: True,
+            },
         ),
         "AnomalyBreaker": lambda **kwargs: SimpleNamespace(),
         "PerBlockCache": lambda **kwargs: SimpleNamespace(),
@@ -256,7 +268,9 @@ async def test_actual_runtime_method_chain_propagates_canonical_identity_to_lear
 
     opp = _opportunity()
     decision = _decision(opp)
-    chosen, selected = runtime._apply_omar_to_candidate(opp, decision, current_block=902)
+    chosen, selected = runtime._apply_omar_to_candidate(
+        opp, decision, current_block=902
+    )
 
     assert chosen is opp
     assert selected is decision
