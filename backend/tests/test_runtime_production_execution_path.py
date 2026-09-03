@@ -141,6 +141,8 @@ async def test_real_runtimebundle_auto_entry_traverses_canonical_execution_path(
     runtime._opps = [_opportunity()]
     runtime._exec_task = None
     runtime._captured_result = None
+    runtime._pending = []
+    monkeypatch.setattr(runtime, "_opp_is_exec_ready", lambda _opp: True)
 
     decision = SimpleNamespace(
         action="trade",
