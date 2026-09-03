@@ -245,30 +245,43 @@ class RuntimeBundle(
             await entry(opp=opp, bn=int(bn), decision=decision)
             return
 
-        # Legacy unbound-call compatibility: prefer methods supplied by the
-        # harness itself, then fall back to the extracted facade implementation.
         prep_fn = getattr(self, "_prepare_auto_execution_dispatch", None)
-        if not callable(prep_fn):
+        uses_facade_prep = not callable(prep_fn)
+        if uses_facade_prep:
             prep_fn = RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch
-        prep = await prep_fn(self, opp=opp, bn=int(bn), decision=decision) if prep_fn is RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch else await prep_fn(opp=opp, bn=int(bn), decision=decision)
+        if uses_facade_prep:
+            prep = await prep_fn(self, opp=opp, bn=int(bn), decision=decision)
+        else:
+            prep = await prep_fn(opp=opp, bn=int(bn), decision=decision)
         if prep is None:
             return
 
         wrapper_fn = getattr(self, "_run_prepared_auto_execution", None)
-        if not callable(wrapper_fn):
+        uses_facade_wrapper = not callable(wrapper_fn)
+        if uses_facade_wrapper:
             wrapper_fn = RuntimeExecuteWrapperFacade._run_prepared_auto_execution
-        if wrapper_fn is RuntimeExecuteWrapperFacade._run_prepared_auto_execution:
-            await wrapper_fn(
-                self,
-                opp=prep.opportunity,
-                bn=int(bn),
-                decision=decision,
-                prep=prep,
-            )
-        else:
-            await wrapper_fn(
-                opp=prep.opportunity,
-                bn=int(bn),
-                decision=decision,
-                prep=prep,
-            )
+            legacy_identity = getattr(self, "_ensure_execution_identity", None)
+            if not callable(legacy_identity):
+                setattr(self, "_ensure_execution_identity", lambda result, _decision: result)
+        try:
+            if uses_facade_wrapper:
+                await wrapper_fn(
+                    self,
+                    opp=prep.opportunity,
+                    bn=int(bn),
+                    decision=decision,
+                    prep=prep,
+                )
+            else:
+                await wrapper_fn(
+                    opp=prep.opportunity,
+                    bn=int(bn),
+                    decision=decision,
+                    prep=prep,
+                )
+        finally:
+            if uses_facade_wrapper and not callable(legacy_identity):
+                try:
+                    delattr(self, "_ensure_execution_identity")
+                except AttributeError:
+                    pass
