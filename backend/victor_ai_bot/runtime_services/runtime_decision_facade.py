@@ -4,6 +4,8 @@ import asyncio
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, List, Optional
 
+from ..canonical_decision_context import CanonicalDecisionContext
+from ..decision_context_bridge import build_decision_context
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
@@ -122,6 +124,7 @@ class RuntimeDecisionFacade:
         auto_enabled: bool,
         gas_budget_remaining_wei: int,
     ) -> Optional[Any]:
+        capital_state: dict[str, Any] = {}
         capital_budget_remaining_wei = None
         family_capital_remaining_wei: dict[str, int] = {}
         try:
@@ -142,7 +145,7 @@ class RuntimeDecisionFacade:
             capital_budget_remaining_wei = None
             family_capital_remaining_wei = {}
         try:
-            return self._decision.annotate_and_decide(
+            decision = self._decision.annotate_and_decide(
                 opps,
                 current_block=int(current_block),
                 pending_txs=int(pending_txs),
@@ -152,6 +155,37 @@ class RuntimeDecisionFacade:
                 capital_budget_remaining_wei=capital_budget_remaining_wei,
                 family_capital_remaining_wei=family_capital_remaining_wei,
             )
+
+            # Phase 7: create the canonical context exactly at the runtime
+            # decision boundary, after capital authority has been read.
+            chosen = None
+            if decision is not None and getattr(decision, "opp_id", ""):
+                chosen = next(
+                    (o for o in opps if str(getattr(o, "id", "")) == str(decision.opp_id)),
+                    None,
+                )
+            if chosen is not None:
+                context = build_decision_context(
+                    opportunity=chosen,
+                    current_block=int(current_block),
+                    capital_engine_state=capital_state,
+                    ai_recommendation={
+                        "action": str(getattr(decision, "action", "") or ""),
+                        "confidence": float(getattr(decision, "p_success", 0.0) or 0.0),
+                        "rationale": str(getattr(decision, "reason", "") or ""),
+                        "model": str(getattr(self.cfg.execution, "brain_mode", "") or ""),
+                    },
+                    latency={
+                        "gas_mode": str(getattr(decision, "gas_mode", "standard") or "standard"),
+                    },
+                )
+                if isinstance(getattr(chosen, "meta", None), dict):
+                    chosen.meta["decision_context"] = context.to_dict()
+                # TradeDecision is intentionally an open dataclass, so retain
+                # the object itself for execution without changing old callers.
+                decision.decision_context = context
+                decision.decision_lineage = context.lineage()
+            return decision
         except _SAFE_DECISION_EXCEPTIONS as e:
             self._errors.append(f"decision_engine_failed:{e}")
             return None
