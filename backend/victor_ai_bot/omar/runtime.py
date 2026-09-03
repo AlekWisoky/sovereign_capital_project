@@ -10,7 +10,10 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from ..learning.outcome_ledger import CanonicalOutcomeLedger
-from ..learning.phase9_outcome_gate import prepare_real_outcome_for_omar
+from ..learning.phase9_outcome_gate import (
+    CanonicalSettlementIndex,
+    prepare_real_outcome_for_omar,
+)
 from ..pathing import canonical_data_dir
 from .config import OmarConfig
 from .metrics import compute_social_metrics, to_dict
@@ -22,9 +25,9 @@ class OmarRuntime:
     """First-class OMAR learning runtime.
 
     OMAR remains downstream of execution truth: finalized outcomes are read from
-    the canonical PnL ledger, enriched with the exact Phase 7 decision context,
-    checked for complete identity/action lineage, and only then used for bounded
-    online policy updates. Governance/execution remain authoritative.
+    the canonical PnL ledger, joined with Phase 7 decision context and canonical
+    receipt-settlement identity, checked for complete identity/action lineage,
+    and only then used for bounded online policy updates.
     """
 
     def __init__(self, cfg: OmarConfig, chain_name: str = "default"):
@@ -49,6 +52,10 @@ class OmarRuntime:
             data_dir=self.data_dir,
             chain=self.chain_name,
         )
+        self._settlement_index = CanonicalSettlementIndex(
+            data_dir=self.data_dir,
+            chain=self.chain_name,
+        )
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -70,6 +77,7 @@ class OmarRuntime:
             "real_learning": dict(self.last_real_learning),
             "ledger": self._ledger.state() if self._ledger is not None else {},
             "phase7_context": self._phase7_context_store.state(),
+            "settlement_index": {"path": self._settlement_index.path},
             "policy": self._trainer.policy.state() if self._trainer is not None else {},
         }
 
@@ -95,6 +103,7 @@ class OmarRuntime:
             eligible, reason_codes = prepare_real_outcome_for_omar(
                 outcome,
                 store=self._phase7_context_store,
+                settlement_index=self._settlement_index,
             )
             if eligible:
                 eligible_outcomes.append(outcome)
