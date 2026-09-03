@@ -1,0 +1,105 @@
+name: OMAR Authoritative Production Regression
+
+on:
+  push:
+    branches:
+      - "omar/**"
+  pull_request:
+
+jobs:
+  authoritative-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: "1. Clean checkout / synchronization"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "2. Import / PYTHONPATH validation"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "2a. Validate imports and checkout SHA"
+        run: |
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+          PYTHONPATH=backend python - <<'PY'
+          import victor_ai_bot
+          from victor_ai_bot.decision_identity import ensure_decision_identity
+          from victor_ai_bot.omar.runtime import OmarRuntime
+          from victor_ai_bot.runtime_services.canonical_settlement_interface import canonical_settled_outcome
+          print("imports: ok")
+          print("decision_identity: ok")
+          print("omar_runtime: ok")
+          print("canonical_settlement_interface: ok")
+          PY
+
+      - name: "3. OMAR real-learning tests"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "4. Canonical propagation tests"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "5. Production runtime-chain test"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "6. Physical pending → receipt → settlement test"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar_pending_settlement_lineage.py
+
+      - name: "7. Adaptive sizing → sizing_id test"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_adaptive_flashloan_risk_budget.py backend/tests/test_flashloan_sizing_canonical_controller.py backend/tests/test_flashloan_sizing_omar_integration.py
+
+      - name: "8. Exact decision/correlation/execution/outcome lineage"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "9. Settled-only learning gate"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "10. Duplicate-settlement idempotency"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "11. OMAR-disabled identity preservation"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "12. Operator-intent immutability"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "13. capital_engine_state authority"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py
+
+      - name: "14. Latency / slippage / gas / net economics"
+        run: PYTHONPATH=backend pytest -q backend/tests/test_omar*.py backend/tests/test_*sizing*.py
+
+      - name: "15. Full backend pytest"
+        working-directory: backend
+        run: pytest -q
+
+      - name: "16. Ruff"
+        run: |
+          ruff check backend
+          while read -r slice; do xargs -a "$slice" ruff check; done < backend/mypy_targets.txt
+
+      - name: "17. Black"
+        run: |
+          black --check backend
+          while read -r slice; do xargs -a "$slice" black --check; done < backend/mypy_targets.txt
+
+      - name: "18. Mypy"
+        run: |
+          while read -r slice; do mypy @"$slice"; done < backend/mypy_targets.txt
+
+      - name: "19. Contracts"
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: "19a. Forge tests"
+        working-directory: contracts
+        run: forge test -q
+
+      - name: "20. Merge gate"
+        run: |
+          echo "All authoritative regression and CI gates passed."
+          echo "Merge/close stacked PRs only after reviewing the complete green run."

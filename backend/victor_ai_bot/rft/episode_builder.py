@@ -5,7 +5,10 @@ import os
 from collections import deque
 from typing import Any, Dict, Iterable, List, Tuple
 
+from ..capital_demand import CapitalDemand, capital_demand_from_mapping
+from ..version import __version__ as BACKEND_BUILDER_VERSION
 from .ids import make_episode_id
+from .replay.bundle import list_replay_bundles, load_replay_bundle
 from .schema import (
     BreakerState,
     EpisodeContext,
@@ -19,9 +22,6 @@ from .schema import (
     RiskCaps,
     TopOpportunity,
 )
-from .replay.bundle import list_replay_bundles, load_replay_bundle
-from ..version import __version__ as BACKEND_BUILDER_VERSION
-
 
 _SAFE_CAST_EXCEPTIONS = (TypeError, ValueError, OverflowError)
 
@@ -112,8 +112,33 @@ def _latency_from_bundle(bundle: Dict[str, Any]) -> LatencyProfile:
     )
 
 
+def _capital_demand_from_bundle(bundle: Dict[str, Any]) -> CapitalDemand:
+    raw_execution = bundle.get("execution")
+    execution: Dict[str, Any] = {}
+    if isinstance(raw_execution, dict):
+        execution = raw_execution
+    demand = bundle.get("capital_demand") or bundle.get("capitalDemand")
+    payload: Dict[str, Any] = {
+        "capital_demand": demand,
+        "capitalAdmission": bundle.get("capitalAdmission") or execution.get("capitalAdmission"),
+        "wealth_goal": bundle.get("wealth_goal") or bundle.get("wealthGoal"),
+        "deployed_usd_micro": execution.get("deployed_usd_micro")
+        or execution.get("deployedUsdMicro"),
+        "deployedNotionalUsd": execution.get("deployedNotionalUsd"),
+        "authority_source": execution.get("authority_source") or execution.get("authoritySource"),
+        "capital_source": execution.get("capital_source") or execution.get("capitalSource"),
+        "goal_posture": execution.get("goal_posture") or execution.get("goalPosture"),
+    }
+    if isinstance(demand, dict):
+        payload.update(demand)
+    return capital_demand_from_mapping(payload)
+
+
 def _reference_action(bundle: Dict[str, Any]) -> ReferenceAction:
-    execution = (bundle.get("execution") or {}) if isinstance(bundle.get("execution"), dict) else {}
+    raw_execution = bundle.get("execution")
+    execution: Dict[str, Any] = {}
+    if isinstance(raw_execution, dict):
+        execution = raw_execution
     opps = list(bundle.get("opportunities") or [])
     primary = _best_ranked_opportunity(opps)
     reason_bits = [
@@ -218,6 +243,7 @@ def build_episodes(data_dir: str, *, limit: int = 0, top_k: int = 20) -> List[Ep
             top_opportunities=opps_sorted,
             controls=dict(bundle.get("controls") or {}),
             wealth_goal=dict(bundle.get("wealth_goal") or {}),
+            capital_demand=_capital_demand_from_bundle(bundle),
             reward_trace=dict(bundle.get("reward_trace") or {}),
             execution_summary=dict(bundle.get("execution") or {}),
         )
