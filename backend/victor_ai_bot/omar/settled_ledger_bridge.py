@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Mapping
 
 from victor_ai_bot.runtime_services.settled_outcome_lineage import (
@@ -92,8 +93,10 @@ def ingest_settled_ledger_record(
     else:
         if capital_demand:
             decision.metadata.setdefault("capital_demand", dict(capital_demand))
-        if operator_intent != OperatorIntentSnapshot():
-            decision.operator_intent = operator_intent  # type: ignore[misc]
+        if decision.operator_intent == OperatorIntentSnapshot() and operator_intent != OperatorIntentSnapshot():
+            loop._decisions[lineage.decision_id] = replace(
+                decision, operator_intent=operator_intent
+            )
 
     execution = getattr(loop, "_executions", {}).get(lineage.execution_id)
     if execution is None:
