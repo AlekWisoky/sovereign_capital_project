@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from victor_ai_bot.identity import TradeIdentity
@@ -163,3 +164,51 @@ def test_omar_bridge_refuses_missing_action_before_policy_update(tmp_path):
     assert result["ok"] is False
     assert result["eligible_for_learning"] is False
     assert "missing_action" in result["reason_codes"]
+
+
+def test_omar_runtime_gate_resolves_settlement_id_from_canonical_receipt_settlement(tmp_path):
+    from victor_ai_bot.learning.phase9_outcome_gate import (
+        CanonicalSettlementIndex,
+        prepare_real_outcome_for_omar,
+    )
+
+    treasury_dir = tmp_path / "treasury"
+    treasury_dir.mkdir()
+    ledger_path = treasury_dir / "ledger_transactions_ethereum.jsonl"
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "transaction_id": "ledger-settlement-1",
+                "tx_type": "receipt_settlement",
+                "receipt_id": "0xabc",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store = Phase7ContextStore(data_dir=str(tmp_path), chain="ethereum")
+    store.put(
+        "0xabc",
+        {
+            "decision": {
+                "decision_id": "decision-1",
+                "correlation_id": "corr-1",
+                "action": "EXECUTE",
+            },
+            "execution": {"execution_id": "exec-1"},
+        },
+    )
+    outcome = SimpleNamespace(tx_hash="0xabc", context={})
+
+    eligible, reasons = prepare_real_outcome_for_omar(
+        outcome,
+        store=store,
+        settlement_index=CanonicalSettlementIndex(
+            data_dir=str(tmp_path),
+            chain="ethereum",
+        ),
+    )
+
+    assert eligible is True
+    assert reasons == []
+    assert outcome.context["lineage"]["settlement_id"] == "ledger-settlement-1"
