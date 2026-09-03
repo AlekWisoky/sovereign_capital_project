@@ -1,0 +1,56 @@
+name: One-time mypy repair
+
+on:
+  push:
+    branches:
+      - codex/current-main-omar-capital-lineage
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Apply validated typing fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('backend/victor_ai_bot/runtime_services/withdraw_all_service.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          if old in s:
+              s = s.replace(old, new, 1)
+          old = '''        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'''
+          new = '''        execute_result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],\n            "preview_id": preview_id,'''
+          if old in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Format repaired file
+        run: black backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+      - name: Run expanded mypy gate
+        run: |
+          while read -r slice; do
+            mypy @"$slice"
+          done < backend/mypy_targets.txt
+      - name: Commit validated repair
+        run: |
+          if git diff --quiet; then
+            echo 'No source changes were required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m 'fix: repair withdraw service typing gate'
+          git push
