@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from victor_ai_bot.runtime_services.phase7_context_store import Phase7ContextStore
 from victor_ai_bot.runtime_services.settled_outcome_lineage import (
     CanonicalSettledOutcomeLineage,
     resolve_settled_lineage,
@@ -41,18 +42,41 @@ def _float(*values: Any) -> float:
         return 0.0
 
 
+def _phase7_context(loop: OmarRealLearningLoop, source: Mapping[str, Any], tx_hash: str) -> dict[str, Any]:
+    direct = _mapping(source.get("phase7_context"))
+    if direct:
+        return direct
+    metadata = _mapping(source.get("metadata"))
+    direct = _mapping(metadata.get("phase7_context"))
+    if direct:
+        return direct
+    try:
+        store = Phase7ContextStore(data_dir=loop.data_dir, chain=loop.chain_name)
+        return store.get(tx_hash)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
+
+
 def ingest_settled_ledger_record(
     loop: OmarRealLearningLoop,
     row: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Feed one canonical settled-ledger record into OMAR's real learning loop.
 
-    The ledger remains the source of settled truth. This bridge only translates
-    the already-settled record into OMAR's decision/execution/outcome interfaces;
-    it cannot authorize a trade or alter capital authority.
+    The settled ledger remains financial truth. Phase 7 context is attached for
+    attribution only. OMAR cannot authorize a trade, capital movement, or bypass
+    governance, and incomplete decision/correlation/execution/settlement/action
+    identity is rejected before any policy update.
     """
 
-    lineage: CanonicalSettledOutcomeLineage = resolve_settled_lineage(row)
+    source = dict(row)
+    tx_hash = str(_first(source.get("tx_hash"), source.get("txHash")) or "")
+    phase7 = _phase7_context(loop, source, tx_hash)
+    lineage_source = dict(source)
+    if phase7 and "phase7_context" not in lineage_source:
+        lineage_source["phase7_context"] = phase7
+
+    lineage: CanonicalSettledOutcomeLineage = resolve_settled_lineage(lineage_source)
     if not lineage.complete:
         return {
             "ok": False,
@@ -62,7 +86,6 @@ def ingest_settled_ledger_record(
             "lineage": lineage.to_dict(),
         }
 
-    source = dict(row)
     metadata = _mapping(source.get("metadata"))
     execution_meta = _mapping(metadata.get("execution"))
     outcome_meta = _mapping(metadata.get("outcome"))
@@ -75,7 +98,7 @@ def ingest_settled_ledger_record(
         loop.record_decision(
             decision_id=lineage.decision_id,
             correlation_id=lineage.correlation_id,
-            action=lineage.action or "trade",
+            action=lineage.action,
             opp_id=lineage.opportunity_id,
             route_id=lineage.route_id,
             policy_version=lineage.policy_version,
@@ -84,6 +107,7 @@ def ingest_settled_ledger_record(
                 "source": "settled_ledger",
                 "transaction_id": lineage.transaction_id,
                 "receipt_id": lineage.receipt_id,
+                "phase7_context": phase7,
             },
         )
 
@@ -94,7 +118,7 @@ def ingest_settled_ledger_record(
             correlation_id=lineage.correlation_id,
             execution_id=lineage.execution_id,
             status=str(_first(execution_meta.get("status"), source.get("execution_status"), "executed")),
-            action=lineage.action or "trade",
+            action=lineage.action,
             tx_hash=lineage.receipt_id,
             fill_quantity=_float(execution_meta.get("fill_quantity"), metadata.get("fill_quantity")),
             fill_price=_float(execution_meta.get("fill_price"), metadata.get("fill_price")),
@@ -109,6 +133,7 @@ def ingest_settled_ledger_record(
                 "source": "settled_ledger",
                 "latency_class": lineage.latency_class,
                 "transaction_id": lineage.transaction_id,
+                "phase7_context": phase7,
             },
         )
 
@@ -150,6 +175,7 @@ def ingest_settled_ledger_record(
             "receipt_id": lineage.receipt_id,
             "latency_ms": lineage.latency_ms,
             "latency_class": lineage.latency_class,
+            "phase7_context": phase7,
             "lineage": lineage.to_dict(),
         },
     )
@@ -157,6 +183,7 @@ def ingest_settled_ledger_record(
         "ok": True,
         "eligible_for_learning": bool(attribution.eligible_for_learning),
         "lineage": lineage.to_dict(),
+        "phase7_context": phase7,
         "attribution": attribution.to_dict(),
         "policy_update": dict(loop.last_update or {}),
     }
