@@ -54,7 +54,9 @@ class DecisionLearningRecord:
     capital_authority: CapitalAuthoritySnapshot = field(
         default_factory=lambda: CapitalAuthoritySnapshot(authority_id="unavailable")
     )
-    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
+    operator_intent: OperatorIntentSnapshot = field(
+        default_factory=OperatorIntentSnapshot
+    )
     metadata: Dict[str, Any] = field(default_factory=dict)
     ts_ms: int = 0
 
@@ -75,7 +77,9 @@ class ExecutionLearningRecord:
     slippage_bps: float = 0.0
     gas_wei: int = 0
     latency_ms: float = 0.0
-    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
+    operator_intent: OperatorIntentSnapshot = field(
+        default_factory=OperatorIntentSnapshot
+    )
     metadata: Dict[str, Any] = field(default_factory=dict)
     ts_ms: int = 0
 
@@ -96,7 +100,9 @@ class SettledOutcomeRecord:
     realized_gas_wei: int = 0
     risk_cost_wei: int = 0
     net_reward_wei: int = 0
-    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
+    operator_intent: OperatorIntentSnapshot = field(
+        default_factory=OperatorIntentSnapshot
+    )
     metadata: Dict[str, Any] = field(default_factory=dict)
     ts_ms: int = 0
 
@@ -115,7 +121,9 @@ class ActionAttribution:
     attribution_weight: float
     reward_wei: int
     eligible_for_learning: bool
-    operator_intent: OperatorIntentSnapshot = field(default_factory=OperatorIntentSnapshot)
+    operator_intent: OperatorIntentSnapshot = field(
+        default_factory=OperatorIntentSnapshot
+    )
     reason_codes: list[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -166,14 +174,21 @@ class OmarRealLearningLoop:
                 reason_codes=["capital_authority_read_failed", _text(exc)],
                 source="omar",
             )
-        family = _dict(raw.get("family_allocatable_wei", raw.get("familyAllocatableWei")))
+        family = _dict(
+            raw.get("family_allocatable_wei", raw.get("familyAllocatableWei"))
+        )
         return CapitalAuthoritySnapshot(
-            authority_id=_text(raw.get("authority_id") or raw.get("authorityId")) or "unknown",
+            authority_id=_text(
+                raw.get("authority_id") or raw.get("authorityId")
+            )
+            or "unknown",
             available_wei=max(
-                0, int(raw.get("available_wei", raw.get("availableWei", 0)) or 0)
+                0,
+                int(raw.get("available_wei", raw.get("availableWei", 0)) or 0),
             ),
             allocatable_wei=max(
-                0, int(raw.get("allocatable_wei", raw.get("allocatableWei", 0)) or 0)
+                0,
+                int(raw.get("allocatable_wei", raw.get("allocatableWei", 0)) or 0),
             ),
             family_allocatable_wei={
                 _text(k): max(0, int(v or 0)) for k, v in family.items() if _text(k)
@@ -285,12 +300,19 @@ class OmarRealLearningLoop:
         execution = self._executions.get(execution_id)
         if execution is None:
             raise KeyError(f"unknown execution_id: {execution_id}")
-        if execution.decision_id != decision_id or execution.correlation_id != correlation_id:
+        if (
+            execution.decision_id != decision_id
+            or execution.correlation_id != correlation_id
+        ):
             raise ValueError("execution_identity_mismatch")
         settlement_id = _text(settlement_id)
         if not settlement_id:
             raise ValueError("settlement_id is required")
-        reward = int(realized_pnl_wei or 0) - int(realized_gas_wei or 0) - int(risk_cost_wei or 0)
+        reward = (
+            int(realized_pnl_wei or 0)
+            - int(realized_gas_wei or 0)
+            - int(risk_cost_wei or 0)
+        )
         outcome = SettledOutcomeRecord(
             decision_id=decision_id,
             correlation_id=correlation_id,
@@ -309,7 +331,12 @@ class OmarRealLearningLoop:
         )
         self._outcomes[settlement_id] = outcome
         self._log("settled_outcome", outcome.to_dict())
-        eligible = outcome.status.lower() in {"settled", "closed", "complete", "completed"}
+        eligible = outcome.status.lower() in {
+            "settled",
+            "closed",
+            "complete",
+            "completed",
+        }
         attribution = ActionAttribution(
             learning_id=f"learning_{uuid.uuid4().hex}",
             decision_id=decision_id,

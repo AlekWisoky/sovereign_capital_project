@@ -38,7 +38,11 @@ def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryE
         return rpc_cls, execute_fn
 
     legacy_rpc = getattr(runtime_legacy, "JsonRpcClient", _DEFAULT_JSON_RPC_CLIENT)
-    legacy_exec = getattr(runtime_legacy, "try_execute_opportunity", _DEFAULT_TRY_EXECUTE)
+    legacy_exec = getattr(
+        runtime_legacy,
+        "try_execute_opportunity",
+        _DEFAULT_TRY_EXECUTE,
+    )
     if legacy_rpc is not _DEFAULT_JSON_RPC_CLIENT:
         rpc_cls = legacy_rpc
     if legacy_exec is not _DEFAULT_TRY_EXECUTE:
@@ -63,7 +67,11 @@ class RuntimeExecuteWrapperFacade:
         attributed separately while remaining under the same decision lineage.
         """
         decision_identity = identity_from(decision)
-        if decision_identity is None or not decision_identity.decision_id or not decision_identity.correlation_id:
+        if (
+            decision_identity is None
+            or not decision_identity.decision_id
+            or not decision_identity.correlation_id
+        ):
             return res
 
         existing = identity_from(res)
@@ -98,8 +106,18 @@ class RuntimeExecuteWrapperFacade:
         try:
             rpc_client_cls, execute_opportunity = _compat_execution_wrapper_symbols()
             async with (
-                rpc_client_cls(read_url, timeout_s=10.0, max_concurrency=20, max_batch=50) as rpc_r,
-                rpc_client_cls(send_url, timeout_s=10.0, max_concurrency=10, max_batch=20) as rpc_s,
+                rpc_client_cls(
+                    read_url,
+                    timeout_s=10.0,
+                    max_concurrency=20,
+                    max_batch=50,
+                ) as rpc_r,
+                rpc_client_cls(
+                    send_url,
+                    timeout_s=10.0,
+                    max_concurrency=10,
+                    max_batch=20,
+                ) as rpc_s,
             ):
                 t1 = time.perf_counter()
                 span = LatencySpan()
@@ -121,7 +139,11 @@ class RuntimeExecuteWrapperFacade:
 
                 execution_service = getattr(self, "_execution_service", None)
                 if execution_service is not None:
-                    fioa_handler = getattr(execution_service, "handle_fioa_execution_wrapper", None)
+                    fioa_handler = getattr(
+                        execution_service,
+                        "handle_fioa_execution_wrapper",
+                        None,
+                    )
                     if callable(fioa_handler):
                         res = await fioa_handler(self, opp, decision, _core)
                     else:
@@ -142,7 +164,9 @@ class RuntimeExecuteWrapperFacade:
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
                     bookkeeping_handler = getattr(
-                        execution_service, "handle_post_execute_bookkeeping", None
+                        execution_service,
+                        "handle_post_execute_bookkeeping",
+                        None,
                     )
                     if callable(bookkeeping_handler):
                         await bookkeeping_handler(
@@ -164,7 +188,12 @@ class RuntimeExecuteWrapperFacade:
                             mode="auto",
                         )
                 else:
-                    await self._record_exec(res, opp, latency_ms=latency_ms, mode="auto")
+                    await self._record_exec(
+                        res,
+                        opp,
+                        latency_ms=latency_ms,
+                        mode="auto",
+                    )
                     if res.ok and (not res.dry_run) and getattr(res, "submitted", False):
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
