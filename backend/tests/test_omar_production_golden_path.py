@@ -123,7 +123,7 @@ def test_flash_arb_success_closes_canonical_ledger_to_omar_policy_update():
 
     call = omar._trainer.policy.calls[0]
     assert call["action_index"] == 5
-    assert call["reward_scaled"] == 90_000.0
+    assert call["reward_scaled"] == 100_000.0
     assert omar.last_real_learning["eligible_for_learning"] is True
     assert omar.last_real_learning["lineage"] == {
         "decision_id": "decision-flash",
