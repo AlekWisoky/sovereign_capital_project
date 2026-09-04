@@ -51,9 +51,7 @@ def _operator_intent(lineage: CanonicalSettledOutcomeLineage) -> OperatorIntentS
             raw.get("aggression_mode") or raw.get("aggressionMode") or "balanced"
         ),
         brain_mode=str(raw.get("brain_mode") or raw.get("brainMode") or "off"),
-        risk_multiplier=_float(
-            raw.get("risk_multiplier"), raw.get("riskMultiplier"), 1.0
-        ),
+        risk_multiplier=_float(raw.get("risk_multiplier"), raw.get("riskMultiplier"), 1.0),
         force_send_mode=str(
             raw.get("force_send_mode") or raw.get("forceSendMode") or ""
         ),
@@ -82,15 +80,9 @@ def _capital_authority(lineage: CanonicalSettledOutcomeLineage) -> CapitalAuthor
     )
     return CapitalAuthoritySnapshot(
         authority_id=str(raw.get("authority_id") or raw.get("authorityId") or "ledger"),
-        available_wei=max(
-            0, _int(raw.get("available_wei"), raw.get("availableWei"))
-        ),
-        allocatable_wei=max(
-            0, _int(raw.get("allocatable_wei"), raw.get("allocatableWei"))
-        ),
-        family_allocatable_wei={
-            str(k): max(0, _int(v)) for k, v in family.items()
-        },
+        available_wei=max(0, _int(raw.get("available_wei"), raw.get("availableWei"))),
+        allocatable_wei=max(0, _int(raw.get("allocatable_wei"), raw.get("allocatableWei"))),
+        family_allocatable_wei={str(k): max(0, _int(v)) for k, v in family.items()},
         status=str(raw.get("status") or "unknown"),
         freshness_class=str(
             raw.get("freshness_class")
