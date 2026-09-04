@@ -1,0 +1,3 @@
+--disable-error-code=assignment
+--disable-error-code=attr-defined
+backend/victor_ai_bot/decision_engine.py
