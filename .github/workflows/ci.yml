@@ -21,6 +21,10 @@ jobs:
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
           pip install pytest-asyncio
 
+      - name: Show OMAR Black diff
+        run: |
+          black --diff backend/victor_ai_bot/learning/net_economics.py backend/victor_ai_bot/learning/outcome_ledger.py
+
       - name: OMAR net-profit and latency learning tests
         run: |
           cd backend
