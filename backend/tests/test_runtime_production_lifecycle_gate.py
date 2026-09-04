@@ -7,13 +7,6 @@ import pytest
 from victor_ai_bot.decision_identity import ensure_decision_identity
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services import runtime_loop_entry_facade
-from victor_ai_bot.runtime_services.runtime_execute_dispatch_facade import (
-    AutoExecutionDispatchContext,
-    RuntimeExecuteDispatchFacade,
-)
-from victor_ai_bot.runtime_services.runtime_execute_wrapper_facade import (
-    RuntimeExecuteWrapperFacade,
-)
 
 
 class _Rpc:
@@ -25,9 +18,6 @@ class _Rpc:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
-
-    async def block_number(self):
-        return 777
 
 
 class _ExecutionService:
@@ -237,44 +227,23 @@ class _Runtime(RuntimeBundle):
 
 @pytest.mark.asyncio
 async def test_actual_runtime_method_chain_reaches_canonical_execution_boundary(monkeypatch):
-    monkeypatch.setattr(runtime_loop_entry_facade, "JsonRpcClient", lambda *args, **kwargs: _Rpc(*args, **kwargs))
-
-    async def fake_execute_opportunity(*args, **kwargs):
-        runtime = kwargs["_runtime"]
-        runtime.events.append("real_execution_call")
-        return SimpleNamespace(
-            ok=True,
-            dry_run=False,
-            submitted=True,
-            plan={
-                "identity": dict(
-                    runtime.decision.metadata["identity"]
-                ),
-            },
-        )
-
-    def fake_symbols():
-        async def execute(*args, **kwargs):
-            runtime = kwargs.pop("_runtime")
-            return await fake_execute_opportunity(*args, _runtime=runtime, **kwargs)
-
-        return _Rpc, execute
-
     monkeypatch.setattr(
-        "victor_ai_bot.runtime_services.runtime_execute_wrapper_facade._compat_execution_wrapper_symbols",
-        fake_symbols,
+        runtime_loop_entry_facade,
+        "JsonRpcClient",
+        lambda *args, **kwargs: _Rpc(*args, **kwargs),
     )
 
     runtime = _Runtime()
 
-    # The production wrapper does not pass runtime to the execution function;
-    # inject the trace handle only at this test seam so no production contract
-    # is changed.
-    original_symbols = fake_symbols
-
     def seam_symbols():
         async def execute(*args, **kwargs):
-            return await fake_execute_opportunity(*args, _runtime=runtime, **kwargs)
+            runtime.events.append("real_execution_call")
+            return SimpleNamespace(
+                ok=True,
+                dry_run=False,
+                submitted=True,
+                plan={"identity": dict(runtime.decision.metadata["identity"])},
+            )
 
         return _Rpc, execute
 
@@ -287,7 +256,7 @@ async def test_actual_runtime_method_chain_reaches_canonical_execution_boundary(
     if runtime._exec_task is not None:
         await runtime._exec_task
 
-    assert runtime.events[:14] == [
+    assert runtime.events == [
         "resolve_amount_in",
         "scan_primary",
         "annotate_can_execute",
@@ -302,15 +271,19 @@ async def test_actual_runtime_method_chain_reaches_canonical_execution_boundary(
         "postdecision_analytics",
         "execution_admission",
         "superstructure_pre_execute",
+        "operator_overrides",
+        "governance_pre_execute",
+        "fioa_wrapper",
+        "real_execution_call",
+        "post_execute_bookkeeping",
+        "restore_operator_overrides",
+        "engine_tail",
+        "post_tick_tails",
+        "loop_tail",
     ]
-    assert "operator_overrides" in runtime.events
-    assert "governance_pre_execute" in runtime.events
-    assert "fioa_wrapper" in runtime.events
-    assert "real_execution_call" in runtime.events
-    assert "post_execute_bookkeeping" in runtime.events
-    assert "restore_operator_overrides" in runtime.events
     assert runtime.execution_result.ok is True
     assert runtime.execution_result.submitted is True
+    assert runtime.execution_mode == "auto"
     assert runtime.execution_result.plan["identity"] == runtime.decision.metadata["identity"]
     assert runtime.decision.metadata["identity"]["decision_id"]
     assert runtime.decision.metadata["identity"]["correlation_id"]
