@@ -84,6 +84,9 @@ def ingest_settled_ledger_record(
                 "source": "settled_ledger",
                 "transaction_id": lineage.transaction_id,
                 "receipt_id": lineage.receipt_id,
+                "outcome_id": lineage.outcome_id,
+                "sizing_id": lineage.sizing_id,
+                "canonical_lineage": lineage.to_dict(),
             },
         )
 
@@ -109,27 +112,36 @@ def ingest_settled_ledger_record(
                 "source": "settled_ledger",
                 "latency_class": lineage.latency_class,
                 "transaction_id": lineage.transaction_id,
+                "outcome_id": lineage.outcome_id,
+                "sizing_id": lineage.sizing_id,
             },
         )
 
-    realized_pnl_wei = _int(
-        outcome_meta.get("realized_pnl_wei"),
+    # The canonical ledger's realized_profit_after_gas_wei is already net of gas.
+    # OmarRealLearningLoop historically subtracts realized_gas_wei again, which
+    # double-counts gas. Reconstruct the pre-gas realized amount for that API so
+    # the learning reward subtracts gas exactly once.
+    realized_after_gas_wei = _int(
+        outcome_meta.get("realized_after_gas_wei"),
+        outcome_meta.get("realized_profit_after_gas_wei"),
         metadata.get("realized_profit_after_gas_wei"),
         metadata.get("realized_after_gas_wei"),
-    )
-    realized_pnl_usd_micro = _int(
-        outcome_meta.get("realized_pnl_usd_micro"),
-        metadata.get("realized_profit_after_gas_usd_micro"),
     )
     realized_gas_wei = _int(
         outcome_meta.get("realized_gas_wei"),
         metadata.get("gas_cost_wei"),
+    )
+    realized_pnl_wei = realized_after_gas_wei + max(0, realized_gas_wei)
+    realized_pnl_usd_micro = _int(
+        outcome_meta.get("realized_pnl_usd_micro"),
+        metadata.get("realized_profit_after_gas_usd_micro"),
     )
     risk_cost_wei = _int(
         outcome_meta.get("risk_cost_wei"),
         metadata.get("risk_cost_wei"),
     )
 
+    canonical_economics = lineage.to_dict()
     attribution = loop.settle_outcome(
         decision_id=lineage.decision_id,
         correlation_id=lineage.correlation_id,
@@ -142,21 +154,26 @@ def ingest_settled_ledger_record(
             outcome_meta.get("realized_slippage_bps"),
             metadata.get("realized_slippage_bps"),
         ),
-        realized_gas_wei=realized_gas_wei,
+        realized_gas_wei=max(0, realized_gas_wei),
         risk_cost_wei=risk_cost_wei,
         metadata={
-            "source": "settled_ledger",
+            "source": "phase2_canonical_outcome_ledger",
             "transaction_id": lineage.transaction_id,
             "receipt_id": lineage.receipt_id,
             "latency_ms": lineage.latency_ms,
             "latency_class": lineage.latency_class,
-            "lineage": lineage.to_dict(),
+            "outcome_id": lineage.outcome_id,
+            "sizing_id": lineage.sizing_id,
+            "canonical_lineage": canonical_economics,
+            "canonical_economics": canonical_economics,
+            "gas_accounting": "realized_after_gas_plus_gas_minus_gas_once",
         },
     )
+
     return {
         "ok": True,
         "eligible_for_learning": bool(attribution.eligible_for_learning),
-        "lineage": lineage.to_dict(),
+        "lineage": canonical_economics,
         "attribution": attribution.to_dict(),
         "policy_update": dict(loop.last_update or {}),
     }
