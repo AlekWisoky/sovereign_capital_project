@@ -10,6 +10,7 @@ from ..features import build_features
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
+from ..omar.native_hooks import decision_hook
 from .profitability_truth import inspect_profit_after_costs_truth, opportunity_profit_sort_key
 
 _SAFE_DECISION_EXCEPTIONS = (
@@ -356,6 +357,8 @@ class RuntimeDecisionFacade:
         if chosen is None:
             return False
 
+        # Canonical identity is a native runtime lifecycle concern, not an OMAR concern.
+        decision_hook(self, chosen, decision, current_block=int(current_block))
         chosen, decision = self._apply_omar_to_candidate(
             chosen,
             decision if brain_mode != "off" else None,
