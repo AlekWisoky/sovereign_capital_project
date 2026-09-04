@@ -85,7 +85,10 @@ def resolve_net_economics(
     context = _mapping(getattr(outcome, "context", {}))
     costs = _nested(context, "costs", "settled_costs", "settledCosts")
     settled = _nested(context, "settled_economics", "settledEconomics", "settlement")
-    borrowing = _nested(context, "borrowing", "internal_prime", "internalPrime")
+    borrowing = _mapping(context.get("borrowing"))
+    prime = _mapping(context.get("internal_prime"))
+    if not prime:
+        prime = _mapping(context.get("internalPrime"))
     capture = _nested(context, "capture")
 
     explicit_net = _first(
@@ -104,17 +107,20 @@ def resolve_net_economics(
         / 1_000_000.0,
     )
 
-    financing_cost = _usd(
-        costs,
-        "financing_cost_usd",
-        "borrow_cost_usd",
-        "prime_cost_usd",
-        "internal_prime_cost_usd",
+    explicit_financing = _first(
+        costs.get("financing_cost_usd"),
+        settled.get("financing_cost_usd"),
     )
-    if financing_cost <= 0.0:
-        financing_cost = max(
-            _usd(borrowing, "realized_cost_usd", "borrow_cost_usd"),
-            _usd(settled, "borrow_cost_usd", "prime_cost_usd", "financing_cost_usd"),
+    if explicit_financing is not None:
+        financing_cost = max(0.0, _float(explicit_financing))
+    else:
+        financing_cost = (
+            _usd(costs, "borrow_cost_usd")
+            + _usd(costs, "prime_cost_usd", "internal_prime_cost_usd")
+            + _usd(borrowing, "realized_cost_usd", "borrow_cost_usd")
+            + _usd(prime, "realized_cost_usd", "prime_cost_usd", "internal_prime_cost_usd")
+            + _usd(settled, "borrow_cost_usd")
+            + _usd(settled, "prime_cost_usd", "internal_prime_cost_usd")
         )
 
     slippage_cost = _usd(costs, "slippage_cost_usd", "realized_slippage_cost_usd")
