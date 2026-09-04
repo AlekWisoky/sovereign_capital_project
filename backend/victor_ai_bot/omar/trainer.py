@@ -59,6 +59,9 @@ class OmarTrainer:
             "skipped": 0,
             "mean_reward_scaled": 0.0,
             "last_tx_hash": "",
+            "mean_expectation_error_wei": "0",
+            "mean_expectation_error_pct": 0.0,
+            "mean_latency_error_ms": 0.0,
         }
 
     def rotate_roles(self, episode: int):
@@ -172,15 +175,53 @@ class OmarTrainer:
                 pass
         return DEFAULT_ACTION_KEYS.index("WAIT")
 
+    @staticmethod
+    def _real_learning_reward(outcome: Any) -> tuple[float, float, float, int]:
+        """Build a bounded reward that teaches both profitability and calibration.
+
+        Realized net remains the primary objective. A separate conservative
+        penalty is applied only when reality underperforms the decision-time
+        expectation, so OMAR learns to reduce systematic overestimation without
+        rewarding latency or forecast error as a substitute for profit.
+        """
+        amount = max(1, int(getattr(outcome, "amount_in_wei", 0) or 0))
+        expected = int(getattr(outcome, "expected_profit_after_costs_wei", 0) or 0)
+        realized = int(getattr(outcome, "realized_profit_after_gas_wei", 0) or 0)
+        base = float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0)
+        error = realized - expected
+        error_pct = (float(error) / abs(expected) * 100.0) if expected else 0.0
+        latency = float(getattr(outcome, "latency_ms", 0.0) or 0.0)
+        context = getattr(outcome, "context", {}) or {}
+        decision_context = context.get("decisionContext") if isinstance(context, dict) else {}
+        if not isinstance(decision_context, dict):
+            decision_context = context.get("decision_context") if isinstance(context, dict) else {}
+        economic = (
+            decision_context.get("economic_context")
+            if isinstance(decision_context, dict)
+            else {}
+        )
+        if not isinstance(economic, dict):
+            economic = context.get("economicContext") if isinstance(context, dict) else {}
+        expected_latency = float((economic or {}).get("expected_latency_ms") or 0.0)
+        latency_error = latency - expected_latency
+        # Penalize overestimation only; realized outperformance stays governed by
+        # the primary realized-net reward.
+        overestimate_penalty = max(0.0, -float(error) / float(amount) * 1_000_000.0)
+        calibrated = base - 0.25 * overestimate_penalty
+        return float(calibrated), float(error_pct), float(latency_error), int(error)
+
     def learn_from_real_outcomes(self, outcomes: Sequence[Any]) -> Dict[str, Any]:
         """Train OMAR from finalized real-market outcomes.
 
-        The financial result comes from the canonical outcome ledger. The
-        transaction-linked RL state supplies decision context; no synthetic
-        market reward is mixed into this update.
+        Financial truth comes from the canonical outcome ledger. Decision-time
+        economics and delivery expectations are used only as calibration context;
+        governance/capital authority is never bypassed by this update.
         """
         seen = learned = skipped = 0
         rewards: List[float] = []
+        errors: List[int] = []
+        error_pcts: List[float] = []
+        latency_errors: List[float] = []
         last_tx_hash = ""
         for outcome in list(outcomes or []):
             seen += 1
@@ -198,17 +239,21 @@ class OmarTrainer:
             if role_vec is None:
                 role_vec = encode_role_vector(role_name, self.cfg.role_vector_size)
             state_vec = self._state_vector(rl_state, self.state_dim)
+            reward, error_pct, latency_error, error = self._real_learning_reward(outcome)
             stats = self.policy.update_from_real_outcome(
                 role_vec=role_vec,
                 state_vec=state_vec,
                 action_index=action_index,
-                reward_scaled=float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0),
+                reward_scaled=float(reward),
                 learning_rate=float(self.cfg.learning_rate),
                 clip_epsilon=float(self.cfg.clip_epsilon),
             )
             if float(stats.get("updated", 0.0)) > 0.0:
                 learned += 1
                 rewards.append(float(stats.get("reward_scaled", 0.0) or 0.0))
+                errors.append(int(error))
+                error_pcts.append(float(error_pct))
+                latency_errors.append(float(latency_error))
                 last_tx_hash = str(getattr(outcome, "tx_hash", "") or "")
             else:
                 skipped += 1
@@ -216,6 +261,9 @@ class OmarTrainer:
         if learned and self.cfg.policy_checkpoint_enabled:
             self.policy.save()
         mean_reward = float(np.mean(rewards)) if rewards else 0.0
+        mean_error = float(np.mean(errors)) if errors else 0.0
+        mean_error_pct = float(np.mean(error_pcts)) if error_pcts else 0.0
+        mean_latency_error = float(np.mean(latency_errors)) if latency_errors else 0.0
         self.last_real_learning = {
             "seen": int(seen),
             "learned": int(learned),
@@ -223,6 +271,9 @@ class OmarTrainer:
             "mean_reward_scaled": mean_reward,
             "last_tx_hash": last_tx_hash,
             "policy_updates": int(self.policy.updates),
+            "mean_expectation_error_wei": str(int(round(mean_error))),
+            "mean_expectation_error_pct": mean_error_pct,
+            "mean_latency_error_ms": mean_latency_error,
         }
         return dict(self.last_real_learning)
 
