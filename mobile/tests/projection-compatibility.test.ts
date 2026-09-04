@@ -71,7 +71,7 @@ test('mergeProjectionCompatibility produces prefixed reasons and alert payloads'
     'commandCenter:summary_contract_missing',
     'commandCenter:legacy_projection_fallback_used',
   ]);
-  const alert = projectionCompatibilityAlert(merged, { tsMs: 42 });
+  const alert = projectionCompatibilityAlert(merged, 42);
   assert.equal(alert?.severity, 'danger');
   assert.match(String(alert?.detail), /commandCenter:summary_contract_missing/);
 });
