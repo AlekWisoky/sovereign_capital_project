@@ -1,0 +1,80 @@
+name: CI baseline mypy fix
+
+on:
+  push:
+    branches:
+      - codex/ci-baseline-repair
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact mypy fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          if old_chain not in text:
+              raise SystemExit("expected _ledger_event chain block not found")
+          text = text.replace(old_chain, new_chain, 1)
+
+          start = text.index("    async def execute(self, runtime: Any, payload: Dict[str, Any]) -> Dict[str, Any]:")
+          marker = '        items = list(plan.get("items") or [])'
+          marker_pos = text.index(marker, start)
+          prefix = text[start:marker_pos]
+
+          # The early blocked-result branches infer a narrow dict type. Rename only
+          # those six local result variables so the canonical execute result can be
+          # explicitly typed later without a no-redef/type-narrowing cascade.
+          replacements = [
+              ('            result = {"ok": False, "reason_code": "preview_id_mismatch"}', '            blocked_result = {"ok": False, "reason_code": "preview_id_mismatch"}'),
+              ('                result=result,', '                result=blocked_result,'),
+              ('"result": result}', '"result": blocked_result}'),
+              ('            result = {"ok": False, "reason_code": "confirmation_text_mismatch"}', '            blocked_result = {"ok": False, "reason_code": "confirmation_text_mismatch"}'),
+              ('"result": result,', '"result": blocked_result,'),
+              ('            result = {"ok": False, "reason_code": "preview_expired"}', '            blocked_result = {"ok": False, "reason_code": "preview_expired"}'),
+              ('            result = {\n                "ok": False,\n                "reason_code": "preview_stale",', '            blocked_result = {\n                "ok": False,\n                "reason_code": "preview_stale",'),
+              ('            result = {\n                "ok": False,\n                "reason_code": current_reason,', '            blocked_result = {\n                "ok": False,\n                "reason_code": current_reason,'),
+          ]
+          for old, new in replacements:
+              prefix = prefix.replace(old, new)
+
+          text = text[:start] + prefix + text[marker_pos:]
+
+          # Ensure no early bare `result` remains before the canonical result declaration.
+          pre_decl = text[start:text.index('        result: Dict[str, Any] = {', start)]
+          if re.search(r'(?<![\w"])(result)(?![\w"])', pre_decl):
+              raise SystemExit("bare result identifier remains in early execute branches")
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Validate diff shape
+        run: |
+          git diff --check
+          grep -n -A8 -B3 'def _ledger_event' backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          grep -n -A12 -B8 'result: Dict\[str, Any\]' backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/ci-baseline-mypy-fix.yml
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: clear baseline withdraw service mypy errors"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
