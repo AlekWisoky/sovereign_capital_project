@@ -13,48 +13,79 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
+def _text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
-def _int(value: Any) -> int:
-    try:
-        return int(value or 0)
-    except _SAFE:
-        return 0
+def _int(*values: Any) -> int:
+    for value in values:
+        if value in (None, ""):
+            continue
+        try:
+            return int(value)
+        except _SAFE:
+            continue
+    return 0
 
 
-def _float(value: Any) -> float:
-    try:
-        return float(value or 0.0)
-    except _SAFE:
-        return 0.0
+def _float(*values: Any) -> float:
+    for value in values:
+        if value in (None, ""):
+            continue
+        try:
+            return float(value)
+        except _SAFE:
+            continue
+    return 0.0
 
 
-def _learning_outcome(*, pending: Mapping[str, Any], decoded: Mapping[str, Any], status: int, tx_hash: str, expected_after: int, realized_after: int, submit_to_receipt_ms: int, result: Mapping[str, Any]) -> dict[str, Any]:
+def _learning_outcome(
+    *,
+    pending: Mapping[str, Any],
+    decoded: Mapping[str, Any],
+    status: int,
+    tx_hash: str,
+    expected_after: int,
+    realized_after: int,
+    submit_to_receipt_ms: int,
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
     return {
         "status": "settled" if int(status) == 1 else "failed",
         "ok": int(status) == 1,
         "truth_verified": bool(result.get("blockedAutoTrading") is not True),
         "tx_hash": str(tx_hash),
-        "realized_pnl_wei": _int(decoded.get("realized_profit_after_gas_wei"),) if decoded.get("realized_profit_after_gas_wei") is not None else int(max(0, realized_after)),
+        "realized_pnl_wei": _int(
+            decoded.get("realized_profit_after_gas_wei"), realized_after
+        ),
         "realized_profit_after_gas_wei": int(max(0, realized_after)) if int(status) == 1 else 0,
-        "realized_profit_after_gas_usd_micro": _int(decoded.get("realized_profit_after_gas_usd_micro")),
-        "gas_cost_wei": _int(decoded.get("realized_gas_cost_wei")),
-        "slippage_bps": _float(decoded.get("realized_slippage_bps"), pending.get("realized_slippage_bps")),
+        "realized_profit_after_gas_usd_micro": _int(
+            decoded.get("realized_profit_after_gas_usd_micro")
+        ),
+        "gas_cost_wei": _int(
+            decoded.get("realized_gas_cost_wei"), decoded.get("gas_cost_wei")
+        ),
+        "slippage_bps": _float(
+            decoded.get("realized_slippage_bps"),
+            pending.get("realized_slippage_bps"),
+        ),
         "latency_ms": int(submit_to_receipt_ms),
-        "amount_in_wei": int(expected_after or pending.get("amount_in") or 0) if not pending.get("amount_in") else int(pending.get("amount_in") or 0),
+        "amount_in_wei": _int(pending.get("amount_in"), pending.get("amount_in_wei"), expected_after),
         "route_id": _text(pending.get("route_id")),
         "opportunity_id": _text(pending.get("opportunity_id")),
     }
 
 
 def install_receipt_settlement_hook() -> None:
-    """Install the OMAR hook at the canonical settlement boundary.
+    """Install OMAR at the canonical settlement boundary.
 
-    The wrapper executes only after ReceiptService.synchronize_settlement_accounting
-    returns a successful canonical commit. It is intentionally idempotent and
-    never changes the settlement result or execution authority.
+    The wrapper runs only after ReceiptService.synchronize_settlement_accounting
+    returns a successful canonical commit. It never changes settlement authority
+    or the returned accounting result; it only appends OMAR learning metadata.
     """
     from .receipt_service import ReceiptService
 
