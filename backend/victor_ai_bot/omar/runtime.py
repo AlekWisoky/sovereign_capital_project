@@ -98,6 +98,7 @@ class OmarRuntime:
                 data_dir=self.data_dir,
                 chain=self.chain_name,
                 bootstrap_history=self.cfg.outcome_bootstrap_history,
+                runtime=self,
             )
             checkpoint = self.policy_path if self.cfg.policy_checkpoint_enabled else None
             self._trainer = OmarTrainer(self.cfg, checkpoint_path=checkpoint)
