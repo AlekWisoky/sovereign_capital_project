@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ..decision_economics import build_decision_economic_context
 from ..identity import attach_identity, identity_from, new_decision_identity
 from ..models import Opportunity
 from ..rpc import JsonRpcClient
@@ -37,6 +38,49 @@ class RuntimeDecisionFinalizeFacade:
             pass
         return decision
 
+    def _attach_decision_economic_context(
+        self, decision: Any, *, opps: List[Opportunity]
+    ) -> Any:
+        """Freeze expected economics/delivery state at the decision boundary.
+
+        The snapshot is observational and is copied downstream into execution
+        and settlement records. It does not authorize execution or override
+        governance/capital controls.
+        """
+        if decision is None or not opps:
+            return decision
+        try:
+            chosen_id = str(getattr(decision, "opp_id", "") or "")
+            opp = next(
+                (item for item in opps if str(getattr(item, "id", "") or "") == chosen_id),
+                None,
+            )
+            if opp is None:
+                opp = opps[0]
+            economic = build_decision_economic_context(
+                opp,
+                decision=decision,
+                cfg=self.cfg,
+            ).to_dict()
+            metadata = getattr(decision, "metadata", None)
+            if not isinstance(metadata, dict):
+                metadata = {}
+                try:
+                    setattr(decision, "metadata", metadata)
+                except (AttributeError, TypeError):
+                    return decision
+            metadata["economic_context"] = dict(economic)
+            metadata.setdefault("decision_context", {})["economic_context"] = dict(economic)
+            if isinstance(getattr(opp, "meta", None), dict):
+                opp.meta["decision_economic_context"] = dict(economic)
+            try:
+                setattr(decision, "economic_context", dict(economic))
+            except (AttributeError, TypeError):
+                pass
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+        return decision
+
     async def _run_decision_finalize(
         self,
         *,
@@ -69,6 +113,7 @@ class RuntimeDecisionFinalizeFacade:
         if identity is None or not identity.decision_id or not identity.correlation_id:
             identity = identity_from(getattr(decision, "metadata", {})) or new_decision_identity()
         attach_identity(decision, identity)
+        decision = self._attach_decision_economic_context(decision, opps=opps)
 
         self._refresh_auto_queue_from_decision(decision, current_block=int(current_block))
 
