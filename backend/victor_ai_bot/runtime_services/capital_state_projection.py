@@ -89,7 +89,9 @@ def build_capital_ledger_truth_projection(
         "capital_ledger_unavailable"
         if status == "unavailable"
         else (
-            str(health.get("reasonCode") or "capital_truth_degraded") if status == "degraded" else "ok"
+            str(health.get("reasonCode") or "capital_truth_degraded")
+            if status == "degraded"
+            else "ok"
         )
     )
     state_contract = {
@@ -114,7 +116,9 @@ def build_capital_ledger_truth_projection(
             "navSource": nav_source,
             "ledgerUsdBalance": ledger_usd_balance,
             "ledgerAvailable": ledger_available,
-            "ledgerTransactionCount": max(len(transactions), _safe_int(truth_projection.get("ledgerTransactionCount"))),
+            "ledgerTransactionCount": max(
+                len(transactions), _safe_int(truth_projection.get("ledgerTransactionCount"))
+            ),
             "ledgerTailCount": max(len(tail), _safe_int(truth_projection.get("ledgerTailCount"))),
             "settlementRecorded": settlement_recorded,
             "lastSettlement": last_settlement,
@@ -126,7 +130,6 @@ def build_capital_ledger_truth_projection(
             "stateContract": state_contract,
         }
     )
-
 
 
 def build_capital_operator_projection(
@@ -148,7 +151,9 @@ def build_capital_operator_projection(
     state_contract = {
         "phase": CAPITAL_OPERATOR_READ_PHASE,
         "status": str(ledger_truth.get("stateContract", {}).get("status") or "unavailable"),
-        "reason_code": str(ledger_truth.get("stateContract", {}).get("reason_code") or "capital_truth_unavailable"),
+        "reason_code": str(
+            ledger_truth.get("stateContract", {}).get("reason_code") or "capital_truth_unavailable"
+        ),
         "degraded": bool(ledger_truth.get("stateContract", {}).get("degraded", False)),
         "blocked": False,
         "sticky_cycle": True,
@@ -156,7 +161,9 @@ def build_capital_operator_projection(
             "navSource": str(summary.get("navSource") or "unavailable"),
             "deployableUsd": _safe_float(summary.get("deployableUsd")),
             "estimatedCapitalUsd": _safe_float(summary.get("estimatedCapitalUsd")),
-            "ledgerState": str(ledger_truth.get("stateContract", {}).get("status") or "unavailable"),
+            "ledgerState": str(
+                ledger_truth.get("stateContract", {}).get("status") or "unavailable"
+            ),
         },
     }
     capital = {

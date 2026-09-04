@@ -328,7 +328,9 @@ class CapitalTruthService:
             if token and amount:
                 by_token[token] = int(by_token.get(token, 0)) + int(amount)
         return {
-            "available": bool(items) or bool(source_counts["audit"]) or bool(source_counts["ledger"]),
+            "available": bool(items)
+            or bool(source_counts["audit"])
+            or bool(source_counts["ledger"]),
             "count": int(len(items)),
             "successful_count": int(successful),
             "items": items[-10:],
@@ -563,11 +565,13 @@ class CapitalTruthService:
     def _bankroll_ts_ms(self, bankroll_state: Any) -> int:
         if bankroll_state is None:
             return 0
-        return kernel_bankroll_ts_ms({
-            "updated_ts_ms": getattr(bankroll_state, "updated_ts_ms", 0),
-            "profit_updated_ts_ms": getattr(bankroll_state, "profit_updated_ts_ms", 0),
-            "sizing_updated_ts_ms": getattr(bankroll_state, "sizing_updated_ts_ms", 0),
-        })
+        return kernel_bankroll_ts_ms(
+            {
+                "updated_ts_ms": getattr(bankroll_state, "updated_ts_ms", 0),
+                "profit_updated_ts_ms": getattr(bankroll_state, "profit_updated_ts_ms", 0),
+                "sizing_updated_ts_ms": getattr(bankroll_state, "sizing_updated_ts_ms", 0),
+            }
+        )
 
     def _has_bankroll_history(self, runtime: Any) -> bool:
         return kernel_has_bankroll_history(runtime)

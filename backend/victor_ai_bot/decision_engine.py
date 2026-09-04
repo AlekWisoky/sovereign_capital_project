@@ -119,7 +119,7 @@ class DecisionEngine:
         self._load_route_stats()
 
         # AQE / SMMAE (optional, additive)
-        self._smmae = None
+        self._smmae: Any = None
 
         # Trade throttling
         self._last_trade_block_by_route: Dict[str, int] = {}
@@ -278,17 +278,17 @@ class DecisionEngine:
             # Approximate gas cost for alternate gas modes using preset max_fee ratios.
             gas_cost = feats.gas_cost_wei
             try:
-                p = getattr(cfg.execution, "gas_presets", None)
+                gas_presets = getattr(cfg.execution, "gas_presets", None)
                 cur = str(getattr(cfg.execution, "gas_mode", "standard") or "standard")
 
                 def _mf(mode: str) -> float:
-                    if not p:
+                    if not gas_presets:
                         return 1.0
                     if mode == "fast":
-                        return float(getattr(p, "fast_max_fee_gwei", 40))
+                        return float(getattr(gas_presets, "fast_max_fee_gwei", 40))
                     if mode == "instant":
-                        return float(getattr(p, "instant_max_fee_gwei", 60))
-                    return float(getattr(p, "standard_max_fee_gwei", 25))
+                        return float(getattr(gas_presets, "instant_max_fee_gwei", 60))
+                    return float(getattr(gas_presets, "standard_max_fee_gwei", 25))
 
                 denom = max(1.0, _mf(cur))
                 mult = _mf(action.gas_mode) / denom

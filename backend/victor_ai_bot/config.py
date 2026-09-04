@@ -13,6 +13,7 @@ from .analytics.quicksight import QuickSightAnalyticsConfig, RBACConfig, ReportA
 from .treasury.config import TreasuryConfig, ProfitGoal
 from .governance.config import GovernanceConfig
 
+
 def _import_optional_symbol(module_name: str, symbol_name: str):
     try:
         module = importlib.import_module(module_name, __package__)
@@ -23,8 +24,8 @@ def _import_optional_symbol(module_name: str, symbol_name: str):
     return getattr(module, symbol_name)
 
 
-SpreadEngineConfig = _import_optional_symbol('.aqe.spread.engine', 'SpreadEngineConfig')  # type: ignore
-ConsensusConfig = _import_optional_symbol('.aqe.coordination.consensus_engine', 'ConsensusConfig')  # type: ignore
+SpreadEngineConfig = _import_optional_symbol(".aqe.spread.engine", "SpreadEngineConfig")  # type: ignore
+ConsensusConfig = _import_optional_symbol(".aqe.coordination.consensus_engine", "ConsensusConfig")  # type: ignore
 
 
 def _as_list(v):

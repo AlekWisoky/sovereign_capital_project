@@ -1372,7 +1372,9 @@ class WithdrawAllService:
                 "reason_code": "preview_stale",
                 "current_reason_code": current_reason,
                 "current_capital_truth_reason_code": str(withdraw_control.get("reasonCode") or ""),
-                "current_capital_truth_reason_codes": list(withdraw_control.get("reasonCodes") or []),
+                "current_capital_truth_reason_codes": list(
+                    withdraw_control.get("reasonCodes") or []
+                ),
                 "capitalTruthHealth": capital_truth_health,
                 "withdrawControl": withdraw_control,
             }

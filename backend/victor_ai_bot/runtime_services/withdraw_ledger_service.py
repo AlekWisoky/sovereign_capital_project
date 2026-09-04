@@ -45,7 +45,10 @@ def _normalize_amount_payload(payload: Mapping[str, Any]) -> str:
 def _metadata(event: str, reason: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
     payload_dict = dict(payload or {})
     tx_status = str(
-        payload_dict.get("tx_status") or payload_dict.get("status") or payload_dict.get("outcome") or ""
+        payload_dict.get("tx_status")
+        or payload_dict.get("status")
+        or payload_dict.get("outcome")
+        or ""
     ).strip()
     tx_hash = str(payload_dict.get("tx_hash") or payload_dict.get("hash") or "").strip()
     return {
@@ -58,7 +61,12 @@ def _metadata(event: str, reason: str, payload: Mapping[str, Any]) -> Dict[str, 
         "tx_hash": tx_hash,
         "tx_proof_reason": str(payload_dict.get("tx_proof_reason") or ""),
         "token": str(payload_dict.get("token") or payload_dict.get("token_in") or ""),
-        "token_out": str(payload_dict.get("token_out") or payload_dict.get("requested_token_out") or payload_dict.get("token_out_requested") or ""),
+        "token_out": str(
+            payload_dict.get("token_out")
+            or payload_dict.get("requested_token_out")
+            or payload_dict.get("token_out_requested")
+            or ""
+        ),
         "amount_wei": _normalize_amount_payload(payload_dict),
         "destination": str(payload_dict.get("to") or ""),
         "from_address": str(payload_dict.get("from_address") or payload_dict.get("from") or ""),
@@ -67,7 +75,9 @@ def _metadata(event: str, reason: str, payload: Mapping[str, Any]) -> Dict[str, 
     }
 
 
-def _repo_payload(*, chain: str, event: str, tx_hash: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+def _repo_payload(
+    *, chain: str, event: str, tx_hash: str, metadata: Dict[str, Any]
+) -> Dict[str, Any]:
     ts_ms = int(time.time() * 1000)
     return {
         "transaction_id": f"withdraw-route-{uuid.uuid4().hex}",

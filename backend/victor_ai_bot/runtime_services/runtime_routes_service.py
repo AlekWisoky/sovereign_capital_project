@@ -39,12 +39,16 @@ class RuntimeRoutesService:
             }
         )
 
-    def _normalize_mode(self, payload: Dict[str, Any], field: str, valid_values: set[str], reason_code: str) -> Tuple[bool, Any]:
+    def _normalize_mode(
+        self, payload: Dict[str, Any], field: str, valid_values: set[str], reason_code: str
+    ) -> Tuple[bool, Any]:
         if field not in payload:
             return True, None
         value = str(payload.get(field) or "").strip().lower()
         if value not in valid_values:
-            return False, invalid_request_payload(reason_code, field=field, value=payload.get(field))
+            return False, invalid_request_payload(
+                reason_code, field=field, value=payload.get(field)
+            )
         return True, value
 
     def validate_settings_patch(self, payload: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:

@@ -58,10 +58,7 @@ def _settlement_marker(runtime: Any) -> str:
     payload = getattr(runtime, "_last_settlement_sync", {}) or {}
     if isinstance(payload, dict):
         return str(
-            payload.get("transactionId")
-            or payload.get("receiptId")
-            or payload.get("txHash")
-            or ""
+            payload.get("transactionId") or payload.get("receiptId") or payload.get("txHash") or ""
         )
     return ""
 
