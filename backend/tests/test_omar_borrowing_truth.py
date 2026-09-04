@@ -27,7 +27,10 @@ def test_borrowing_truth_distinguishes_requested_authorized_deployed_and_settled
             "loan_id": "loan-7",
             "capital_admission": {
                 "allowed": True,
-                "details": {"requestedNotionalUsd": 25_000.0},
+                "details": {
+                    "requestedNotionalUsd": 25_000.0,
+                    "capitalSource": "internal_prime",
+                },
             },
         },
     )
@@ -57,7 +60,10 @@ def test_borrowing_truth_does_not_infer_settlement_from_global_prime_balance():
         pending={
             "capital_admission": {
                 "allowed": True,
-                "details": {"requestedNotionalUsd": 10_000.0},
+                "details": {
+                    "requestedNotionalUsd": 10_000.0,
+                    "capitalSource": "internal_prime",
+                },
             }
         },
     )
@@ -67,6 +73,26 @@ def test_borrowing_truth_does_not_infer_settlement_from_global_prime_balance():
     assert truth.deployed_usd == 0.0
     assert truth.settled_usd == 0.0
     assert truth.reason_code == "borrowing_authorized"
+
+
+def test_ordinary_capital_admission_is_not_classified_as_borrowing():
+    truth = resolve_borrowing_truth(
+        pending={
+            "capital_admission": {
+                "allowed": True,
+                "details": {
+                    "requestedNotionalUsd": 10_000.0,
+                    "capitalSource": "treasury",
+                },
+            }
+        }
+    )
+
+    assert truth.requested_usd == 0.0
+    assert truth.authorized_usd == 0.0
+    assert truth.deployed_usd == 0.0
+    assert truth.settled_usd == 0.0
+    assert truth.source == "unavailable"
 
 
 def test_canonical_outcome_ledger_binds_live_capital_authority(tmp_path):
@@ -121,7 +147,10 @@ def test_canonical_outcome_ledger_binds_live_capital_authority(tmp_path):
             "extra": {
                 "capital_admission": {
                     "allowed": True,
-                    "details": {"requestedNotionalUsd": 20_000.0},
+                    "details": {
+                        "requestedNotionalUsd": 20_000.0,
+                        "capitalSource": "internal_prime",
+                    },
                     "loanId": "loan-1",
                 },
                 "loan_id": "loan-1",
