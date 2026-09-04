@@ -83,17 +83,24 @@ def test_canonical_economic_identity_survives_settlement_and_attribution():
 
 def test_settled_after_gas_value_is_not_charged_gas_twice():
     captured = {}
-    result = ingest_settled_ledger_record(_loop(captured), _row(net_usd=9.0, realized_after_gas_wei=900))
+    result = ingest_settled_ledger_record(
+        _loop(captured), _row(net_usd=9.0, realized_after_gas_wei=900)
+    )
 
     # The bridge reconstructs pre-gas realized value (900 + 100) because the
     # learning loop subtracts realized_gas_wei exactly once.
     assert result["attribution"]["reward_wei"] == 900
-    assert result["attribution"]["metadata"]["gas_accounting"] == "realized_after_gas_plus_gas_minus_gas_once"
+    assert (
+        result["attribution"]["metadata"]["gas_accounting"]
+        == "realized_after_gas_plus_gas_minus_gas_once"
+    )
 
 
 def test_successful_cost_only_loss_remains_learning_eligible():
     captured = {}
-    result = ingest_settled_ledger_record(_loop(captured), _row(net_usd=-1.0, realized_after_gas_wei=0))
+    result = ingest_settled_ledger_record(
+        _loop(captured), _row(net_usd=-1.0, realized_after_gas_wei=0)
+    )
 
     assert result["ok"] is True
     assert result["eligible_for_learning"] is True

@@ -103,8 +103,7 @@ def resolve_net_economics(
     gas_cost = max(
         _usd(costs, "gas_cost_usd", "gas_usd"),
         _usd(settled, "gas_cost_usd", "gas_usd"),
-        _float(getattr(outcome, "realized_gas_cost_usd_micro", 0), 0.0)
-        / 1_000_000.0,
+        _float(getattr(outcome, "realized_gas_cost_usd_micro", 0), 0.0) / 1_000_000.0,
     )
 
     explicit_financing = _first(
@@ -147,13 +146,7 @@ def resolve_net_economics(
         net_profit = _float(explicit_net, 0.0)
         source = "settled_authoritative"
     else:
-        net_profit = (
-            after_gas
-            - financing_cost
-            - slippage_cost
-            - execution_cost
-            - other_cost
-        )
+        net_profit = after_gas - financing_cost - slippage_cost - execution_cost - other_cost
         # On a failed/reverted settlement, no trading profit exists but settled
         # gas is still a real economic loss.
         if not bool(getattr(outcome, "ok", False)):

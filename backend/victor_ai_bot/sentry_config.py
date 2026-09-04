@@ -122,7 +122,9 @@ def set_sentry_trade_context(
             sentry_sdk.set_tag(key, text)
 
 
-def capture_runtime_exception(error: BaseException, *, context: Dict[str, Any] | None = None) -> None:
+def capture_runtime_exception(
+    error: BaseException, *, context: Dict[str, Any] | None = None
+) -> None:
     """Capture a handled runtime exception without exposing sensitive payloads."""
 
     try:

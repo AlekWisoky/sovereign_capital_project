@@ -137,9 +137,7 @@ class OmarRealLearningLoop:
         self.chain_name = _text(chain_name) or "default"
         self.data_dir = str(data_dir or "data/superstructure")
         os.makedirs(self.data_dir, exist_ok=True)
-        self.audit_path = os.path.join(
-            self.data_dir, f"omar_real_learning_{self.chain_name}.jsonl"
-        )
+        self.audit_path = os.path.join(self.data_dir, f"omar_real_learning_{self.chain_name}.jsonl")
         self.policy_updater = policy_updater
         self.capital_authority_reader = capital_authority_reader
         self._decisions: Dict[str, DecisionLearningRecord] = {}
@@ -169,9 +167,7 @@ class OmarRealLearningLoop:
         family = _dict(raw.get("family_allocatable_wei", raw.get("familyAllocatableWei")))
         return CapitalAuthoritySnapshot(
             authority_id=_text(raw.get("authority_id") or raw.get("authorityId")) or "unknown",
-            available_wei=max(
-                0, int(raw.get("available_wei", raw.get("availableWei", 0)) or 0)
-            ),
+            available_wei=max(0, int(raw.get("available_wei", raw.get("availableWei", 0)) or 0)),
             allocatable_wei=max(
                 0, int(raw.get("allocatable_wei", raw.get("allocatableWei", 0)) or 0)
             ),
@@ -179,9 +175,7 @@ class OmarRealLearningLoop:
                 _text(k): max(0, int(v or 0)) for k, v in family.items() if _text(k)
             },
             status=_text(raw.get("status")) or "unknown",
-            freshness_class=_text(
-                raw.get("freshness_class", raw.get("freshnessClass"))
-            )
+            freshness_class=_text(raw.get("freshness_class", raw.get("freshnessClass")))
             or "unknown",
             reason_codes=[
                 _text(x)

@@ -64,7 +64,11 @@ class RuntimeExecuteWrapperFacade:
         attributed separately while remaining under the same decision lineage.
         """
         decision_identity = identity_from(decision)
-        if decision_identity is None or not decision_identity.decision_id or not decision_identity.correlation_id:
+        if (
+            decision_identity is None
+            or not decision_identity.decision_id
+            or not decision_identity.correlation_id
+        ):
             return res
 
         existing = identity_from(res)

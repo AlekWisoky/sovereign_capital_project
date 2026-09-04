@@ -199,14 +199,8 @@ class CanonicalOutcomeLedger:
     ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = (
-            training.get("extra") if isinstance(training.get("extra"), dict) else {}
-        )
-        brain = (
-            training_extra.get("brain")
-            if isinstance(training_extra.get("brain"), dict)
-            else {}
-        )
+        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
