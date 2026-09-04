@@ -181,6 +181,7 @@ class OmarTrainer:
         error_pct = (float(error) / abs(expected) * 100.0) if expected else 0.0
         latency = float(getattr(outcome, "latency_ms", 0.0) or 0.0)
         context = getattr(outcome, "context", {}) or {}
+        brain = context.get("brain") if isinstance(context, dict) else {}
         decision_context = context.get("decisionContext") if isinstance(context, dict) else {}
         if not isinstance(decision_context, dict):
             decision_context = context.get("decision_context") if isinstance(context, dict) else {}
