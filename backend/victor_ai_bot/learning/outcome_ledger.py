@@ -4,8 +4,10 @@ import json
 import os
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List
+
+from .net_economics import resolve_net_economics
 
 
 _SAFE_LEDGER_EXCEPTIONS = (OSError, sqlite3.Error, TypeError, ValueError)
@@ -39,6 +41,9 @@ class LearningOutcome:
     strategy_type: str
     income_stream: str
     venue_path: str
+    net_profit_after_costs_usd_micro: int = 0
+    learning_reward: float = 0.0
+    latency_quality: float = 1.0
     rl_state: str = ""
     rl_action_index: int = -1
     aqe_action: str = ""
@@ -74,6 +79,9 @@ class LearningOutcome:
             "strategyType": self.strategy_type,
             "incomeStream": self.income_stream,
             "venuePath": self.venue_path,
+            "netProfitAfterCostsUsdMicro": str(self.net_profit_after_costs_usd_micro),
+            "learningReward": self.learning_reward,
+            "latencyQuality": self.latency_quality,
             "rlState": self.rl_state,
             "rlActionIndex": self.rl_action_index,
             "aqeAction": self.aqe_action,
@@ -191,8 +199,14 @@ class CanonicalOutcomeLedger:
     ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
-        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
+        training_extra = (
+            training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        )
+        brain = (
+            training_extra.get("brain")
+            if isinstance(training_extra.get("brain"), dict)
+            else {}
+        )
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
@@ -235,9 +249,24 @@ class CanonicalOutcomeLedger:
                 if isinstance(training_extra.get("capture"), dict)
                 else {}
             ),
+            "costs": (
+                dict(training_extra.get("costs") or {})
+                if isinstance(training_extra.get("costs"), dict)
+                else {}
+            ),
+            "borrowing": (
+                dict(training_extra.get("borrowing") or {})
+                if isinstance(training_extra.get("borrowing"), dict)
+                else {}
+            ),
+            "settled_economics": (
+                dict(training_extra.get("settled_economics") or {})
+                if isinstance(training_extra.get("settled_economics"), dict)
+                else {}
+            ),
         }
 
-        return LearningOutcome(
+        outcome = LearningOutcome(
             ledger_id=self._int(row.get("id"), 0),
             ts=self._int(row.get("ts"), 0),
             chain=str(row.get("chain") or self.chain),
@@ -274,6 +303,20 @@ class CanonicalOutcomeLedger:
             latency_ms=self._int(training_extra.get("latency_ms"), 0),
             submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms"), 0),
             context=context,
+        )
+
+        economics = resolve_net_economics(outcome)
+        economics_context = economics.to_dict()
+        merged_context = dict(outcome.context)
+        merged_context["netEconomics"] = economics_context
+        return replace(
+            outcome,
+            net_profit_after_costs_usd_micro=int(
+                round(economics.net_profit_after_costs_usd * 1_000_000.0)
+            ),
+            learning_reward=float(economics.learning_reward),
+            latency_quality=float(economics.latency_quality),
+            context=merged_context,
         )
 
     def poll(self, *, limit: int = 50) -> List[LearningOutcome]:
