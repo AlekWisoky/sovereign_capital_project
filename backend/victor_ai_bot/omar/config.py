@@ -41,12 +41,16 @@ class OmarConfig:
     # Human-in-the-loop injection (for training only)
     human_role_enabled: bool = True
 
-    # Phase 2: real outcome-ledger learning.
+    # Real outcome-ledger learning.
     real_outcome_learning_enabled: bool = True
     real_outcome_poll_seconds: float = 2.0
     real_outcome_batch_size: int = 25
     outcome_bootstrap_history: int = 500
     policy_checkpoint_enabled: bool = True
+
+    # Phase 22: borrowing-bearing trades must have authoritative settlement
+    # before they can update the policy.
+    require_settled_borrowing_for_learning: bool = True
 
     roles: List[str] | None = None
 
@@ -59,3 +63,6 @@ class OmarConfig:
         self.real_outcome_poll_seconds = max(0.25, float(self.real_outcome_poll_seconds))
         self.real_outcome_batch_size = max(1, int(self.real_outcome_batch_size))
         self.outcome_bootstrap_history = max(1, int(self.outcome_bootstrap_history))
+        self.require_settled_borrowing_for_learning = bool(
+            self.require_settled_borrowing_for_learning
+        )

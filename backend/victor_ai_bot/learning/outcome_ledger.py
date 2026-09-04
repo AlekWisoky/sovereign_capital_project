@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+from .borrowing_truth import BorrowingTruth, resolve_borrowing_truth
 
 _SAFE_LEDGER_EXCEPTIONS = (OSError, sqlite3.Error, TypeError, ValueError)
 
@@ -46,6 +47,7 @@ class LearningOutcome:
     reward_scaled_float: float = 0.0
     latency_ms: int = 0
     submit_to_receipt_ms: int = 0
+    borrowing: BorrowingTruth = field(default_factory=BorrowingTruth)
     context: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -81,6 +83,7 @@ class LearningOutcome:
             "rewardScaledFloat": self.reward_scaled_float,
             "latencyMs": self.latency_ms,
             "submitToReceiptMs": self.submit_to_receipt_ms,
+            "borrowing": self.borrowing.to_dict(),
             "context": dict(self.context),
         }
 
@@ -89,7 +92,9 @@ class CanonicalOutcomeLedger:
     """Read-only canonical outcome view backed by PnLStore's SQLite journal.
 
     Financial truth stays in the existing PnL store. OMAR reads this normalized
-    view and joins the existing RL training record by transaction hash.
+    view and joins the transaction-linked learning record by transaction hash.
+    The live runtime is optional but, when bound, is used to resolve the exact
+    internal-prime loan and its current lifecycle state.
     """
 
     def __init__(
@@ -98,9 +103,11 @@ class CanonicalOutcomeLedger:
         data_dir: str,
         chain: str,
         bootstrap_history: int = 500,
+        runtime: Any | None = None,
     ):
         self.data_dir = str(data_dir or "")
         self.chain = str(chain or "")
+        self.runtime = runtime
         self.pnl_path = os.path.join(self.data_dir, f"pnl_{self.chain}.sqlite")
         self.training_path = os.path.join(
             self.data_dir,
@@ -116,6 +123,10 @@ class CanonicalOutcomeLedger:
         self._seen: set[str] = set()
         self.last_error = ""
         self._load_cursor()
+
+    def bind_runtime(self, runtime: Any | None) -> None:
+        """Bind the live runtime without changing ledger ownership."""
+        self.runtime = runtime
 
     @staticmethod
     def _int(value: Any, default: int = 0) -> int:
@@ -191,8 +202,14 @@ class CanonicalOutcomeLedger:
     ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
-        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
+        training_extra = (
+            training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        )
+        brain = (
+            training_extra.get("brain")
+            if isinstance(training_extra.get("brain"), dict)
+            else {}
+        )
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
@@ -202,6 +219,9 @@ class CanonicalOutcomeLedger:
         penalty = 0 if ok else abs(expected_after)
         reward_num = realized_for_reward - penalty
 
+        internal_prime_context = training_extra.get("internal_prime")
+        if not isinstance(internal_prime_context, dict):
+            internal_prime_context = training_extra.get("internalPrime")
         context = {
             "trainingTs": self._int(training.get("ts"), 0),
             "strategy": str(training_extra.get("strategy") or ""),
@@ -235,7 +255,36 @@ class CanonicalOutcomeLedger:
                 if isinstance(training_extra.get("capture"), dict)
                 else {}
             ),
+            "capital": (
+                dict(training_extra.get("capital") or {})
+                if isinstance(training_extra.get("capital"), dict)
+                else {}
+            ),
+            "internalPrime": dict(internal_prime_context or {})
+            if isinstance(internal_prime_context, dict)
+            else {},
         }
+
+        borrowing = resolve_borrowing_truth(
+            runtime=self.runtime,
+            pending={
+                "pending_context": training_extra,
+                "capital_admission": training_extra.get("capital_admission")
+                or training_extra.get("capitalAdmission")
+                or {},
+                "loan_id": training_extra.get("loan_id")
+                or training_extra.get("loanId")
+                or "",
+                "borrowing_truth": training_extra.get("borrowing_truth")
+                or training_extra.get("borrowingTruth")
+                or {},
+            },
+            outcome={
+                "borrow_settled_usd": row.get("borrow_settled_usd"),
+                "realized_borrow_cost_usd": row.get("realized_borrow_cost_usd"),
+            },
+        )
+        context["borrowing"] = borrowing.to_dict()
 
         return LearningOutcome(
             ledger_id=self._int(row.get("id"), 0),
@@ -273,6 +322,7 @@ class CanonicalOutcomeLedger:
             reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
             latency_ms=self._int(training_extra.get("latency_ms"), 0),
             submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms"), 0),
+            borrowing=borrowing,
             context=context,
         )
 
@@ -307,4 +357,5 @@ class CanonicalOutcomeLedger:
             "trainingPath": self.training_path,
             "seenOutcomeCount": len(self._seen),
             "lastError": self.last_error,
+            "capitalAuthorityBound": bool(self.runtime is not None),
         }

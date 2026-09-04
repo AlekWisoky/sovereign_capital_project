@@ -59,6 +59,8 @@ class OmarTrainer:
             "skipped": 0,
             "mean_reward_scaled": 0.0,
             "last_tx_hash": "",
+            "borrowing_settled": 0,
+            "borrowing_unresolved": 0,
         }
 
     def rotate_roles(self, episode: int):
@@ -147,18 +149,44 @@ class OmarTrainer:
         return stats
 
     @staticmethod
-    def _state_vector(rl_state: str, state_dim: int) -> np.ndarray:
+    def _state_vector(
+        rl_state: str,
+        state_dim: int,
+        borrowing: Any | None = None,
+    ) -> np.ndarray:
+        """Encode the RL state while exposing borrowing economics to the policy."""
         key = str(rl_state or "unknown")
-        return encode_role_vector(f"OMAR_STATE:{key}", state_dim).astype(np.float32)
+        vec = encode_role_vector(f"OMAR_STATE:{key}", state_dim).astype(np.float32)
+        if borrowing is None or state_dim < 6:
+            return vec
+
+        requested = float(getattr(borrowing, "requested_usd", 0.0) or 0.0)
+        authorized = float(getattr(borrowing, "authorized_usd", 0.0) or 0.0)
+        deployed = float(getattr(borrowing, "deployed_usd", 0.0) or 0.0)
+        settled = float(getattr(borrowing, "settled_usd", 0.0) or 0.0)
+        cost = float(getattr(borrowing, "realized_cost_usd", 0.0) or 0.0)
+        capacity = max(1.0, float(getattr(borrowing, "capacity_usd", 0.0) or 0.0))
+        utilization = float(getattr(borrowing, "utilization", 0.0) or 0.0)
+        denom = max(1.0, requested)
+        vec[0] = np.float32(np.clip(requested / capacity, 0.0, 2.0))
+        vec[1] = np.float32(np.clip(authorized / denom, 0.0, 2.0))
+        vec[2] = np.float32(np.clip(deployed / denom, 0.0, 2.0))
+        vec[3] = np.float32(np.clip(settled / denom, 0.0, 2.0))
+        vec[4] = np.float32(np.clip(cost / denom, 0.0, 1.0))
+        vec[5] = np.float32(np.clip(utilization, 0.0, 1.0))
+        return vec
 
     @staticmethod
     def _target_action_index(outcome: Any) -> int:
-        """Translate a settled trade into OMAR's action vocabulary.
+        """Use exact recorded action attribution whenever available."""
+        exact = getattr(outcome, "rl_action_index", -1)
+        try:
+            exact_idx = int(exact)
+            if 0 <= exact_idx < len(DEFAULT_ACTION_KEYS):
+                return exact_idx
+        except (TypeError, ValueError):
+            pass
 
-        Receipt success alone is not enough to reinforce EXECUTE: a successful
-        transaction with zero/non-positive realized reward is treated as WAIT.
-        Failed aggressive decisions reinforce DECREASE_RISK.
-        """
         reward = float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0)
         if bool(getattr(outcome, "ok", False)) and reward > 0.0:
             return DEFAULT_ACTION_KEYS.index("EXECUTE")
@@ -172,18 +200,42 @@ class OmarTrainer:
                 pass
         return DEFAULT_ACTION_KEYS.index("WAIT")
 
+    def _borrowing_learning_ready(self, outcome: Any) -> bool:
+        """Only learn a borrowing-bearing trade after authoritative settlement."""
+        if not bool(getattr(self.cfg, "require_settled_borrowing_for_learning", True)):
+            return True
+        borrowing = getattr(outcome, "borrowing", None)
+        if borrowing is None:
+            return True
+        requested = float(getattr(borrowing, "requested_usd", 0.0) or 0.0)
+        if requested <= 0.0:
+            return True
+        settled = float(getattr(borrowing, "settled_usd", 0.0) or 0.0)
+        return settled > 0.0
+
     def learn_from_real_outcomes(self, outcomes: Sequence[Any]) -> Dict[str, Any]:
         """Train OMAR from finalized real-market outcomes.
 
-        The financial result comes from the canonical outcome ledger. The
-        transaction-linked RL state supplies decision context; no synthetic
-        market reward is mixed into this update.
+        Financial truth comes from the canonical outcome ledger. Exact action
+        attribution is preferred over heuristic reconstruction. Borrowing-bearing
+        outcomes are gated until the authoritative prime loan is settled, so
+        requested/authorized capital is never mistaken for realized deployment.
         """
         seen = learned = skipped = 0
+        borrowing_settled = borrowing_unresolved = 0
         rewards: List[float] = []
         last_tx_hash = ""
         for outcome in list(outcomes or []):
             seen += 1
+            borrowing = getattr(outcome, "borrowing", None)
+            if borrowing is not None and float(getattr(borrowing, "requested_usd", 0.0) or 0.0) > 0.0:
+                if self._borrowing_learning_ready(outcome):
+                    borrowing_settled += 1
+                else:
+                    borrowing_unresolved += 1
+                    skipped += 1
+                    continue
+
             rl_state = str(getattr(outcome, "rl_state", "") or "")
             if not rl_state:
                 skipped += 1
@@ -197,7 +249,7 @@ class OmarTrainer:
             role_vec = self._role_embeds.get(role_name)
             if role_vec is None:
                 role_vec = encode_role_vector(role_name, self.cfg.role_vector_size)
-            state_vec = self._state_vector(rl_state, self.state_dim)
+            state_vec = self._state_vector(rl_state, self.state_dim, borrowing=borrowing)
             stats = self.policy.update_from_real_outcome(
                 role_vec=role_vec,
                 state_vec=state_vec,
@@ -223,6 +275,8 @@ class OmarTrainer:
             "mean_reward_scaled": mean_reward,
             "last_tx_hash": last_tx_hash,
             "policy_updates": int(self.policy.updates),
+            "borrowing_settled": int(borrowing_settled),
+            "borrowing_unresolved": int(borrowing_unresolved),
         }
         return dict(self.last_real_learning)
 
