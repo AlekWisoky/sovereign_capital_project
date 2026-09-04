@@ -156,12 +156,7 @@ class OmarTrainer:
 
     @staticmethod
     def _target_action_index(outcome: Any) -> int:
-        """Translate a settled trade into OMAR's action vocabulary.
-
-        Receipt success alone is not enough to reinforce EXECUTE: a successful
-        transaction with zero/non-positive realized reward is treated as WAIT.
-        Failed aggressive decisions reinforce DECREASE_RISK.
-        """
+        """Translate a settled trade into OMAR's action vocabulary."""
         reward = float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0)
         if bool(getattr(outcome, "ok", False)) and reward > 0.0:
             return DEFAULT_ACTION_KEYS.index("EXECUTE")
@@ -177,13 +172,7 @@ class OmarTrainer:
 
     @staticmethod
     def _real_learning_reward(outcome: Any) -> tuple[float, float, float, int]:
-        """Build a bounded reward that teaches both profitability and calibration.
-
-        Realized net remains the primary objective. A separate conservative
-        penalty is applied only when reality underperforms the decision-time
-        expectation, so OMAR learns to reduce systematic overestimation without
-        rewarding latency or forecast error as a substitute for profit.
-        """
+        """Build a bounded reward that teaches profitability and calibration."""
         amount = max(1, int(getattr(outcome, "amount_in_wei", 0) or 0))
         expected = int(getattr(outcome, "expected_profit_after_costs_wei", 0) or 0)
         realized = int(getattr(outcome, "realized_profit_after_gas_wei", 0) or 0)
@@ -202,21 +191,21 @@ class OmarTrainer:
         )
         if not isinstance(economic, dict):
             economic = context.get("economicContext") if isinstance(context, dict) else {}
+        if not isinstance(economic, dict):
+            economic = context.get("economic_context") if isinstance(context, dict) else {}
+        # The canonical execution path currently stores the snapshot under
+        # brain.economic_context so the existing receipt-learning envelope can
+        # carry it without widening the ledger schema.
+        if not isinstance(economic, dict) or not economic:
+            economic = brain.get("economic_context") if isinstance(brain, dict) else {}
         expected_latency = float((economic or {}).get("expected_latency_ms") or 0.0)
         latency_error = latency - expected_latency
-        # Penalize overestimation only; realized outperformance stays governed by
-        # the primary realized-net reward.
         overestimate_penalty = max(0.0, -float(error) / float(amount) * 1_000_000.0)
         calibrated = base - 0.25 * overestimate_penalty
         return float(calibrated), float(error_pct), float(latency_error), int(error)
 
     def learn_from_real_outcomes(self, outcomes: Sequence[Any]) -> Dict[str, Any]:
-        """Train OMAR from finalized real-market outcomes.
-
-        Financial truth comes from the canonical outcome ledger. Decision-time
-        economics and delivery expectations are used only as calibration context;
-        governance/capital authority is never bypassed by this update.
-        """
+        """Train OMAR from finalized real-market outcomes."""
         seen = learned = skipped = 0
         rewards: List[float] = []
         errors: List[int] = []
