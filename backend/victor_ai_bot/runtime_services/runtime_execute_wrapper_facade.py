@@ -83,8 +83,8 @@ class RuntimeExecuteWrapperFacade:
         return res
 
     @staticmethod
-    def _propagate_decision_economics(res: Any, decision: Any) -> Any:
-        """Carry the frozen decision-time economics into the execution plan."""
+    def _propagate_decision_economics(res: Any, decision: Any, opp: Any | None = None) -> Any:
+        """Carry frozen decision economics into execution and pending-learning state."""
         try:
             decision_meta = getattr(decision, "metadata", None)
             economic = (
@@ -103,6 +103,11 @@ class RuntimeExecuteWrapperFacade:
                     return res
             plan["economic_context"] = dict(economic)
             plan.setdefault("decision_context", {})["economic_context"] = dict(economic)
+            if isinstance(getattr(opp, "meta", None), dict):
+                brain = opp.meta.setdefault("brain", {})
+                if isinstance(brain, dict):
+                    brain["economic_context"] = dict(economic)
+                opp.meta["decision_economic_context"] = dict(economic)
         except (AttributeError, KeyError, TypeError, ValueError):
             pass
         return res
@@ -166,7 +171,7 @@ class RuntimeExecuteWrapperFacade:
                 # same boundary so execution/settlement cannot silently lose the
                 # decision-time expectation.
                 res = self._ensure_execution_identity(res, decision)
-                res = self._propagate_decision_economics(res, decision)
+                res = self._propagate_decision_economics(res, decision, opp)
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
                     bookkeeping_handler = getattr(
