@@ -4,12 +4,13 @@ import importlib
 import time
 from typing import Any, Awaitable, Callable, Tuple
 
+from ..decision_identity import ensure_decision_identity
+from ..identity import attach_identity, new_execution_identity
 from ..execution import try_execute_opportunity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
 from .runtime_execute_dispatch_facade import AutoExecutionDispatchContext
-
 
 _DefaultTryExecute = Callable[..., Awaitable[Any]]
 _DefaultRpcClient = type[JsonRpcClient]
@@ -18,26 +19,15 @@ _DEFAULT_TRY_EXECUTE = try_execute_opportunity
 
 
 def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryExecute]:
-    """Return the canonical execution-wrapper patch seam.
-
-    Legacy/runtime harnesses historically monkeypatched `victor_ai_bot.runtime_legacy`
-    to replace `JsonRpcClient` and `try_execute_opportunity`. The refactor moved the
-    hot wrapper into this facade, which broke that compatibility seam.
-
-    We intentionally preserve both seam locations now:
-    - patching this facade module continues to work for local extraction tests
-    - patching `runtime_legacy` continues to work for compatibility/runtime tests
-    """
-
+    """Return the canonical execution-wrapper patch seam."""
     rpc_cls = JsonRpcClient
     execute_fn = try_execute_opportunity
     try:
-        runtime_legacy = importlib.import_module('victor_ai_bot.runtime_legacy')
+        runtime_legacy = importlib.import_module("victor_ai_bot.runtime_legacy")
     except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
         return rpc_cls, execute_fn
-
-    legacy_rpc = getattr(runtime_legacy, 'JsonRpcClient', _DEFAULT_JSON_RPC_CLIENT)
-    legacy_exec = getattr(runtime_legacy, 'try_execute_opportunity', _DEFAULT_TRY_EXECUTE)
+    legacy_rpc = getattr(runtime_legacy, "JsonRpcClient", _DEFAULT_JSON_RPC_CLIENT)
+    legacy_exec = getattr(runtime_legacy, "try_execute_opportunity", _DEFAULT_TRY_EXECUTE)
     if legacy_rpc is not _DEFAULT_JSON_RPC_CLIENT:
         rpc_cls = legacy_rpc
     if legacy_exec is not _DEFAULT_TRY_EXECUTE:
@@ -46,12 +36,26 @@ def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryE
 
 
 class RuntimeExecuteWrapperFacade:
-    """Compatibility facade for prepared auto-execution wrapper flow.
+    """Compatibility facade for prepared auto-execution wrapper flow."""
 
-    This isolates the prepared RPC execution wrapper and post-execution
-    bookkeeping from RuntimeBundle._execute_auto while preserving the
-    current execution semantics.
-    """
+    def _ensure_execution_identity(self, opp: Any, decision: Any) -> None:
+        if decision is None or opp is None:
+            return
+        try:
+            identity = ensure_decision_identity(
+                opp,
+                decision,
+                chain_name=str(getattr(getattr(self, "cfg", None).chain, "name", "default")),
+            )
+            execution_identity = new_execution_identity(identity)
+            attach_identity(opp, execution_identity)
+            meta = getattr(opp, "meta", None)
+            if isinstance(meta, dict):
+                lineage = meta.setdefault("canonical_lineage", {})
+                if isinstance(lineage, dict):
+                    lineage.update(execution_identity.to_dict())
+        except (AttributeError, TypeError, ValueError):
+            return
 
     async def _run_prepared_auto_execution(
         self,
@@ -61,6 +65,7 @@ class RuntimeExecuteWrapperFacade:
         decision: Any,
         prep: AutoExecutionDispatchContext,
     ) -> None:
+        self._ensure_execution_identity(opp, decision)
         force_dry = bool(prep.force_dry)
         old_gas_mode = str(prep.old_gas_mode)
         old_send_mode = str(prep.old_send_mode)
@@ -98,14 +103,14 @@ class RuntimeExecuteWrapperFacade:
                         res = await fioa_handler(self, opp, decision, _core)
                     else:
                         res = await ExecutionService.handle_fioa_execution_wrapper(
-                            execution_service,
-                            self,
-                            opp,
-                            decision,
-                            _core,
+                            execution_service, self, opp, decision, _core
                         )
                 else:
                     res = await _core()
+
+                identity = getattr(opp, "identity", None)
+                if identity is not None:
+                    attach_identity(res, identity)
 
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
@@ -114,12 +119,7 @@ class RuntimeExecuteWrapperFacade:
                     )
                     if callable(bookkeeping_handler):
                         await bookkeeping_handler(
-                            self,
-                            opp,
-                            res,
-                            bn=bn,
-                            latency_ms=latency_ms,
-                            mode="auto",
+                            self, opp, res, bn=bn, latency_ms=latency_ms, mode="auto"
                         )
                     else:
                         await ExecutionService.handle_post_execute_bookkeeping(
@@ -140,9 +140,7 @@ class RuntimeExecuteWrapperFacade:
             execution_service = getattr(self, "_execution_service", None)
             if execution_service is not None:
                 execution_service.restore_operator_overrides(
-                    self,
-                    old_gas_mode=old_gas_mode,
-                    old_send_mode=old_send_mode,
+                    self, old_gas_mode=old_gas_mode, old_send_mode=old_send_mode
                 )
             else:
                 self.cfg.execution.gas_mode = old_gas_mode

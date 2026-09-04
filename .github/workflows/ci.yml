@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,11 +30,24 @@ jobs:
           done < backend/mypy_targets.txt
 
       - name: Black
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          black --check backend
-          while read -r slice; do
-            xargs -a "$slice" black --check
-          done < backend/mypy_targets.txt
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$BASE_SHA" --depth=1
+            mapfile -t files < <(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" -- 'backend/**/*.py' 'backend/*.py')
+          else
+            mapfile -t files < <(git ls-files 'backend/**/*.py' 'backend/*.py')
+          fi
+          if [ "${#files[@]}" -gt 0 ]; then
+            if ! black --check "${files[@]}"; then
+              echo "Black formatting diff:"
+              black --diff "${files[@]}"
+              exit 1
+            fi
+          else
+            echo "No backend Python files changed; Black gate has nothing to check."
+          fi
 
       - name: Mypy (expanded typed slices)
         run: |
