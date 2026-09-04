@@ -107,11 +107,12 @@ class RuntimeExecuteWrapperFacade:
                     return res
             plan["economic_context"] = dict(economic)
             plan.setdefault("decision_context", {})["economic_context"] = dict(economic)
-            if isinstance(getattr(opp, "meta", None), dict):
-                brain = opp.meta.setdefault("brain", {})
+            opp_meta = getattr(opp, "meta", None)
+            if isinstance(opp_meta, dict):
+                brain = opp_meta.setdefault("brain", {})
                 if isinstance(brain, dict):
                     brain["economic_context"] = dict(economic)
-                opp.meta["decision_economic_context"] = dict(economic)
+                opp_meta["decision_economic_context"] = dict(economic)
         except (AttributeError, KeyError, TypeError, ValueError):
             pass
         return res
