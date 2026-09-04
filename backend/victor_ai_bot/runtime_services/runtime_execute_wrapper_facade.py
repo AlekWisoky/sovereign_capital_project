@@ -82,6 +82,31 @@ class RuntimeExecuteWrapperFacade:
             pass
         return res
 
+    @staticmethod
+    def _propagate_decision_economics(res: Any, decision: Any) -> Any:
+        """Carry the frozen decision-time economics into the execution plan."""
+        try:
+            decision_meta = getattr(decision, "metadata", None)
+            economic = (
+                decision_meta.get("economic_context")
+                if isinstance(decision_meta, dict)
+                else getattr(decision, "economic_context", None)
+            )
+            if not isinstance(economic, dict):
+                return res
+            plan = getattr(res, "plan", None)
+            if not isinstance(plan, dict):
+                try:
+                    setattr(res, "plan", {})
+                    plan = res.plan
+                except (AttributeError, TypeError):
+                    return res
+            plan["economic_context"] = dict(economic)
+            plan.setdefault("decision_context", {})["economic_context"] = dict(economic)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+        return res
+
     async def _run_prepared_auto_execution(
         self,
         *,
@@ -137,9 +162,11 @@ class RuntimeExecuteWrapperFacade:
                     res = await _core()
 
                 # The execution boundary is the point at which decision identity
-                # becomes execution identity. This happens before bookkeeping so
-                # every downstream recorder sees the same IDs.
+                # becomes execution identity. Economic state is copied at the
+                # same boundary so execution/settlement cannot silently lose the
+                # decision-time expectation.
                 res = self._ensure_execution_identity(res, decision)
+                res = self._propagate_decision_economics(res, decision)
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
                     bookkeeping_handler = getattr(
