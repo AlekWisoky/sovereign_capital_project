@@ -97,12 +97,9 @@ def resolve_borrowing_truth(
 ) -> BorrowingTruth:
     """Resolve requested/authorized/deployed/settled borrowing truth.
 
-    Priority is deliberate:
-      1. explicit trade-linked borrowing lifecycle fields;
-      2. the authoritative ``internal_prime_state()`` and its linked loan;
-      3. capital-admission fields for requested/authorized values.
-
-    The resolver is read-only and never mutates capital authority.
+    Borrowing is only classified when the trade explicitly carries a borrowing
+    source/loan or a borrowing lifecycle object. Ordinary capital admission does
+    not become a borrowing event merely because it has a requested notional.
     """
     pending_m = _mapping(pending)
     result_m = _mapping(result)
@@ -147,54 +144,83 @@ def resolve_borrowing_truth(
     )
     if not loan_id:
         loan_id = str(
-            _find_first_key(
-                capital_admission,
-                ("loan_id", "loanId"),
-            )
+            _find_first_key(capital_admission, ("loan_id", "loanId"))
             or _find_first_key(admission_details, ("loan_id", "loanId"))
             or _find_first_key(context, ("loan_id", "loanId"))
             or ""
         )
+
+    capital_source = str(
+        _first(
+            explicit_borrow,
+            ("source", "capital_source", "capitalSource", "provider"),
+            _first(
+                admission_details,
+                ("capital_source", "capitalSource", "source", "provider"),
+                _first(context, ("capital_source", "capitalSource", "source"), ""),
+            ),
+        )
+        or ""
+    ).strip().lower()
+    source_hint = " ".join(
+        [
+            capital_source,
+            str(pending_m.get("strategy_family") or ""),
+            str(pending_m.get("route_family") or ""),
+        ]
+    )
+    borrowing_candidate = bool(explicit_borrow or loan_id) or any(
+        token in source_hint for token in ("internal_prime", "prime", "borrow", "flashloan", "flash_loan")
+    )
 
     linked_loan: Dict[str, Any] = {}
     if loan_id and isinstance(prime_state.get("loans"), dict):
         candidate_loan = prime_state["loans"].get(loan_id)
         if isinstance(candidate_loan, dict):
             linked_loan = dict(candidate_loan)
+            borrowing_candidate = True
 
-    requested = _float(
-        _first(
-            explicit_borrow,
-            ("requested_usd", "requestedUsd", "notional_usd", "notionalUsd"),
+    requested = 0.0
+    authorized = 0.0
+    if borrowing_candidate:
+        requested = _float(
             _first(
-                admission_details,
-                ("requested_notional_usd", "requestedNotionalUsd", "notional_usd", "notionalUsd"),
-                _first(linked_loan, ("notional_usd", "notionalUsd"), 0.0),
-            ),
-        )
-    )
-    authorized = _float(
-        _first(
-            explicit_borrow,
-            ("authorized_usd", "authorizedUsd"),
-            _first(
-                admission_details,
-                (
-                    "authorized_notional_usd",
-                    "authorizedNotionalUsd",
-                    "approved_notional_usd",
-                    "approvedNotionalUsd",
+                explicit_borrow,
+                ("requested_usd", "requestedUsd", "notional_usd", "notionalUsd"),
+                _first(
+                    admission_details,
+                    (
+                        "requested_notional_usd",
+                        "requestedNotionalUsd",
+                        "notional_usd",
+                        "notionalUsd",
+                    ),
+                    _first(linked_loan, ("notional_usd", "notionalUsd"), 0.0),
                 ),
-                requested
-                if bool(
-                    capital_admission.get(
-                        "allowed", capital_admission.get("approved", False)
-                    )
-                )
-                else 0.0,
-            ),
+            )
         )
-    )
+        authorized = _float(
+            _first(
+                explicit_borrow,
+                ("authorized_usd", "authorizedUsd"),
+                _first(
+                    admission_details,
+                    (
+                        "authorized_notional_usd",
+                        "authorizedNotionalUsd",
+                        "approved_notional_usd",
+                        "approvedNotionalUsd",
+                    ),
+                    requested
+                    if bool(
+                        capital_admission.get(
+                            "allowed", capital_admission.get("approved", False)
+                        )
+                    )
+                    else 0.0,
+                ),
+            )
+        )
 
     deployed = _float(
         _first(
@@ -291,7 +317,7 @@ def resolve_borrowing_truth(
     source = (
         "explicit_trade_context"
         if explicit_borrow
-        else ("internal_prime_loan" if linked_loan else (prime_source or "capital_admission"))
+        else ("internal_prime_loan" if linked_loan else (prime_source if borrowing_candidate else "unavailable"))
     )
     return BorrowingTruth(
         requested_usd=max(0.0, requested),
