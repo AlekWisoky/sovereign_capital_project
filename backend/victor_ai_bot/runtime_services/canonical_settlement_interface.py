@@ -58,8 +58,6 @@ def _matches(
         _text(metadata.get("receiptId")),
     }
     candidates.discard("")
-    if tx_hash and tx_hash in candidates:
-        return True
 
     lineage = _dict(metadata.get("canonical_lineage"))
     execution_lineage = _dict(metadata.get("execution_lineage"))
@@ -82,8 +80,14 @@ def _matches(
         _text(metadata.get("opportunity_id")),
         _text(metadata.get("opportunityId")),
     }
+
+    # When an execution ID is supplied, it is an exact lineage constraint.
+    # A matching transaction hash must never override a mismatched execution
+    # attempt; this prevents a retry/replacement from learning the wrong fill.
     if execution_id and execution_id not in execution_candidates:
         return False
+    if tx_hash and tx_hash in candidates:
+        return True
     return bool(
         (decision_id and decision_id in decision_candidates)
         or (correlation_id and correlation_id in correlation_candidates)
@@ -123,9 +127,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "settled_at_ms": int(row.get("ts_ms") or 0),
         "decision_id": _text(first("canonical_decision_id", "decision_id", default=lineage.get("decision_id"))),
         "correlation_id": _text(first("correlation_id", default=lineage.get("correlation_id"))),
-        "execution_id": _text(
-            first("execution_id", default=execution_lineage.get("execution_id"))
-        ),
+        "execution_id": _text(first("execution_id", default=execution_lineage.get("execution_id"))),
         "opportunity_id": _text(first("opportunity_id", "opportunityId")),
         "route_id": _text(first("route_id", "routeId")),
         "strategy_family": _text(first("strategy_family", "strategyFamily", "family")),
