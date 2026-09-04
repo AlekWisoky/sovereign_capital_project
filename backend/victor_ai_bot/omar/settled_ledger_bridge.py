@@ -47,16 +47,24 @@ def _operator_intent(lineage: CanonicalSettledOutcomeLineage) -> OperatorIntentS
     raw = _mapping(lineage.operator_intent)
     return OperatorIntentSnapshot(
         control_mode=str(raw.get("control_mode") or raw.get("controlMode") or ""),
-        aggression_mode=str(raw.get("aggression_mode") or raw.get("aggressionMode") or "balanced"),
+        aggression_mode=str(
+            raw.get("aggression_mode") or raw.get("aggressionMode") or "balanced"
+        ),
         brain_mode=str(raw.get("brain_mode") or raw.get("brainMode") or "off"),
-        risk_multiplier=_float(raw.get("risk_multiplier"), raw.get("riskMultiplier"), 1.0),
+        risk_multiplier=_float(
+            raw.get("risk_multiplier"), raw.get("riskMultiplier"), 1.0
+        ),
         force_send_mode=str(raw.get("force_send_mode") or raw.get("forceSendMode") or ""),
         force_gas_mode=str(raw.get("force_gas_mode") or raw.get("forceGasMode") or ""),
         desired_wealth_goal=_mapping(
-            raw.get("desired_wealth_goal") or raw.get("desiredWealthGoal") or lineage.wealth_goal
+            raw.get("desired_wealth_goal")
+            or raw.get("desiredWealthGoal")
+            or lineage.wealth_goal
         ),
         ai_recommendation=_mapping(
-            raw.get("ai_recommendation") or raw.get("aiRecommendation") or lineage.ai_recommendation
+            raw.get("ai_recommendation")
+            or raw.get("aiRecommendation")
+            or lineage.ai_recommendation
         ),
         source=str(raw.get("source") or "settled_ledger"),
     )
@@ -65,17 +73,29 @@ def _operator_intent(lineage: CanonicalSettledOutcomeLineage) -> OperatorIntentS
 def _capital_authority(lineage: CanonicalSettledOutcomeLineage) -> CapitalAuthoritySnapshot:
     """Rehydrate the authoritative capital snapshot carried by the settled ledger."""
     raw = _mapping(lineage.capital_engine_state)
-    family = _mapping(raw.get("family_allocatable_wei") or raw.get("familyAllocatableWei"))
+    family = _mapping(
+        raw.get("family_allocatable_wei") or raw.get("familyAllocatableWei")
+    )
     return CapitalAuthoritySnapshot(
         authority_id=str(raw.get("authority_id") or raw.get("authorityId") or "ledger"),
-        available_wei=max(0, _int(raw.get("available_wei"), raw.get("availableWei"))),
-        allocatable_wei=max(0, _int(raw.get("allocatable_wei"), raw.get("allocatableWei"))),
+        available_wei=max(
+            0, _int(raw.get("available_wei"), raw.get("availableWei"))
+        ),
+        allocatable_wei=max(
+            0, _int(raw.get("allocatable_wei"), raw.get("allocatableWei"))
+        ),
         family_allocatable_wei={str(k): max(0, _int(v)) for k, v in family.items()},
         status=str(raw.get("status") or "unknown"),
         freshness_class=str(
-            raw.get("freshness_class") or raw.get("freshnessClass") or "settled_snapshot"
+            raw.get("freshness_class")
+            or raw.get("freshnessClass")
+            or "settled_snapshot"
         ),
-        reason_codes=[str(x) for x in (raw.get("reason_codes") or raw.get("reasonCodes") or []) if str(x)],
+        reason_codes=[
+            str(x)
+            for x in (raw.get("reason_codes") or raw.get("reasonCodes") or [])
+            if str(x)
+        ],
         source=str(raw.get("source") or "capital_engine_state"),
     )
 
@@ -149,7 +169,9 @@ def ingest_settled_ledger_record(
             fill_quantity=_float(
                 execution_meta.get("fill_quantity"), metadata.get("fill_quantity")
             ),
-            fill_price=_float(execution_meta.get("fill_price"), metadata.get("fill_price")),
+            fill_price=_float(
+                execution_meta.get("fill_price"), metadata.get("fill_price")
+            ),
             slippage_bps=_float(
                 execution_meta.get("slippage_bps"),
                 metadata.get("realized_slippage_bps"),
