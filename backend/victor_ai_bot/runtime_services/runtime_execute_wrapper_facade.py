@@ -5,6 +5,7 @@ import time
 from typing import Any, Awaitable, Callable, Tuple
 
 from ..execution import try_execute_opportunity
+from ..execution_identity import attach_execution_identity, create_execution_identity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
@@ -73,6 +74,16 @@ class RuntimeExecuteWrapperFacade:
                 rpc_client_cls(read_url, timeout_s=10.0, max_concurrency=20, max_batch=50) as rpc_r,
                 rpc_client_cls(send_url, timeout_s=10.0, max_concurrency=10, max_batch=20) as rpc_s,
             ):
+                # This is the production execution-attempt boundary.  The ID is
+                # created only after canonical decision lineage exists and is
+                # propagated into every downstream execution/settlement record.
+                execution_identity = create_execution_identity(decision, opp)
+                attach_execution_identity(
+                    execution_identity,
+                    decision=decision,
+                    opp=opp,
+                )
+
                 t1 = time.perf_counter()
                 span = LatencySpan()
 
@@ -106,6 +117,16 @@ class RuntimeExecuteWrapperFacade:
                         )
                 else:
                     res = await _core()
+
+                # The execution adapter/result may add the transaction hash and
+                # other physical facts. Preserve the canonical execution-attempt
+                # identity alongside those facts before bookkeeping/persistence.
+                attach_execution_identity(
+                    execution_identity,
+                    decision=decision,
+                    opp=opp,
+                    result=res,
+                )
 
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
