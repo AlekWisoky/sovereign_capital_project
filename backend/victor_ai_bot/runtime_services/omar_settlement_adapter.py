@@ -43,6 +43,44 @@ def _float(*values: Any) -> float:
     return 0.0
 
 
+def _runtime_capital_snapshot(runtime: Any) -> dict[str, Any]:
+    try:
+        reader = getattr(runtime, "capital_engine_state", None)
+        if callable(reader):
+            value = reader()
+            if isinstance(value, Mapping):
+                return dict(value)
+    except _SAFE:
+        pass
+    return {}
+
+
+def _runtime_prime_snapshot(runtime: Any, pending: Mapping[str, Any]) -> dict[str, Any]:
+    prime = _mapping(pending.get("internal_prime") or pending.get("internalPrime"))
+    if prime:
+        return prime
+    service = getattr(runtime, "_internal_prime", None)
+    if service is None:
+        return {}
+    snapshot: dict[str, Any] = {}
+    try:
+        state_fn = getattr(service, "state", None)
+        if callable(state_fn):
+            value = state_fn()
+            if isinstance(value, Mapping):
+                snapshot.update(value)
+    except _SAFE:
+        pass
+    for attr in ("authority_id", "authorityId", "loan_id", "loanId"):
+        try:
+            value = getattr(service, attr, None)
+        except _SAFE:
+            value = None
+        if value not in (None, ""):
+            snapshot[attr] = value
+    return snapshot
+
+
 def _learning_outcome(
     *,
     pending: Mapping[str, Any],
@@ -74,7 +112,9 @@ def _learning_outcome(
             pending.get("realized_slippage_bps"),
         ),
         "latency_ms": int(submit_to_receipt_ms),
-        "amount_in_wei": _int(pending.get("amount_in"), pending.get("amount_in_wei"), expected_after),
+        "amount_in_wei": _int(
+            pending.get("amount_in"), pending.get("amount_in_wei"), expected_after
+        ),
         "route_id": _text(pending.get("route_id")),
         "opportunity_id": _text(pending.get("opportunity_id")),
     }
@@ -101,6 +141,15 @@ def install_receipt_settlement_hook() -> None:
             return result
 
         pending = _mapping(kwargs.get("pending"))
+        capital_state = _runtime_capital_snapshot(runtime)
+        if capital_state:
+            pending["capital_engine_state"] = capital_state
+        prime_state = _runtime_prime_snapshot(runtime, pending)
+        if prime_state:
+            pending["internal_prime"] = prime_state
+        if "capital_admission" not in pending and isinstance(result.get("capitalAdmission"), Mapping):
+            pending["capital_admission"] = dict(result.get("capitalAdmission") or {})
+
         decoded = _mapping(kwargs.get("decoded"))
         status = _int(kwargs.get("status"))
         tx_hash = _text(kwargs.get("tx_hash"))
