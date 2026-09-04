@@ -142,8 +142,8 @@ class OmarTrainer:
         stats = OmarTrainStats(
             episode=episode,
             mean_reward=float(np.mean(rewards)) if len(rewards) else 0.0,
-            mean_coordination=float(np.mean(coord_hist)) if len(coord_hist) else 0.0,
-            mean_conflict=float(np.mean(conflict_hist)) if len(conflict_hist) else 0.0,
+            mean_coordination=float(np.mean(coord_hist)) if coord_hist else 0.0,
+            mean_conflict=float(np.mean(conflict_hist)) if conflict_hist else 0.0,
             ppo=ppo,
         )
         self.last_stats = stats
@@ -185,7 +185,7 @@ class OmarTrainer:
         """Train only from settled economic truth using net profit after costs.
 
         Gas, financing/prime, slippage and execution costs are included when
-        authoritative USD amounts exist. Latency is a bounded delivery-quality
+        authoritative USD values exist. Latency is a bounded delivery-quality
         multiplier on the learning reward; it never changes accounting truth.
         """
         seen = learned = skipped = 0
@@ -201,7 +201,10 @@ class OmarTrainer:
                 skipped += 1
                 continue
 
-            economics = resolve_net_economics(outcome)
+            economics = resolve_net_economics(
+                outcome,
+                latency_half_life_ms=self.cfg.latency_half_life_ms,
+            )
             if not economics.complete:
                 skipped += 1
                 continue
