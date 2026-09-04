@@ -100,7 +100,8 @@ def resolve_net_economics(
     gas_cost = max(
         _usd(costs, "gas_cost_usd", "gas_usd"),
         _usd(settled, "gas_cost_usd", "gas_usd"),
-        _float(getattr(outcome, "realized_gas_cost_usd_micro", 0), 0.0) / 1_000_000.0,
+        _float(getattr(outcome, "realized_gas_cost_usd_micro", 0), 0.0)
+        / 1_000_000.0,
     )
 
     financing_cost = _usd(
@@ -127,13 +128,11 @@ def resolve_net_economics(
 
     after_gas = max(
         0.0,
-        _float(getattr(outcome, "realized_profit_after_gas_usd_micro", 0), 0.0)
-        / 1_000_000.0,
+        _float(getattr(outcome, "realized_profit_after_gas_usd_micro", 0), 0.0) / 1_000_000.0,
     )
     gross_profit = max(
         0.0,
-        _float(getattr(outcome, "realized_profit_usd_micro", 0), 0.0)
-        / 1_000_000.0,
+        _float(getattr(outcome, "realized_profit_usd_micro", 0), 0.0) / 1_000_000.0,
     )
     if gross_profit <= 0.0 and after_gas > 0.0:
         gross_profit = after_gas + gas_cost
@@ -142,7 +141,13 @@ def resolve_net_economics(
         net_profit = _float(explicit_net, 0.0)
         source = "settled_authoritative"
     else:
-        net_profit = after_gas - financing_cost - slippage_cost - execution_cost - other_cost
+        net_profit = (
+            after_gas
+            - financing_cost
+            - slippage_cost
+            - execution_cost
+            - other_cost
+        )
         # On a failed/reverted settlement, no trading profit exists but settled
         # gas is still a real economic loss.
         if not bool(getattr(outcome, "ok", False)):
@@ -174,9 +179,9 @@ def resolve_net_economics(
     latency_quality = exp(-latency / half_life)
 
     # Positive/negative financial outcomes remain the dominant signal. Faster
-    # delivery gets a bounded 0.50..1.00 multiplier instead of becoming a fake
-    # financial fee. This teaches OMAR to prefer the same net edge delivered
-    # sooner without allowing speed to turn a loss into a profit.
+    # delivery gets a bounded 0.50..1.00 multiplier instead of a fake financial
+    # fee. This teaches OMAR to prefer the same net edge delivered sooner without
+    # allowing speed to turn a loss into a profit.
     learning_reward = net_profit * (0.50 + 0.50 * latency_quality)
 
     complete = bool(
