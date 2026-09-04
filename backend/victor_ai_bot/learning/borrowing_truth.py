@@ -9,10 +9,9 @@ class BorrowingTruth:
     """Canonical borrowing lifecycle attached to one trade outcome.
 
     Values are only populated from explicit authority surfaces.  In particular,
-    ``borrow_deployed_usd`` and ``borrow_settled_usd`` are never inferred from
-    requested size or transaction success.  Missing authoritative values remain
-    zero and are marked unavailable so OMAR cannot learn from a fabricated
-    borrowing event.
+    deployed and settled amounts are never inferred from requested size or
+    transaction success.  Missing authoritative values remain zero and carry a
+    reason code so OMAR cannot learn from a fabricated borrowing event.
     """
 
     requested_usd: float = 0.0
@@ -85,13 +84,12 @@ def resolve_borrowing_truth(
     result: Dict[str, Any] | None = None,
     outcome: Dict[str, Any] | None = None,
 ) -> BorrowingTruth:
-    """Resolve borrowing truth from authoritative runtime/context surfaces.
+    """Resolve requested/authorized/deployed/settled borrowing truth.
 
     Priority is deliberate:
-      1. explicit settled outcome fields;
-      2. runtime ``internal_prime_state()`` for actual prime state;
-      3. explicit capital-admission/request fields for requested/authorized;
-      4. explicit execution fields for deployed.
+      1. explicit trade-linked borrowing lifecycle fields;
+      2. the authoritative ``internal_prime_state()`` and its linked loan;
+      3. capital-admission fields for requested/authorized values.
 
     The resolver is read-only and never mutates capital authority.
     """
@@ -100,10 +98,7 @@ def resolve_borrowing_truth(
     outcome_m = _mapping(outcome)
 
     context = _mapping(pending_m.get("pending_context"))
-    capital_admission = _nested(
-        pending_m,
-        ("capital_admission", "capitalAdmission"),
-    )
+    capital_admission = _nested(pending_m, ("capital_admission", "capitalAdmission"))
     if not capital_admission:
         capital_admission = _nested(context, ("capital_admission", "capitalAdmission"))
     admission_details = _nested(capital_admission, ("details",))
@@ -131,6 +126,21 @@ def resolve_borrowing_truth(
         if prime_state:
             prime_source = "transaction_context_internal_prime"
 
+    loan_id = str(
+        _first(
+            explicit_borrow,
+            ("loan_id", "loanId"),
+            _first(pending_m, ("loan_id", "loanId"), ""),
+        )
+        or ""
+    )
+
+    linked_loan: Dict[str, Any] = {}
+    if loan_id and isinstance(prime_state.get("loans"), dict):
+        candidate_loan = prime_state["loans"].get(loan_id)
+        if isinstance(candidate_loan, dict):
+            linked_loan = dict(candidate_loan)
+
     requested = _float(
         _first(
             explicit_borrow,
@@ -138,7 +148,7 @@ def resolve_borrowing_truth(
             _first(
                 admission_details,
                 ("requested_notional_usd", "requestedNotionalUsd", "notional_usd", "notionalUsd"),
-                0.0,
+                _first(linked_loan, ("notional_usd", "notionalUsd"), 0.0),
             ),
         )
     )
@@ -148,8 +158,19 @@ def resolve_borrowing_truth(
             ("authorized_usd", "authorizedUsd"),
             _first(
                 admission_details,
-                ("authorized_notional_usd", "authorizedNotionalUsd", "approved_notional_usd", "approvedNotionalUsd"),
-                requested if bool(capital_admission.get("allowed", capital_admission.get("approved", False))) else 0.0,
+                (
+                    "authorized_notional_usd",
+                    "authorizedNotionalUsd",
+                    "approved_notional_usd",
+                    "approvedNotionalUsd",
+                ),
+                requested
+                if bool(
+                    capital_admission.get(
+                        "allowed", capital_admission.get("approved", False)
+                    )
+                )
+                else 0.0,
             ),
         )
     )
@@ -160,7 +181,12 @@ def resolve_borrowing_truth(
             ("deployed_usd", "deployedUsd", "actual_deployed_usd", "actualDeployedUsd"),
             _first(
                 result_m,
-                ("borrow_deployed_usd", "borrowDeployedUsd", "deployed_borrow_usd", "deployedBorrowUsd"),
+                (
+                    "borrow_deployed_usd",
+                    "borrowDeployedUsd",
+                    "deployed_borrow_usd",
+                    "deployedBorrowUsd",
+                ),
                 _first(pending_m, ("borrow_deployed_usd", "borrowDeployedUsd"), 0.0),
             ),
         )
@@ -171,7 +197,12 @@ def resolve_borrowing_truth(
             ("settled_usd", "settledUsd", "actual_settled_usd", "actualSettledUsd"),
             _first(
                 outcome_m,
-                ("borrow_settled_usd", "borrowSettledUsd", "settled_borrow_usd", "settledBorrowUsd"),
+                (
+                    "borrow_settled_usd",
+                    "borrowSettledUsd",
+                    "settled_borrow_usd",
+                    "settledBorrowUsd",
+                ),
                 0.0,
             ),
         )
@@ -179,14 +210,36 @@ def resolve_borrowing_truth(
     realized_cost = _float(
         _first(
             explicit_borrow,
-            ("realized_cost_usd", "realizedCostUsd", "realized_borrow_cost_usd", "realizedBorrowCostUsd"),
-            _first(
-                outcome_m,
-                ("realized_borrow_cost_usd", "realizedBorrowCostUsd"),
-                0.0,
+            (
+                "realized_cost_usd",
+                "realizedCostUsd",
+                "realized_borrow_cost_usd",
+                "realizedBorrowCostUsd",
             ),
+            _first(outcome_m, ("realized_borrow_cost_usd", "realizedBorrowCostUsd"), 0.0),
         )
     )
+
+    # The internal-prime authority can resolve this exact trade when the loan is
+    # retained in its authoritative loan map.  A settled loan proves deployed
+    # and settled notional; an open/disputed loan proves deployment but not
+    # settlement.  It does not retroactively prove a loan merely because the
+    # global borrowed balance is non-zero.
+    if linked_loan:
+        loan_notional = _float(_first(linked_loan, ("notional_usd", "notionalUsd"), 0.0))
+        if requested <= 0.0:
+            requested = loan_notional
+        if authorized <= 0.0:
+            authorized = loan_notional
+        status = str(linked_loan.get("status") or "open").strip().lower()
+        if deployed <= 0.0 and status in {"open", "settled", "disputed"}:
+            deployed = loan_notional
+        if settled <= 0.0 and status == "settled":
+            settled = loan_notional
+        if realized_cost <= 0.0:
+            realized_cost = _float(
+                _first(linked_loan, ("borrow_cost_usd", "borrowCostUsd"), 0.0)
+            )
 
     capacity = _float(
         _first(
@@ -202,18 +255,7 @@ def resolve_borrowing_truth(
             _first(prime_state, ("utilization", "primeUtilization"), 0.0),
         )
     )
-    loan_id = str(
-        _first(
-            explicit_borrow,
-            ("loan_id", "loanId"),
-            _first(pending_m, ("loan_id", "loanId"), ""),
-        )
-        or ""
-    )
 
-    # A state snapshot can prove that borrowing is currently outstanding, but it
-    # cannot prove that this particular trade deployed or settled a loan.  Only
-    # explicit trade-linked lifecycle values receive those labels.
     if settled > 0.0:
         status = "settled"
         reason = "borrowing_settled"
@@ -230,11 +272,7 @@ def resolve_borrowing_truth(
         status = "unavailable"
         reason = "borrowing_truth_unavailable"
 
-    source = "explicit_trade_context" if explicit_borrow else (prime_source or "capital_admission")
-    if status in {"deployed", "settled"} and not explicit_borrow:
-        status = "authorized" if authorized > 0.0 else "requested"
-        reason = "trade_linked_borrowing_lifecycle_missing"
-
+    source = "explicit_trade_context" if explicit_borrow else ("internal_prime_loan" if linked_loan else (prime_source or "capital_admission"))
     return BorrowingTruth(
         requested_usd=max(0.0, requested),
         authorized_usd=max(0.0, authorized),
