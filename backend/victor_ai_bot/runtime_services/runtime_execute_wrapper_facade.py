@@ -64,7 +64,11 @@ class RuntimeExecuteWrapperFacade:
         attributed separately while remaining under the same decision lineage.
         """
         decision_identity = identity_from(decision)
-        if decision_identity is None or not decision_identity.decision_id or not decision_identity.correlation_id:
+        if (
+            decision_identity is None
+            or not decision_identity.decision_id
+            or not decision_identity.correlation_id
+        ):
             return res
 
         existing = identity_from(res)
@@ -171,7 +175,7 @@ class RuntimeExecuteWrapperFacade:
                 # same boundary so execution/settlement cannot silently lose the
                 # decision-time expectation.
                 res = self._ensure_execution_identity(res, decision)
-                res = self._propagate_decision_economics(res, decision, opp)
+                res = RuntimeExecuteWrapperFacade._propagate_decision_economics(res, decision, opp)
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
                     bookkeeping_handler = getattr(

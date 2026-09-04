@@ -66,9 +66,11 @@ def build_decision_economic_context(
             profitability.get("profit_after_costs_wei"),
             meta.get("expected_profit_after_costs_wei"),
             getattr(opp, "expected_profit_after_costs_wei", None),
-            meta.get("safety", {}).get("profit_after_costs_wei")
-            if isinstance(meta.get("safety"), Mapping)
-            else None,
+            (
+                meta.get("safety", {}).get("profit_after_costs_wei")
+                if isinstance(meta.get("safety"), Mapping)
+                else None
+            ),
             getattr(opp, "expected_profit_raw", None),
         ),
         0,
@@ -87,9 +89,11 @@ def build_decision_economic_context(
             decision_meta.get("expected_gas_cost_wei"),
             profitability.get("gas_cost_wei"),
             meta.get("gas_cost_wei"),
-            meta.get("safety", {}).get("gas_cost_wei")
-            if isinstance(meta.get("safety"), Mapping)
-            else None,
+            (
+                meta.get("safety", {}).get("gas_cost_wei")
+                if isinstance(meta.get("safety"), Mapping)
+                else None
+            ),
         ),
         0,
     )

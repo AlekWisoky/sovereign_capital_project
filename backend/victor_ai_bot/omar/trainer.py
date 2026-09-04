@@ -185,9 +185,7 @@ class OmarTrainer:
         if not isinstance(decision_context, dict):
             decision_context = context.get("decision_context") if isinstance(context, dict) else {}
         economic = (
-            decision_context.get("economic_context")
-            if isinstance(decision_context, dict)
-            else {}
+            decision_context.get("economic_context") if isinstance(decision_context, dict) else {}
         )
         if not isinstance(economic, dict):
             economic = context.get("economicContext") if isinstance(context, dict) else {}

@@ -38,9 +38,7 @@ class RuntimeDecisionFinalizeFacade:
             pass
         return decision
 
-    def _attach_decision_economic_context(
-        self, decision: Any, *, opps: List[Opportunity]
-    ) -> Any:
+    def _attach_decision_economic_context(self, decision: Any, *, opps: List[Opportunity]) -> Any:
         """Freeze expected economics/delivery state at the decision boundary.
 
         The snapshot is observational and is copied downstream into execution
