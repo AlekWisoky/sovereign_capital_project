@@ -48,6 +48,10 @@ class OmarConfig:
     outcome_bootstrap_history: int = 500
     policy_checkpoint_enabled: bool = True
 
+    # Delivery-quality objective. This modifies learning reward only; it never
+    # changes settled financial P&L.
+    latency_half_life_ms: float = 750.0
+
     roles: List[str] | None = None
 
     def __post_init__(self):
@@ -59,3 +63,4 @@ class OmarConfig:
         self.real_outcome_poll_seconds = max(0.25, float(self.real_outcome_poll_seconds))
         self.real_outcome_batch_size = max(1, int(self.real_outcome_batch_size))
         self.outcome_bootstrap_history = max(1, int(self.outcome_bootstrap_history))
+        self.latency_half_life_ms = max(1.0, float(self.latency_half_life_ms))
