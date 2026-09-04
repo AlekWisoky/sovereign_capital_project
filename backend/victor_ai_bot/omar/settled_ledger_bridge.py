@@ -7,8 +7,8 @@ from victor_ai_bot.runtime_services.settled_outcome_lineage import (
     resolve_settled_lineage,
 )
 
-from .real_learning import CapitalAuthoritySnapshot, OmarRealLearningLoop
 from .operator_intent import OperatorIntentSnapshot
+from .real_learning import CapitalAuthoritySnapshot, OmarRealLearningLoop
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -54,8 +54,12 @@ def _operator_intent(lineage: CanonicalSettledOutcomeLineage) -> OperatorIntentS
         risk_multiplier=_float(
             raw.get("risk_multiplier"), raw.get("riskMultiplier"), 1.0
         ),
-        force_send_mode=str(raw.get("force_send_mode") or raw.get("forceSendMode") or ""),
-        force_gas_mode=str(raw.get("force_gas_mode") or raw.get("forceGasMode") or ""),
+        force_send_mode=str(
+            raw.get("force_send_mode") or raw.get("forceSendMode") or ""
+        ),
+        force_gas_mode=str(
+            raw.get("force_gas_mode") or raw.get("forceGasMode") or ""
+        ),
         desired_wealth_goal=_mapping(
             raw.get("desired_wealth_goal")
             or raw.get("desiredWealthGoal")
@@ -84,7 +88,9 @@ def _capital_authority(lineage: CanonicalSettledOutcomeLineage) -> CapitalAuthor
         allocatable_wei=max(
             0, _int(raw.get("allocatable_wei"), raw.get("allocatableWei"))
         ),
-        family_allocatable_wei={str(k): max(0, _int(v)) for k, v in family.items()},
+        family_allocatable_wei={
+            str(k): max(0, _int(v)) for k, v in family.items()
+        },
         status=str(raw.get("status") or "unknown"),
         freshness_class=str(
             raw.get("freshness_class")
