@@ -110,6 +110,11 @@ class CanonicalSettledOutcomeLineage:
     reason_codes: list[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def latency_ms(self) -> float:
+        """Stable compatibility alias for the realized end-to-end latency."""
+        return self.realized_latency_ms
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
