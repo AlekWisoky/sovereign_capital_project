@@ -44,7 +44,11 @@ def test_settled_ledger_record_resolves_identity_and_latency():
             "correlation_id": identity.correlation_id,
             "execution_id": identity.execution_id,
             "sizing_id": "sizing-001",
-            "outcome": {"settlement_id": identity.settlement_id, "status": "settled"},
+            "outcome": {
+                "outcome_id": "outcome-001",
+                "settlement_id": identity.settlement_id,
+                "status": "settled",
+            },
             "latency_stages_ms": {"total": 320},
             "action": "EXECUTE",
             "opportunity_id": "opp-001",
@@ -59,6 +63,7 @@ def test_settled_ledger_record_resolves_identity_and_latency():
     assert lineage.decision_id == identity.decision_id
     assert lineage.correlation_id == identity.correlation_id
     assert lineage.execution_id == identity.execution_id
+    assert lineage.outcome_id == "outcome-001"
     assert lineage.sizing_id == "sizing-001"
     assert lineage.settlement_id == identity.settlement_id
     assert lineage.latency_class == "fast"
@@ -66,5 +71,6 @@ def test_settled_ledger_record_resolves_identity_and_latency():
     assert enriched["decision_id"] == identity.decision_id
     assert enriched["correlation_id"] == identity.correlation_id
     assert enriched["execution_id"] == identity.execution_id
+    assert enriched["outcome_id"] == "outcome-001"
     assert enriched["sizing_id"] == "sizing-001"
     assert enriched["settlement_id"] == identity.settlement_id
