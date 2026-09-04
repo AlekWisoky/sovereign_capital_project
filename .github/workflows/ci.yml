@@ -25,9 +25,6 @@ jobs:
       - name: Ruff
         run: |
           ruff check backend
-          while read -r slice; do
-            xargs -a "$slice" ruff check
-          done < backend/mypy_targets.txt
 
       - name: Black
         env:
