@@ -325,7 +325,7 @@ class RuntimeStateFacade:
         )
 
     def metrics_state(self) -> dict:
-        """Best-effort metrics snapshot for AQE/meta layers."""
+    ​    """Best-effort metrics snapshot for AQE/meta layers."""
         aux = getattr(self, "_auxiliary_state_service", None)
         if aux is None or not hasattr(aux, "metrics_state"):
             return {}
