@@ -21,6 +21,32 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Repair baseline withdraw service typing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text()
+          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          if old_chain not in text:
+              raise SystemExit("expected chain expression not found")
+          text = text.replace(old_chain, new_chain, 1)
+
+          old_result = '        result = {"ok": False, "reason_code": "preview_id_mismatch"}'
+          new_result = '        result: Dict[str, Any] = {"ok": False, "reason_code": "preview_id_mismatch"}'
+          if old_result not in text:
+              raise SystemExit("expected result initialization not found")
+          text = text.replace(old_result, new_result, 1)
+
+          old_typed_result = '        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],'
+          new_typed_result = '        result = {\n            "ok": True,\n            "status": state["last_status"],'
+          if old_typed_result not in text:
+              raise SystemExit("expected second result annotation not found")
+          text = text.replace(old_typed_result, new_typed_result, 1)
+          path.write_text(text)
+          PY
       - name: Format OMAR economic learning Python files
         run: |
           black \
@@ -37,10 +63,11 @@ jobs:
             backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py \
             backend/victor_ai_bot/runtime_services/runtime_execute_wrapper_facade.py \
             backend/victor_ai_bot/runtime_services/settled_outcome_lineage.py \
+            backend/victor_ai_bot/runtime_services/withdraw_all_service.py \
             backend/victor_ai_bot/sentry_config.py \
             backend/victor_ai_bot/treasury/capital_compounding.py \
             backend/tests/test_omar_canonical_economic_lineage.py
-      - name: Commit formatting changes
+      - name: Commit formatting and typing repairs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -58,12 +85,13 @@ jobs:
             backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py \
             backend/victor_ai_bot/runtime_services/runtime_execute_wrapper_facade.py \
             backend/victor_ai_bot/runtime_services/settled_outcome_lineage.py \
+            backend/victor_ai_bot/runtime_services/withdraw_all_service.py \
             backend/victor_ai_bot/sentry_config.py \
             backend/victor_ai_bot/treasury/capital_compounding.py \
             backend/tests/test_omar_canonical_economic_lineage.py
           if git diff --cached --quiet; then
-            echo "Formatting already clean"
+            echo "Formatting and typing repairs already clean"
             exit 0
           fi
-          git commit -m "style: format OMAR economic learning files"
+          git commit -m "fix: repair withdraw service typing for Linux gate"
           git push
