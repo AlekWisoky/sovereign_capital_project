@@ -51,7 +51,7 @@ class LearningOutcome:
     context: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        payload = {
+        return {
             "ledgerId": self.ledger_id,
             "ts": self.ts,
             "chain": self.chain,
@@ -86,7 +86,6 @@ class LearningOutcome:
             "borrowing": self.borrowing.to_dict(),
             "context": dict(self.context),
         }
-        return payload
 
 
 class CanonicalOutcomeLedger:
@@ -94,9 +93,8 @@ class CanonicalOutcomeLedger:
 
     Financial truth stays in the existing PnL store. OMAR reads this normalized
     view and joins the transaction-linked learning record by transaction hash.
-    Borrowing truth is resolved from the trade-linked context and authoritative
-    internal-prime state; global prime balances are never treated as proof that
-    this trade borrowed capital.
+    The live runtime is optional but, when bound, is used to resolve the exact
+    internal-prime loan and its current lifecycle state.
     """
 
     def __init__(
@@ -105,9 +103,11 @@ class CanonicalOutcomeLedger:
         data_dir: str,
         chain: str,
         bootstrap_history: int = 500,
+        runtime: Any | None = None,
     ):
         self.data_dir = str(data_dir or "")
         self.chain = str(chain or "")
+        self.runtime = runtime
         self.pnl_path = os.path.join(self.data_dir, f"pnl_{self.chain}.sqlite")
         self.training_path = os.path.join(
             self.data_dir,
@@ -123,6 +123,10 @@ class CanonicalOutcomeLedger:
         self._seen: set[str] = set()
         self.last_error = ""
         self._load_cursor()
+
+    def bind_runtime(self, runtime: Any | None) -> None:
+        """Bind the live runtime without changing ledger ownership."""
+        self.runtime = runtime
 
     @staticmethod
     def _int(value: Any, default: int = 0) -> int:
@@ -201,7 +205,11 @@ class CanonicalOutcomeLedger:
         training_extra = (
             training.get("extra") if isinstance(training.get("extra"), dict) else {}
         )
-        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
+        brain = (
+            training_extra.get("brain")
+            if isinstance(training_extra.get("brain"), dict)
+            else {}
+        )
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
@@ -211,6 +219,9 @@ class CanonicalOutcomeLedger:
         penalty = 0 if ok else abs(expected_after)
         reward_num = realized_for_reward - penalty
 
+        internal_prime_context = training_extra.get("internal_prime")
+        if not isinstance(internal_prime_context, dict):
+            internal_prime_context = training_extra.get("internalPrime")
         context = {
             "trainingTs": self._int(training.get("ts"), 0),
             "strategy": str(training_extra.get("strategy") or ""),
@@ -249,23 +260,21 @@ class CanonicalOutcomeLedger:
                 if isinstance(training_extra.get("capital"), dict)
                 else {}
             ),
-            "internalPrime": (
-                dict(training_extra.get("internal_prime") or training_extra.get("internalPrime") or {})
-                if isinstance(
-                    training_extra.get("internal_prime") or training_extra.get("internalPrime") or {},
-                    dict,
-                )
-                else {}
-            ),
+            "internalPrime": dict(internal_prime_context or {})
+            if isinstance(internal_prime_context, dict)
+            else {},
         }
 
         borrowing = resolve_borrowing_truth(
+            runtime=self.runtime,
             pending={
                 "pending_context": training_extra,
                 "capital_admission": training_extra.get("capital_admission")
                 or training_extra.get("capitalAdmission")
                 or {},
-                "loan_id": training_extra.get("loan_id") or training_extra.get("loanId") or "",
+                "loan_id": training_extra.get("loan_id")
+                or training_extra.get("loanId")
+                or "",
                 "borrowing_truth": training_extra.get("borrowing_truth")
                 or training_extra.get("borrowingTruth")
                 or {},
@@ -275,6 +284,7 @@ class CanonicalOutcomeLedger:
                 "realized_borrow_cost_usd": row.get("realized_borrow_cost_usd"),
             },
         )
+        context["borrowing"] = borrowing.to_dict()
 
         return LearningOutcome(
             ledger_id=self._int(row.get("id"), 0),
@@ -347,4 +357,5 @@ class CanonicalOutcomeLedger:
             "trainingPath": self.training_path,
             "seenOutcomeCount": len(self._seen),
             "lastError": self.last_error,
+            "capitalAuthorityBound": bool(self.runtime is not None),
         }
