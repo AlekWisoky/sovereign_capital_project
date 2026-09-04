@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+from .borrowing_truth import BorrowingTruth, resolve_borrowing_truth
 
 _SAFE_LEDGER_EXCEPTIONS = (OSError, sqlite3.Error, TypeError, ValueError)
 
@@ -46,10 +47,11 @@ class LearningOutcome:
     reward_scaled_float: float = 0.0
     latency_ms: int = 0
     submit_to_receipt_ms: int = 0
+    borrowing: BorrowingTruth = field(default_factory=BorrowingTruth)
     context: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "ledgerId": self.ledger_id,
             "ts": self.ts,
             "chain": self.chain,
@@ -81,15 +83,20 @@ class LearningOutcome:
             "rewardScaledFloat": self.reward_scaled_float,
             "latencyMs": self.latency_ms,
             "submitToReceiptMs": self.submit_to_receipt_ms,
+            "borrowing": self.borrowing.to_dict(),
             "context": dict(self.context),
         }
+        return payload
 
 
 class CanonicalOutcomeLedger:
     """Read-only canonical outcome view backed by PnLStore's SQLite journal.
 
     Financial truth stays in the existing PnL store. OMAR reads this normalized
-    view and joins the existing RL training record by transaction hash.
+    view and joins the transaction-linked learning record by transaction hash.
+    Borrowing truth is resolved from the trade-linked context and authoritative
+    internal-prime state; global prime balances are never treated as proof that
+    this trade borrowed capital.
     """
 
     def __init__(
@@ -191,7 +198,9 @@ class CanonicalOutcomeLedger:
     ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        training_extra = (
+            training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        )
         brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
@@ -235,7 +244,37 @@ class CanonicalOutcomeLedger:
                 if isinstance(training_extra.get("capture"), dict)
                 else {}
             ),
+            "capital": (
+                dict(training_extra.get("capital") or {})
+                if isinstance(training_extra.get("capital"), dict)
+                else {}
+            ),
+            "internalPrime": (
+                dict(training_extra.get("internal_prime") or training_extra.get("internalPrime") or {})
+                if isinstance(
+                    training_extra.get("internal_prime") or training_extra.get("internalPrime") or {},
+                    dict,
+                )
+                else {}
+            ),
         }
+
+        borrowing = resolve_borrowing_truth(
+            pending={
+                "pending_context": training_extra,
+                "capital_admission": training_extra.get("capital_admission")
+                or training_extra.get("capitalAdmission")
+                or {},
+                "loan_id": training_extra.get("loan_id") or training_extra.get("loanId") or "",
+                "borrowing_truth": training_extra.get("borrowing_truth")
+                or training_extra.get("borrowingTruth")
+                or {},
+            },
+            outcome={
+                "borrow_settled_usd": row.get("borrow_settled_usd"),
+                "realized_borrow_cost_usd": row.get("realized_borrow_cost_usd"),
+            },
+        )
 
         return LearningOutcome(
             ledger_id=self._int(row.get("id"), 0),
@@ -273,6 +312,7 @@ class CanonicalOutcomeLedger:
             reward_scaled_float=reward_num / float(denom) * 1_000_000.0,
             latency_ms=self._int(training_extra.get("latency_ms"), 0),
             submit_to_receipt_ms=self._int(training_extra.get("submit_to_receipt_ms"), 0),
+            borrowing=borrowing,
             context=context,
         )
 
