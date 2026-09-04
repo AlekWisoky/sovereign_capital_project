@@ -154,11 +154,7 @@ class OmarTrainer:
         state_dim: int,
         borrowing: Any | None = None,
     ) -> np.ndarray:
-        """Encode the RL state while exposing borrowing economics to the policy.
-
-        The first six slots are reserved for normalized borrowing features; the
-        remaining dimensions preserve the deterministic RL-state representation.
-        """
+        """Encode the RL state while exposing borrowing economics to the policy."""
         key = str(rl_state or "unknown")
         vec = encode_role_vector(f"OMAR_STATE:{key}", state_dim).astype(np.float32)
         if borrowing is None or state_dim < 6:
@@ -204,9 +200,10 @@ class OmarTrainer:
                 pass
         return DEFAULT_ACTION_KEYS.index("WAIT")
 
-    @staticmethod
-    def _borrowing_learning_ready(outcome: Any) -> bool:
-        """Only learn a borrowing-bearing trade after the borrowing is settled."""
+    def _borrowing_learning_ready(self, outcome: Any) -> bool:
+        """Only learn a borrowing-bearing trade after authoritative settlement."""
+        if not bool(getattr(self.cfg, "require_settled_borrowing_for_learning", True)):
+            return True
         borrowing = getattr(outcome, "borrowing", None)
         if borrowing is None:
             return True
