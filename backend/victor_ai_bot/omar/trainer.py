@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Sequence
 
 import numpy as np
 
+from ..learning.net_economics import resolve_net_economics
 from .advantage import compute_gae, hierarchical_advantage
 from .config import OmarConfig
 from .env import SelfPlayEnv
@@ -58,6 +59,8 @@ class OmarTrainer:
             "learned": 0,
             "skipped": 0,
             "mean_reward_scaled": 0.0,
+            "mean_net_profit_after_costs_usd": 0.0,
+            "mean_latency_quality": 0.0,
             "last_tx_hash": "",
         }
 
@@ -153,12 +156,18 @@ class OmarTrainer:
 
     @staticmethod
     def _target_action_index(outcome: Any) -> int:
-        """Translate a settled trade into OMAR's action vocabulary.
+        """Prefer the exact recorded policy action; heuristics are fallback only."""
+        try:
+            exact = int(getattr(outcome, "rl_action_index", -1))
+            if 0 <= exact < len(DEFAULT_ACTION_KEYS):
+                return exact
+        except (TypeError, ValueError):
+            pass
 
-        Receipt success alone is not enough to reinforce EXECUTE: a successful
-        transaction with zero/non-positive realized reward is treated as WAIT.
-        Failed aggressive decisions reinforce DECREASE_RISK.
-        """
+        action = str(getattr(outcome, "action", "") or "").upper()
+        if action in DEFAULT_ACTION_KEYS:
+            return DEFAULT_ACTION_KEYS.index(action)
+
         reward = float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0)
         if bool(getattr(outcome, "ok", False)) and reward > 0.0:
             return DEFAULT_ACTION_KEYS.index("EXECUTE")
@@ -173,54 +182,69 @@ class OmarTrainer:
         return DEFAULT_ACTION_KEYS.index("WAIT")
 
     def learn_from_real_outcomes(self, outcomes: Sequence[Any]) -> Dict[str, Any]:
-        """Train OMAR from finalized real-market outcomes.
+        """Train only from settled economic truth using net profit after costs.
 
-        The financial result comes from the canonical outcome ledger. The
-        transaction-linked RL state supplies decision context; no synthetic
-        market reward is mixed into this update.
+        Gas, financing/prime, slippage and execution costs are included when
+        authoritative USD amounts exist. Latency is a bounded delivery-quality
+        multiplier on the learning reward; it never changes accounting truth.
         """
         seen = learned = skipped = 0
         rewards: List[float] = []
+        net_profits: List[float] = []
+        latency_quality: List[float] = []
         last_tx_hash = ""
+
         for outcome in list(outcomes or []):
             seen += 1
             rl_state = str(getattr(outcome, "rl_state", "") or "")
             if not rl_state:
                 skipped += 1
                 continue
+
+            economics = resolve_net_economics(outcome)
+            if not economics.complete:
+                skipped += 1
+                continue
+
             action_index = self._target_action_index(outcome)
             role_name = "ARBITRAGE_AGENT"
             context = getattr(outcome, "context", {}) or {}
             brain = context.get("brain") if isinstance(context, dict) else {}
             if isinstance(brain, dict):
                 role_name = str(brain.get("role") or role_name)
+
             role_vec = self._role_embeds.get(role_name)
             if role_vec is None:
                 role_vec = encode_role_vector(role_name, self.cfg.role_vector_size)
             state_vec = self._state_vector(rl_state, self.state_dim)
+
             stats = self.policy.update_from_real_outcome(
                 role_vec=role_vec,
                 state_vec=state_vec,
                 action_index=action_index,
-                reward_scaled=float(getattr(outcome, "reward_scaled_float", 0.0) or 0.0),
+                reward_scaled=float(economics.learning_reward),
                 learning_rate=float(self.cfg.learning_rate),
                 clip_epsilon=float(self.cfg.clip_epsilon),
             )
             if float(stats.get("updated", 0.0)) > 0.0:
                 learned += 1
-                rewards.append(float(stats.get("reward_scaled", 0.0) or 0.0))
+                rewards.append(float(economics.learning_reward))
+                net_profits.append(float(economics.net_profit_after_costs_usd))
+                latency_quality.append(float(economics.latency_quality))
                 last_tx_hash = str(getattr(outcome, "tx_hash", "") or "")
             else:
                 skipped += 1
 
         if learned and self.cfg.policy_checkpoint_enabled:
             self.policy.save()
-        mean_reward = float(np.mean(rewards)) if rewards else 0.0
+
         self.last_real_learning = {
             "seen": int(seen),
             "learned": int(learned),
             "skipped": int(skipped),
-            "mean_reward_scaled": mean_reward,
+            "mean_reward_scaled": float(np.mean(rewards)) if rewards else 0.0,
+            "mean_net_profit_after_costs_usd": float(np.mean(net_profits)) if net_profits else 0.0,
+            "mean_latency_quality": float(np.mean(latency_quality)) if latency_quality else 0.0,
             "last_tx_hash": last_tx_hash,
             "policy_updates": int(self.policy.updates),
         }
