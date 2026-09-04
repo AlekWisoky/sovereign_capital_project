@@ -6,13 +6,7 @@ from typing import Any, Dict, Iterable
 
 @dataclass(frozen=True)
 class BorrowingTruth:
-    """Canonical borrowing lifecycle attached to one trade outcome.
-
-    Values are only populated from explicit authority surfaces.  In particular,
-    deployed and settled amounts are never inferred from requested size or
-    transaction success.  Missing authoritative values remain zero and carry a
-    reason code so OMAR cannot learn from a fabricated borrowing event.
-    """
+    """Canonical borrowing lifecycle attached to one trade outcome."""
 
     requested_usd: float = 0.0
     authorized_usd: float = 0.0
@@ -77,6 +71,23 @@ def _nested(payload: Dict[str, Any], names: Iterable[str]) -> Dict[str, Any]:
     return {}
 
 
+def _find_first_key(payload: Any, keys: Iterable[str]) -> Any:
+    wanted = set(keys)
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in wanted and value not in (None, ""):
+                return value
+            found = _find_first_key(value, keys)
+            if found not in (None, ""):
+                return found
+    elif isinstance(payload, list):
+        for value in payload:
+            found = _find_first_key(value, keys)
+            if found not in (None, ""):
+                return found
+    return None
+
+
 def resolve_borrowing_truth(
     *,
     runtime: Any | None = None,
@@ -134,6 +145,16 @@ def resolve_borrowing_truth(
         )
         or ""
     )
+    if not loan_id:
+        loan_id = str(
+            _find_first_key(
+                capital_admission,
+                ("loan_id", "loanId"),
+            )
+            or _find_first_key(admission_details, ("loan_id", "loanId"))
+            or _find_first_key(context, ("loan_id", "loanId"))
+            or ""
+        )
 
     linked_loan: Dict[str, Any] = {}
     if loan_id and isinstance(prime_state.get("loans"), dict):
@@ -220,11 +241,6 @@ def resolve_borrowing_truth(
         )
     )
 
-    # The internal-prime authority can resolve this exact trade when the loan is
-    # retained in its authoritative loan map.  A settled loan proves deployed
-    # and settled notional; an open/disputed loan proves deployment but not
-    # settlement.  It does not retroactively prove a loan merely because the
-    # global borrowed balance is non-zero.
     if linked_loan:
         loan_notional = _float(_first(linked_loan, ("notional_usd", "notionalUsd"), 0.0))
         if requested <= 0.0:
@@ -272,7 +288,11 @@ def resolve_borrowing_truth(
         status = "unavailable"
         reason = "borrowing_truth_unavailable"
 
-    source = "explicit_trade_context" if explicit_borrow else ("internal_prime_loan" if linked_loan else (prime_source or "capital_admission"))
+    source = (
+        "explicit_trade_context"
+        if explicit_borrow
+        else ("internal_prime_loan" if linked_loan else (prime_source or "capital_admission"))
+    )
     return BorrowingTruth(
         requested_usd=max(0.0, requested),
         authorized_usd=max(0.0, authorized),
