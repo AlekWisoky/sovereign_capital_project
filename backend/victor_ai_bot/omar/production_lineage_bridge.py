@@ -4,6 +4,7 @@ import inspect
 import os
 from typing import Any, Mapping
 
+from ..capital_demand import capital_demand_from_mapping
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
 from ..operator_intent import resolve_operator_intent
 
@@ -18,7 +19,9 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
+def _lineage_matches(
+    outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str, execution_id: str
+) -> bool:
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
@@ -28,15 +31,18 @@ def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opp
         return False
     if opportunity_id and _text(row.get("opportunity_id")) != opportunity_id:
         return False
+    if execution_id and _text(row.get("execution_id")) != execution_id:
+        return False
     return True
 
 
 def _patch_omar_context() -> None:
-    """Feed operator intent into OMAR without changing its authority boundary."""
+    """Feed capital authority and operator intent into OMAR as read-only context."""
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+    from victor_ai_bot.omar.lifecycle_bridge import capital_authority_context
 
     original = getattr(RuntimeDecisionFacade, "_omar_context", None)
-    if original is None or getattr(original, "_operator_intent_patched", False):
+    if original is None or getattr(original, "_production_context_patched", False):
         return
 
     def wrapped(self: Any, opp: Any, *, p_success: float, ev_wei: int):
@@ -57,9 +63,16 @@ def _patch_omar_context() -> None:
                 "ai_recommendation_confidence": float(recommendation.get("confidence") or 0.0),
             }
         )
+        context.update(capital_authority_context(self))
+        capital_admission = _dict((_dict(getattr(opp, "meta", None))).get("capital_admission"))
+        demand = capital_demand_from_mapping(capital_admission).to_dict()
+        context["capital_demand"] = demand
+        context["capital_demand_requested_usd_micro"] = int(demand["requested_usd_micro"])
+        context["capital_demand_authorized_usd_micro"] = int(demand["authorized_usd_micro"])
+        context["capital_demand_deployed_usd_micro"] = int(demand["deployed_usd_micro"])
         return context
 
-    wrapped._operator_intent_patched = True
+    wrapped._production_context_patched = True
     RuntimeDecisionFacade._omar_context = wrapped
 
 
@@ -91,6 +104,7 @@ def _patch_decision_identity() -> None:
 
 def _patch_execution_identity() -> None:
     from victor_ai_bot.runtime_services.execution_service import ExecutionService
+    from victor_ai_bot.omar.lifecycle_bridge import capital_authority_context
 
     original = getattr(ExecutionService, "handle_post_execute_bookkeeping", None)
     if original is None or getattr(original, "_production_identity_patched", False):
@@ -132,6 +146,57 @@ def _patch_execution_identity() -> None:
     ExecutionService.handle_post_execute_bookkeeping = wrapped
 
 
+def _patch_pending_execution_identity() -> None:
+    """Persist the real execution identity and capital-authority snapshot into pending state."""
+    from victor_ai_bot.runtime_services.execution_service import ExecutionService
+    from victor_ai_bot.omar.lifecycle_bridge import capital_authority_context
+
+    original = getattr(ExecutionService, "_build_pending_submission", None)
+    if original is None or getattr(original, "_production_pending_patched", False):
+        return
+
+    def wrapped(self: Any, runtime: Any, result: Any, opp: Any, *, latency_ms: int, mode: str):
+        pending = _dict(original(self, runtime, result, opp, latency_ms=latency_ms, mode=mode))
+        plan = _dict(getattr(result, "plan", None))
+        meta = _dict(getattr(opp, "meta", None))
+        brain = _dict(meta.get("brain"))
+        lineage = _dict(meta.get("canonical_lineage"))
+        execution_lineage = _dict(meta.get("execution_lineage"))
+        execution_id = _text(
+            plan.get("execution_id")
+            or execution_lineage.get("execution_id")
+            or brain.get("execution_id")
+        )
+        if execution_id:
+            pending["execution_id"] = execution_id
+        pending["canonical_decision_id"] = _text(
+            plan.get("canonical_decision_id") or lineage.get("decision_id") or brain.get("canonical_decision_id")
+        )
+        pending["correlation_id"] = _text(
+            plan.get("correlation_id") or lineage.get("correlation_id") or brain.get("correlation_id")
+        )
+        pending["execution_lineage"] = {
+            "decision_id": pending["canonical_decision_id"],
+            "correlation_id": pending["correlation_id"],
+            "execution_id": execution_id,
+        }
+        pending["capital_demand"] = capital_demand_from_mapping(
+            pending.get("capital_admission") or meta.get("capital_admission")
+        ).to_dict()
+        pending["capital_authority"] = capital_authority_context(runtime)
+        pending["internal_prime_authority"] = {
+            "authority_id": pending["capital_authority"].get("capital_authority_id", ""),
+            "source": pending["capital_authority"].get("capital_source", ""),
+            "available": bool(pending["capital_authority"].get("internal_prime_available", False)),
+            "capacity_ratio": float(pending["capital_authority"].get("prime_capacity_ratio", 0.0) or 0.0),
+            "cost_bps": float(pending["capital_authority"].get("prime_cost_bps", 0.0) or 0.0),
+        }
+        return pending
+
+    wrapped._production_pending_patched = True
+    ExecutionService._build_pending_submission = wrapped
+
+
 def _patch_settlement_resolution() -> None:
     from victor_ai_bot.omar import lifecycle_bridge
 
@@ -144,16 +209,22 @@ def _patch_settlement_resolution() -> None:
         if outcome is None:
             return None
         lineage = lineage_from_opportunity(opp)
+        meta = _dict(getattr(opp, "meta", None))
+        brain = _dict(meta.get("brain"))
+        plan = _dict(getattr(result, "plan", None))
+        execution_id = _text(plan.get("execution_id") or brain.get("execution_id"))
         if not _lineage_matches(
             outcome,
             decision_id=lineage["decision_id"],
             correlation_id=lineage["correlation_id"],
             opportunity_id=_text(getattr(opp, "id", "")),
+            execution_id=execution_id,
         ):
             return None
         try:
             if isinstance(outcome, dict):
                 outcome["operator_intent_fingerprint"] = lineage["operator_intent_fingerprint"]
+                outcome["execution_id"] = execution_id
         except (AttributeError, TypeError):
             pass
         return outcome
@@ -229,7 +300,10 @@ def _patch_learning_identity() -> None:
                 "opportunity_id": _text(settlement.get("opportunity_id"))
                 or _text(pending.get("opportunity_id")),
                 "action": _text(settlement.get("action")) or _text(pending.get("action")),
-                "route_id": _text(settlement.get("route_id")) or _text(kwargs.get("route_id") or pending.get("route_id")),
+                "route_id": _text(settlement.get("route_id"))
+                or _text(kwargs.get("route_id") or pending.get("route_id")),
+                "execution_id": _text(settlement.get("execution_id"))
+                or _text(metadata.get("execution_id") or pending.get("execution_id")),
                 "outcome_truth_verified": bool(
                     settlement.get(
                         "truth_verified",
@@ -237,9 +311,16 @@ def _patch_learning_identity() -> None:
                     )
                 ),
                 "source": _text(settlement.get("source")) or _text(metadata.get("source")),
+                "capital_demand": settlement.get("capital_demand") or pending.get("capital_demand") or {},
+                "capital_authority": settlement.get("capital_authority") or pending.get("capital_authority") or {},
+                "internal_prime_authority": settlement.get("internal_prime_authority")
+                or pending.get("internal_prime_authority")
+                or {},
                 "canonical_lineage": {
                     "decision_id": _text(canonical_lineage.get("decision_id")) or decision_id,
                     "correlation_id": _text(canonical_lineage.get("correlation_id")),
+                    "execution_id": _text(canonical_lineage.get("execution_id"))
+                    or _text(settlement.get("execution_id") or pending.get("execution_id")),
                 },
             }
         )
@@ -262,6 +343,7 @@ def _patch_learning_identity() -> None:
                 decision_id,
                 {
                     "correlation_id": outcome["correlation_id"],
+                    "execution_id": outcome["execution_id"],
                     "action": outcome["action"],
                     "route_id": outcome["route_id"],
                     "tx_hash": _text(kwargs.get("tx_hash") or outcome.get("tx_hash")),
@@ -276,16 +358,12 @@ def _patch_learning_identity() -> None:
 
 
 def install_production_lineage_bridge() -> None:
-    """Install identity propagation even when OMAR's numerical runtime is unavailable.
-
-    The decision/execution/settlement identity layer is useful independently of
-    the learning runtime. In constrained environments such as Termux, NumPy may
-    be unavailable; that must not disable canonical lineage propagation.
-    """
+    """Install production identity propagation independently of OMAR numerical training."""
     try:
         _patch_omar_context()
         _patch_decision_identity()
         _patch_execution_identity()
+        _patch_pending_execution_identity()
         _patch_settlement_resolution()
     except _SAFE:
         return
