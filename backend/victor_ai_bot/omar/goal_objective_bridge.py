@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import inspect
 from typing import Any, Mapping
 
-from .goal_objective import (
-    build_goal_objective_context,
-    goal_advancement_reward,
-    goal_state_bucket,
-)
+from .goal_objective import build_goal_objective_context, goal_advancement_reward, goal_state_bucket
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -26,11 +21,27 @@ def install_goal_objective_bridge() -> None:
     try:
         from .real_learning import OmarRealLearner
         from .runtime import OmarRuntime
+        from ..runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+
+        context_original = getattr(RuntimeDecisionFacade, "_omar_context", None)
+        if context_original is not None and not getattr(context_original, "_goal_objective_patched", False):
+            def context_with_goal(self: Any, opp: Any, *, p_success: float, ev_wei: int) -> dict[str, Any]:
+                context = _dict(context_original(self, opp, p_success=p_success, ev_wei=ev_wei))
+                service = getattr(self, "_wealth_goal_service", None)
+                if service is not None and hasattr(service, "state"):
+                    try:
+                        goal_state = service.state(self)
+                        goal_context = build_goal_objective_context(goal_state)
+                        context.update(goal_context)
+                    except _SAFE:
+                        pass
+                return context
+
+            context_with_goal._goal_objective_patched = True
+            RuntimeDecisionFacade._omar_context = context_with_goal
 
         state_key_original = getattr(OmarRealLearner, "state_key", None)
-        if state_key_original is not None and not getattr(
-            state_key_original, "_goal_objective_patched", False
-        ):
+        if state_key_original is not None and not getattr(state_key_original, "_goal_objective_patched", False):
             def state_key_with_goal(context: Mapping[str, Any]) -> str:
                 base = str(state_key_original(context))
                 bucket = goal_state_bucket(context)
@@ -40,9 +51,7 @@ def install_goal_objective_bridge() -> None:
             OmarRealLearner.state_key = staticmethod(state_key_with_goal)
 
         observe_original = getattr(OmarRealLearner, "observe", None)
-        if observe_original is not None and not getattr(
-            observe_original, "_goal_objective_patched", False
-        ):
+        if observe_original is not None and not getattr(observe_original, "_goal_objective_patched", False):
             def observe_with_goal(self: Any, *, state_key: str, action: str, reward: float, outcome: Mapping[str, Any]):
                 row = _dict(outcome)
                 metadata = _dict(row.get("metadata"))
@@ -65,21 +74,13 @@ def install_goal_objective_bridge() -> None:
                     metadata["goal_objective_reward"] = float(goal_reward)
                     metadata["goal_objective_weight"] = float(weight)
                     row["metadata"] = metadata
-                return observe_original(
-                    self,
-                    state_key=state_key,
-                    action=action,
-                    reward=reward,
-                    outcome=row,
-                )
+                return observe_original(self, state_key=state_key, action=action, reward=reward, outcome=row)
 
             observe_with_goal._goal_objective_patched = True
             OmarRealLearner.observe = observe_with_goal
 
         runtime_original = getattr(OmarRuntime, "observe_outcome", None)
-        if runtime_original is not None and not getattr(
-            runtime_original, "_goal_objective_patched", False
-        ):
+        if runtime_original is not None and not getattr(runtime_original, "_goal_objective_patched", False):
             def observe_outcome_with_goal(self: Any, *, decision_id: str, ok: bool, realized_net_usd: float,
                                           expected_net_usd: float, amount_in_wei: int, gas_cost_usd: float = 0.0,
                                           slippage_bps: float = 0.0, latency_ms: int = 0, route_id: str = "",
@@ -90,16 +91,9 @@ def install_goal_objective_bridge() -> None:
                     pending = _dict(getattr(self, "_pending_decisions", {}).get(str(decision_id)))
                     context = _dict(pending.get("context"))
                     if context:
-                        merged["goal_objective_context"] = build_goal_objective_context(
-                            {"state": context}
-                        )
-                        merged["goal_objective_context"]["drawdown_pct"] = float(
-                            context.get("drawdown_pct", 0.0) or 0.0
-                        )
+                        merged["goal_objective_context"] = dict(context)
                     merged["omar_config"] = {
-                        "goal_objective_weight": float(
-                            getattr(getattr(self, "cfg", None), "goal_objective_weight", 0.35)
-                        )
+                        "goal_objective_weight": float(getattr(getattr(self, "cfg", None), "goal_objective_weight", 0.35))
                     }
                 except _SAFE:
                     pass
