@@ -33,9 +33,11 @@ class RuntimeDecisionFinalizeFacade:
         identity = ensure_decision_identity(
             opportunity,
             decision,
-            chain_name=str(getattr(getattr(self, "cfg", None), "chain", None).name)
-            if getattr(getattr(self, "cfg", None), "chain", None) is not None
-            else "default",
+            chain_name=(
+                str(getattr(getattr(self, "cfg", None), "chain", None).name)
+                if getattr(getattr(self, "cfg", None), "chain", None) is not None
+                else "default"
+            ),
             current_block=int(current_block),
             operator_intent=operator_intent,
             intent_fingerprint=intent_fingerprint,
