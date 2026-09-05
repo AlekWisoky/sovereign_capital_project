@@ -10,6 +10,7 @@ from victor_ai_bot.omar.goal_objective import (
 )
 
 
+# Goal objective is a learning signal only; canonical execution/capital authority remains external.
 def test_goal_context_uses_canonical_wealth_goal_state():
     context = build_goal_objective_context(
         {
