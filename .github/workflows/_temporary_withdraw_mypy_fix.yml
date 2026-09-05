@@ -1,0 +1,73 @@
+name: Temporary Withdraw Mypy Fix
+
+on:
+  push:
+    branches:
+      - omar/phase-6-runtime-method-chain
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply targeted fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          if old_chain not in text:
+              raise SystemExit("expected _ledger_event chain block not found")
+          text = text.replace(old_chain, new_chain, 1)
+
+          start = text.index("    async def execute(self, runtime: Any, payload: Dict[str, Any]) -> Dict[str, Any]:")
+          segment = text[start:]
+          replacements = [
+              ("result: Dict[str, Any] = {", "execute_result: Dict[str, Any] = {"),
+              ("        result = {", "        execute_result = {"),
+              ("        result = _attach_lifecycle_summary(", "        execute_result = _attach_lifecycle_summary("),
+              ("            result = _attach_lifecycle_summary(", "            execute_result = _attach_lifecycle_summary("),
+              ("                result=result,", "                result=execute_result,"),
+              ("                \"result\": result", "                \"result\": execute_result"),
+              ("                \"result\": result,", "                \"result\": execute_result,"),
+              ("            \"result\": result", "            \"result\": execute_result"),
+              ("            \"result\": result,", "            \"result\": execute_result,"),
+              ("result[\"items\"]", "execute_result[\"items\"]"),
+              ("result.get(\"items\")", "execute_result.get(\"items\")"),
+              ("result.pop(", "execute_result.pop("),
+              ("result.update(", "execute_result.update("),
+              ("list(result.get(\"items\") or [])", "list(execute_result.get(\"items\") or [])"),
+              ("        result = _attach_lifecycle_summary(", "        execute_result = _attach_lifecycle_summary("),
+              ("            result, fallback_status=", "            execute_result, fallback_status="),
+              ("        result, fallback_status=", "        execute_result, fallback_status="),
+              ("            result=result,", "            result=execute_result,"),
+          ]
+          for old, new in replacements:
+              segment = segment.replace(old, new)
+
+          text = text[:start] + segment
+          path.write_text(text, encoding="utf-8")
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Format repair
+        run: python -m pip install black==24.10.0 && black backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+      - name: Commit repair
+        run: |
+          if git diff --quiet; then
+            echo "No targeted changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: resolve withdraw service mypy errors"
+          git push
