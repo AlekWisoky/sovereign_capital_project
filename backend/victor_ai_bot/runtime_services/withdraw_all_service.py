@@ -812,11 +812,8 @@ class WithdrawAllService:
     def _ledger_event(self, runtime: Any, *, event: str, metadata: Dict[str, Any]) -> None:
         ledger = getattr(runtime, "_ledger", None)
         repo = getattr(runtime, "_ledger_repo", None)
-        chain = str(
-            getattr(getattr(runtime, "cfg", None), "chain", None).name
-            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
-            else "default"
-        )
+        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)
+        chain = str(getattr(chain_cfg, "name", "default") or "default")
         if ledger is None or not hasattr(ledger, "append_transaction"):
             return
         metadata_payload = dict(metadata or {})
@@ -1412,7 +1409,7 @@ class WithdrawAllService:
         mode = str(plan.get("mode") or "txdata")
         state["last_status"] = "prepared" if dry_run or mode != "backend" else "executing"
         state["last_reason_code"] = "ok"
-        result: Dict[str, Any] = {
+        execute_result: Dict[str, Any] = {
             "ok": True,
             "status": state["last_status"],
             "preview_id": preview_id,
@@ -1422,7 +1419,7 @@ class WithdrawAllService:
         }
         if dry_run or mode != "backend":
             for item in items:
-                result["items"].append(
+                execute_result["items"].append(
                     {
                         **dict(item),
                         "calldata": build_withdraw_calldata(
@@ -1432,29 +1429,32 @@ class WithdrawAllService:
                         ),
                     }
                 )
-            result = _attach_lifecycle_summary(
-                result, fallback_status=state["last_status"], fallback_reason_code="ok"
+            execute_result = _attach_lifecycle_summary(
+                execute_result, fallback_status=state["last_status"], fallback_reason_code="ok"
             )
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status=state["last_status"],
                 reason_code="ok",
-                result=result,
+                result=execute_result,
                 preview_id=preview_id,
                 event="withdraw_all_prepared",
                 persisted_state=persisted_state,
             )
-            return {"ok": True, **saved, "result": result}
+            return {"ok": True, **saved, "execute_result": execute_result}
 
         if is_public_mode():
-            result = {"ok": False, "reason_code": "withdraw_execute_disabled_in_public_mode"}
+            execute_result = {
+                "ok": False,
+                "reason_code": "withdraw_execute_disabled_in_public_mode",
+            }
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="withdraw_execute_disabled_in_public_mode",
-                result=result,
+                result=execute_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
@@ -1462,7 +1462,7 @@ class WithdrawAllService:
                 "ok": False,
                 "reason_code": "withdraw_execute_disabled_in_public_mode",
                 **saved,
-                "result": result,
+                "execute_result": execute_result,
             }
 
         cfg = getattr(runtime, "cfg", None)
@@ -1472,7 +1472,7 @@ class WithdrawAllService:
         )
         key_hex = os.environ.get(key_env, "").strip()
         if not key_hex:
-            result = {
+            execute_result = {
                 "ok": False,
                 "reason_code": "missing_private_key_env",
                 "private_key_env": key_env,
@@ -1482,7 +1482,7 @@ class WithdrawAllService:
                 state=state,
                 status="execute_blocked",
                 reason_code="missing_private_key_env",
-                result=result,
+                result=execute_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
@@ -1490,14 +1490,14 @@ class WithdrawAllService:
                 "ok": False,
                 "reason_code": "missing_private_key_env",
                 **saved,
-                "result": result,
+                "execute_result": execute_result,
             }
         from eth_account import Account
 
         try:
             acct = Account.from_key(key_hex)
         except (TypeError, ValueError):
-            result = {
+            execute_result = {
                 "ok": False,
                 "reason_code": "invalid_private_key_env",
                 "private_key_env": key_env,
@@ -1507,7 +1507,7 @@ class WithdrawAllService:
                 state=state,
                 status="execute_blocked",
                 reason_code="invalid_private_key_env",
-                result=result,
+                result=execute_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
@@ -1515,7 +1515,7 @@ class WithdrawAllService:
                 "ok": False,
                 "reason_code": "invalid_private_key_env",
                 **saved,
-                "result": result,
+                "execute_result": execute_result,
             }
         rpc_plan_read = (
             runtime.rpc_manager.best_read()
@@ -1528,26 +1528,31 @@ class WithdrawAllService:
             else ""
         )
         if not rpc_plan_read or not rpc_plan_send:
-            result = {"ok": False, "reason_code": "no_rpc_endpoints"}
+            execute_result = {"ok": False, "reason_code": "no_rpc_endpoints"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="no_rpc_endpoints",
-                result=result,
+                result=execute_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "no_rpc_endpoints", **saved, "result": result}
+            return {
+                "ok": False,
+                "reason_code": "no_rpc_endpoints",
+                **saved,
+                "execute_result": execute_result,
+            }
         executor = str(getattr(getattr(cfg, "execution", None), "executor_address", "") or "")
         if not executor:
-            result = {"ok": False, "reason_code": "executor_not_configured"}
+            execute_result = {"ok": False, "reason_code": "executor_not_configured"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="executor_not_configured",
-                result=result,
+                result=execute_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
@@ -1555,16 +1560,16 @@ class WithdrawAllService:
                 "ok": False,
                 "reason_code": "executor_not_configured",
                 **saved,
-                "result": result,
+                "execute_result": execute_result,
             }
         if not self._is_address(executor):
-            result = {"ok": False, "reason_code": "invalid_executor_address"}
+            execute_result = {"ok": False, "reason_code": "invalid_executor_address"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="invalid_executor_address",
-                result=result,
+                result=execute_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
@@ -1572,7 +1577,7 @@ class WithdrawAllService:
                 "ok": False,
                 "reason_code": "invalid_executor_address",
                 **saved,
-                "result": result,
+                "execute_result": execute_result,
             }
         nonce_offset = 0
         async with (
@@ -1603,7 +1608,12 @@ class WithdrawAllService:
                     event="withdraw_all_execute_blocked",
                     persisted_state=persisted_state,
                 )
-                return {"ok": False, "reason_code": owner_reason, **saved, "result": failure}
+                return {
+                    "ok": False,
+                    "reason_code": owner_reason,
+                    **saved,
+                    "execute_result": failure,
+                }
 
             max_fee, prio = await suggest_gas(
                 rpc_r,
@@ -1656,13 +1666,13 @@ class WithdrawAllService:
                     sent = await rpc_s.send_raw_tx(raw)
                 txh = getattr(sent, "result", None) if getattr(sent, "ok", False) else ""
                 if isinstance(txh, dict):
-                    txh = txh.get("txHash") or txh.get("hash") or txh.get("result")
+                    txh = txh.get("txHash") or txh.get("hash") or txh.get("execute_result")
                 if not isinstance(txh, str) or not self._is_tx_hash(txh):
                     failure = {
                         "ok": False,
                         "reason_code": "send_failed",
                         "failed_item": dict(item),
-                        "items": list(result.get("items") or []),
+                        "items": list(execute_result.get("items") or []),
                     }
                     failure = _attach_lifecycle_summary(
                         failure,
@@ -1680,22 +1690,27 @@ class WithdrawAllService:
                         event="withdraw_all_execute_failed",
                         persisted_state=persisted_state,
                     )
-                    return {"ok": False, "reason_code": "send_failed", **saved, "result": failure}
-                tx_result = await assess_submitted_tx(
+                    return {
+                        "ok": False,
+                        "reason_code": "send_failed",
+                        **saved,
+                        "execute_result": failure,
+                    }
+                tx_execute_result = await assess_submitted_tx(
                     rpc_r,
                     tx_hash=str(txh or ""),
                     send_mode=send_mode,
                 )
-                if tx_result.tx_status == "mined_reverted":
+                if tx_execute_result.tx_status == "mined_reverted":
                     failure = {
                         "ok": False,
                         "reason_code": "receipt_reverted",
                         "failed_item": {
                             **dict(item),
                             "tx_hash": str(txh or ""),
-                            **submitted_tx_status_payload(tx_result),
+                            **submitted_tx_status_payload(tx_execute_result),
                         },
-                        "items": list(result.get("items") or []),
+                        "items": list(execute_result.get("items") or []),
                     }
                     failure = _attach_lifecycle_summary(
                         failure,
@@ -1723,35 +1738,35 @@ class WithdrawAllService:
                         "ok": False,
                         "reason_code": "receipt_reverted",
                         **saved,
-                        "result": failure,
+                        "execute_result": failure,
                     }
-                result["items"].append(
+                execute_result["items"].append(
                     {
                         **dict(item),
                         "tx_hash": str(txh or ""),
-                        **submitted_tx_status_payload(tx_result),
+                        **submitted_tx_status_payload(tx_execute_result),
                     }
                 )
                 nonce_offset += 1
-        submission_state = _submission_state(list(result.get("items") or []))
+        submission_state = _submission_state(list(execute_result.get("items") or []))
         if submission_state == "mined_success":
-            result["status"] = "completed"
+            execute_result["status"] = "completed"
             state["last_status"] = "completed"
             persist_status = "completed"
             persist_event = "withdraw_all_completed"
         else:
-            result["status"] = "submitted"
-            result["submission_state"] = submission_state
+            execute_result["status"] = "submitted"
+            execute_result["submission_state"] = submission_state
             submission_proof_reason = aggregate_submission_proof_reason(
-                list(result.get("items") or [])
+                list(execute_result.get("items") or [])
             )
             if submission_proof_reason:
-                result["submission_proof_reason"] = submission_proof_reason
+                execute_result["submission_proof_reason"] = submission_proof_reason
             state["last_status"] = "submitted"
             persist_status = "submitted"
             persist_event = "withdraw_all_submitted"
-        result = _attach_lifecycle_summary(
-            result, fallback_status=persist_status, fallback_reason_code="ok"
+        execute_result = _attach_lifecycle_summary(
+            execute_result, fallback_status=persist_status, fallback_reason_code="ok"
         )
         _clear_refresh_failure(state)
         _apply_refresh_metadata(
@@ -1762,7 +1777,7 @@ class WithdrawAllService:
             state=state,
             status=persist_status,
             reason_code="ok",
-            result=result,
+            result=execute_result,
             preview_id=preview_id,
             event=persist_event,
             persisted_state=persisted_state,
@@ -1785,4 +1800,4 @@ class WithdrawAllService:
                         rollout.pause_family(str(family), actor="withdraw_all")
                     except (AttributeError, TypeError, ValueError):
                         continue
-        return {"ok": True, **saved, "result": result}
+        return {"ok": True, **saved, "execute_result": execute_result}

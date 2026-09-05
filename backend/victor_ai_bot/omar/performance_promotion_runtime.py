@@ -48,10 +48,16 @@ def performance_promotion(
     or successful evidence.
     """
     cfg = thresholds or PerformancePromotionThresholds(
-        min_evaluation_observations=int(getattr(runtime.cfg, "performance_min_evaluation_observations", 50)),
+        min_evaluation_observations=int(
+            getattr(runtime.cfg, "performance_min_evaluation_observations", 50)
+        ),
         min_unique_states=int(getattr(runtime.cfg, "performance_min_unique_states", 10)),
-        min_mean_advantage_usd=float(getattr(runtime.cfg, "performance_min_mean_advantage_usd", 0.0)),
-        min_mean_advantage_bps=float(getattr(runtime.cfg, "performance_min_mean_advantage_bps", 5.0)),
+        min_mean_advantage_usd=float(
+            getattr(runtime.cfg, "performance_min_mean_advantage_usd", 0.0)
+        ),
+        min_mean_advantage_bps=float(
+            getattr(runtime.cfg, "performance_min_mean_advantage_bps", 5.0)
+        ),
         min_win_rate=float(getattr(runtime.cfg, "performance_min_win_rate", 0.55)),
         min_lower_confidence_advantage_usd=float(
             getattr(runtime.cfg, "performance_min_lower_confidence_advantage_usd", 0.0)

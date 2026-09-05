@@ -59,7 +59,9 @@ def evaluate_learning_quality(
     actions = {_text(row.get("action")) for row in rows if _text(row.get("action")) in ACTIONS}
     action_coverage = len(actions) / len(ACTIONS)
 
-    truth_count = sum(bool(row.get("outcome_truth_verified", row.get("truth_verified", False))) for row in rows)
+    truth_count = sum(
+        bool(row.get("outcome_truth_verified", row.get("truth_verified", False))) for row in rows
+    )
     truth_rate = truth_count / observations if observations else 0.0
 
     missing_lineage = 0
