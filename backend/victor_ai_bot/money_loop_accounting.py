@@ -5,9 +5,11 @@ from typing import Any, Mapping
 
 _SAFE_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
 
+
 @dataclass(frozen=True)
 class SettledReceiptEconomics:
     """Canonical economic facts derived from a settled receipt transaction."""
+
     receipt_id: str
     transaction_id: str
     status: int
@@ -34,8 +36,10 @@ class SettledReceiptEconomics:
         out["reinvestable_profit_usd"] = round(self.reinvestable_profit_usd, 8)
         return out
 
+
 class MoneyLoopAccounting:
     """Translate a canonical settled receipt transaction into signed economics."""
+
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:
         try:
@@ -51,7 +55,9 @@ class MoneyLoopAccounting:
             return int(default)
 
     @classmethod
-    def from_settlement_payload(cls, payload: Mapping[str, Any], *, receipt_id: str = "") -> SettledReceiptEconomics:
+    def from_settlement_payload(
+        cls, payload: Mapping[str, Any], *, receipt_id: str = ""
+    ) -> SettledReceiptEconomics:
         raw = dict(payload or {})
         metadata = raw.get("metadata")
         meta = dict(metadata or {}) if isinstance(metadata, Mapping) else raw
@@ -59,7 +65,9 @@ class MoneyLoopAccounting:
         transaction_id = str(raw.get("transaction_id") or "")
         status = cls._safe_int(meta.get("status"), cls._safe_int(raw.get("status"), 0))
         amount_in_wei = cls._safe_int(meta.get("amount_in_wei"), 0)
-        realized_after_gas_wei = cls._safe_int(meta.get("realized_after_gas_wei") or meta.get("realized_profit_after_gas_wei"), 0)
+        realized_after_gas_wei = cls._safe_int(
+            meta.get("realized_after_gas_wei") or meta.get("realized_profit_after_gas_wei"), 0
+        )
         realized_after_gas_usd = cls._safe_float(meta.get("realized_after_gas_usd"), 0.0)
         gas_cost_usd = cls._safe_float(meta.get("gas_cost_usd"), 0.0)
         borrow_cost_usd = cls._safe_float(meta.get("borrow_cost_usd"), 0.0)

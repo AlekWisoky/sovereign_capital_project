@@ -29,9 +29,7 @@ class GenealogyStore:
         parent_ids = raw.get("parent_ids")
         if isinstance(parent_ids, list):
             item["parent_ids"] = [
-                str(x).strip()
-                for x in parent_ids
-                if x is not None and str(x).strip()
+                str(x).strip() for x in parent_ids if x is not None and str(x).strip()
             ]
         else:
             item["parent_ids"] = []
@@ -39,9 +37,7 @@ class GenealogyStore:
         mutation_history = raw.get("mutation_history")
         if isinstance(mutation_history, list):
             item["mutation_history"] = [
-                str(x).strip()
-                for x in mutation_history
-                if x is not None and str(x).strip()
+                str(x).strip() for x in mutation_history if x is not None and str(x).strip()
             ]
         else:
             item["mutation_history"] = []

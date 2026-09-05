@@ -74,9 +74,7 @@ def _audit(
     store = getattr(rt, "_security_audit", None)
     if store is None:
         return
-    chain_name = str(
-        getattr(getattr(getattr(rt, "cfg", None), "chain", None), "name", "") or ""
-    )
+    chain_name = str(getattr(getattr(getattr(rt, "cfg", None), "chain", None), "name", "") or "")
     store.record(
         action=action,
         allowed=allowed,

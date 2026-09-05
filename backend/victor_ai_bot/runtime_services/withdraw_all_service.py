@@ -812,11 +812,8 @@ class WithdrawAllService:
     def _ledger_event(self, runtime: Any, *, event: str, metadata: Dict[str, Any]) -> None:
         ledger = getattr(runtime, "_ledger", None)
         repo = getattr(runtime, "_ledger_repo", None)
-        chain = str(
-            getattr(getattr(runtime, "cfg", None), "chain", None).name
-            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
-            else "default"
-        )
+        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)
+        chain = str(getattr(chain_cfg, "name", "default") or "default")
         if ledger is None or not hasattr(ledger, "append_transaction"):
             return
         metadata_payload = dict(metadata or {})
@@ -1308,7 +1305,7 @@ class WithdrawAllService:
         preview_id = str(raw_payload.get("preview_id") or "")
         confirm_text = str(raw_payload.get("confirm_text") or "")
         if not preview_id or preview_id != str(state.get("last_preview_id") or ""):
-            result = {"ok": False, "reason_code": "preview_id_mismatch"}
+            result: Dict[str, Any] = {"ok": False, "reason_code": "preview_id_mismatch"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
@@ -1372,7 +1369,9 @@ class WithdrawAllService:
                 "reason_code": "preview_stale",
                 "current_reason_code": current_reason,
                 "current_capital_truth_reason_code": str(withdraw_control.get("reasonCode") or ""),
-                "current_capital_truth_reason_codes": list(withdraw_control.get("reasonCodes") or []),
+                "current_capital_truth_reason_codes": list(
+                    withdraw_control.get("reasonCodes") or []
+                ),
                 "capitalTruthHealth": capital_truth_health,
                 "withdrawControl": withdraw_control,
             }
@@ -1410,7 +1409,7 @@ class WithdrawAllService:
         mode = str(plan.get("mode") or "txdata")
         state["last_status"] = "prepared" if dry_run or mode != "backend" else "executing"
         state["last_reason_code"] = "ok"
-        result: Dict[str, Any] = {
+        result = {
             "ok": True,
             "status": state["last_status"],
             "preview_id": preview_id,

@@ -42,4 +42,10 @@ def opportunity_after_costs_wei(opp: Dict[str, Any]) -> int:
 
 
 def opportunity_after_gas_usd_micro(opp: Dict[str, Any]) -> int:
-    return max(0, _safe_int(opp.get("expected_profit_after_gas_usd_micro") or opp.get("expected_profit_usd_micro"), 0))
+    return max(
+        0,
+        _safe_int(
+            opp.get("expected_profit_after_gas_usd_micro") or opp.get("expected_profit_usd_micro"),
+            0,
+        ),
+    )

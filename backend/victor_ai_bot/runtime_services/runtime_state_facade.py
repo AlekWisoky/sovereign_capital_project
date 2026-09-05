@@ -19,6 +19,8 @@ _RUNTIME_STATE_FACADE_FAILURES = (
 
 
 class RuntimeStateFacade:
+    _auxiliary_state_service: Any
+
     """Non-hot-path runtime state/reporting compatibility facade.
 
     This isolates dashboard, analytics, and operator summary accessors away from

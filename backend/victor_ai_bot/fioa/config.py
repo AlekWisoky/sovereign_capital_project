@@ -57,11 +57,13 @@ class FIOAConfig:
     confidentiality_enabled: bool = True
     # If strict, CONFIDENTIAL_SIGNAL access is blocked unless agent is GOVERNANCE_AGENT.
     confidentiality_strict: bool = False
-    data_access_levels: List[str] = field(default_factory=lambda: [
-        "PUBLIC_ANALYTICS",
-        "INTERNAL_STRATEGY",
-        "CONFIDENTIAL_SIGNAL",
-    ])
+    data_access_levels: List[str] = field(
+        default_factory=lambda: [
+            "PUBLIC_ANALYTICS",
+            "INTERNAL_STRATEGY",
+            "CONFIDENTIAL_SIGNAL",
+        ]
+    )
 
     # Section 6: Escalation & protection protocol
     escalation_threshold: float = 0.85

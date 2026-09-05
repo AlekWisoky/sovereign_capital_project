@@ -62,17 +62,27 @@ def family_launch_acceleration_signal(readiness: Dict[str, Any]) -> Dict[str, An
     if count > 0 and success < SEED_MIN_SUCCESS_RATE:
         seed_reason_codes.append("execution_success_rate_below_seed_floor")
     if execution_evidence_present and not actual_execution_ready:
-        seed_reason_codes.extend([str(x) for x in list(info.get("executionReasons") or []) if str(x)])
+        seed_reason_codes.extend(
+            [str(x) for x in list(info.get("executionReasons") or []) if str(x)]
+        )
     if not telemetry_sufficient:
         seed_reason_codes.append("telemetry_insufficient")
     if not capital_ready:
-        seed_reason_codes.extend([str(x) for x in list(info.get("capitalTruthReasonCodes") or []) if str(x)])
+        seed_reason_codes.extend(
+            [str(x) for x in list(info.get("capitalTruthReasonCodes") or []) if str(x)]
+        )
     if not receipt_truth_rollout_ready:
         seed_reason_codes.extend(
-            [str(x) for x in list(info.get("receiptOutcomeTruthRolloutReasonCodes") or []) if str(x)]
+            [
+                str(x)
+                for x in list(info.get("receiptOutcomeTruthRolloutReasonCodes") or [])
+                if str(x)
+            ]
         )
     if not family_hardening_ready:
-        seed_reason_codes.extend([str(x) for x in list(info.get("familyHardeningReasonCodes") or []) if str(x)])
+        seed_reason_codes.extend(
+            [str(x) for x in list(info.get("familyHardeningReasonCodes") or []) if str(x)]
+        )
 
     seed_reason_codes = _unique(seed_reason_codes)
     seed_ready = bool(info.get("ready", False)) and not seed_reason_codes
@@ -126,14 +136,23 @@ def build_launch_acceleration_summary(
 ) -> Dict[str, Any]:
     items = [dict(item or {}) for item in list(readiness_items or []) if isinstance(item, dict)]
     by_family = {str(item.get("family") or ""): item for item in items}
-    active_families = [canonical_launch_family_id(str(x or "")) for x in list((profile or {}).get("active_families") or []) if str(x)]
-    active_secondary_families = [family for family in active_families if not is_core_launch_family(family)]
+    active_families = [
+        canonical_launch_family_id(str(x or ""))
+        for x in list((profile or {}).get("active_families") or [])
+        if str(x)
+    ]
+    active_secondary_families = [
+        family for family in active_families if not is_core_launch_family(family)
+    ]
 
     signals = {
         canonical_launch_family_id(family): family_launch_acceleration_signal(item)
-        for family, item in by_family.items() if family
+        for family, item in by_family.items()
+        if family
     }
-    core_signal = signals.get("flash_arb") or family_launch_acceleration_signal(by_family.get("flash_arb") or {})
+    core_signal = signals.get("flash_arb") or family_launch_acceleration_signal(
+        by_family.get("flash_arb") or {}
+    )
     core_stable = bool(core_signal.get("stableReady", False))
 
     seed_candidates = [
@@ -149,9 +168,7 @@ def build_launch_acceleration_summary(
         if bool((signals.get(family) or {}).get("stableReady", False))
     ]
     unstable_secondary_families = [
-        family
-        for family in active_secondary_families
-        if family not in stable_secondary_families
+        family for family in active_secondary_families if family not in stable_secondary_families
     ]
 
     reason_codes: List[str] = []
@@ -165,13 +182,13 @@ def build_launch_acceleration_summary(
         phase = "stabilize_active_multi_strategy"
         for family in unstable_secondary_families:
             signal = signals.get(family) or {}
-            reason_codes.extend([str(x) for x in list(signal.get("stableReasonCodes") or []) if str(x)])
+            reason_codes.extend(
+                [str(x) for x in list(signal.get("stableReasonCodes") or []) if str(x)]
+            )
         reason_codes = _unique(reason_codes)
         next_action = "stabilize_active_family_before_expansion"
     elif seed_candidates:
-        phase = (
-            "expand_multi_strategy" if stable_secondary_families else "seed_next_family"
-        )
+        phase = "expand_multi_strategy" if stable_secondary_families else "seed_next_family"
         next_action = "enable_next_family"
     elif stable_secondary_families:
         phase = "stable_multi_strategy"

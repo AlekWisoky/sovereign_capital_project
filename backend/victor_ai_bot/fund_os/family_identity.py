@@ -106,7 +106,6 @@ def canonical_launch_family_id(family: str) -> str:
     return _ALIAS_TO_LAUNCH.get(family_s, family_s)
 
 
-
 def family_identity(family: str) -> Dict[str, Any]:
     launch_family = canonical_launch_family_id(family)
     base = dict(_FAMILY_IDENTITY_TABLE.get(launch_family) or {})
@@ -131,7 +130,6 @@ def family_identity(family: str) -> Dict[str, Any]:
     }
 
 
-
 def family_alias_candidates(families: str | Iterable[str]) -> List[str]:
     raw_values = [families] if isinstance(families, str) else list(families or [])
     out: List[str] = []
@@ -149,11 +147,9 @@ def family_alias_candidates(families: str | Iterable[str]) -> List[str]:
     return out
 
 
-
 def family_matches(*, family: str, candidate: str) -> bool:
     candidate_s = str(candidate or "")
     return bool(candidate_s) and candidate_s in family_alias_candidates(family)
-
 
 
 def is_core_launch_family(family: str) -> bool:
