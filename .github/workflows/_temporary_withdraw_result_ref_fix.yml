@@ -1,0 +1,40 @@
+name: Temporary Withdraw Result Ref Fix
+
+on:
+  push:
+    branches:
+      - omar/phase-6-runtime-method-chain
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix remaining execute result references
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+          start = text.index("    async def execute(self, runtime: Any, payload: Dict[str, Any]) -> Dict[str, Any]:")
+          segment = text[start:]
+          segment = segment.replace('"result": result', '"result": execute_result')
+          text = text[:start] + segment
+          path.write_text(text, encoding="utf-8")
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Format
+        run: python -m pip install black==24.10.0 && black backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+      - name: Commit
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: finish withdraw result reference repair"
+          git push
