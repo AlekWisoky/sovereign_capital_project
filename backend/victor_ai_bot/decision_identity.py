@@ -43,7 +43,7 @@ def ensure_decision_identity(
         lineage.update(
             {"chain": _text(chain_name) or "default", "decision_block": int(current_block)}
         )
-        if operator_intent is not None:
+        if operator_intent is not None and "operator_intent_snapshot" not in meta:
             payload = (
                 operator_intent.to_dict()
                 if hasattr(operator_intent, "to_dict")
@@ -51,7 +51,7 @@ def ensure_decision_identity(
             )
             meta["operator_intent_snapshot"] = dict(payload)
             lineage["operator_intent"] = dict(payload)
-        if intent_fingerprint:
+        if intent_fingerprint and not meta.get("intent_fingerprint"):
             fingerprint = _text(intent_fingerprint)
             meta["intent_fingerprint"] = fingerprint
             lineage["intent_fingerprint"] = fingerprint
@@ -65,14 +65,14 @@ def ensure_decision_identity(
         lineage = opp_meta.setdefault("canonical_lineage", {})
         if isinstance(lineage, dict):
             lineage.update(identity.to_dict())
-            if operator_intent is not None:
+            if operator_intent is not None and "operator_intent" not in lineage:
                 payload = (
                     operator_intent.to_dict()
                     if hasattr(operator_intent, "to_dict")
                     else _mapping(operator_intent)
                 )
                 lineage["operator_intent"] = dict(payload)
-            if intent_fingerprint:
+            if intent_fingerprint and not lineage.get("intent_fingerprint"):
                 lineage["intent_fingerprint"] = _text(intent_fingerprint)
 
     return identity
