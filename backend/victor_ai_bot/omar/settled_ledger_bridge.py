@@ -160,7 +160,11 @@ def ingest_settled_ledger_record(
             correlation_id=lineage.correlation_id,
             execution_id=lineage.execution_id,
             status=str(
-                _first(execution_meta.get("status"), source.get("execution_status"), "executed")
+                _first(
+                    execution_meta.get("status"),
+                    source.get("execution_status"),
+                    "executed",
+                )
             ),
             action=lineage.action or "trade",
             tx_hash=lineage.receipt_id,
