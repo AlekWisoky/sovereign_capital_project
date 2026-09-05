@@ -5,85 +5,9 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  repair-withdraw-typing:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.repository }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Apply minimal baseline typing repair
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
-          text = path.read_text()
-          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
-          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
-          if old_chain in text:
-              text = text.replace(old_chain, new_chain, 1)
-
-          old_first = '        result = {"ok": False, "reason_code": "preview_id_mismatch"}'
-          new_first = '        result: Dict[str, Any] = {"ok": False, "reason_code": "preview_id_mismatch"}'
-          if old_first in text:
-              text = text.replace(old_first, new_first, 1)
-
-          old_second = '        result: Dict[str, Any] = {\n            "ok": True,\n            "status": state["last_status"],'
-          new_second = '        result = {\n            "ok": True,\n            "status": state["last_status"],'
-          if old_second in text:
-              text = text.replace(old_second, new_second, 1)
-          path.write_text(text)
-          PY
-      - name: Commit repair if needed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
-          if git diff --cached --quiet; then
-            echo "Baseline typing already repaired"
-            exit 0
-          fi
-          git commit -m "fix: repair withdraw service typing"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
-  repair-omar-format:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.repository }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install backend deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-      - name: Format only demonstrated OMAR blockers
-        run: |
-          black backend/victor_ai_bot/omar/settled_ledger_bridge.py backend/victor_ai_bot/runtime_services/runtime_decision_finalize_facade.py
-      - name: Commit format repair if needed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/victor_ai_bot/omar/settled_ledger_bridge.py backend/victor_ai_bot/runtime_services/runtime_decision_finalize_facade.py
-          if git diff --cached --quiet; then
-            echo "OMAR formatting already clean"
-            exit 0
-          fi
-          git commit -m "style: format canonical OMAR lifecycle files"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
   omar-economic-learning:
     runs-on: ubuntu-latest
     steps:
@@ -100,14 +24,13 @@ jobs:
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
           pip install pytest-asyncio
 
-      - name: Show OMAR Black diff
-        run: |
-          black --diff backend/victor_ai_bot/learning/net_economics.py backend/victor_ai_bot/learning/outcome_ledger.py
-
       - name: OMAR net-profit and latency learning tests
         run: |
           cd backend
-          pytest -q tests/test_omar_net_profit_latency_learning.py
+          pytest -q \
+            tests/test_omar_net_profit_latency_learning.py \
+            tests/test_omar_canonical_economic_lineage.py \
+            tests/test_canonical_intent_fingerprint.py
 
   canonical-runtime-path:
     runs-on: ubuntu-latest
@@ -125,15 +48,18 @@ jobs:
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
           pip install pytest-asyncio
 
-      - name: Canonical runtime execution-path tests
+      - name: Canonical runtime production-lifecycle regression
         run: |
           cd backend
           pytest -q \
             tests/test_runtime_production_execution_path.py \
+            tests/test_runtime_method_chain_learning_attribution.py \
             tests/test_execution_service_auto_trade_hold.py \
             tests/test_canonical_identity_outcome_lineage.py \
             tests/test_omar_runtime.py \
-            tests/test_omar_net_profit_latency_learning.py
+            tests/test_omar_net_profit_latency_learning.py \
+            tests/test_omar_canonical_economic_lineage.py \
+            tests/test_canonical_intent_fingerprint.py
 
   execution-facade-typing:
     runs-on: ubuntu-latest
@@ -199,10 +125,13 @@ jobs:
           cd backend
           pytest -q \
             tests/test_runtime_production_execution_path.py \
+            tests/test_runtime_method_chain_learning_attribution.py \
             tests/test_execution_service_auto_trade_hold.py \
             tests/test_canonical_identity_outcome_lineage.py \
             tests/test_omar_runtime.py \
-            tests/test_omar_net_profit_latency_learning.py
+            tests/test_omar_net_profit_latency_learning.py \
+            tests/test_omar_canonical_economic_lineage.py \
+            tests/test_canonical_intent_fingerprint.py
 
       - name: Pytest
         run: |
