@@ -7,7 +7,7 @@ from ..capital_demand import capital_demand_from_mapping
 from ..decision_identity import ensure_decision_identity
 from ..models import Opportunity
 from ..rpc import JsonRpcClient
-from ..omar.operator_intent import capture_operator_intent
+from ..omar.operator_intent import capture_operator_intent, operator_intent_fingerprint
 
 
 class RuntimeDecisionFinalizeFacade:
@@ -59,13 +59,22 @@ class RuntimeDecisionFinalizeFacade:
         )
         if selected is None:
             return
+
+        # Capture the effective operator intent before minting/attaching the
+        # canonical identity so the identity boundary contains the exact
+        # decision-time context that later execution/settlement learning must
+        # attribute. The snapshot is immutable by construction and the
+        # fingerprint is an attribution handle, not an authority signal.
+        intent = capture_operator_intent(self, decision)
+        intent_fingerprint = operator_intent_fingerprint(intent)
         identity = ensure_decision_identity(
             selected,
             decision,
             chain_name=str(getattr(self.cfg.chain, "name", "default")),
             current_block=int(current_block),
+            operator_intent=intent,
+            intent_fingerprint=intent_fingerprint,
         )
-        intent = capture_operator_intent(self, decision)
         metadata = getattr(decision, "metadata", None)
         if not isinstance(metadata, dict):
             metadata = {}
@@ -75,6 +84,7 @@ class RuntimeDecisionFinalizeFacade:
         ).to_dict()
         metadata["capital_demand"] = capital_demand
         metadata["operator_intent_snapshot"] = intent.to_dict()
+        metadata["intent_fingerprint"] = intent_fingerprint
         state = dict(metadata.get("learning_state") or metadata.get("state") or {})
         rl_state = str(getattr(decision, "rl_state", "") or metadata.get("rl_state") or "")
         if rl_state:
@@ -93,6 +103,7 @@ class RuntimeDecisionFinalizeFacade:
                 "source": "production_runtime_decision_boundary",
                 "current_block": int(current_block),
                 "capital_demand": dict(capital_demand),
+                "intent_fingerprint": intent_fingerprint,
             },
         )
 
