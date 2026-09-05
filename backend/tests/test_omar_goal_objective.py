@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import inspect
+
+import victor_ai_bot.omar.goal_objective as goal_objective
 from victor_ai_bot.omar.goal_objective import (
     build_goal_objective_context,
     goal_advancement_reward,
@@ -79,7 +82,7 @@ def test_goal_reward_favors_positive_settled_progress_when_goal_has_gap():
 
 
 def test_goal_objective_does_not_create_execution_or_capital_authority():
-    source = open("backend/victor_ai_bot/omar/goal_objective.py", encoding="utf-8").read()
+    source = inspect.getsource(goal_objective)
     assert "capital_engine_state" not in source
     assert "try_execute_opportunity" not in source
     assert "sign_transaction" not in source
