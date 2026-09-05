@@ -1,0 +1,52 @@
+name: OMAR targeted mypy repair
+
+on:
+  push:
+    branches:
+      - omar/phase-21-production-execution-identity-verified
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact keyword repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+          old = "execute_result="
+          new = "result="
+          count = text.count(old)
+          if count != 11:
+              raise SystemExit(f"expected 11 execute_result keyword calls, found {count}")
+          text = text.replace(old, new)
+          path.write_text(text, encoding="utf-8")
+          print(f"repaired {count} keyword call sites")
+          PY
+          git diff --check
+          grep -n "execute_result=" backend/victor_ai_bot/runtime_services/withdraw_all_service.py && exit 1 || true
+
+      - name: Verify targeted mypy slice
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+          mypy @backend/mypy_targets.txt
+
+      - name: Remove temporary workflow and commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/omar-targeted-mypy-repair.yml
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: align withdraw outcome keyword with helper signature"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
