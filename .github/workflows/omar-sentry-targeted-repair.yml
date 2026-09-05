@@ -1,0 +1,44 @@
+name: OMAR Sentry targeted repair
+
+on:
+  push:
+    branches:
+      - omar/phase-21-production-execution-identity-verified
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply verified Sentry fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'getattr(sent, "execute_result", None)'
+          new = 'getattr(sent, "result", None)'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"expected one RpcResult execute_result access, found {count}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          print("repaired RpcResult transaction-hash access")
+          PY
+          git diff --check
+
+      - name: Remove temporary workflow and commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/omar-sentry-targeted-repair.yml
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: read transaction hash from rpc result"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
