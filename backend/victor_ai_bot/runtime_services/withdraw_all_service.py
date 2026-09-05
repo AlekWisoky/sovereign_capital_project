@@ -1664,7 +1664,7 @@ class WithdrawAllService:
                     sent = await rpc_s.send_private_tx(raw, max_block_number=current_block + 2)
                 else:
                     sent = await rpc_s.send_raw_tx(raw)
-                txh = getattr(sent, "execute_result", None) if getattr(sent, "ok", False) else ""
+                txh = getattr(sent, "result", None) if getattr(sent, "ok", False) else ""
                 if isinstance(txh, dict):
                     txh = txh.get("txHash") or txh.get("hash") or txh.get("execute_result")
                 if not isinstance(txh, str) or not self._is_tx_hash(txh):
