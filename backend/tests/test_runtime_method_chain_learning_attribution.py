@@ -120,7 +120,9 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning(tmp
     assert attribution.execution_id == execution_identity.execution_id
     assert attribution.settlement_id == settlement_identity.settlement_id
     assert attribution.action == "EXECUTE"
-    assert attribution.reward_wei == 875
+    # realized_after_gas_wei is already net of gas; only risk_cost_wei remains
+    # to be deducted from the learning reward.
+    assert attribution.reward_wei == 975
     assert attribution.operator_intent.aggression_mode == "aggressive"
     assert attribution.operator_intent.desired_wealth_goal["timeframe_days"] == 180
     assert attribution.operator_intent.ai_recommendation["confidence"] == 0.92
