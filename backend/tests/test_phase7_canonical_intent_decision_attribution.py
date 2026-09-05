@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from victor_ai_bot.caq_kds import bus as bus_module
 from victor_ai_bot.omar.operator_intent import operator_intent_fingerprint
 from victor_ai_bot.runtime_services.runtime_decision_finalize_facade import (
     RuntimeDecisionFinalizeFacade,
@@ -48,11 +49,11 @@ class _Omar:
 
 def test_phase7_canonical_intent_is_attached_before_omar_observation(monkeypatch):
     monkeypatch.setattr(
-        "victor_ai_bot.omar.operator_intent.BUS",
+        bus_module,
+        "BUS",
         SimpleNamespace(
             snapshot=lambda: {"command": {"data": {"risk_multiplier": 0.75}}}
         ),
-        raising=False,
     )
     monkeypatch.setenv("VICTOR_ENABLE_OMAR", "1")
 
