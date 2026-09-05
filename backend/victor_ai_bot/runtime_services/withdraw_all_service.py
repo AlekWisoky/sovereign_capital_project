@@ -1445,7 +1445,10 @@ class WithdrawAllService:
             return {"ok": True, **saved, "execute_result": execute_result}
 
         if is_public_mode():
-            execute_result = {"ok": False, "reason_code": "withdraw_execute_disabled_in_public_mode"}
+            execute_result = {
+                "ok": False,
+                "reason_code": "withdraw_execute_disabled_in_public_mode",
+            }
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
@@ -1535,7 +1538,12 @@ class WithdrawAllService:
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "no_rpc_endpoints", **saved, "execute_result": execute_result}
+            return {
+                "ok": False,
+                "reason_code": "no_rpc_endpoints",
+                **saved,
+                "execute_result": execute_result,
+            }
         executor = str(getattr(getattr(cfg, "execution", None), "executor_address", "") or "")
         if not executor:
             execute_result = {"ok": False, "reason_code": "executor_not_configured"}
@@ -1600,7 +1608,12 @@ class WithdrawAllService:
                     event="withdraw_all_execute_blocked",
                     persisted_state=persisted_state,
                 )
-                return {"ok": False, "reason_code": owner_reason, **saved, "execute_result": failure}
+                return {
+                    "ok": False,
+                    "reason_code": owner_reason,
+                    **saved,
+                    "execute_result": failure,
+                }
 
             max_fee, prio = await suggest_gas(
                 rpc_r,
@@ -1677,7 +1690,12 @@ class WithdrawAllService:
                         event="withdraw_all_execute_failed",
                         persisted_state=persisted_state,
                     )
-                    return {"ok": False, "reason_code": "send_failed", **saved, "execute_result": failure}
+                    return {
+                        "ok": False,
+                        "reason_code": "send_failed",
+                        **saved,
+                        "execute_result": failure,
+                    }
                 tx_execute_result = await assess_submitted_tx(
                     rpc_r,
                     tx_hash=str(txh or ""),
