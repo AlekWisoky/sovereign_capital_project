@@ -316,7 +316,7 @@ class OmarRealLearningLoop:
             eligible_for_learning=eligible,
             operator_intent=execution.operator_intent,
             reason_codes=[] if eligible else ["outcome_not_settled"],
-            metadata={"status": outcome.status},
+            metadata={**outcome.metadata, "status": outcome.status},
         )
         self._log("action_attribution", attribution.to_dict())
         if eligible and self.policy_updater is not None:
