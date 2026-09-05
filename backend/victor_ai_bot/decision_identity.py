@@ -51,11 +51,7 @@ def ensure_decision_identity(
 
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
-    decision_meta = (
-        _dict(getattr(decision, "metadata", None))
-        if decision is not None
-        else {}
-    )
+    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
 
     decision_id = _text(
         brain.get("canonical_decision_id")
@@ -142,9 +138,7 @@ def _resolve_sizing_inputs(
         amount_in_wei = _text(meta_value(opp, "amount_in_wei", "amountInWei"))
 
     existing = _text(
-        brain.get("sizing_id")
-        or lineage.get("sizing_id")
-        or decision_meta.get("sizing_id")
+        brain.get("sizing_id") or lineage.get("sizing_id") or decision_meta.get("sizing_id")
     )
     sizing_id = existing or _stable_id(
         "sizing",
@@ -182,11 +176,7 @@ def ensure_sizing_identity(
 
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
-    decision_meta = (
-        _dict(getattr(decision, "metadata", None))
-        if decision is not None
-        else {}
-    )
+    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
     sizing_id, size_mult, amount_in_wei = _resolve_sizing_inputs(
         opp,
         decision,
