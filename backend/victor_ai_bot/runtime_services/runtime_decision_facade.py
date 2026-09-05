@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, List, Optional
 
+from ..identity import attach_identity, identity_from
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
@@ -196,6 +198,46 @@ class RuntimeDecisionFacade:
             )
         return chosen
 
+    @staticmethod
+    def _forward_baseline_decision_for_execution(decision: Any, chosen: Opportunity) -> Any:
+        """Forward a real canonical decision even when OMAR/brain influence is off.
+
+        `brain_mode=off` means OMAR does not influence selection; it does *not*
+        mean the execution boundary may lose the decision/correlation identity.
+        The decision produced at the canonical decision boundary is copied so
+        the original observation remains truthful (`brain_off`), while the
+        execution-facing copy records that the baseline selector chose the
+        opportunity. Identity and economic context remain the same lineage.
+        """
+        if decision is None:
+            return None
+        identity = identity_from(decision)
+        if identity is None or not identity.decision_id or not identity.correlation_id:
+            return None
+
+        forwarded = copy.copy(decision)
+        try:
+            forwarded.action = "trade"
+            forwarded.opp_id = str(getattr(chosen, "id", "") or "")
+            forwarded.route_id = str(getattr(chosen, "route_id", "") or "")
+            forwarded.reason = "baseline_selected"
+        except (AttributeError, TypeError):
+            return None
+
+        try:
+            metadata = dict(getattr(decision, "metadata", {}) or {})
+            metadata["execution_forwarding"] = {
+                "selection_source": "baseline_auto_candidate",
+                "omar_influence": False,
+                "brain_mode": "off",
+            }
+            forwarded.metadata = metadata
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+        attach_identity(forwarded, identity)
+        return forwarded
+
     def _maybe_dispatch_auto_trade(self, *, current_block: int, decision: Any = None) -> bool:
         if not self._auto_trading or not self._opps or not self._cb.allow_auto_trading():
             return False
@@ -204,17 +246,25 @@ class RuntimeDecisionFacade:
 
         brain_mode = str(getattr(self.cfg.execution, "brain_mode", "off") or "off")
         chosen = None
+        execution_decision = decision
         if brain_mode == "off":
             chosen = self._simple_auto_trade_candidate()
+            if chosen is not None:
+                execution_decision = self._forward_baseline_decision_for_execution(decision, chosen)
         elif decision is not None and getattr(decision, "action", "skip") == "trade":
             chosen = self._decision_auto_trade_candidate(decision)
 
-        if chosen is None:
+        # Every real execution must carry the canonical decision identity.
+        # If the decision boundary failed to produce one, fail closed instead
+        # of falling back to an identity-less execution attempt.
+        if chosen is None or execution_decision is None:
             return False
 
         self._exec_task = asyncio.create_task(
             self._execute_auto(
-                chosen, int(current_block), decision=decision if brain_mode != "off" else None
+                chosen,
+                int(current_block),
+                decision=execution_decision,
             )
         )
         return True
