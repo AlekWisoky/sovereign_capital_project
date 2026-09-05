@@ -71,16 +71,20 @@ jobs:
           lines = [
               line.strip()
               for line in Path('/tmp/pytest-nodeids.txt').read_text(encoding='utf-8').splitlines()
-              if line.strip().startswith('tests/') and '::' in line
+              if '::' in line and line.strip()
           ]
           total = 8
+          if not lines:
+              print(Path('/tmp/pytest-nodeids.txt').read_text(encoding='utf-8'))
+              raise SystemExit('pytest collection produced zero nodeids; refusing a false-green shard gate')
           for shard in range(total):
               selected = lines[shard::total]
               Path(f'/tmp/pytest-shard-{shard}.txt').write_text(
                   '\n'.join(selected) + ('\n' if selected else ''), encoding='utf-8'
               )
+          shard = int("${{ matrix.shard }}")
           print(f'collected={len(lines)}')
-          print(f'shard={int("${{ matrix.shard }}")} size={len(lines[int("${{ matrix.shard }}")::total])}')
+          print(f'shard={shard} size={len(lines[shard::total])}')
           PY
 
       - name: Run pytest shard
