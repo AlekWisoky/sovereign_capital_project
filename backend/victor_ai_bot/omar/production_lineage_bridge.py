@@ -16,7 +16,13 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
+def _lineage_matches(
+    outcome: Any,
+    *,
+    decision_id: str,
+    correlation_id: str,
+    opportunity_id: str,
+) -> bool:
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
@@ -40,7 +46,11 @@ def _patch_decision_identity() -> None:
         ensure_decision_identity(
             opp,
             decision,
-            chain_name=_text(getattr(getattr(self, "cfg", None), "chain", None).name if getattr(getattr(self, "cfg", None), "chain", None) is not None else "chain"),
+            chain_name=_text(
+                getattr(getattr(self, "cfg", None), "chain", None).name
+                if getattr(getattr(self, "cfg", None), "chain", None) is not None
+                else "chain"
+            ),
             current_block=int(current_block),
         )
         return original(self, opp, decision, current_block=current_block)
@@ -68,7 +78,11 @@ def _patch_execution_identity() -> None:
                 ensure_decision_identity(
                     opp,
                     decision,
-                    chain_name=_text(getattr(getattr(runtime, "cfg", None), "chain", None).name if getattr(getattr(runtime, "cfg", None), "chain", None) is not None else "chain"),
+                    chain_name=_text(
+                        getattr(getattr(runtime, "cfg", None), "chain", None).name
+                        if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
+                        else "chain"
+                    ),
                     current_block=int(bound.arguments.get("bn") or 0),
                 )
                 lineage = lineage_from_opportunity(opp)
