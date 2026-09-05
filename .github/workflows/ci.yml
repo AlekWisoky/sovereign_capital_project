@@ -27,6 +27,11 @@ jobs:
             xargs -a "$slice" ruff check
           done < backend/mypy_targets.txt
 
+      - name: Pytest
+        run: |
+          cd backend
+          pytest -q
+
       - name: Black
         run: |
           black --check backend
@@ -39,11 +44,6 @@ jobs:
           while read -r slice; do
             mypy @"$slice"
           done < backend/mypy_targets.txt
-
-      - name: Pytest
-        run: |
-          cd backend
-          pytest -q
 
   mobile:
     runs-on: ubuntu-latest
