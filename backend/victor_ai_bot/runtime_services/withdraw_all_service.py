@@ -1409,7 +1409,7 @@ class WithdrawAllService:
         mode = str(plan.get("mode") or "txdata")
         state["last_status"] = "prepared" if dry_run or mode != "backend" else "executing"
         state["last_reason_code"] = "ok"
-        execute_execute_result: Dict[str, Any] = {
+        execute_result: Dict[str, Any] = {
             "ok": True,
             "status": state["last_status"],
             "preview_id": preview_id,
