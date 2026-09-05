@@ -1,0 +1,55 @@
+name: Temporary Withdraw Typing Fix
+
+on:
+  push:
+    branches:
+      - omar/phase-6-runtime-method-chain
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Finalize execute result typing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+          start = text.index("    async def execute(self, runtime: Any, payload: Dict[str, Any]) -> Dict[str, Any]:")
+          segment = text[start:]
+          # One explicit Dict[str, Any] declaration; all later assignments are plain assignments.
+          segment = segment.replace(
+              '        if not preview_id or preview_id != str(state.get("last_preview_id") or ""):\n            execute_result = {',
+              '        execute_result: Dict[str, Any] = {}\n        if not preview_id or preview_id != str(state.get("last_preview_id") or ""):\n            execute_result = {',
+              1,
+          )
+          segment = segment.replace('        execute_result: Dict[str, Any] = {', '        execute_result = {', 1)
+          for old, new in [
+              ('result[', 'execute_result['),
+              ('result.get(', 'execute_result.get('),
+              ('result.pop(', 'execute_result.pop('),
+              ('result.update(', 'execute_result.update('),
+              ('list(result.get(', 'list(execute_result.get('),
+              ('        result = _attach_lifecycle_summary(', '        execute_result = _attach_lifecycle_summary('),
+          ]:
+              segment = segment.replace(old, new)
+          text = text[:start] + segment
+          path.write_text(text, encoding="utf-8")
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Format
+        run: python -m pip install black==24.10.0 && black backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+      - name: Commit
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: finalize withdraw result typing"
+          git push
