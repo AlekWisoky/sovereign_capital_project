@@ -17,6 +17,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
           text = path.read_text(encoding="utf-8")
@@ -30,9 +31,13 @@ jobs:
           if marker not in text:
               raise SystemExit("typing repair marker not found")
           before, after = text.split(marker, 1)
-          after = after.replace("        result: Dict[str, Any] = {", "        execute_result: Dict[str, Any] = {", 1)
-          after = after.replace("result", "execute_result")
+          after = re.sub(r"\\bresult\\b", "execute_result", after)
           text = before + marker + after
+          text = text.replace(
+              '        execute_execute_result: Dict[str, Any] = {',
+              '        execute_result: Dict[str, Any] = {',
+              1,
+          )
           path.write_text(text, encoding="utf-8")
           PY
       - name: Commit repair
