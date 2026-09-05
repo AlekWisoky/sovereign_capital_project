@@ -54,11 +54,11 @@ class DurableLearningIdentity:
 
     def _trim(self) -> None:
         if len(self._pending) > self.max_rows:
-            keys = list(self._pending.keys())[:-self.max_rows]
+            keys = list(self._pending.keys())[: -self.max_rows]
             for key in keys:
                 self._pending.pop(key, None)
         if len(self._settled) > self.max_rows:
-            keys = list(self._settled.keys())[:-self.max_rows]
+            keys = list(self._settled.keys())[: -self.max_rows]
             for key in keys:
                 self._settled.pop(key, None)
 

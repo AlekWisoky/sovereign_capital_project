@@ -170,10 +170,14 @@ def _patch_pending_execution_identity() -> None:
         if execution_id:
             pending["execution_id"] = execution_id
         pending["canonical_decision_id"] = _text(
-            plan.get("canonical_decision_id") or lineage.get("decision_id") or brain.get("canonical_decision_id")
+            plan.get("canonical_decision_id")
+            or lineage.get("decision_id")
+            or brain.get("canonical_decision_id")
         )
         pending["correlation_id"] = _text(
-            plan.get("correlation_id") or lineage.get("correlation_id") or brain.get("correlation_id")
+            plan.get("correlation_id")
+            or lineage.get("correlation_id")
+            or brain.get("correlation_id")
         )
         pending["execution_lineage"] = {
             "decision_id": pending["canonical_decision_id"],
@@ -188,7 +192,9 @@ def _patch_pending_execution_identity() -> None:
             "authority_id": pending["capital_authority"].get("capital_authority_id", ""),
             "source": pending["capital_authority"].get("capital_source", ""),
             "available": bool(pending["capital_authority"].get("internal_prime_available", False)),
-            "capacity_ratio": float(pending["capital_authority"].get("prime_capacity_ratio", 0.0) or 0.0),
+            "capacity_ratio": float(
+                pending["capital_authority"].get("prime_capacity_ratio", 0.0) or 0.0
+            ),
             "cost_bps": float(pending["capital_authority"].get("prime_cost_bps", 0.0) or 0.0),
         }
         return pending
@@ -252,7 +258,9 @@ def _patch_learning_identity() -> None:
             return store
         base = str(getattr(runtime, "data_dir", os.path.join("data", "superstructure")))
         chain = _text(getattr(runtime, "chain_name", "default")) or "default"
-        store = DurableLearningIdentity(os.path.join(base, "omar_learning", f"identity_{chain}.json"))
+        store = DurableLearningIdentity(
+            os.path.join(base, "omar_learning", f"identity_{chain}.json")
+        )
         runtime._durable_learning_identity = store
         return store
 
@@ -307,12 +315,18 @@ def _patch_learning_identity() -> None:
                 "outcome_truth_verified": bool(
                     settlement.get(
                         "truth_verified",
-                        settlement.get("outcome_truth_verified", kwargs.get("outcome_truth_verified", False)),
+                        settlement.get(
+                            "outcome_truth_verified", kwargs.get("outcome_truth_verified", False)
+                        ),
                     )
                 ),
                 "source": _text(settlement.get("source")) or _text(metadata.get("source")),
-                "capital_demand": settlement.get("capital_demand") or pending.get("capital_demand") or {},
-                "capital_authority": settlement.get("capital_authority") or pending.get("capital_authority") or {},
+                "capital_demand": settlement.get("capital_demand")
+                or pending.get("capital_demand")
+                or {},
+                "capital_authority": settlement.get("capital_authority")
+                or pending.get("capital_authority")
+                or {},
                 "internal_prime_authority": settlement.get("internal_prime_authority")
                 or pending.get("internal_prime_authority")
                 or {},
@@ -335,7 +349,12 @@ def _patch_learning_identity() -> None:
                     "lineage": gate.to_dict(),
                 }
             )
-            return {"ok": False, "learned": False, "reason": gate.reason, "decision_id": decision_id}
+            return {
+                "ok": False,
+                "learned": False,
+                "reason": gate.reason,
+                "decision_id": decision_id,
+            }
 
         result = original_outcome(self, **kwargs)
         if isinstance(result, Mapping) and result.get("ok") and decision_id:
@@ -347,7 +366,9 @@ def _patch_learning_identity() -> None:
                     "action": outcome["action"],
                     "route_id": outcome["route_id"],
                     "tx_hash": _text(kwargs.get("tx_hash") or outcome.get("tx_hash")),
-                    "operator_intent_fingerprint": _text(metadata.get("operator_intent_fingerprint")),
+                    "operator_intent_fingerprint": _text(
+                        metadata.get("operator_intent_fingerprint")
+                    ),
                 },
             )
         return result

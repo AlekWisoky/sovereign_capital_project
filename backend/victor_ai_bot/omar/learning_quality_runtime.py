@@ -4,7 +4,11 @@ import json
 import os
 from typing import Any, Iterable, Mapping
 
-from .learning_quality import LearningQualityResult, LearningQualityThresholds, evaluate_learning_quality
+from .learning_quality import (
+    LearningQualityResult,
+    LearningQualityThresholds,
+    evaluate_learning_quality,
+)
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -42,9 +46,7 @@ def _events_from_jsonl(path: str) -> Iterable[dict[str, Any]]:
                     "state_key": _text(row.get("state_key")),
                     "action": _text(row.get("action")),
                     "reward": row.get("reward"),
-                    "outcome_truth_verified": bool(
-                        outcome.get("outcome_truth_verified", False)
-                    ),
+                    "outcome_truth_verified": bool(outcome.get("outcome_truth_verified", False)),
                     "tx_hash": _text(outcome.get("tx_hash")),
                 }
     except OSError:

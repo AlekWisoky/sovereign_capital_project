@@ -66,9 +66,13 @@ class OmarConfig:
         self.real_learning_min_observations = max(1, int(self.real_learning_min_observations))
         self.real_learning_alpha = max(0.001, min(1.0, float(self.real_learning_alpha)))
         self.live_exploration_epsilon = max(0.0, min(0.25, float(self.live_exploration_epsilon)))
-        self.performance_min_evaluation_observations = max(1, int(self.performance_min_evaluation_observations))
+        self.performance_min_evaluation_observations = max(
+            1, int(self.performance_min_evaluation_observations)
+        )
         self.performance_min_unique_states = max(1, int(self.performance_min_unique_states))
         self.performance_min_mean_advantage_usd = float(self.performance_min_mean_advantage_usd)
         self.performance_min_mean_advantage_bps = float(self.performance_min_mean_advantage_bps)
         self.performance_min_win_rate = max(0.0, min(1.0, float(self.performance_min_win_rate)))
-        self.performance_min_lower_confidence_advantage_usd = float(self.performance_min_lower_confidence_advantage_usd)
+        self.performance_min_lower_confidence_advantage_usd = float(
+            self.performance_min_lower_confidence_advantage_usd
+        )
