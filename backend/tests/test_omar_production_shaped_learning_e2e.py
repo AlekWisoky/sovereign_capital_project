@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
-from victor_ai_bot.decision_identity import ensure_decision_identity, lineage_from_opportunity
+from victor_ai_bot.decision_identity import (
+    ensure_decision_identity,
+    lineage_from_opportunity,
+)
 from victor_ai_bot.omar.config import OmarConfig
 from victor_ai_bot.omar.lifecycle_bridge import install_omar_lifecycle_hooks
 from victor_ai_bot.omar.runtime import OmarRuntime
@@ -209,11 +212,19 @@ def _install_execution_seams(monkeypatch, identity, execution_result, events):
     ):
         events.append(("execute", candidate, kwargs["decision"]))
         assert candidate.meta["brain"]["sizing_id"]
-        assert candidate.meta["brain"]["canonical_decision_id"] == identity.decision_id
-        assert candidate.meta["brain"]["correlation_id"] == identity.correlation_id
+        assert (
+            candidate.meta["brain"]["canonical_decision_id"]
+            == identity.decision_id
+        )
+        assert (
+            candidate.meta["brain"]["correlation_id"]
+            == identity.correlation_id
+        )
         return execution_result
 
-    monkeypatch.setattr(runtime_legacy_module, "try_execute_opportunity", fake_execute)
+    monkeypatch.setattr(
+        runtime_legacy_module, "try_execute_opportunity", fake_execute
+    )
 
     async def fake_prepare(self, *, opp, bn, decision):
         return AutoExecutionDispatchContext(
