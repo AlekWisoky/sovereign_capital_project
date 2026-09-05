@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  backend:
+  backend-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,10 +40,72 @@ jobs:
             mypy @"$slice"
           done < backend/mypy_targets.txt
 
-      - name: Pytest
+  backend-pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        total: [8]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
         run: |
-          cd backend
-          pytest -q
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+
+      - name: Collect pytest files
+        working-directory: backend
+        run: |
+          pytest --collect-only -q > /tmp/pytest-collection.txt
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          files = []
+          for raw in Path('/tmp/pytest-collection.txt').read_text(encoding='utf-8').splitlines():
+              match = re.match(r'^(tests/[^:]+):\s+(\d+)\s*$', raw.strip())
+              if match:
+                  files.append((match.group(1), int(match.group(2))))
+          total = 8
+          if not files:
+              print(Path('/tmp/pytest-collection.txt').read_text(encoding='utf-8'))
+              raise SystemExit('pytest collection produced zero test files; refusing a false-green shard gate')
+          shard_files = [[] for _ in range(total)]
+          shard_counts = [0] * total
+          # Greedy balancing by collected test count keeps large test modules from
+          # concentrating on one runner while preserving whole-file execution.
+          for path, count in sorted(files, key=lambda item: item[1], reverse=True):
+              shard = min(range(total), key=lambda index: shard_counts[index])
+              shard_files[shard].append(path)
+              shard_counts[shard] += count
+          for shard in range(total):
+              Path(f'/tmp/pytest-shard-{shard}.txt').write_text(
+                  '\n'.join(shard_files[shard]) + ('\n' if shard_files[shard] else ''),
+                  encoding='utf-8',
+              )
+          shard = int("${{ matrix.shard }}")
+          print(f'collected_files={len(files)}')
+          print(f'collected_tests={sum(count for _, count in files)}')
+          print(f'shard={shard} files={len(shard_files[shard])} tests={shard_counts[shard]}')
+          PY
+
+      - name: Run pytest shard
+        working-directory: backend
+        run: |
+          mapfile -t test_files < /tmp/pytest-shard-${{ matrix.shard }}.txt
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "No tests assigned to shard ${{ matrix.shard }}"
+            exit 1
+          fi
+          pytest -q -o faulthandler_timeout=300 "${test_files[@]}"
 
   mobile:
     runs-on: ubuntu-latest
