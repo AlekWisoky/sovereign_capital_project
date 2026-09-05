@@ -51,9 +51,7 @@ def test_phase7_canonical_intent_is_attached_before_omar_observation(monkeypatch
     monkeypatch.setattr(
         bus_module,
         "BUS",
-        SimpleNamespace(
-            snapshot=lambda: {"command": {"data": {"risk_multiplier": 0.75}}}
-        ),
+        SimpleNamespace(snapshot=lambda: {"command": {"data": {"risk_multiplier": 0.75}}}),
     )
     monkeypatch.setenv("VICTOR_ENABLE_OMAR", "1")
 
