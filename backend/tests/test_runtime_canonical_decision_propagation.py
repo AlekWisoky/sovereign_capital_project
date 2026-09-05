@@ -28,21 +28,6 @@ class _Runtime(RuntimeDecisionFacade):
         self.calls.append((opp, bn, decision))
 
 
-def test_brain_off_does_not_break_canonical_decision_lineage():
-    runtime = _Runtime()
-    decision = SimpleNamespace(
-        decision_id="decision-001",
-        correlation_id="corr-001",
-        action="trade",
-    )
-
-    assert runtime._maybe_dispatch_auto_trade(current_block=123, decision=decision)
-
-    # The event loop has not executed the task yet, so the assertion is made
-    # after the task is awaited by the async companion below.
-    assert runtime._exec_task is not None
-
-
 @pytest.mark.asyncio
 async def test_brain_off_forwards_decision_to_execution_entry():
     runtime = _Runtime()
