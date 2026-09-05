@@ -3,7 +3,11 @@ from __future__ import annotations
 from victor_ai_bot.fund_os.health_states import HealthState
 from victor_ai_bot.fund_os.launch_modes import LaunchMode, LaunchProfile
 from victor_ai_bot.fund_os.staged_rollout import StagedRolloutManager
-from victor_ai_bot.identity import new_decision_identity, new_execution_identity, new_settlement_identity
+from victor_ai_bot.identity import (
+    new_decision_identity,
+    new_execution_identity,
+    new_settlement_identity,
+)
 from victor_ai_bot.omar.operator_intent import OperatorIntentSnapshot
 from victor_ai_bot.omar.real_learning import CapitalAuthoritySnapshot, OmarRealLearningLoop
 from victor_ai_bot.omar.settled_ledger_bridge import ingest_settled_ledger_record

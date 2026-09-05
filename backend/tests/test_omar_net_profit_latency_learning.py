@@ -151,4 +151,6 @@ def test_canonical_ledger_carries_net_profit_and_latency_truth(tmp_path):
     assert outcome.learning_reward > 0.0
     assert outcome.latency_quality > 0.0
     assert outcome.to_dict()["netProfitAfterCostsUsdMicro"] == "6250000"
-    assert outcome.to_dict()["context"]["netEconomics"]["source"] == "derived_from_settled_components"
+    assert (
+        outcome.to_dict()["context"]["netEconomics"]["source"] == "derived_from_settled_components"
+    )

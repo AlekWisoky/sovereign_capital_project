@@ -31,9 +31,7 @@ class _FakeExecutionService:
         self.calls.append("admission")
         return SimpleNamespace(opportunity=opp, blocked_result=None)
 
-    def handle_superstructure_pre_execute(
-        self, runtime, opp, decision, *, force_dry_run
-    ):
+    def handle_superstructure_pre_execute(self, runtime, opp, decision, *, force_dry_run):
         self.calls.append("superstructure")
         return SimpleNamespace(
             opportunity=opp,
@@ -52,9 +50,7 @@ class _FakeExecutionService:
             runtime.cfg.execution.send_mode,
         )
 
-    def handle_governance_pre_execute(
-        self, runtime, opp, bn, decision, *, force_dry_run
-    ):
+    def handle_governance_pre_execute(self, runtime, opp, bn, decision, *, force_dry_run):
         self.calls.append("governance")
         return SimpleNamespace(opportunity=opp, blocked_result=None)
 
@@ -62,9 +58,7 @@ class _FakeExecutionService:
         self.calls.append("fioa")
         return await core()
 
-    async def handle_post_execute_bookkeeping(
-        self, runtime, opp, res, *, bn, latency_ms, mode
-    ):
+    async def handle_post_execute_bookkeeping(self, runtime, opp, res, *, bn, latency_ms, mode):
         self.calls.append("bookkeeping")
         runtime._captured_result = res
 

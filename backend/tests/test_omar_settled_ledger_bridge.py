@@ -15,7 +15,8 @@ def test_omar_ingests_complete_settled_ledger_lineage(tmp_path):
             "freshness_class": "fresh",
             "source": "internal_prime",
         },
-        policy_updater=lambda attribution: updates.append(attribution.to_dict()) or {"updated": True},
+        policy_updater=lambda attribution: updates.append(attribution.to_dict())
+        or {"updated": True},
     )
 
     result = ingest_settled_ledger_record(

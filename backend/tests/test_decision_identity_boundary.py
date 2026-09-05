@@ -7,9 +7,7 @@ from victor_ai_bot.runtime_services.runtime_decision_finalize_facade import (
 
 def test_decision_boundary_assigns_one_canonical_identity():
     decision = TradeDecision(action="trade", opp_id="opp-1", route_id="route-1")
-    finalized = RuntimeDecisionFinalizeFacade()._ensure_decision_identity(
-        decision, opps=[]
-    )
+    finalized = RuntimeDecisionFinalizeFacade()._ensure_decision_identity(decision, opps=[])
 
     identity = identity_from(finalized)
     assert identity is not None

@@ -263,7 +263,21 @@ class ExecutionPlanSnapshot:
         }
 
     def validate(self) -> SnapshotStatus:
-        if not all((self.route_identity, self.quote_revision, self.provider_identity, self.fee_revision, self.calldata, self.simulation_state, self.treasury_revision, self.risk_governance_revision, self.goal_revision, self.strategy_family, self.execution_plan_id)):
+        if not all(
+            (
+                self.route_identity,
+                self.quote_revision,
+                self.provider_identity,
+                self.fee_revision,
+                self.calldata,
+                self.simulation_state,
+                self.treasury_revision,
+                self.risk_governance_revision,
+                self.goal_revision,
+                self.strategy_family,
+                self.execution_plan_id,
+            )
+        ):
             return SnapshotStatus.MISSING_AUTHORITY
         if self.amount <= 0 or self.min_out < 0 or self.slippage_bps < 0 or self.fee_amount < 0:
             return SnapshotStatus.INVALID
@@ -287,7 +301,11 @@ class DecisionSnapshot:
     trade_correlation_id: str
 
     def validate(self, *, now: datetime) -> SnapshotStatus:
-        if not self.opportunity_identity or not self.policy_revision or not self.trade_correlation_id:
+        if (
+            not self.opportunity_identity
+            or not self.policy_revision
+            or not self.trade_correlation_id
+        ):
             return SnapshotStatus.MISSING_AUTHORITY
         if self.selected_strategy != "flash_arb":
             return SnapshotStatus.INVALID
@@ -299,9 +317,17 @@ class DecisionSnapshot:
             return self.conversion.validate(now=now)
         if self.provider.validate(now=now) != SnapshotStatus.VALID:
             return self.provider.validate(now=now)
-        if self.risk_governance.validate(now=now, required_policy_revision=self.policy_revision) != SnapshotStatus.VALID:
-            return self.risk_governance.validate(now=now, required_policy_revision=self.policy_revision)
-        if self.freshness_envelope.status(now=now, revision=self.policy_revision) != SnapshotStatus.VALID:
+        if (
+            self.risk_governance.validate(now=now, required_policy_revision=self.policy_revision)
+            != SnapshotStatus.VALID
+        ):
+            return self.risk_governance.validate(
+                now=now, required_policy_revision=self.policy_revision
+            )
+        if (
+            self.freshness_envelope.status(now=now, revision=self.policy_revision)
+            != SnapshotStatus.VALID
+        ):
             return self.freshness_envelope.status(now=now, revision=self.policy_revision)
         return SnapshotStatus.VALID
 
@@ -310,7 +336,9 @@ NOW = datetime(2026, 8, 14, 7, 0, tzinfo=timezone.utc)
 
 
 def _provenance(name: str, revision: str) -> Provenance:
-    return Provenance(TEST_MARKER, name, revision, NOW, observed_block=100, observed_block_hash="block-100")
+    return Provenance(
+        TEST_MARKER, name, revision, NOW, observed_block=100, observed_block_hash="block-100"
+    )
 
 
 def _fresh(revision: str) -> Freshness:
@@ -318,29 +346,120 @@ def _fresh(revision: str) -> Freshness:
 
 
 def _treasury() -> TreasurySnapshot:
-    return TreasurySnapshot("chain-x", "scope-x", "ASSET_UNSPECIFIED", 0, "decimals-r1", "ledger-r1", "treasury-r1", "reservation-unresolved", 100, 10, 5, _provenance("treasury-test", "treasury-r1"), _fresh("treasury-r1"))
+    return TreasurySnapshot(
+        "chain-x",
+        "scope-x",
+        "ASSET_UNSPECIFIED",
+        0,
+        "decimals-r1",
+        "ledger-r1",
+        "treasury-r1",
+        "reservation-unresolved",
+        100,
+        10,
+        5,
+        _provenance("treasury-test", "treasury-r1"),
+        _fresh("treasury-r1"),
+    )
 
 
 def _conversion() -> ConversionSnapshot:
-    return ConversionSnapshot("ASSET_A", 8, "decimals-a-r1", "ASSET_B", 6, "decimals-b-r1", 3, 2, "conversion-source-x", "conversion-r1", 100, "block-100", NOW, _fresh("conversion-r1"), "ceil", _provenance("conversion-test", "conversion-r1"))
+    return ConversionSnapshot(
+        "ASSET_A",
+        8,
+        "decimals-a-r1",
+        "ASSET_B",
+        6,
+        "decimals-b-r1",
+        3,
+        2,
+        "conversion-source-x",
+        "conversion-r1",
+        100,
+        "block-100",
+        NOW,
+        _fresh("conversion-r1"),
+        "ceil",
+        _provenance("conversion-test", "conversion-r1"),
+    )
 
 
 def _provider() -> ProviderSnapshot:
-    return ProviderSnapshot("provider-unresolved", "ASSET_UNSPECIFIED", 0, 1000, "asset-native-units", 100, "block-100", "provider-r1", "fee-r1", 1, None, None, _fresh("provider-r1"), _provenance("provider-test", "provider-r1"))
+    return ProviderSnapshot(
+        "provider-unresolved",
+        "ASSET_UNSPECIFIED",
+        0,
+        1000,
+        "asset-native-units",
+        100,
+        "block-100",
+        "provider-r1",
+        "fee-r1",
+        1,
+        None,
+        None,
+        _fresh("provider-r1"),
+        _provenance("provider-test", "provider-r1"),
+    )
 
 
 def _risk() -> RiskGovernanceSnapshot:
-    return RiskGovernanceSnapshot("policy-r1", "policy-r1", "policy-r1", "policy-r1", "policy-r1", "policy-r1", "policy-r1", {"ready": True, "gates": "mandatory"}, _fresh("policy-r1"), _provenance("risk-test", "policy-r1"))
+    return RiskGovernanceSnapshot(
+        "policy-r1",
+        "policy-r1",
+        "policy-r1",
+        "policy-r1",
+        "policy-r1",
+        "policy-r1",
+        "policy-r1",
+        {"ready": True, "gates": "mandatory"},
+        _fresh("policy-r1"),
+        _provenance("risk-test", "policy-r1"),
+    )
 
 
 def _plan() -> ExecutionPlanSnapshot:
-    fields = {"route_identity": "route-test", "amount": 100, "quote_revision": "quote-r1", "quote_block": 100, "min_out": 99, "slippage_bps": 50, "provider_identity": "provider-unresolved", "fee_revision": "fee-r1", "fee_amount": 1, "gas_assumptions": (("gas_limit", "200000"),), "calldata": "0xtest", "deadline": 200, "simulation_state": "passed-test-only", "treasury_revision": "treasury-r1", "risk_governance_revision": "policy-r1", "goal_revision": "goal-r1", "strategy_family": "flash_arb"}
-    return ExecutionPlanSnapshot(**fields, execution_plan_id=ExecutionPlanSnapshot.contract_id(fields))
+    fields = {
+        "route_identity": "route-test",
+        "amount": 100,
+        "quote_revision": "quote-r1",
+        "quote_block": 100,
+        "min_out": 99,
+        "slippage_bps": 50,
+        "provider_identity": "provider-unresolved",
+        "fee_revision": "fee-r1",
+        "fee_amount": 1,
+        "gas_assumptions": (("gas_limit", "200000"),),
+        "calldata": "0xtest",
+        "deadline": 200,
+        "simulation_state": "passed-test-only",
+        "treasury_revision": "treasury-r1",
+        "risk_governance_revision": "policy-r1",
+        "goal_revision": "goal-r1",
+        "strategy_family": "flash_arb",
+    }
+    return ExecutionPlanSnapshot(
+        **fields, execution_plan_id=ExecutionPlanSnapshot.contract_id(fields)
+    )
 
 
 def _decision() -> DecisionSnapshot:
     plan = _plan()
-    return DecisionSnapshot("opportunity-test", plan, _treasury(), _conversion(), _provider(), _risk(), "single", "flash_arb", (("pacing", "constrained"),), _fresh("policy-r1"), _provenance("decision-test", "policy-r1"), "policy-r1", "trade-correlation-test")
+    return DecisionSnapshot(
+        "opportunity-test",
+        plan,
+        _treasury(),
+        _conversion(),
+        _provider(),
+        _risk(),
+        "single",
+        "flash_arb",
+        (("pacing", "constrained"),),
+        _fresh("policy-r1"),
+        _provenance("decision-test", "policy-r1"),
+        "policy-r1",
+        "trade-correlation-test",
+    )
 
 
 def test_snapshots_are_explicitly_synthetic_and_do_not_choose_authorities():
@@ -352,43 +471,107 @@ def test_snapshots_are_explicitly_synthetic_and_do_not_choose_authorities():
 
 def test_treasury_rejects_ambiguous_or_legacy_proxy_truth():
     assert _treasury().validate(now=NOW) is SnapshotStatus.VALID
-    assert replace(_treasury(), asset_identity="").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(_treasury(), decimal_authority_revision="").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
+    assert (
+        replace(_treasury(), asset_identity="").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(_treasury(), decimal_authority_revision="").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
     assert "estimated_capital_wei" not in _treasury().__dataclass_fields__
     assert "bankroll_proxy" not in _treasury().__dataclass_fields__
 
 
 def test_conversion_fails_closed_for_missing_stale_conflicting_or_ambiguous_evidence():
     assert _conversion().validate(now=NOW) is SnapshotStatus.VALID
-    assert replace(_conversion(), source_decimals=None).validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(_conversion(), source_identity="").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(_conversion(), conflict_state="contradictory").validate(now=NOW) is SnapshotStatus.PROVENANCE_CONFLICT
-    assert replace(_conversion(), direction="ambiguous").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(_conversion(), freshness=_fresh("other-revision")).validate(now=NOW) is SnapshotStatus.REVISION_CONFLICT
-    assert replace(_conversion(), freshness=Freshness(NOW - timedelta(minutes=1), 99, "block-99", timedelta(seconds=1), "conversion-r1")).validate(now=NOW) is SnapshotStatus.STALE
+    assert (
+        replace(_conversion(), source_decimals=None).validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(_conversion(), source_identity="").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(_conversion(), conflict_state="contradictory").validate(now=NOW)
+        is SnapshotStatus.PROVENANCE_CONFLICT
+    )
+    assert (
+        replace(_conversion(), direction="ambiguous").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(_conversion(), freshness=_fresh("other-revision")).validate(now=NOW)
+        is SnapshotStatus.REVISION_CONFLICT
+    )
+    assert (
+        replace(
+            _conversion(),
+            freshness=Freshness(
+                NOW - timedelta(minutes=1), 99, "block-99", timedelta(seconds=1), "conversion-r1"
+            ),
+        ).validate(now=NOW)
+        is SnapshotStatus.STALE
+    )
 
 
 def test_provider_capacity_is_not_a_dimensionless_multiplier():
     assert _provider().validate(now=NOW) is SnapshotStatus.VALID
-    assert replace(_provider(), capacity_units="").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(_provider(), fee_schedule_revision="").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
+    assert (
+        replace(_provider(), capacity_units="").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(_provider(), fee_schedule_revision="").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
     assert "dimensionless_multiplier" not in _provider().__dataclass_fields__
 
 
 def test_risk_governance_requires_compatible_revisioned_state():
     assert _risk().validate(now=NOW, required_policy_revision="policy-r1") is SnapshotStatus.VALID
-    assert replace(_risk(), policy_revision="policy-r2").validate(now=NOW, required_policy_revision="policy-r1") is SnapshotStatus.REVISION_CONFLICT
-    assert replace(_risk(), state={}).validate(now=NOW, required_policy_revision="policy-r1") is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(_risk(), state={"contradictory": True}).validate(now=NOW, required_policy_revision="policy-r1") is SnapshotStatus.PROVENANCE_CONFLICT
-    assert replace(_risk(), freshness=Freshness(NOW - timedelta(minutes=1), 99, "block-99", timedelta(seconds=1), "policy-r1")).validate(now=NOW, required_policy_revision="policy-r1") is SnapshotStatus.STALE
+    assert (
+        replace(_risk(), policy_revision="policy-r2").validate(
+            now=NOW, required_policy_revision="policy-r1"
+        )
+        is SnapshotStatus.REVISION_CONFLICT
+    )
+    assert (
+        replace(_risk(), state={}).validate(now=NOW, required_policy_revision="policy-r1")
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(_risk(), state={"contradictory": True}).validate(
+            now=NOW, required_policy_revision="policy-r1"
+        )
+        is SnapshotStatus.PROVENANCE_CONFLICT
+    )
+    assert (
+        replace(
+            _risk(),
+            freshness=Freshness(
+                NOW - timedelta(minutes=1), 99, "block-99", timedelta(seconds=1), "policy-r1"
+            ),
+        ).validate(now=NOW, required_policy_revision="policy-r1")
+        is SnapshotStatus.STALE
+    )
 
 
 def test_material_plan_changes_invalidate_test_only_plan_identity():
     plan = _plan()
     assert plan.validate() is SnapshotStatus.VALID
-    changed = replace(plan, amount=101, execution_plan_id=ExecutionPlanSnapshot.contract_id({**plan.material_fields(), "amount": 101}))
+    changed = replace(
+        plan,
+        amount=101,
+        execution_plan_id=ExecutionPlanSnapshot.contract_id(
+            {**plan.material_fields(), "amount": 101}
+        ),
+    )
     assert changed.execution_plan_id != plan.execution_plan_id
-    assert replace(plan, execution_plan_id=plan.route_identity).execution_plan_id != ExecutionPlanSnapshot.contract_id(plan.material_fields())
+    assert replace(
+        plan, execution_plan_id=plan.route_identity
+    ).execution_plan_id != ExecutionPlanSnapshot.contract_id(plan.material_fields())
 
 
 def test_decision_snapshot_is_immutable_revision_aware_and_fail_closed():
@@ -396,10 +579,28 @@ def test_decision_snapshot_is_immutable_revision_aware_and_fail_closed():
     assert decision.validate(now=NOW) is SnapshotStatus.VALID
     with pytest.raises((AttributeError, TypeError)):
         decision.policy_revision = "policy-r2"  # type: ignore[misc]
-    assert replace(decision, selected_strategy="stat_arb").validate(now=NOW) is SnapshotStatus.INVALID
-    assert replace(decision, trade_correlation_id="").validate(now=NOW) is SnapshotStatus.MISSING_AUTHORITY
-    assert replace(decision, freshness_envelope=Freshness(NOW - timedelta(minutes=1), 99, "block-99", timedelta(seconds=1), "policy-r1")).validate(now=NOW) is SnapshotStatus.STALE
-    assert replace(decision, risk_governance=replace(_risk(), policy_revision="policy-r2")).validate(now=NOW) is SnapshotStatus.REVISION_CONFLICT
+    assert (
+        replace(decision, selected_strategy="stat_arb").validate(now=NOW) is SnapshotStatus.INVALID
+    )
+    assert (
+        replace(decision, trade_correlation_id="").validate(now=NOW)
+        is SnapshotStatus.MISSING_AUTHORITY
+    )
+    assert (
+        replace(
+            decision,
+            freshness_envelope=Freshness(
+                NOW - timedelta(minutes=1), 99, "block-99", timedelta(seconds=1), "policy-r1"
+            ),
+        ).validate(now=NOW)
+        is SnapshotStatus.STALE
+    )
+    assert (
+        replace(decision, risk_governance=replace(_risk(), policy_revision="policy-r2")).validate(
+            now=NOW
+        )
+        is SnapshotStatus.REVISION_CONFLICT
+    )
 
 
 def test_validation_is_deterministic_explicit_now_and_has_no_runtime_io_boundary():

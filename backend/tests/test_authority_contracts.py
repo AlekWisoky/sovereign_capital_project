@@ -31,23 +31,65 @@ def rev(source: str, value: str = "r1") -> Revision:
 
 
 def provenance(source: str = "fixture") -> Provenance:
-    return Provenance(source=source, source_id="fixture-1", evidence_type="test", observed_at=NOW, chain="test", block_number=100, block_hash="block-100", revision=rev(source))
+    return Provenance(
+        source=source,
+        source_id="fixture-1",
+        evidence_type="test",
+        observed_at=NOW,
+        chain="test",
+        block_number=100,
+        block_hash="block-100",
+        revision=rev(source),
+    )
 
 
-def freshness(revision: Revision | None = None, horizon: timedelta | None = timedelta(seconds=30)) -> FreshnessSnapshot:
-    return FreshnessSnapshot(source="fixture", observed_at=NOW, observed_block=100, observed_block_hash="block-100", horizon=horizon, policy_revision=revision, state=SnapshotState.VALID)
+def freshness(
+    revision: Revision | None = None, horizon: timedelta | None = timedelta(seconds=30)
+) -> FreshnessSnapshot:
+    return FreshnessSnapshot(
+        source="fixture",
+        observed_at=NOW,
+        observed_block=100,
+        observed_block_hash="block-100",
+        horizon=horizon,
+        policy_revision=revision,
+        state=SnapshotState.VALID,
+    )
 
 
-def evidence(status: AuthorityStatus = AuthorityStatus.PROVEN, revision: Revision | None = None, conflicts: tuple[str, ...] = ()) -> Evidence:
-    return Evidence(status=status, provenance=provenance(), freshness=freshness(revision or rev("fixture")), revision=revision or rev("fixture"), conflicts=conflicts)
+def evidence(
+    status: AuthorityStatus = AuthorityStatus.PROVEN,
+    revision: Revision | None = None,
+    conflicts: tuple[str, ...] = (),
+) -> Evidence:
+    return Evidence(
+        status=status,
+        provenance=provenance(),
+        freshness=freshness(revision or rev("fixture")),
+        revision=revision or rev("fixture"),
+        conflicts=conflicts,
+    )
 
 
 def unit(asset: str = "ASSET_A", denomination: str = "asset-native") -> Unit:
-    return Unit(asset=asset, denomination=denomination, decimals=18, decimal_revision=rev("decimals"))
+    return Unit(
+        asset=asset, denomination=denomination, decimals=18, decimal_revision=rev("decimals")
+    )
 
 
 def treasury(status: AuthorityStatus = AuthorityStatus.PROVEN) -> TreasurySnapshot:
-    return TreasurySnapshot("scope", "test-chain", "account-1", unit(), 1000, 800, 100, 100, evidence(status), rev("treasury"))
+    return TreasurySnapshot(
+        "scope",
+        "test-chain",
+        "account-1",
+        unit(),
+        1000,
+        800,
+        100,
+        100,
+        evidence(status),
+        rev("treasury"),
+    )
 
 
 def plan_fields(**changes):
@@ -78,7 +120,9 @@ def plan(**changes) -> ExecutionPlanSnapshot:
     for key, value in values.items():
         object.__setattr__(provisional, key, value)
     execution_plan_id = ExecutionPlanSnapshot.content_id(provisional.material_fields())
-    return ExecutionPlanSnapshot(**values, execution_plan_id=execution_plan_id, provenance=provenance("plan"))
+    return ExecutionPlanSnapshot(
+        **values, execution_plan_id=execution_plan_id, provenance=provenance("plan")
+    )
 
 
 def decision(**changes) -> DecisionSnapshot:
@@ -135,21 +179,46 @@ def test_revision_compatibility_is_deterministic_and_source_specific():
 
 def test_freshness_requires_explicit_now_and_does_not_invent_ttl():
     assert freshness().evaluate(now=NOW, revision=rev("fixture")) is SnapshotState.VALID
-    assert freshness().evaluate(now=NOW + timedelta(seconds=31), revision=rev("fixture")) is SnapshotState.STALE
-    assert freshness(horizon=None).evaluate(now=NOW, revision=rev("fixture")) is SnapshotState.POLICY_UNRESOLVED
+    assert (
+        freshness().evaluate(now=NOW + timedelta(seconds=31), revision=rev("fixture"))
+        is SnapshotState.STALE
+    )
+    assert (
+        freshness(horizon=None).evaluate(now=NOW, revision=rev("fixture"))
+        is SnapshotState.POLICY_UNRESOLVED
+    )
     with pytest.raises(AuthorityContractError):
         freshness().evaluate(now=datetime(2026, 8, 14, 23, 55), revision=rev("fixture"))
 
 
 def test_unresolved_and_conflicting_evidence_fail_closed():
     assert treasury(AuthorityStatus.UNRESOLVED).validate(now=NOW) is SnapshotState.POLICY_UNRESOLVED
-    assert treasury(AuthorityStatus.CONFLICTING).validate(now=NOW) is SnapshotState.PROVENANCE_CONFLICT
-    assert evidence(conflicts=("source-a/source-b",)).validate(now=NOW) is SnapshotState.PROVENANCE_CONFLICT
+    assert (
+        treasury(AuthorityStatus.CONFLICTING).validate(now=NOW) is SnapshotState.PROVENANCE_CONFLICT
+    )
+    assert (
+        evidence(conflicts=("source-a/source-b",)).validate(now=NOW)
+        is SnapshotState.PROVENANCE_CONFLICT
+    )
 
 
 def test_units_and_missing_decimals_are_not_silently_compatible():
     assert not unit().compatible_with(unit(asset="ASSET_B"))
-    assert TreasurySnapshot("scope", "chain", "acct", Unit("ASSET", "native", None), 1, 1, 0, 0, evidence(), rev("treasury")).validate(now=NOW) is SnapshotState.MISSING
+    assert (
+        TreasurySnapshot(
+            "scope",
+            "chain",
+            "acct",
+            Unit("ASSET", "native", None),
+            1,
+            1,
+            0,
+            0,
+            evidence(),
+            rev("treasury"),
+        ).validate(now=NOW)
+        is SnapshotState.MISSING
+    )
 
 
 def test_execution_plan_identity_is_deterministic_and_material_fields_bound():
@@ -174,24 +243,41 @@ def test_execution_plan_identity_is_deterministic_and_material_fields_bound():
         {"policy_revision": rev("policy", "r2")},
         {"amount_unit": unit(asset="ASSET_B")},
     )
-    assert all(plan(**change).execution_plan_id != first.execution_plan_id for change in material_changes)
+    assert all(
+        plan(**change).execution_plan_id != first.execution_plan_id for change in material_changes
+    )
     with pytest.raises(AuthorityContractError):
-        ExecutionPlanSnapshot(**plan_fields(), execution_plan_id="not-the-content-id", provenance=provenance("plan"))
+        ExecutionPlanSnapshot(
+            **plan_fields(), execution_plan_id="not-the-content-id", provenance=provenance("plan")
+        )
 
 
 def test_provider_capacity_and_fee_contracts_require_explicit_units_and_fee_evidence():
-    capacity = ProviderCapacitySnapshot("provider-unresolved", unit(), 1000, "asset-native", evidence(), 100, "block-100")
+    capacity = ProviderCapacitySnapshot(
+        "provider-unresolved", unit(), 1000, "asset-native", evidence(), 100, "block-100"
+    )
     fee = ProviderFeeSnapshot("provider-unresolved", unit(), 1, None, None, evidence())
     assert capacity.validate(now=NOW) is SnapshotState.VALID
     assert fee.validate(now=NOW) is SnapshotState.VALID
-    assert ProviderCapacitySnapshot("provider", unit(), 1, "", evidence(), 1, "hash").validate(now=NOW) is SnapshotState.MISSING
+    assert (
+        ProviderCapacitySnapshot("provider", unit(), 1, "", evidence(), 1, "hash").validate(now=NOW)
+        is SnapshotState.MISSING
+    )
 
 
 def test_decision_validation_is_pure_explicit_now_and_rejects_unresolved_root():
     assert decision().validate(now=NOW) is SnapshotState.VALID
-    assert decision(status=AuthorityStatus.UNRESOLVED).validate(now=NOW) is SnapshotState.POLICY_UNRESOLVED
+    assert (
+        decision(status=AuthorityStatus.UNRESOLVED).validate(now=NOW)
+        is SnapshotState.POLICY_UNRESOLVED
+    )
     assert decision(trade_correlation_id="").validate(now=NOW) is SnapshotState.MISSING
-    assert decision(freshness=freshness(rev("policy"), timedelta(seconds=1))).validate(now=NOW + timedelta(seconds=2)) is SnapshotState.STALE
+    assert (
+        decision(freshness=freshness(rev("policy"), timedelta(seconds=1))).validate(
+            now=NOW + timedelta(seconds=2)
+        )
+        is SnapshotState.STALE
+    )
 
 
 def test_policy_snapshot_is_read_only_evidence_not_runtime_authority():
