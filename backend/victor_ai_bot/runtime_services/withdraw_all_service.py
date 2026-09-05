@@ -1315,7 +1315,12 @@ class WithdrawAllService:
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "preview_id_mismatch", **saved, "result": result}
+            return {
+                "ok": False,
+                "reason_code": "preview_id_mismatch",
+                **saved,
+                "result": execute_result,
+            }
         if confirm_text != "WITHDRAW EVERYTHING":
             execute_result = {"ok": False, "reason_code": "confirmation_text_mismatch"}
             saved = self._persist_execute_outcome(
@@ -1344,7 +1349,12 @@ class WithdrawAllService:
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "preview_expired", **saved, "result": result}
+            return {
+                "ok": False,
+                "reason_code": "preview_expired",
+                **saved,
+                "result": execute_result,
+            }
         if (
             preview_id == str(state.get("last_executed_preview_id") or "")
             and isinstance(state.get("last_executed_result"), dict)
@@ -1384,7 +1394,7 @@ class WithdrawAllService:
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "preview_stale", **saved, "result": result}
+            return {"ok": False, "reason_code": "preview_stale", **saved, "result": execute_result}
         if current_reason != "ok":
             execute_result = {
                 "ok": False,
@@ -1403,7 +1413,7 @@ class WithdrawAllService:
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": current_reason, **saved, "result": result}
+            return {"ok": False, "reason_code": current_reason, **saved, "result": execute_result}
 
         items = list(plan.get("items") or [])
         mode = str(plan.get("mode") or "txdata")
@@ -1442,7 +1452,7 @@ class WithdrawAllService:
                 event="withdraw_all_prepared",
                 persisted_state=persisted_state,
             )
-            return {"ok": True, **saved, "result": result}
+            return {"ok": True, **saved, "result": execute_result}
 
         if is_public_mode():
             execute_result = {
@@ -1538,7 +1548,12 @@ class WithdrawAllService:
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "no_rpc_endpoints", **saved, "result": result}
+            return {
+                "ok": False,
+                "reason_code": "no_rpc_endpoints",
+                **saved,
+                "result": execute_result,
+            }
         executor = str(getattr(getattr(cfg, "execution", None), "executor_address", "") or "")
         if not executor:
             execute_result = {"ok": False, "reason_code": "executor_not_configured"}
@@ -1785,4 +1800,4 @@ class WithdrawAllService:
                         rollout.pause_family(str(family), actor="withdraw_all")
                     except (AttributeError, TypeError, ValueError):
                         continue
-        return {"ok": True, **saved, "result": result}
+        return {"ok": True, **saved, "result": execute_result}
