@@ -1304,8 +1304,6 @@ class WithdrawAllService:
         persisted_state = dict(state)
         preview_id = str(raw_payload.get("preview_id") or "")
         confirm_text = str(raw_payload.get("confirm_text") or "")
-        execute_result = {}
-        execute_result = {}
         execute_result: Dict[str, Any] = {}
         if not preview_id or preview_id != str(state.get("last_preview_id") or ""):
             execute_result = {"ok": False, "reason_code": "preview_id_mismatch"}
