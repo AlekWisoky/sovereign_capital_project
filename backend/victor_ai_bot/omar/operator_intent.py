@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Mapping
 
@@ -40,6 +42,24 @@ class OperatorIntentSnapshot:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def operator_intent_fingerprint(intent: OperatorIntentSnapshot | Mapping[str, Any]) -> str:
+    """Return a stable attribution fingerprint for one decision-time intent.
+
+    The fingerprint is an attribution identifier only. It is deliberately
+    separate from OMAR's generalized learning-state key, and therefore does not
+    grant intent any authority over governance, capital, or execution.
+    """
+    payload = intent.to_dict() if hasattr(intent, "to_dict") else _dict(intent)
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def capture_operator_intent(runtime: Any, decision: Any = None) -> OperatorIntentSnapshot:
