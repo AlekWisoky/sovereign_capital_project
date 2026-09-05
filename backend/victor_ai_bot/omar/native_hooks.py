@@ -78,15 +78,21 @@ def settlement_hook(runtime: Any, opp: Any, outcome: Mapping[str, Any] | None) -
         omar.observe_outcome(
             decision_id=decision_id,
             ok=bool(row.get("ok", True)),
-            realized_net_usd=float(row.get("realized_net_usd", row.get("realizedNetUsd", 0.0)) or 0.0),
-            expected_net_usd=float(row.get("expected_net_usd", row.get("expectedNetUsd", 0.0)) or 0.0),
+            realized_net_usd=float(
+                row.get("realized_net_usd", row.get("realizedNetUsd", 0.0)) or 0.0
+            ),
+            expected_net_usd=float(
+                row.get("expected_net_usd", row.get("expectedNetUsd", 0.0)) or 0.0
+            ),
             amount_in_wei=int(row.get("amount_in_wei", row.get("amountInWei", 0)) or 0),
             gas_cost_usd=float(row.get("gas_cost_usd", row.get("gasCostUsd", 0.0)) or 0.0),
             slippage_bps=float(row.get("slippage_bps", row.get("slippageBps", 0.0)) or 0.0),
             latency_ms=int(row.get("latency_ms", row.get("latencyMs", 0)) or 0),
             route_id=_text(row.get("route_id") or getattr(opp, "route_id", "")),
             tx_hash=_text(row.get("tx_hash") or row.get("txHash")),
-            outcome_truth_verified=bool(row.get("truth_verified", row.get("outcome_truth_verified", True))),
+            outcome_truth_verified=bool(
+                row.get("truth_verified", row.get("outcome_truth_verified", True))
+            ),
             metadata={
                 "canonical_lineage": {
                     "decision_id": decision_id,
