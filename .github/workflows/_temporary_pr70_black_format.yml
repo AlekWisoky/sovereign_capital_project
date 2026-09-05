@@ -1,0 +1,148 @@
+name: Temporary PR70 Black Format
+
+on:
+  push:
+    branches:
+      - codex/omar-phase-final-main-sync
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install formatting dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Format PR70 changed Python files
+        run: |
+          black \
+            backend/tests/test_authority_contracts.py \
+            backend/tests/test_authority_snapshot_contracts.py \
+            backend/tests/test_canonical_identity_outcome_lineage.py \
+            backend/tests/test_canonical_intent_fingerprint.py \
+            backend/tests/test_capital_compounding_authority.py \
+            backend/tests/test_capital_compounding_runtime.py \
+            backend/tests/test_current_golden_path_closed_loop.py \
+            backend/tests/test_decision_identity_boundary.py \
+            backend/tests/test_omar_canonical_economic_lineage.py \
+            backend/tests/test_omar_net_profit_latency_learning.py \
+            backend/tests/test_omar_operator_intent_lineage.py \
+            backend/tests/test_omar_outcome_ledger.py \
+            backend/tests/test_omar_real_learning.py \
+            backend/tests/test_omar_settled_ledger_bridge.py \
+            backend/tests/test_production_lineage_identity.py \
+            backend/tests/test_runtime_method_chain_learning_attribution.py \
+            backend/tests/test_runtime_production_auto_path.py \
+            backend/tests/test_runtime_production_execution_path.py \
+            backend/tests/test_runtime_production_method_chain.py \
+            backend/tests/test_settled_outcome_lineage.py \
+            backend/tests/test_settlement_authoritative_pnl_contract.py \
+            backend/tests/test_trade_identity.py \
+            backend/victor_ai_bot/analytics/quicksight/runtime.py \
+            backend/victor_ai_bot/api_facades/launch_facade.py \
+            backend/victor_ai_bot/api_routes/_route_helpers.py \
+            backend/victor_ai_bot/api_routes/withdraw_routes.py \
+            backend/victor_ai_bot/authority_contracts.py \
+            backend/victor_ai_bot/bankroll.py \
+            backend/victor_ai_bot/capital_compounding.py \
+            backend/victor_ai_bot/capital_family_policy.py \
+            backend/victor_ai_bot/command_center_overlay.py \
+            backend/victor_ai_bot/config.py \
+            backend/victor_ai_bot/config_validation.py \
+            backend/victor_ai_bot/decision_engine.py \
+            backend/victor_ai_bot/decision_identity.py \
+            backend/victor_ai_bot/evolution/genealogy.py \
+            backend/victor_ai_bot/execution_capture/flashloan_sizing.py \
+            backend/victor_ai_bot/execution_capture/pending_state_context.py \
+            backend/victor_ai_bot/fioa/config.py \
+            backend/victor_ai_bot/fioa/runtime.py \
+            backend/victor_ai_bot/fund_os/family_identity.py \
+            backend/victor_ai_bot/fund_os/family_readiness.py \
+            backend/victor_ai_bot/fund_os/launch_acceleration.py \
+            backend/victor_ai_bot/fund_os/staged_rollout.py \
+            backend/victor_ai_bot/identity.py \
+            backend/victor_ai_bot/learning/__init__.py \
+            backend/victor_ai_bot/learning/net_economics.py \
+            backend/victor_ai_bot/learning/outcome_ledger.py \
+            backend/victor_ai_bot/money_loop_accounting.py \
+            backend/victor_ai_bot/omar/__init__.py \
+            backend/victor_ai_bot/omar/config.py \
+            backend/victor_ai_bot/omar/operator_intent.py \
+            backend/victor_ai_bot/omar/policy.py \
+            backend/victor_ai_bot/omar/real_learning.py \
+            backend/victor_ai_bot/omar/runtime.py \
+            backend/victor_ai_bot/omar/settled_ledger_bridge.py \
+            backend/victor_ai_bot/omar/trainer.py \
+            backend/victor_ai_bot/outcomes.py \
+            backend/victor_ai_bot/persistence/repositories/auto_trade_recovery_repository.py \
+            backend/victor_ai_bot/rft/episode_builder.py \
+            backend/victor_ai_bot/rft/graders/_common.py \
+            backend/victor_ai_bot/rft/graders/capital_grader.py \
+            backend/victor_ai_bot/rft/graders/profit_grader.py \
+            backend/victor_ai_bot/runtime_core/bootstrap.py \
+            backend/victor_ai_bot/runtime_legacy.py \
+            backend/victor_ai_bot/runtime_services/canonical_capital_write_service.py \
+            backend/victor_ai_bot/runtime_services/canonical_receipt_service.py \
+            backend/victor_ai_bot/runtime_services/capital_state_projection.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_derived_state.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_projection.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_read_context.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_reconciliation.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_runtime_state_adapters.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_service.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_service_adapters.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_source_snapshot.py \
+            backend/victor_ai_bot/runtime_services/capital_truth_summary_finalization.py \
+            backend/victor_ai_bot/runtime_services/execution_lifecycle_projection.py \
+            backend/victor_ai_bot/runtime_services/execution_service.py \
+            backend/victor_ai_bot/runtime_services/launch_service.py \
+            backend/victor_ai_bot/runtime_services/operator_summary_service.py \
+            backend/victor_ai_bot/runtime_services/receipt_service.py \
+            backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_decision_finalize_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_engine_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_execute_dispatch_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_execute_entry_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_execute_wrapper_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_execution_support_init.py \
+            backend/victor_ai_bot/runtime_services/runtime_loop_entry_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_loop_tail_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_post_tick_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_receipt_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_routes_service.py \
+            backend/victor_ai_bot/runtime_services/runtime_score_overlay_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_state_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_tick_prepare_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_unit_econ_facade.py \
+            backend/victor_ai_bot/runtime_services/settled_outcome_lineage.py \
+            backend/victor_ai_bot/runtime_services/wealth_goal_service.py \
+            backend/victor_ai_bot/runtime_services/withdraw_all_service.py \
+            backend/victor_ai_bot/runtime_services/withdraw_ledger_service.py \
+            backend/victor_ai_bot/runtime_subsystems/replay_store.py \
+            backend/victor_ai_bot/security/auth.py \
+            backend/victor_ai_bot/sentry_config.py \
+            backend/victor_ai_bot/server.py \
+            backend/victor_ai_bot/system_truth.py \
+            backend/victor_ai_bot/treasury/capital_compounding.py \
+            backend/victor_ai_bot/treasury/compounding_runtime.py \
+            backend/victor_ai_bot/tx_confirmation.py \
+            backend/victor_ai_bot/verification_report.py \
+            backend/victor_ai_bot/wealth_goals.py
+      - name: Commit formatting changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend
+          if git diff --cached --quiet; then
+            echo "Formatting already clean"
+            exit 0
+          fi
+          git commit -m "style: format PR70 Python files"
+          git push
