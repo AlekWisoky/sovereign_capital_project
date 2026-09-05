@@ -15,39 +15,18 @@ def _bucket(value: float, edges: tuple[float, ...], labels: tuple[str, ...]) -> 
 
 
 def build_goal_objective_context(goal: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Normalize the existing wealth-goal state for OMAR learning.
-
-    This is a read-only learning adapter. It never approves capital, changes
-    governance, sizes a trade, or creates a second goal authority.
-    """
+    """Normalize the existing wealth-goal state for OMAR learning."""
     goal = dict(goal or {})
     state = goal.get("state") if isinstance(goal.get("state"), Mapping) else goal
-    recommendation = (
-        goal.get("recommendation")
-        if isinstance(goal.get("recommendation"), Mapping)
-        else {}
-    )
+    recommendation = goal.get("recommendation") if isinstance(goal.get("recommendation"), Mapping) else {}
     target = float(state.get("targetReturnPct") or state.get("target_return_pct") or 0.0)
     current = float(state.get("currentReturnPct") or state.get("current_return_pct") or 0.0)
     progress = float(state.get("progressPct") or 0.0)
-    horizon = float(
-        state.get("goalHorizonDays")
-        or state.get("timeframeDays")
-        or state.get("timeframe_days")
-        or 30.0
-    )
-    compatibility = float(
-        state.get("goalHorizonCompatibility")
-        or state.get("goal_horizon_compatibility")
-        or 1.0
-    )
+    horizon = float(state.get("goalHorizonDays") or state.get("timeframeDays") or state.get("timeframe_days") or 30.0)
+    compatibility = float(state.get("goalHorizonCompatibility") or state.get("goal_horizon_compatibility") or 1.0)
     urgency = str(state.get("goalUrgency") or recommendation.get("urgency") or "steady")
     pacing = str(state.get("pacing") or "steady")
-    aggressiveness_cap = float(
-        state.get("aggressivenessCap")
-        or recommendation.get("aggressiveness_hint")
-        or 1.0
-    )
+    aggressiveness_cap = float(state.get("aggressivenessCap") or recommendation.get("aggressiveness_hint") or 1.0)
     achieved = bool(state.get("goalAchieved", False))
     blocked = str(state.get("goalStatus") or "active") == "blocked"
     gap = max(0.0, target - current)
@@ -78,26 +57,10 @@ def goal_state_bucket(context: Mapping[str, Any]) -> str:
     pacing = str(context.get("goal_pacing") or "steady").lower()
     return ":".join(
         (
-            _bucket(
-                progress,
-                (25.0, 50.0, 75.0, 100.0),
-                ("p0", "p25", "p50", "p75", "p100"),
-            ),
-            _bucket(
-                gap,
-                (0.0, 2.0, 5.0, 10.0),
-                ("gap0", "gap2", "gap5", "gap10", "gap_hi"),
-            ),
-            _bucket(
-                compatibility,
-                (0.50, 0.75, 1.00),
-                ("vel_low", "vel_watch", "vel_ok", "vel_ahead"),
-            ),
-            _bucket(
-                cap,
-                (0.60, 0.80, 1.00),
-                ("cap_def", "cap_measured", "cap_normal", "cap_expand"),
-            ),
+            _bucket(progress, (25.0, 50.0, 75.0, 100.0), ("p0", "p25", "p50", "p75", "p100")),
+            _bucket(gap, (0.0, 2.0, 5.0, 10.0), ("gap0", "gap2", "gap5", "gap10", "gap_hi")),
+            _bucket(compatibility, (0.50, 0.75, 1.00), ("vel_low", "vel_watch", "vel_ok", "vel_ahead")),
+            _bucket(cap, (0.60, 0.80, 1.00), ("cap_def", "cap_measured", "cap_normal", "cap_expand")),
             urgency,
             pacing,
         )
@@ -113,21 +76,15 @@ def goal_advancement_reward(
     drawdown_pct: float = 0.0,
     truth_verified: bool = True,
 ) -> float:
-    """Translate a settled trade into a bounded goal-advancement signal.
-
-    Realized economics remain the primary signal; goal progress shapes
-    preference among otherwise comparable actions. It cannot turn an
-    unprofitable or unsafe trade into a positive execution decision.
-    """
+    """Add bounded goal advancement shaping to the canonical settled reward."""
+    del amount_in_wei  # canonical reward is already expressed in settled USD economics
     realized = float(realized_net_usd)
     expected = float(expected_net_usd)
     gap_ratio = _clip(float(context.get("goal_gap_ratio") or 0.0), 0.0, 2.0)
     velocity = _clip(float(context.get("goal_horizon_compatibility") or 1.0), 0.0, 2.0)
     urgency = str(context.get("goal_urgency") or "steady").lower()
     cap = _clip(float(context.get("goal_aggressiveness_cap") or 1.0), 0.25, 1.25)
-
-    scale = max(1.0, abs(float(amount_in_wei)))
-    economics = _clip((realized - expected) / scale * 1_000_000.0, -5.0, 5.0)
+    economics = _clip(realized - expected, -5.0, 5.0)
     realized_direction = 1.0 if realized > 0.0 else (-1.0 if realized < 0.0 else 0.0)
     advancement = realized_direction * (0.20 + 0.35 * gap_ratio)
     velocity_adjustment = _clip(velocity - 1.0, -1.0, 1.0) * 0.15
