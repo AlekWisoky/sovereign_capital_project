@@ -1305,6 +1305,7 @@ class WithdrawAllService:
         preview_id = str(raw_payload.get("preview_id") or "")
         confirm_text = str(raw_payload.get("confirm_text") or "")
         execute_result = {}
+        execute_result: Dict[str, Any] = {}
         if not preview_id or preview_id != str(state.get("last_preview_id") or ""):
             execute_result = {"ok": False, "reason_code": "preview_id_mismatch"}
             saved = self._persist_execute_outcome(
@@ -1362,9 +1363,9 @@ class WithdrawAllService:
             and state.get("last_executed_result")
         ):
             replayed_result = dict(state.get("last_executed_result") or {})
-            replay_ok = bool(replayed_execute_result.get("ok", False))
+            replay_ok = bool(replayed_result.get("ok", False))
             response = {"ok": replay_ok, **state, "result": replayed_result, "replayed": True}
-            replay_reason = str(replayed_execute_result.get("reason_code") or "")
+            replay_reason = str(replayed_result.get("reason_code") or "")
             if replay_reason:
                 response["reason_code"] = replay_reason
             return response
@@ -1420,7 +1421,7 @@ class WithdrawAllService:
         mode = str(plan.get("mode") or "txdata")
         state["last_status"] = "prepared" if dry_run or mode != "backend" else "executing"
         state["last_reason_code"] = "ok"
-        execute_result: Dict[str, Any] = {
+        execute_result = {
             "ok": True,
             "status": state["last_status"],
             "preview_id": preview_id,
@@ -1430,7 +1431,7 @@ class WithdrawAllService:
         }
         if dry_run or mode != "backend":
             for item in items:
-                execute_execute_result["items"].append(
+                execute_result["items"].append(
                     {
                         **dict(item),
                         "calldata": build_withdraw_calldata(
@@ -1678,7 +1679,7 @@ class WithdrawAllService:
                         "ok": False,
                         "reason_code": "send_failed",
                         "failed_item": dict(item),
-                        "items": list(execute_execute_result.get("items") or []),
+                        "items": list(execute_result.get("items") or []),
                     }
                     failure = _attach_lifecycle_summary(
                         failure,
@@ -1711,7 +1712,7 @@ class WithdrawAllService:
                             "tx_hash": str(txh or ""),
                             **submitted_tx_status_payload(tx_result),
                         },
-                        "items": list(execute_execute_result.get("items") or []),
+                        "items": list(execute_result.get("items") or []),
                     }
                     failure = _attach_lifecycle_summary(
                         failure,
@@ -1741,7 +1742,7 @@ class WithdrawAllService:
                         **saved,
                         "result": failure,
                     }
-                execute_execute_result["items"].append(
+                execute_result["items"].append(
                     {
                         **dict(item),
                         "tx_hash": str(txh or ""),
@@ -1749,7 +1750,7 @@ class WithdrawAllService:
                     }
                 )
                 nonce_offset += 1
-        submission_state = _submission_state(list(execute_execute_result.get("items") or []))
+        submission_state = _submission_state(list(execute_result.get("items") or []))
         if submission_state == "mined_success":
             execute_result["status"] = "completed"
             state["last_status"] = "completed"
@@ -1759,7 +1760,7 @@ class WithdrawAllService:
             execute_result["status"] = "submitted"
             execute_result["submission_state"] = submission_state
             submission_proof_reason = aggregate_submission_proof_reason(
-                list(execute_execute_result.get("items") or [])
+                list(execute_result.get("items") or [])
             )
             if submission_proof_reason:
                 execute_result["submission_proof_reason"] = submission_proof_reason
