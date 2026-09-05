@@ -1,4 +1,4 @@
-name: Temporary Black diff
+name: Temporary pytest diagnostic
 on:
   push:
     branches:
@@ -6,12 +6,23 @@ on:
 permissions:
   contents: read
 jobs:
-  black-diff:
+  pytest-diagnostic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install black==24.10.0
-      - run: black --diff backend/victor_ai_bot/decision_identity.py
+      - run: pip install -r backend/requirements-dev.txt -r backend/requirements.txt
+      - name: Run pytest and capture full log
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q backend/tests > pytest.log 2>&1
+          status=$?
+          echo "pytest_exit=$status" >> pytest.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pytest-diagnostic
+          path: pytest.log
