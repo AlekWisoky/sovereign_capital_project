@@ -30,9 +30,8 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          # Run tests before style/type gates so a stalled suite produces
-          # actionable evidence instead of being masked by formatting checks.
-          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --faulthandler-timeout=60 --durations=50
+          # Bound the suite and capture the exact stuck test/thread if one exists.
+          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --timeout=60 --timeout-method=thread --durations=50
 
       - name: Black
         run: |
@@ -51,6 +50,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Set up Node
         uses: actions/setup-node@v4
