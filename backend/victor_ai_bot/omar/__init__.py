@@ -21,6 +21,7 @@ def __getattr__(name: str):
 
 
 try:
+    from .canonical_execution_hook import install_canonical_execution_invariant
     from .production_lineage_bridge import install_production_lineage_bridge
     from .lifecycle_bridge import install_omar_lifecycle_hooks
     from .learning_quality_bridge import install_learning_quality_runtime_hooks
@@ -34,6 +35,7 @@ try:
     install_production_lineage_bridge()
     install_omar_lifecycle_hooks()
     install_learning_quality_runtime_hooks()
+    install_canonical_execution_invariant()
 except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
     pass
 
