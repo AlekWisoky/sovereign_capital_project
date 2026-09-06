@@ -15,9 +15,7 @@ def _dict(value: Any) -> dict[str, Any]:
 
 
 def _chain_name(runtime: Any) -> str:
-    return _text(
-        getattr(getattr(getattr(runtime, "cfg", None), "chain", None), "name", "")
-    )
+    return _text(getattr(getattr(getattr(runtime, "cfg", None), "chain", None), "name", ""))
 
 
 def _transactions(runtime: Any) -> list[dict[str, Any]]:
@@ -84,18 +82,15 @@ def _matches(
 def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     metadata = _dict(row.get("metadata"))
     profitability = _dict(
-        metadata.get("terminalProfitability")
-        or metadata.get("terminal_profitability")
+        metadata.get("terminalProfitability") or metadata.get("terminal_profitability")
     )
-    chain = _dict(
-        metadata.get("profitabilityChain")
-        or metadata.get("profitability_chain")
-    )
-    capital_admission = _dict(
-        metadata.get("capitalAdmission")
-        or metadata.get("capital_admission")
-    )
+    chain = _dict(metadata.get("profitabilityChain") or metadata.get("profitability_chain"))
+    capital_admission = _dict(metadata.get("capitalAdmission") or metadata.get("capital_admission"))
     lineage = _dict(metadata.get("canonical_lineage"))
+    operator_intent = _dict(metadata.get("operator_intent") or lineage.get("operator_intent"))
+    intent_fingerprint = _text(
+        metadata.get("intent_fingerprint") or lineage.get("intent_fingerprint")
+    )
 
     def first(*keys: str, default: Any = None) -> Any:
         for source in (metadata, profitability, chain, row):
@@ -111,54 +106,32 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "settlement_status": "settled",
         "transaction_id": _text(row.get("transaction_id")),
         "tx_hash": _text(
-            row.get("receipt_id")
-            or metadata.get("tx_hash")
-            or metadata.get("txHash")
+            row.get("receipt_id") or metadata.get("tx_hash") or metadata.get("txHash")
         ),
         "settled_at_ms": int(row.get("ts_ms") or 0),
         "decision_id": _text(
-            first(
-                "canonical_decision_id",
-                "decision_id",
-                default=lineage.get("decision_id"),
-            )
+            first("canonical_decision_id", "decision_id", default=lineage.get("decision_id"))
         ),
-        "correlation_id": _text(
-            first("correlation_id", default=lineage.get("correlation_id"))
-        ),
+        "correlation_id": _text(first("correlation_id", default=lineage.get("correlation_id"))),
         "opportunity_id": _text(first("opportunity_id", "opportunityId")),
         "route_id": _text(first("route_id", "routeId")),
-        "strategy_family": _text(
-            first("strategy_family", "strategyFamily", "family")
-        ),
+        "strategy_family": _text(first("strategy_family", "strategyFamily", "family")),
         "ok": bool(first("ok", default=True)),
-        "expected_net_usd": float(
-            first("expected_net_usd", "expectedNetUsd", default=0.0) or 0.0
-        ),
-        "realized_net_usd": float(
-            first("realized_net_usd", "realizedNetUsd", default=0.0) or 0.0
-        ),
-        "amount_in_wei": int(
-            first("amount_in_wei", "amountInWei", default=0) or 0
-        ),
-        "gas_cost_usd": float(
-            first("gas_cost_usd", "gasCostUsd", default=0.0) or 0.0
-        ),
-        "slippage_bps": float(
-            first("slippage_bps", "slippageBps", default=0.0) or 0.0
-        ),
+        "expected_net_usd": float(first("expected_net_usd", "expectedNetUsd", default=0.0) or 0.0),
+        "realized_net_usd": float(first("realized_net_usd", "realizedNetUsd", default=0.0) or 0.0),
+        "amount_in_wei": int(first("amount_in_wei", "amountInWei", default=0) or 0),
+        "gas_cost_usd": float(first("gas_cost_usd", "gasCostUsd", default=0.0) or 0.0),
+        "slippage_bps": float(first("slippage_bps", "slippageBps", default=0.0) or 0.0),
         "latency_ms": int(first("latency_ms", "latencyMs", default=0) or 0),
         "truth_verified": bool(
-            first(
-                "truth_verified",
-                "outcome_truth_verified",
-                "verified",
-                default=True,
-            )
+            first("truth_verified", "outcome_truth_verified", "verified", default=True)
         ),
         "outcome_truth_reason_code": _text(
             first("outcome_truth_reason_code", "truth_reason_code", default="ok")
         ),
+        "operator_intent": operator_intent,
+        "intent_fingerprint": intent_fingerprint,
+        "canonical_lineage": lineage,
         "terminal_profitability": profitability,
         "profitability_chain": chain,
         "capital_admission": capital_admission,
@@ -175,12 +148,7 @@ def canonical_settled_outcome(
     correlation_id: str = "",
     opportunity_id: str = "",
 ) -> dict[str, Any] | None:
-    """Return the exact settled outcome recorded by the Phase 2 ledger.
-
-    This is deliberately ledger-only: PnL rows, receipts, runtime caches, and
-    guessed settlement state are not accepted as substitutes for the canonical
-    receipt_settlement transaction.
-    """
+    """Return the exact settled outcome recorded by the Phase 2 ledger."""
     rows = _transactions(runtime)
     matches = [
         row

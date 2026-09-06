@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 from dataclasses import dataclass
@@ -34,13 +35,10 @@ def ensure_decision_identity(
     *,
     chain_name: str,
     current_block: int,
+    operator_intent: Mapping[str, Any] | None = None,
+    intent_fingerprint: str | None = None,
 ) -> DecisionExecutionIdentity:
-    """Create/preserve one canonical identity and persist it on both objects.
-
-    Identity creation is deliberately independent of OMAR. The decision,
-    execution, and settlement lifecycle must remain traceable even when the
-    OMAR learning policy is disabled.
-    """
+    """Create/preserve canonical identity and immutable decision intent."""
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
         meta = {}
@@ -79,11 +77,23 @@ def ensure_decision_identity(
     brain["canonical_decision_id"] = decision_id
     brain["correlation_id"] = correlation_id
     meta["brain"] = brain
-    meta["canonical_lineage"] = {
+
+    canonical_lineage = {
         "decision_id": decision_id,
         "correlation_id": correlation_id,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
+    existing_intent = lineage.get("operator_intent")
+    existing_fingerprint = _text(lineage.get("intent_fingerprint"))
+    if isinstance(existing_intent, Mapping):
+        canonical_lineage["operator_intent"] = copy.deepcopy(dict(existing_intent))
+    elif operator_intent is not None:
+        canonical_lineage["operator_intent"] = copy.deepcopy(dict(operator_intent))
+    if existing_fingerprint:
+        canonical_lineage["intent_fingerprint"] = existing_fingerprint
+    elif intent_fingerprint:
+        canonical_lineage["intent_fingerprint"] = _text(intent_fingerprint)
+    meta["canonical_lineage"] = canonical_lineage
 
     if decision is not None:
         decision_meta["canonical_decision_id"] = decision_id
@@ -92,6 +102,10 @@ def ensure_decision_identity(
             "decision_id": decision_id,
             "correlation_id": correlation_id,
         }
+        if "operator_intent" in canonical_lineage:
+            decision_meta["operator_intent"] = copy.deepcopy(canonical_lineage["operator_intent"])
+        if "intent_fingerprint" in canonical_lineage:
+            decision_meta["intent_fingerprint"] = canonical_lineage["intent_fingerprint"]
         try:
             decision.metadata = decision_meta
         except (AttributeError, TypeError):
