@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
+from .operator_intent import snapshot_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -43,6 +44,7 @@ def _patch_decision_identity() -> None:
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
+        operator_intent, fingerprint = snapshot_operator_intent(self, opp, decision)
         ensure_decision_identity(
             opp,
             decision,
@@ -52,6 +54,8 @@ def _patch_decision_identity() -> None:
                 else "chain"
             ),
             current_block=int(current_block),
+            operator_intent=operator_intent,
+            intent_fingerprint=fingerprint,
         )
         return original(self, opp, decision, current_block=current_block)
 
