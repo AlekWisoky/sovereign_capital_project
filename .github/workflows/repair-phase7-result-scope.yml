@@ -23,8 +23,9 @@ jobs:
           if len(lines) < start + 1:
               raise SystemExit('withdraw_all_service.py is shorter than expected')
           for i in range(start, len(lines)):
-              lines[i] = lines[i].replace('execute_result', 'result')
+              lines[i] = lines[i].replace('execute_result', '__OMAR_EXECUTE_RESULT__')
               lines[i] = lines[i].replace('result', 'execute_result')
+              lines[i] = lines[i].replace('__OMAR_EXECUTE_RESULT__', 'execute_result')
           p.write_text(''.join(lines), encoding='utf-8')
           PY
       - uses: actions/setup-python@v5
