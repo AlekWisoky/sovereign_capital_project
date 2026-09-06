@@ -34,12 +34,13 @@ def ensure_decision_identity(
     *,
     chain_name: str,
     current_block: int,
+    operator_intent: Mapping[str, Any] | None = None,
+    intent_fingerprint: str = "",
 ) -> DecisionExecutionIdentity:
     """Create/preserve one canonical identity and persist it on both objects.
 
-    Identity creation is deliberately independent of OMAR. The decision,
-    execution, and settlement lifecycle must remain traceable even when the
-    OMAR learning policy is disabled.
+    Identity creation is independent of OMAR. Operator intent is immutable
+    decision-time context for attribution only; it never grants authority.
     """
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
@@ -79,11 +80,18 @@ def ensure_decision_identity(
     brain["canonical_decision_id"] = decision_id
     brain["correlation_id"] = correlation_id
     meta["brain"] = brain
-    meta["canonical_lineage"] = {
+    canonical_lineage = {
         "decision_id": decision_id,
         "correlation_id": correlation_id,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
+    if operator_intent is not None:
+        canonical_lineage["operator_intent"] = _dict(operator_intent)
+        canonical_lineage["intent_fingerprint"] = _text(intent_fingerprint)
+    elif lineage.get("operator_intent") is not None:
+        canonical_lineage["operator_intent"] = _dict(lineage.get("operator_intent"))
+        canonical_lineage["intent_fingerprint"] = _text(lineage.get("intent_fingerprint"))
+    meta["canonical_lineage"] = canonical_lineage
 
     if decision is not None:
         decision_meta["canonical_decision_id"] = decision_id
@@ -92,6 +100,9 @@ def ensure_decision_identity(
             "decision_id": decision_id,
             "correlation_id": correlation_id,
         }
+        if operator_intent is not None:
+            decision_meta["operator_intent"] = _dict(operator_intent)
+            decision_meta["intent_fingerprint"] = _text(intent_fingerprint)
         try:
             decision.metadata = decision_meta
         except (AttributeError, TypeError):
