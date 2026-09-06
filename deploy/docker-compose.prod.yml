@@ -8,6 +8,7 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       - VICTOR_CONFIG=/app/backend/config/ethereum.yaml
+      - VICTOR_DATA_DIR=/app/backend/data
       - VICTOR_LOG_JSON=1
       - VICTOR_ADMIN_KEY=
       - VICTOR_AUTOSTART=1
@@ -15,6 +16,7 @@ services:
       - VICTOR_CORS_ALLOW_ORIGINS=https://your-netlify-site.netlify.app
     volumes:
       - ../backend/config:/app/backend/config:ro
+      # Persistent host-backed store for canonical ledger + OMAR durable learning state.
       - ../backend/data:/app/backend/data
     restart: unless-stopped
 
