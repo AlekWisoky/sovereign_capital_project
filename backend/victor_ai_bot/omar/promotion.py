@@ -181,7 +181,9 @@ class PromotionBoundary:
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
         return f"candidate-{digest}"
 
-    def register_candidate(self, policy_snapshot: Mapping[str, Any], *, source_observations: int) -> str:
+    def register_candidate(
+        self, policy_snapshot: Mapping[str, Any], *, source_observations: int
+    ) -> str:
         version = self.candidate_version(policy_snapshot)
         self.candidates[version] = {
             "version": version,
@@ -192,7 +194,9 @@ class PromotionBoundary:
         self._save()
         return version
 
-    def evaluate(self, candidate_version: str, events: Iterable[Mapping[str, Any]]) -> PromotionDecision:
+    def evaluate(
+        self, candidate_version: str, events: Iterable[Mapping[str, Any]]
+    ) -> PromotionDecision:
         if candidate_version not in self.candidates:
             raise ValueError("candidate_not_registered")
         return evaluate_oos(candidate_version, events, self.thresholds)
@@ -254,7 +258,9 @@ class PromotionBoundary:
                             continue
             candidates = payload.get("candidates")
             if isinstance(candidates, dict):
-                self.candidates = {str(key): dict(row) for key, row in candidates.items() if isinstance(row, dict)}
+                self.candidates = {
+                    str(key): dict(row) for key, row in candidates.items() if isinstance(row, dict)
+                }
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             return
 

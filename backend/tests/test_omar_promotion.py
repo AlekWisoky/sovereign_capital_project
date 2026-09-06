@@ -19,8 +19,22 @@ def test_oos_gate_rejects_training_or_in_sample_records():
     result = evaluate_oos(
         "candidate-test",
         [
-            {"evaluation_split": "training", "decision_id": "d1", "outcome_id": "o1", "state_key": "s1", "candidate_reward_usd": 10, "baseline_reward_usd": 1},
-            {"evaluation_split": "in_sample", "decision_id": "d2", "outcome_id": "o2", "state_key": "s2", "candidate_reward_usd": 10, "baseline_reward_usd": 1},
+            {
+                "evaluation_split": "training",
+                "decision_id": "d1",
+                "outcome_id": "o1",
+                "state_key": "s1",
+                "candidate_reward_usd": 10,
+                "baseline_reward_usd": 1,
+            },
+            {
+                "evaluation_split": "in_sample",
+                "decision_id": "d2",
+                "outcome_id": "o2",
+                "state_key": "s2",
+                "candidate_reward_usd": 10,
+                "baseline_reward_usd": 1,
+            },
         ],
         PromotionThresholds(min_oos_observations=1, min_unique_states=1),
     )
@@ -31,7 +45,9 @@ def test_oos_gate_rejects_training_or_in_sample_records():
 def test_promotion_requires_oos_advantage_and_registers_active_version(tmp_path):
     boundary = PromotionBoundary(
         str(tmp_path / "promotion.json"),
-        PromotionThresholds(min_oos_observations=4, min_unique_states=4, min_mean_advantage_bps=1, min_win_rate=0.75),
+        PromotionThresholds(
+            min_oos_observations=4, min_unique_states=4, min_mean_advantage_bps=1, min_win_rate=0.75
+        ),
     )
     candidate = boundary.register_candidate(
         {"q": {"state-0": {"EXECUTE": 1.0}}, "n": {"state-0": 20}, "total_observations": 20},
@@ -48,7 +64,9 @@ def test_promotion_requires_oos_advantage_and_registers_active_version(tmp_path)
 
 def test_promotion_never_activates_without_successful_oos_gate(tmp_path):
     boundary = PromotionBoundary(str(tmp_path / "promotion.json"))
-    candidate = boundary.register_candidate({"q": {}, "n": {}, "total_observations": 1}, source_observations=1)
+    candidate = boundary.register_candidate(
+        {"q": {}, "n": {}, "total_observations": 1}, source_observations=1
+    )
     decision = boundary.evaluate(candidate, _events(1))
     assert decision.ready is False
     assert boundary.active_version == "baseline-v0"
