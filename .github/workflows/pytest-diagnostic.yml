@@ -1,0 +1,45 @@
+name: pytest diagnostic
+
+on:
+  push:
+    branches:
+      - omar/phase-7-canonical-execution-invariant
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  pytest-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          if [ -f backend/requirements-dev.txt ]; then pip install -r backend/requirements-dev.txt; fi
+          pip install pytest pytest-asyncio pytest-timeout
+      - name: Run full pytest and capture output
+        shell: bash
+        run: |
+          set +e
+          cd backend
+          pytest -q 2>&1 | tee ../pytest-diagnostic.log
+          status=${PIPESTATUS[0]}
+          echo "pytest_exit_code=${status}" >> ../pytest-diagnostic.log
+          exit "${status}"
+      - name: Upload pytest diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-diagnostic-${{ github.sha }}
+          path: pytest-diagnostic.log
+          if-no-files-found: warn
