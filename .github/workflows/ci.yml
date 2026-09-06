@@ -43,7 +43,7 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          pytest -q
+          timeout --signal=TERM --kill-after=30s 30m python -m pytest -q --faulthandler-timeout=60 --durations=25
 
   mobile:
     runs-on: ubuntu-latest
