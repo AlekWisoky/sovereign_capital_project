@@ -30,7 +30,7 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          pytest -q
+          timeout --signal=TERM --kill-after=30s 15m pytest -vv --durations=25 -o faulthandler_timeout=60
 
       - name: Black
         run: |
