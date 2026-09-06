@@ -27,25 +27,12 @@ jobs:
             xargs -a "$slice" ruff check
           done < backend/mypy_targets.txt
 
-      - name: Black (diagnostic formatting pass)
+      - name: Black
         run: |
-          black backend
-          git diff --check
-          git diff -- backend/victor_ai_bot/omar/production_lineage_bridge.py \
-            backend/victor_ai_bot/omar/lifecycle_bridge.py \
-            backend/victor_ai_bot/omar/real_learning.py \
-            backend/victor_ai_bot/omar/runtime.py \
-            backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py \
-            backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py \
-            backend/victor_ai_bot/runtime_services/runtime_decision_facade.py > /tmp/black.patch
-
-      - name: Upload Black diagnostic patch
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: black-diagnostic-patch
-          path: /tmp/black.patch
-          if-no-files-found: error
+          black --check backend
+          while read -r slice; do
+            xargs -a "$slice" black --check
+          done < backend/mypy_targets.txt
 
       - name: Mypy (expanded typed slices)
         run: |
