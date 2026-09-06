@@ -15,7 +15,9 @@ def _dict(value: Any) -> dict[str, Any]:
 
 
 def _chain_name(runtime: Any) -> str:
-    return _text(getattr(getattr(getattr(runtime, "cfg", None), "chain", None), "name", ""))
+    return _text(
+        getattr(getattr(getattr(runtime, "cfg", None), "chain", None), "name", "")
+    )
 
 
 def _transactions(runtime: Any) -> list[dict[str, Any]]:
@@ -55,8 +57,8 @@ def _matches(
         _text(metadata.get("receiptId")),
     }
     candidates.discard("")
-    if tx_hash and tx_hash in candidates:
-        return True
+    if tx_hash and tx_hash not in candidates:
+        return False
 
     lineage = _dict(metadata.get("canonical_lineage"))
     decision_candidates = {
@@ -72,11 +74,13 @@ def _matches(
         _text(metadata.get("opportunity_id")),
         _text(metadata.get("opportunityId")),
     }
-    return bool(
-        (decision_id and decision_id in decision_candidates)
-        or (correlation_id and correlation_id in correlation_candidates)
-        or (opportunity_id and opportunity_id in opportunity_candidates)
-    )
+    if decision_id and decision_id not in decision_candidates:
+        return False
+    if correlation_id and correlation_id not in correlation_candidates:
+        return False
+    if opportunity_id and opportunity_id not in opportunity_candidates:
+        return False
+    return True
 
 
 def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -115,6 +119,8 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "correlation_id": _text(first("correlation_id", default=lineage.get("correlation_id"))),
         "opportunity_id": _text(first("opportunity_id", "opportunityId")),
         "route_id": _text(first("route_id", "routeId")),
+        "action": _text(first("action", "decision_action", "decisionAction")),
+        "execution_id": _text(first("execution_id", "executionId")),
         "strategy_family": _text(first("strategy_family", "strategyFamily", "family")),
         "ok": bool(first("ok", default=True)),
         "expected_net_usd": float(first("expected_net_usd", "expectedNetUsd", default=0.0) or 0.0),
@@ -128,11 +134,11 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
                 "truth_verified",
                 "outcome_truth_verified",
                 "verified",
-                default=True,
+                default=False,
             )
         ),
         "outcome_truth_reason_code": _text(
-            first("outcome_truth_reason_code", "truth_reason_code", default="ok")
+            first("outcome_truth_reason_code", "truth_reason_code", default="unverified")
         ),
         "terminal_profitability": profitability,
         "profitability_chain": chain,
