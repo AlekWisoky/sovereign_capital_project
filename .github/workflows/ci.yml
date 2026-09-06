@@ -29,9 +29,9 @@ jobs:
 
       - name: Black
         run: |
-          black --check backend
+          black --diff backend
           while read -r slice; do
-            xargs -a "$slice" black --check
+            xargs -a "$slice" black --diff
           done < backend/mypy_targets.txt
 
       - name: Mypy (expanded typed slices)
