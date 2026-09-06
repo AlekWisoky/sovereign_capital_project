@@ -32,6 +32,7 @@ class PromotionDecision:
     lower_confidence_advantage_usd: float
     candidate_reward_usd: float
     baseline_reward_usd: float
+    evaluation_fingerprint: str
     failures: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,7 +77,11 @@ def _fingerprint(rows: Iterable[Mapping[str, Any]]) -> str:
                 "baseline_reward_usd": _number(row.get("baseline_reward_usd")),
             }
         )
-    payload = json.dumps(sorted(canonical, key=lambda x: (x["decision_id"], x["outcome_id"])), sort_keys=True)
+    payload = json.dumps(
+        sorted(canonical, key=lambda x: (x["decision_id"], x["outcome_id"])),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
@@ -85,12 +90,7 @@ def evaluate_oos(
     events: Iterable[Mapping[str, Any]],
     thresholds: PromotionThresholds | None = None,
 ) -> PromotionDecision:
-    """Evaluate an immutable candidate strictly on explicit OOS observations.
-
-    Promotion cannot be inferred from training reward or live reward alone.
-    Each observation must carry a stable decision/outcome lineage and explicit
-    candidate-vs-baseline realized reward from an OOS evaluation dataset.
-    """
+    """Evaluate an immutable candidate strictly on explicit OOS observations."""
     cfg = thresholds or PromotionThresholds()
     rows: list[Mapping[str, Any]] = []
     seen_identity: set[tuple[str, str]] = set()
@@ -160,24 +160,20 @@ def evaluate_oos(
         lower_confidence_advantage_usd=float(lower_bound),
         candidate_reward_usd=float(sum(float(row["candidate_reward_usd"]) for row in rows)),
         baseline_reward_usd=float(sum(float(row["baseline_reward_usd"]) for row in rows)),
+        evaluation_fingerprint=_fingerprint(rows),
         failures=tuple(failures),
     )
 
 
 class PromotionBoundary:
-    """Persistent OOS promotion registry.
-
-    The registry is the only component allowed to turn a candidate policy into
-    the production-active policy version. It stores candidate metadata and the
-    immutable OOS evaluation fingerprint, but never grants execution/capital
-    authority.
-    """
+    """The only path that can make a learned candidate production-active."""
 
     def __init__(self, path: str, thresholds: PromotionThresholds | None = None) -> None:
         self.path = path
         self.thresholds = thresholds or PromotionThresholds()
         self.active_version = "baseline-v0"
         self.versions: dict[str, PolicyVersion] = {}
+        self.candidates: dict[str, dict[str, Any]] = {}
         self._load()
 
     def candidate_version(self, policy_snapshot: Mapping[str, Any]) -> str:
@@ -185,39 +181,56 @@ class PromotionBoundary:
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
         return f"candidate-{digest}"
 
+    def register_candidate(self, policy_snapshot: Mapping[str, Any], *, source_observations: int) -> str:
+        version = self.candidate_version(policy_snapshot)
+        self.candidates[version] = {
+            "version": version,
+            "snapshot": json.loads(json.dumps(policy_snapshot, sort_keys=True, default=str)),
+            "source_observations": max(0, int(source_observations)),
+            "created_at_ms": int(time.time() * 1000),
+        }
+        self._save()
+        return version
+
     def evaluate(self, candidate_version: str, events: Iterable[Mapping[str, Any]]) -> PromotionDecision:
+        if candidate_version not in self.candidates:
+            raise ValueError("candidate_not_registered")
         return evaluate_oos(candidate_version, events, self.thresholds)
 
-    def promote(
-        self,
-        decision: PromotionDecision,
-        *,
-        source_observations: int,
-    ) -> PolicyVersion:
+    def promote(self, decision: PromotionDecision) -> PolicyVersion:
         if not decision.ready:
             raise ValueError(f"candidate_not_promotable:{decision.reason}")
         version = _text(decision.candidate_version)
-        if not version or version == "baseline-v0":
-            raise ValueError("invalid_candidate_version")
+        candidate = self.candidates.get(version)
+        if not candidate:
+            raise ValueError("candidate_not_registered")
         now = int(time.time() * 1000)
         policy = PolicyVersion(
             version=version,
             status="promoted",
-            created_at_ms=now,
+            created_at_ms=int(candidate.get("created_at_ms") or now),
             promoted_at_ms=now,
-            source_observations=max(0, int(source_observations)),
+            source_observations=int(candidate.get("source_observations") or 0),
             oos_observations=decision.observations,
-            evaluation_fingerprint=_fingerprint([]),
+            evaluation_fingerprint=decision.evaluation_fingerprint,
         )
         self.active_version = version
         self.versions[version] = policy
         self._save()
         return policy
 
+    def active_snapshot(self) -> dict[str, Any] | None:
+        row = self.candidates.get(self.active_version)
+        if not row:
+            return None
+        snapshot = row.get("snapshot")
+        return dict(snapshot) if isinstance(snapshot, Mapping) else None
+
     def state(self) -> dict[str, Any]:
         return {
             "active_version": self.active_version,
             "versions": {key: value.to_dict() for key, value in self.versions.items()},
+            "candidate_versions": sorted(self.candidates),
         }
 
     def _load(self) -> None:
@@ -239,6 +252,9 @@ class PromotionBoundary:
                             self.versions[str(key)] = PolicyVersion(**row)
                         except TypeError:
                             continue
+            candidates = payload.get("candidates")
+            if isinstance(candidates, dict):
+                self.candidates = {str(key): dict(row) for key, row in candidates.items() if isinstance(row, dict)}
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             return
 
@@ -247,7 +263,15 @@ class PromotionBoundary:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as handle:
-                json.dump(self.state(), handle, sort_keys=True)
+                json.dump(
+                    {
+                        "active_version": self.active_version,
+                        "versions": {k: v.to_dict() for k, v in self.versions.items()},
+                        "candidates": self.candidates,
+                    },
+                    handle,
+                    sort_keys=True,
+                )
             os.replace(tmp, self.path)
         except (OSError, TypeError, ValueError):
             return
