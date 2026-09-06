@@ -35,12 +35,7 @@ def ensure_decision_identity(
     chain_name: str,
     current_block: int,
 ) -> DecisionExecutionIdentity:
-    """Create/preserve one canonical identity and persist it on both objects.
-
-    Identity creation is deliberately independent of OMAR. The decision,
-    execution, and settlement lifecycle must remain traceable even when the
-    OMAR learning policy is disabled.
-    """
+    """Create/preserve one canonical identity and persist it on both objects."""
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
         meta = {}
@@ -76,21 +71,43 @@ def ensure_decision_identity(
     if not correlation_id:
         correlation_id = _stable_id("corr", decision_id, chain_name)
 
+    opportunity_id = _text(getattr(opp, "id", ""))
+    route_id = _text(getattr(opp, "route_id", ""))
+    action = _text(getattr(decision, "action", "")) if decision is not None else ""
+
     brain["canonical_decision_id"] = decision_id
     brain["correlation_id"] = correlation_id
+    if opportunity_id:
+        brain["opportunity_id"] = opportunity_id
+    if route_id:
+        brain["route_id"] = route_id
+    if action:
+        brain["decision_action"] = action
     meta["brain"] = brain
     meta["canonical_lineage"] = {
         "decision_id": decision_id,
         "correlation_id": correlation_id,
+        "opportunity_id": opportunity_id,
+        "route_id": route_id,
+        "action": action,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
 
     if decision is not None:
         decision_meta["canonical_decision_id"] = decision_id
         decision_meta["correlation_id"] = correlation_id
+        if opportunity_id:
+            decision_meta["opportunity_id"] = opportunity_id
+        if route_id:
+            decision_meta["route_id"] = route_id
+        if action:
+            decision_meta["decision_action"] = action
         decision_meta["decision_lineage"] = {
             "decision_id": decision_id,
             "correlation_id": correlation_id,
+            "opportunity_id": opportunity_id,
+            "route_id": route_id,
+            "action": action,
         }
         try:
             decision.metadata = decision_meta
@@ -107,4 +124,11 @@ def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     return {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
+        "opportunity_id": _text(
+            brain.get("opportunity_id") or lineage.get("opportunity_id") or getattr(opp, "id", "")
+        ),
+        "route_id": _text(
+            brain.get("route_id") or lineage.get("route_id") or getattr(opp, "route_id", "")
+        ),
+        "action": _text(brain.get("decision_action") or lineage.get("action")),
     }
