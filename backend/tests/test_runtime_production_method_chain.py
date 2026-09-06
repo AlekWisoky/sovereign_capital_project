@@ -6,6 +6,10 @@ import pytest
 
 import victor_ai_bot.runtime_legacy as runtime_legacy_module
 from victor_ai_bot.decision_identity import lineage_from_opportunity
+from victor_ai_bot.omar.canonical_execution import (
+    CanonicalExecutionInvariantError,
+    require_canonical_execution_context,
+)
 from victor_ai_bot.omar.production_lineage_bridge import install_production_lineage_bridge
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 
@@ -41,6 +45,7 @@ def _runtime():
             dry_run=False,
             gas_mode="standard",
             send_mode="public",
+            brain_mode="off",
         ),
     )
     runtime.metrics = SimpleNamespace(
@@ -62,6 +67,21 @@ def _runtime():
     runtime._cb = SimpleNamespace(allow_auto_trading=lambda: True)
     runtime._omar = None
     return runtime
+
+
+def _decision(opp_id: str = "opp-1"):
+    return SimpleNamespace(
+        action="trade",
+        opp_id=opp_id,
+        route_id="route-1",
+        size_mult=1.0,
+        borrow_mult=1.0,
+        gas_mode="standard",
+        p_success=0.9,
+        ev_wei=10,
+        portfolio=[opp_id],
+        metadata={},
+    )
 
 
 @pytest.mark.asyncio
@@ -103,8 +123,9 @@ async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(mo
         },
     )
     runtime._opps = [opp]
+    decision = _decision()
 
-    dispatched = runtime._maybe_dispatch_auto_trade(current_block=123)
+    dispatched = runtime._maybe_dispatch_auto_trade(current_block=123, decision=decision)
     assert dispatched is True
     await runtime._exec_task
 
@@ -112,14 +133,72 @@ async def test_runtime_bundle_auto_trade_walks_actual_production_method_chain(mo
     assert events[0][1:3] == ("read-rpc", "send-rpc")
     assert events[0][3] is opp
     assert events[0][4:6] == (123, 17)
-    assert events[0][6] is None
+    assert events[0][6] is decision
     assert events[1][0] == "record"
     assert events[1][1] is execution_result
     assert events[1][2] is opp
     assert events[1][4] == "auto"
     assert runtime._last_submitted_block == 123
-    assert lineage_from_opportunity(opp)["decision_id"]
-    assert lineage_from_opportunity(opp)["correlation_id"]
+    lineage = lineage_from_opportunity(opp)
+    assert lineage["decision_id"] == decision.metadata["canonical_decision_id"]
+    assert lineage["correlation_id"] == decision.metadata["correlation_id"]
+
+
+def test_brain_mode_off_cannot_fall_back_to_legacy_best_candidate():
+    runtime = _runtime()
+    opp = SimpleNamespace(
+        id="opp-legacy",
+        route_id="route-legacy",
+        can_execute=True,
+        meta={"safety": {"exec_ready": True}, "brain": {}},
+    )
+    runtime._opps = [opp]
+
+    assert runtime._maybe_dispatch_auto_trade(current_block=99, decision=None) is False
+    assert runtime._exec_task is None
+
+
+def test_non_trade_decision_cannot_reach_execution():
+    runtime = _runtime()
+    opp = SimpleNamespace(
+        id="opp-wait",
+        route_id="route-wait",
+        can_execute=True,
+        meta={"safety": {"exec_ready": True}, "brain": {}},
+    )
+    runtime._opps = [opp]
+    decision = _decision("opp-wait")
+    decision.action = "skip"
+
+    assert runtime._maybe_dispatch_auto_trade(current_block=100, decision=decision) is False
+    assert runtime._exec_task is None
+
+
+def test_canonical_execution_invariant_requires_decision():
+    runtime = _runtime()
+    opp = SimpleNamespace(id="opp-invariant", route_id="route-invariant", meta={})
+
+    with pytest.raises(CanonicalExecutionInvariantError, match="requires_canonical_decision"):
+        require_canonical_execution_context(runtime, opp, None, current_block=101)
+
+
+def test_canonical_execution_invariant_creates_and_validates_identity():
+    runtime = _runtime()
+    opp = SimpleNamespace(id="opp-identity", route_id="route-identity", meta={})
+    decision = _decision("opp-identity")
+
+    decision_id, correlation_id = require_canonical_execution_context(
+        runtime, opp, decision, current_block=102
+    )
+
+    assert decision_id
+    assert correlation_id
+    assert decision.metadata["canonical_decision_id"] == decision_id
+    assert decision.metadata["correlation_id"] == correlation_id
+    assert lineage_from_opportunity(opp) == {
+        "decision_id": decision_id,
+        "correlation_id": correlation_id,
+    }
 
 
 def test_production_lineage_bridge_is_installed_on_runtime_decision_boundary():
