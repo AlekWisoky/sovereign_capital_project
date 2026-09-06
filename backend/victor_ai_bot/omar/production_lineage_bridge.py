@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Mapping
 
 from ..decision_identity import ensure_decision_identity, lineage_from_opportunity
+from .operator_intent import snapshot_operator_intent
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -35,6 +36,22 @@ def _lineage_matches(
     return True
 
 
+def _intent_for_decision(runtime: Any, opp: Any, decision: Any | None) -> tuple[dict[str, Any], str]:
+    """Return the write-once decision-time intent, creating it only if absent."""
+    meta = _dict(getattr(opp, "meta", None))
+    lineage = _dict(meta.get("canonical_lineage"))
+    existing = lineage.get("operator_intent")
+    fingerprint = _text(lineage.get("intent_fingerprint"))
+    if isinstance(existing, Mapping) and existing:
+        return dict(existing), fingerprint
+    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
+    existing = decision_meta.get("operator_intent")
+    fingerprint = fingerprint or _text(decision_meta.get("intent_fingerprint"))
+    if isinstance(existing, Mapping) and existing:
+        return dict(existing), fingerprint
+    return snapshot_operator_intent(runtime, opp, decision)
+
+
 def _patch_decision_identity() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 
@@ -43,6 +60,7 @@ def _patch_decision_identity() -> None:
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
+        operator_intent, fingerprint = _intent_for_decision(self, opp, decision)
         ensure_decision_identity(
             opp,
             decision,
@@ -52,6 +70,8 @@ def _patch_decision_identity() -> None:
                 else "chain"
             ),
             current_block=int(current_block),
+            operator_intent=operator_intent,
+            intent_fingerprint=fingerprint,
         )
         return original(self, opp, decision, current_block=current_block)
 
@@ -75,6 +95,7 @@ def _patch_execution_identity() -> None:
         result = bound.arguments.get("result")
         if runtime is not None and opp is not None:
             try:
+                operator_intent, fingerprint = _intent_for_decision(runtime, opp, decision)
                 ensure_decision_identity(
                     opp,
                     decision,
@@ -84,13 +105,17 @@ def _patch_execution_identity() -> None:
                         else "chain"
                     ),
                     current_block=int(bound.arguments.get("bn") or 0),
+                    operator_intent=operator_intent,
+                    intent_fingerprint=fingerprint,
                 )
-                lineage = lineage_from_opportunity(opp)
+                lineage = _dict(getattr(opp, "meta", {}).get("canonical_lineage"))
                 if result is not None:
                     plan = _dict(getattr(result, "plan", None))
                     plan["canonical_lineage"] = dict(lineage)
-                    plan["canonical_decision_id"] = lineage["decision_id"]
-                    plan["correlation_id"] = lineage["correlation_id"]
+                    plan["canonical_decision_id"] = lineage.get("decision_id", "")
+                    plan["correlation_id"] = lineage.get("correlation_id", "")
+                    plan["intent_fingerprint"] = fingerprint
+                    plan["operator_intent"] = operator_intent
                     result.plan = plan
             except _SAFE:
                 pass
