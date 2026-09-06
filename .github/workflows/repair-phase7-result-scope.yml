@@ -21,12 +21,11 @@ jobs:
           s = p.read_text(encoding='utf-8')
           marker = '        items = list(plan.get("items") or [])\n'
           start = s.index(marker)
-          end = s.index('\n    async def ', start)
-          block = s[start:end]
+          block = s[start:]
           if '        result = {' not in block:
               raise SystemExit('execution result block not found')
           block = block.replace('result', 'execute_result')
-          s = s[:start] + block + s[end:]
+          s = s[:start] + block
           p.write_text(s, encoding='utf-8')
           PY
       - uses: actions/setup-python@v5
