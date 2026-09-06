@@ -24,11 +24,16 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _lineage_matches(outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str) -> bool:
+def _lineage_matches(
+    outcome: Any, *, decision_id: str, correlation_id: str, opportunity_id: str
+) -> bool:
     row = _dict(outcome)
     if _text(row.get("status")).lower() != "settled":
         return False
-    if decision_id and _text(row.get("decision_id") or row.get("canonical_decision_id")) != decision_id:
+    if (
+        decision_id
+        and _text(row.get("decision_id") or row.get("canonical_decision_id")) != decision_id
+    ):
         return False
     if correlation_id and _text(row.get("correlation_id")) != correlation_id:
         return False
@@ -133,7 +138,9 @@ def _patch_execution_identity() -> None:
                     plan["canonical_lineage"] = dict(lineage)
                     plan["canonical_decision_id"] = lineage["decision_id"]
                     plan["correlation_id"] = lineage["correlation_id"]
-                    plan["operator_intent_fingerprint"] = operator_intent_fingerprint_from_opportunity(opp)
+                    plan["operator_intent_fingerprint"] = (
+                        operator_intent_fingerprint_from_opportunity(opp)
+                    )
                     result.plan = plan
             except _SAFE:
                 pass
@@ -165,7 +172,9 @@ def _patch_settlement_resolution() -> None:
         try:
             if isinstance(outcome, dict):
                 outcome["canonical_decision_id"] = lineage["decision_id"]
-                outcome["operator_intent_fingerprint"] = operator_intent_fingerprint_from_opportunity(opp)
+                outcome["operator_intent_fingerprint"] = (
+                    operator_intent_fingerprint_from_opportunity(opp)
+                )
         except (AttributeError, TypeError):
             pass
         return outcome
@@ -193,7 +202,9 @@ def _patch_learning_identity() -> None:
             return store
         base = str(getattr(runtime, "data_dir", os.path.join("data", "superstructure")))
         chain = _text(getattr(runtime, "chain_name", "default")) or "default"
-        store = DurableLearningIdentity(os.path.join(base, "omar_learning", f"identity_{chain}.json"))
+        store = DurableLearningIdentity(
+            os.path.join(base, "omar_learning", f"identity_{chain}.json")
+        )
         runtime._durable_learning_identity = store
         return store
 
@@ -219,7 +230,13 @@ def _patch_learning_identity() -> None:
         decision_id = _text(kwargs.get("decision_id"))
         store = store_for(self)
         if decision_id and store.is_settled(decision_id):
-            return {"ok": True, "duplicate": True, "learned": False, "reason": "settled_outcome_already_learned", "decision_id": decision_id}
+            return {
+                "ok": True,
+                "duplicate": True,
+                "learned": False,
+                "reason": "settled_outcome_already_learned",
+                "decision_id": decision_id,
+            }
 
         pending = store.pending(decision_id) if decision_id else {}
         metadata = _dict(kwargs.get("metadata"))
@@ -229,21 +246,49 @@ def _patch_learning_identity() -> None:
         outcome.update(
             {
                 "status": _text(settlement.get("status")) or "settled",
-                "decision_id": _text(settlement.get("decision_id") or settlement.get("canonical_decision_id")) or decision_id,
-                "correlation_id": _text(settlement.get("correlation_id")) or _text(canonical_lineage.get("correlation_id")),
-                "opportunity_id": _text(settlement.get("opportunity_id")) or _text(pending.get("opportunity_id")),
+                "decision_id": _text(
+                    settlement.get("decision_id") or settlement.get("canonical_decision_id")
+                )
+                or decision_id,
+                "correlation_id": _text(settlement.get("correlation_id"))
+                or _text(canonical_lineage.get("correlation_id")),
+                "opportunity_id": _text(settlement.get("opportunity_id"))
+                or _text(pending.get("opportunity_id")),
                 "action": _text(settlement.get("action")) or _text(pending.get("action")),
-                "route_id": _text(settlement.get("route_id")) or _text(kwargs.get("route_id") or pending.get("route_id")),
-                "outcome_truth_verified": bool(settlement.get("truth_verified", settlement.get("outcome_truth_verified", kwargs.get("outcome_truth_verified", False)))),
+                "route_id": _text(settlement.get("route_id"))
+                or _text(kwargs.get("route_id") or pending.get("route_id")),
+                "outcome_truth_verified": bool(
+                    settlement.get(
+                        "truth_verified",
+                        settlement.get(
+                            "outcome_truth_verified", kwargs.get("outcome_truth_verified", False)
+                        ),
+                    )
+                ),
                 "source": _text(settlement.get("source")) or _text(metadata.get("source")),
-                "canonical_lineage": {"decision_id": _text(canonical_lineage.get("decision_id")) or decision_id, "correlation_id": _text(canonical_lineage.get("correlation_id"))},
+                "canonical_lineage": {
+                    "decision_id": _text(canonical_lineage.get("decision_id")) or decision_id,
+                    "correlation_id": _text(canonical_lineage.get("correlation_id")),
+                },
             }
         )
 
         gate = validate_learning_transition(pending, outcome, decision_id=decision_id)
         if not gate.allowed:
-            self._log({"event": "omar_learning_integrity_rejected", "decision_id": decision_id, "reason": gate.reason, "lineage": gate.to_dict()})
-            return {"ok": False, "learned": False, "reason": gate.reason, "decision_id": decision_id}
+            self._log(
+                {
+                    "event": "omar_learning_integrity_rejected",
+                    "decision_id": decision_id,
+                    "reason": gate.reason,
+                    "lineage": gate.to_dict(),
+                }
+            )
+            return {
+                "ok": False,
+                "learned": False,
+                "reason": gate.reason,
+                "decision_id": decision_id,
+            }
 
         result = original_outcome(self, **kwargs)
         if isinstance(result, Mapping) and result.get("ok") and decision_id:
@@ -254,7 +299,9 @@ def _patch_learning_identity() -> None:
                     "action": outcome["action"],
                     "route_id": outcome["route_id"],
                     "tx_hash": _text(kwargs.get("tx_hash") or outcome.get("tx_hash")),
-                    "operator_intent_fingerprint": _text(metadata.get("operator_intent_fingerprint")),
+                    "operator_intent_fingerprint": _text(
+                        metadata.get("operator_intent_fingerprint")
+                    ),
                 },
             )
         return result

@@ -1,4 +1,5 @@
 """Compatibility integration helpers for the canonical adaptive flash-loan controller."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping
@@ -21,13 +22,27 @@ def _first(mapping: Mapping[str, Any], *keys: str, default: float = 0.0) -> floa
 
 
 def apply_adaptive_flashloan_controller(
-    *, legacy_result: Dict[str, Any], canonical_decision_id: str, correlation_id: str,
-    route_id: str, provider: str, requested_size_mult: float,
-    capital_engine_state: Mapping[str, Any] | None, treasury_state: Mapping[str, Any] | None,
-    wealth_goal_state: Mapping[str, Any] | None, drawdown_state: Mapping[str, Any] | None,
-    governance_allowed: bool, capital_authority_fresh: bool, confidence: float,
-    aggressiveness: float, goal_gap_pct: float, max_borrow_usd: float, max_loss_usd: float,
-    minimum_net_profit_usd: float, minimum_net_roi_bps: float, expected_loss_ratio: float,
+    *,
+    legacy_result: Dict[str, Any],
+    canonical_decision_id: str,
+    correlation_id: str,
+    route_id: str,
+    provider: str,
+    requested_size_mult: float,
+    capital_engine_state: Mapping[str, Any] | None,
+    treasury_state: Mapping[str, Any] | None,
+    wealth_goal_state: Mapping[str, Any] | None,
+    drawdown_state: Mapping[str, Any] | None,
+    governance_allowed: bool,
+    capital_authority_fresh: bool,
+    confidence: float,
+    aggressiveness: float,
+    goal_gap_pct: float,
+    max_borrow_usd: float,
+    max_loss_usd: float,
+    minimum_net_profit_usd: float,
+    minimum_net_roi_bps: float,
+    expected_loss_ratio: float,
     max_size_mult: float,
 ) -> Dict[str, Any]:
     """Apply Phase 23 adaptive sizing inside the canonical flash-loan path."""
@@ -43,9 +58,24 @@ def apply_adaptive_flashloan_controller(
     hard_stop = bool(drawdown.get("hardStop", False))
     if isinstance(drawdown.get("hardStop"), Mapping):
         hard_stop = bool(drawdown["hardStop"].get("active"))
-    available = _first(capital, "capital_available_usd", "capitalAvailableUsd", "available_usd", "availableUsd")
-    deployable = _first(capital, "deployable_capital_usd", "deployableCapitalUsd", "deployable_usd", "deployableUsd", default=available)
-    family = _first(capital, "family_allocation_usd", "familyAllocationUsd", "family_capital_usd", "familyCapitalUsd")
+    available = _first(
+        capital, "capital_available_usd", "capitalAvailableUsd", "available_usd", "availableUsd"
+    )
+    deployable = _first(
+        capital,
+        "deployable_capital_usd",
+        "deployableCapitalUsd",
+        "deployable_usd",
+        "deployableUsd",
+        default=available,
+    )
+    family = _first(
+        capital,
+        "family_allocation_usd",
+        "familyAllocationUsd",
+        "family_capital_usd",
+        "familyCapitalUsd",
+    )
     if family <= 0.0:
         targets = capital.get("family_targets")
         key = str((legacy_result or {}).get("resolved_family_target_key") or "")
@@ -58,7 +88,15 @@ def apply_adaptive_flashloan_controller(
     selected_row = next((row for row in rows if str(row.get("provider") or "") == selected), None)
     candidates = list((selected_row or {}).get("candidates") or [])
     if not candidates:
-        candidates = [{"size_mult": float((legacy_result or {}).get("size_mult") or requested_size_mult or 1.0), "net_profit_usd": float((legacy_result or {}).get("net_edge") or 0.0), "net_roi_bps": 0.0}]
+        candidates = [
+            {
+                "size_mult": float(
+                    (legacy_result or {}).get("size_mult") or requested_size_mult or 1.0
+                ),
+                "net_profit_usd": float((legacy_result or {}).get("net_edge") or 0.0),
+                "net_roi_bps": 0.0,
+            }
+        ]
     normalized = []
     for raw in candidates:
         item = dict(raw or {})
@@ -71,25 +109,47 @@ def apply_adaptive_flashloan_controller(
         item.update(size_mult=size, net_profit_usd=net, net_roi_bps=roi, estimated_loss_usd=loss)
         normalized.append(item)
     budget = build_risk_budget(
-        capital_available_usd=available, deployable_capital_usd=deployable,
-        family_allocation_usd=family, max_borrow_usd=max_borrow_usd,
-        max_loss_usd=max_loss_usd, current_drawdown_pct=_first(drawdown, "drawdownPct", "drawdown_pct"),
-        hard_stop=hard_stop, governance_allowed=governance_allowed,
-        capital_authority_fresh=capital_authority_fresh, confidence=confidence,
-        aggressiveness=aggressiveness, goal_gap_pct=goal_gap_pct,
+        capital_available_usd=available,
+        deployable_capital_usd=deployable,
+        family_allocation_usd=family,
+        max_borrow_usd=max_borrow_usd,
+        max_loss_usd=max_loss_usd,
+        current_drawdown_pct=_first(drawdown, "drawdownPct", "drawdown_pct"),
+        hard_stop=hard_stop,
+        governance_allowed=governance_allowed,
+        capital_authority_fresh=capital_authority_fresh,
+        confidence=confidence,
+        aggressiveness=aggressiveness,
+        goal_gap_pct=goal_gap_pct,
     )
     adaptive = choose_adaptive_size(
-        canonical_decision_id=decision_id, correlation_id=correlation, route_id=route_id,
-        provider=selected, requested_size_mult=requested_size_mult, candidates=normalized,
-        risk_budget_usd=budget, minimum_net_profit_usd=minimum_net_profit_usd,
-        minimum_net_roi_bps=minimum_net_roi_bps, expected_loss_ratio=expected_loss_ratio,
+        canonical_decision_id=decision_id,
+        correlation_id=correlation,
+        route_id=route_id,
+        provider=selected,
+        requested_size_mult=requested_size_mult,
+        candidates=normalized,
+        risk_budget_usd=budget,
+        minimum_net_profit_usd=minimum_net_profit_usd,
+        minimum_net_roi_bps=minimum_net_roi_bps,
+        expected_loss_ratio=expected_loss_ratio,
         max_size_mult=max_size_mult,
     )
     result = dict(legacy_result)
-    result.update(adaptive_risk_budget=adaptive.to_dict(), risk_budget_usd=float(budget), sizing_id=adaptive.sizing_id, canonical_decision_id=decision_id, correlation_id=correlation, adaptive_controller="phase23")
+    result.update(
+        adaptive_risk_budget=adaptive.to_dict(),
+        risk_budget_usd=float(budget),
+        sizing_id=adaptive.sizing_id,
+        canonical_decision_id=decision_id,
+        correlation_id=correlation,
+        adaptive_controller="phase23",
+    )
     if adaptive.allowed and bool(result.get("allowed", True)):
         result["size_mult"] = float(adaptive.selected_size_mult)
-        result["borrow_mult"] = min(float(result.get("borrow_mult") or adaptive.selected_size_mult), float(adaptive.selected_size_mult))
+        result["borrow_mult"] = min(
+            float(result.get("borrow_mult") or adaptive.selected_size_mult),
+            float(adaptive.selected_size_mult),
+        )
         result["adaptive_allowed"] = True
     else:
         result["adaptive_allowed"] = False

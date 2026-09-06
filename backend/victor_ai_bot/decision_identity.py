@@ -135,4 +135,6 @@ def operator_intent_fingerprint_from_opportunity(opp: Any) -> str:
     meta = _dict(getattr(opp, "meta", None))
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
-    return _text(brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint"))
+    return _text(
+        brain.get("operator_intent_fingerprint") or lineage.get("operator_intent_fingerprint")
+    )

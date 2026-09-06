@@ -118,9 +118,17 @@ def capture_runtime_exception(
     with sentry_sdk.new_scope() as scope:
         safe_context = dict(context or {})
         for key in (
-            "decision_id", "correlation_id", "execution_id", "outcome_id",
-            "opportunity_id", "route_id", "sizing_id", "action", "mode",
-            "status", "reason_code",
+            "decision_id",
+            "correlation_id",
+            "execution_id",
+            "outcome_id",
+            "opportunity_id",
+            "route_id",
+            "sizing_id",
+            "action",
+            "mode",
+            "status",
+            "reason_code",
         ):
             if key in safe_context and safe_context[key] is not None:
                 scope.set_tag(key, str(safe_context[key]))

@@ -57,9 +57,17 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _sizing_id(decision_id: str, correlation_id: str, route_id: str, provider: str, size_mult: float) -> str:
+def _sizing_id(
+    decision_id: str, correlation_id: str, route_id: str, provider: str, size_mult: float
+) -> str:
     body = "|".join(
-        (_text(decision_id), _text(correlation_id), _text(route_id), _text(provider), f"{float(size_mult):.8f}")
+        (
+            _text(decision_id),
+            _text(correlation_id),
+            _text(route_id),
+            _text(provider),
+            f"{float(size_mult):.8f}",
+        )
     )
     return "sizing_" + hashlib.sha256(body.encode("utf-8")).hexdigest()[:24]
 
@@ -88,7 +96,9 @@ def compute_profit_after_costs(
     net = gross - sum(costs.values())
     base = max(0.0, _num(capital_base_usd))
     roi_bps = (net / base * 10_000.0) if base > 0.0 else 0.0
-    return ProfitAfterCosts(gross_profit_usd=gross, **costs, net_profit_usd=net, net_roi_bps=roi_bps)
+    return ProfitAfterCosts(
+        gross_profit_usd=gross, **costs, net_profit_usd=net, net_roi_bps=roi_bps
+    )
 
 
 def build_risk_budget(
@@ -127,7 +137,9 @@ def build_risk_budget(
     dd = max(0.0, _num(current_drawdown_pct))
     drawdown_factor = 0.50 if dd >= 8.0 else 0.75 if dd >= 5.0 else 0.90 if dd >= 2.0 else 1.0
 
-    preferred = configured_loss * confidence_factor * aggression_factor * goal_factor * drawdown_factor
+    preferred = (
+        configured_loss * confidence_factor * aggression_factor * goal_factor * drawdown_factor
+    )
     return _clip(preferred, 0.0, min(configured_loss, capital_ceiling))
 
 
@@ -157,9 +169,20 @@ def choose_adaptive_size(
 
     if not decision_id or not correlation:
         return RiskBudgetDecision(
-            decision_id, correlation, "", False, 0.0, hard_max, budget, 0.0, 0.0,
-            min_profit, min_roi, "missing_canonical_identity",
-            ("canonical_decision_id_required", "correlation_id_required"), (),
+            decision_id,
+            correlation,
+            "",
+            False,
+            0.0,
+            hard_max,
+            budget,
+            0.0,
+            0.0,
+            min_profit,
+            min_roi,
+            "missing_canonical_identity",
+            ("canonical_decision_id_required", "correlation_id_required"),
+            (),
         )
 
     eligible: list[dict[str, float]] = []
@@ -173,12 +196,24 @@ def choose_adaptive_size(
             continue
         if net_profit < min_profit or roi < min_roi or estimated_loss > budget + 1e-9:
             continue
-        eligible.append({"size": size, "net_profit": net_profit, "roi": roi, "loss": estimated_loss})
+        eligible.append(
+            {"size": size, "net_profit": net_profit, "roi": roi, "loss": estimated_loss}
+        )
 
     if not eligible:
         return RiskBudgetDecision(
-            decision_id, correlation, "", False, 0.0, hard_max, budget, 0.0, 0.0,
-            min_profit, min_roi, "no_size_passed_net_profit_and_risk_budget",
+            decision_id,
+            correlation,
+            "",
+            False,
+            0.0,
+            hard_max,
+            budget,
+            0.0,
+            0.0,
+            min_profit,
+            min_roi,
+            "no_size_passed_net_profit_and_risk_budget",
             ("max_size_mult", "risk_budget", "minimum_net_profit", "minimum_net_roi_bps"),
             ("requested_size_mult",),
         )
@@ -193,8 +228,17 @@ def choose_adaptive_size(
         "requested_size_supported" if size >= requested else "requested_size_reduced",
     )
     return RiskBudgetDecision(
-        decision_id, correlation, sizing_id, True, round(size, 8), hard_max, budget,
-        round(winner["loss"], 8), round(winner["net_profit"], 8), min_profit, min_roi,
+        decision_id,
+        correlation,
+        sizing_id,
+        True,
+        round(size, 8),
+        hard_max,
+        budget,
+        round(winner["loss"], 8),
+        round(winner["net_profit"], 8),
+        min_profit,
+        min_roi,
         "largest_eligible_net_profit_candidate",
         ("max_size_mult", "risk_budget", "minimum_net_profit", "minimum_net_roi_bps"),
         preference,

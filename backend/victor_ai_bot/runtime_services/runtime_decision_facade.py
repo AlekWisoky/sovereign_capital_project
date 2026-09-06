@@ -126,7 +126,9 @@ class RuntimeDecisionFacade:
         capital_budget_remaining_wei = None
         family_capital_remaining_wei: dict[str, int] = {}
         try:
-            capital_state = self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
+            capital_state = (
+                self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
+            )
             capital_engine = dict((capital_state or {}).get("capital_engine") or {})
             raw_capital_budget = capital_engine.get("deployable_bankroll_wei")
             if raw_capital_budget not in (None, ""):
@@ -178,7 +180,9 @@ class RuntimeDecisionFacade:
         chosen = None
         try:
             for oid in list(getattr(decision, "portfolio", []) or self._auto_queue):
-                cand = next((o for o in self._opps if o.id == oid and self._opp_is_exec_ready(o)), None)
+                cand = next(
+                    (o for o in self._opps if o.id == oid and self._opp_is_exec_ready(o)), None
+                )
                 if cand is not None:
                     chosen = cand
                     break
@@ -212,12 +216,22 @@ class RuntimeDecisionFacade:
             "drawdown_pct": float(goal.get("drawdownPct") or 0.0),
             "execution_realism": float(goal.get("executionRealismScore") or 0.0),
             "stability": float(goal.get("stabilityScore") or 0.0),
-            "goal_gap_pct": max(0.0, float(goal.get("targetReturnPct") or 0.0) - float(goal.get("currentReturnPct") or 0.0)),
-            "volatility": float(regime.get("volatility", 0.0) or 0.0) if isinstance(regime, dict) else 0.0,
+            "goal_gap_pct": max(
+                0.0,
+                float(goal.get("targetReturnPct") or 0.0)
+                - float(goal.get("currentReturnPct") or 0.0),
+            ),
+            "volatility": (
+                float(regime.get("volatility", 0.0) or 0.0) if isinstance(regime, dict) else 0.0
+            ),
             "legs": int(feats.legs),
             "ev_wei": int(ev_wei),
             "route_id": str(getattr(opp, "route_id", "") or ""),
-            "strategy_family": str((getattr(opp, "meta", {}) or {}).get("strategy_family") or (getattr(opp, "meta", {}) or {}).get("route_family") or ""),
+            "strategy_family": str(
+                (getattr(opp, "meta", {}) or {}).get("strategy_family")
+                or (getattr(opp, "meta", {}) or {}).get("route_family")
+                or ""
+            ),
         }
 
     def _apply_omar_to_candidate(
@@ -262,7 +276,14 @@ class RuntimeDecisionFacade:
 
             rec = omar.recommend(context)
             learning_action = str(getattr(rec, "action", "") or "")
-            if learning_action not in {"WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE"}:
+            if learning_action not in {
+                "WAIT",
+                "DEFEND",
+                "SEEK_OPP",
+                "INCREASE_RISK",
+                "DECREASE_RISK",
+                "EXECUTE",
+            }:
                 learning_action = "EXECUTE"
 
             if isinstance(getattr(opp, "meta", None), dict):
@@ -340,7 +361,9 @@ class RuntimeDecisionFacade:
             if isinstance(getattr(opp, "meta", None), dict):
                 brain = dict(opp.meta.get("brain") or {})
                 brain["size_mult_omar"] = float(getattr(decision, "size_mult", 1.0) or 1.0)
-                brain["gas_mode_omar"] = str(getattr(decision, "gas_mode", "standard") or "standard")
+                brain["gas_mode_omar"] = str(
+                    getattr(decision, "gas_mode", "standard") or "standard"
+                )
                 brain["canonical_decision_id"] = identity.decision_id
                 brain["correlation_id"] = identity.correlation_id
                 brain["operator_intent"] = dict(intent)
@@ -384,5 +407,7 @@ class RuntimeDecisionFacade:
         if chosen is None:
             return False
 
-        self._exec_task = asyncio.create_task(self._execute_auto(chosen, int(current_block), decision=decision))
+        self._exec_task = asyncio.create_task(
+            self._execute_auto(chosen, int(current_block), decision=decision)
+        )
         return True

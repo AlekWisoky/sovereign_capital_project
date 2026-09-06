@@ -95,7 +95,17 @@ def filter_integrity_valid_oos_rows(
 ) -> tuple[list[Mapping[str, Any]], OOSLineageIntegrity]:
     valid: list[Mapping[str, Any]] = []
     total = rejected = 0
-    counts = {key: 0 for key in ("decision_id", "correlation_id", "execution_id", "outcome_id", "state_key", "action")}
+    counts = {
+        key: 0
+        for key in (
+            "decision_id",
+            "correlation_id",
+            "execution_id",
+            "outcome_id",
+            "state_key",
+            "action",
+        )
+    }
     for row in rows:
         if not isinstance(row, Mapping):
             continue
