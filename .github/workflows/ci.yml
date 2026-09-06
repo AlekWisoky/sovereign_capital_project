@@ -27,6 +27,31 @@ jobs:
             xargs -a "$slice" ruff check
           done < backend/mypy_targets.txt
 
+      - name: Pytest
+        id: pytest
+        continue-on-error: true
+        run: |
+          cd backend
+          set +e
+          timeout --signal=TERM --kill-after=30s 10m python -m pytest -x -vv --timeout=60 --timeout-method=thread --durations=50 > ../pytest.log 2>&1
+          status=$?
+          echo "$status" > ../pytest.exit
+          exit "$status"
+
+      - name: Pytest failure evidence
+        if: steps.pytest.outcome == 'failure'
+        run: |
+          echo '--- pytest exit ---'
+          cat pytest.exit || true
+          echo '--- pytest tail ---'
+          tail -n 250 pytest.log || true
+          echo '--- pytest failure markers ---'
+          grep -nE 'FAILED|ERROR|Timeout|E +|short test summary' pytest.log | tail -n 120 || true
+
+      - name: Fail backend job on pytest failure
+        if: steps.pytest.outcome == 'failure'
+        run: exit 1
+
       - name: Black
         run: |
           black --check backend
@@ -40,26 +65,17 @@ jobs:
             mypy @"$slice"
           done < backend/mypy_targets.txt
 
-      - name: Pytest
-        run: |
-          cd backend
-          pytest -q
-
   mobile:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install deps
         run: |
           cd mobile
           npm install --no-audit --no-fund
-
       - name: Mobile typecheck + unit smoke
         run: |
           cd mobile
@@ -69,12 +85,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-
       - name: Forge tests
         run: |
           cd contracts

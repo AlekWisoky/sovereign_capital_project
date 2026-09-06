@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from victor_ai_bot.server import app
-from victor_ai_bot.runtime_services.auxiliary_state_service import AuxiliaryStateService
+from victor_ai_bot.runtime_services.auxiliary_state_service import (
+    CAPITAL_CONTRACT_VERSION,
+    CAPITAL_POLICY_VERSION,
+    AuxiliaryStateService,
+)
 
 
 class _ExplodingQuickSight:
@@ -57,7 +61,9 @@ class _ExplodingAnalyticsRuntime:
         )
 
 
-def _assert_degraded_read_payload(payload: dict, *, family: str, read_model: str, reason_code: str):
+def _assert_degraded_read_payload(
+    payload: dict, *, family: str, read_model: str, reason_code: str
+):
     summary_contract = payload.pop("summaryContract")
     assert payload["ok"] is False
     assert payload["status"] == "degraded"
@@ -68,8 +74,8 @@ def _assert_degraded_read_payload(payload: dict, *, family: str, read_model: str
         "contractVersion": "canonical_summary_read_contract_v1",
         "truthFamily": family,
         "readModel": read_model,
-        "capitalContractVersion": "",
-        "capitalPolicyVersion": "",
+        "capitalContractVersion": CAPITAL_CONTRACT_VERSION,
+        "capitalPolicyVersion": CAPITAL_POLICY_VERSION,
         "sourceContracts": {},
         "ok": True,
         "synthesized": True,
@@ -86,7 +92,9 @@ def _assert_degraded_read_payload(payload: dict, *, family: str, read_model: str
     }
 
 
-def test_analytics_routes_surface_deterministic_degraded_payloads_on_quicksight_failures(monkeypatch):
+def test_analytics_routes_surface_deterministic_degraded_payloads_on_quicksight_failures(
+    monkeypatch,
+):
     monkeypatch.setattr(app.state, "runtime", _ExplodingAnalyticsRuntime(), raising=False)
     client = TestClient(app)
 
