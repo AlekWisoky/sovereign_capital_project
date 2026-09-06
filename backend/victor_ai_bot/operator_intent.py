@@ -66,7 +66,9 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
         goal_state = {}
 
     goal = _dict(goal_state.get("goal"))
-    target_amount = goal.get("target_amount") or goal.get("target_wealth_usd") or goal.get("target_capital_usd")
+    target_amount = (
+        goal.get("target_amount") or goal.get("target_wealth_usd") or goal.get("target_capital_usd")
+    )
     target_return_pct = goal.get("target_return_percentage") or goal.get("target_return_pct")
     timeframe_days = goal.get("timeframe_days")
     if not timeframe_days and goal.get("time_horizon_seconds"):
@@ -81,8 +83,13 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
             "timeframe_days": round(_number(timeframe_days), 6),
             "goal_id": _text(_dict(goal_state.get("meta")).get("active_goal_id")),
             "goal_revision": int(_number(_dict(goal_state.get("meta")).get("goal_revision"), 1)),
-            "current_return_pct": round(_number(goal_state.get("currentReturnPct") or goal_state.get("current_return_pct")), 6),
-            "drawdown_pct": round(_number(goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")), 6),
+            "current_return_pct": round(
+                _number(goal_state.get("currentReturnPct") or goal_state.get("current_return_pct")),
+                6,
+            ),
+            "drawdown_pct": round(
+                _number(goal_state.get("drawdownPct") or goal_state.get("drawdown_pct")), 6
+            ),
         },
         "ai_recommendation": {
             "present": bool(recommendation),
