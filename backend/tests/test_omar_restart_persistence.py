@@ -29,7 +29,8 @@ def test_omar_restart_preserves_settled_learning_and_lineage(tmp_path: Path, mon
     first = OmarRuntime(cfg, chain_name="restart")
     expected_root = tmp_path / "superstructure"
     assert Path(first.data_dir) == expected_root
-    assert Path(first.learning_path).parent == expected_root / "omar_learning"
+    assert Path(first.omar_data_dir) == expected_root / "omar"
+    assert Path(first.learning_path).parent == expected_root / "omar" / "learning"
 
     context = _context()
     state_key = first._real_learner.state_key(context)
