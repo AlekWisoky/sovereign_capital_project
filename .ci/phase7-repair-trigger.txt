@@ -1,1 +1,1 @@
-temporary trigger; removed by repair workflow follow-up
+temporary trigger; second pass for result-scope repair
