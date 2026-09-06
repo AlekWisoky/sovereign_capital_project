@@ -27,6 +27,13 @@ jobs:
             xargs -a "$slice" ruff check
           done < backend/mypy_targets.txt
 
+      - name: Pytest
+        run: |
+          cd backend
+          # Run tests before style/type gates so a stalled suite produces
+          # actionable evidence instead of being masked by formatting checks.
+          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --faulthandler-timeout=60 --durations=50
+
       - name: Black
         run: |
           black --check backend
@@ -39,13 +46,6 @@ jobs:
           while read -r slice; do
             mypy @"$slice"
           done < backend/mypy_targets.txt
-
-      - name: Pytest
-        run: |
-          cd backend
-          # Bound CI and emit Python thread stacks if a test stalls. This is
-          # diagnostic only; failures remain visible and fail the job.
-          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --faulthandler-timeout=60 --durations=50
 
   mobile:
     runs-on: ubuntu-latest
