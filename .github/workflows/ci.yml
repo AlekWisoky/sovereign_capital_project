@@ -43,6 +43,7 @@ jobs:
       - name: Pytest
         run: |
           cd backend
+          # Keep a hard CI ceiling and emit Python thread stacks if a test stalls.
           timeout --signal=TERM --kill-after=30s 30m python -m pytest -q --faulthandler-timeout=60 --durations=25
 
   mobile:
