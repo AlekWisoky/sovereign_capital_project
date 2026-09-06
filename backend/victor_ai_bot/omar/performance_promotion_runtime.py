@@ -4,6 +4,7 @@ import json
 import os
 from typing import Any, Iterable, Mapping
 
+from .goal_advancement import evaluate_goal_advancement
 from .oos_evidence import oos_evidence_path
 from .oos_lineage_integrity import filter_integrity_valid_oos_rows
 from .performance_promotion import (
@@ -61,6 +62,21 @@ def performance_promotion(
     return evaluate_performance_promotion(rows, thresholds=cfg)
 
 
+def _goal_state(runtime: Any) -> Mapping[str, Any]:
+    """Read the canonical wealth-goal state without creating a second goal authority."""
+    service = getattr(runtime, "_wealth_goal_service", None)
+    if service is None or not hasattr(service, "state"):
+        return {}
+    try:
+        state = service.state(runtime)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return {}
+    if not isinstance(state, Mapping):
+        return {}
+    value = state.get("state")
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
 def live_performance_promotion(runtime: Any) -> dict[str, Any]:
     rows, integrity = _valid_oos_rows(runtime)
     result = performance_promotion(runtime)
@@ -71,4 +87,13 @@ def live_performance_promotion(runtime: Any) -> dict[str, Any]:
     payload["promotion_allowed"] = bool(result.ready and integrity.ready)
     if not payload["promotion_allowed"] and integrity.rejected_rows:
         payload["reason"] = "incomplete_oos_lineage"
+
+    # Goal advancement is deliberately downstream of the same performance gate.
+    # A completed wealth goal can be recorded, but the next goal is not promoted
+    # unless the learned policy also has verified OOS advantage and healthy
+    # execution/risk economics. This prevents goal pressure from becoming a
+    # hidden source of trading aggressiveness.
+    goal_advancement = evaluate_goal_advancement(_goal_state(runtime), payload)
+    payload["goal_advancement"] = goal_advancement.to_dict()
+    payload["goal_advancement_allowed"] = bool(goal_advancement.allowed)
     return payload
