@@ -67,7 +67,9 @@ def _patch_decision_identity() -> None:
                 registry[route_id] = {
                     "operator_intent": dict(operator_intent),
                     "intent_fingerprint": str(fingerprint),
-                    "canonical_lineage": dict(_dict(getattr(opp, "meta", {}).get("canonical_lineage"))),
+                    "canonical_lineage": dict(
+                        _dict(getattr(opp, "meta", {}).get("canonical_lineage"))
+                    ),
                     "opportunity_id": _text(getattr(opp, "id", "")),
                 }
         except _SAFE:
