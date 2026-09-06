@@ -337,9 +337,17 @@ def _observe_settled_outcome(
     try:
         learned = omar.observe_outcome(**kwargs)
     except _SAFE as exc:
-        return {"ok": False, "reason_code": "omar_observe_failed", "error": str(exc)}
+        return {
+            "ok": False,
+            "reason_code": "omar_observe_failed",
+            "error": str(exc),
+        }
 
-    return dict(learned) if isinstance(learned, Mapping) else {"ok": True, "result": learned}
+    return (
+        dict(learned)
+        if isinstance(learned, Mapping)
+        else {"ok": True, "result": learned}
+    )
 
 
 def install_omar_lifecycle_hooks() -> None:
