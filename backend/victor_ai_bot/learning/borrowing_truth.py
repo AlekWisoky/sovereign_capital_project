@@ -150,18 +150,22 @@ def resolve_borrowing_truth(
             or ""
         )
 
-    capital_source = str(
-        _first(
-            explicit_borrow,
-            ("source", "capital_source", "capitalSource", "provider"),
+    capital_source = (
+        str(
             _first(
-                admission_details,
-                ("capital_source", "capitalSource", "source", "provider"),
-                _first(context, ("capital_source", "capitalSource", "source"), ""),
-            ),
+                explicit_borrow,
+                ("source", "capital_source", "capitalSource", "provider"),
+                _first(
+                    admission_details,
+                    ("capital_source", "capitalSource", "source", "provider"),
+                    _first(context, ("capital_source", "capitalSource", "source"), ""),
+                ),
+            )
+            or ""
         )
-        or ""
-    ).strip().lower()
+        .strip()
+        .lower()
+    )
     source_hint = " ".join(
         [
             capital_source,
@@ -170,7 +174,8 @@ def resolve_borrowing_truth(
         ]
     )
     borrowing_candidate = bool(explicit_borrow or loan_id) or any(
-        token in source_hint for token in ("internal_prime", "prime", "borrow", "flashloan", "flash_loan")
+        token in source_hint
+        for token in ("internal_prime", "prime", "borrow", "flashloan", "flash_loan")
     )
 
     linked_loan: Dict[str, Any] = {}
@@ -211,13 +216,15 @@ def resolve_borrowing_truth(
                         "approved_notional_usd",
                         "approvedNotionalUsd",
                     ),
-                    requested
-                    if bool(
-                        capital_admission.get(
-                            "allowed", capital_admission.get("approved", False)
+                    (
+                        requested
+                        if bool(
+                            capital_admission.get(
+                                "allowed", capital_admission.get("approved", False)
+                            )
                         )
-                    )
-                    else 0.0,
+                        else 0.0
+                    ),
                 ),
             )
         )
@@ -279,9 +286,7 @@ def resolve_borrowing_truth(
         if settled <= 0.0 and status == "settled":
             settled = loan_notional
         if realized_cost <= 0.0:
-            realized_cost = _float(
-                _first(linked_loan, ("borrow_cost_usd", "borrowCostUsd"), 0.0)
-            )
+            realized_cost = _float(_first(linked_loan, ("borrow_cost_usd", "borrowCostUsd"), 0.0))
 
     capacity = _float(
         _first(
@@ -317,7 +322,11 @@ def resolve_borrowing_truth(
     source = (
         "explicit_trade_context"
         if explicit_borrow
-        else ("internal_prime_loan" if linked_loan else (prime_source if borrowing_candidate else "unavailable"))
+        else (
+            "internal_prime_loan"
+            if linked_loan
+            else (prime_source if borrowing_candidate else "unavailable")
+        )
     )
     return BorrowingTruth(
         requested_usd=max(0.0, requested),

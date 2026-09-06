@@ -28,10 +28,25 @@ class ExecutionOutcome:
             current = str(getattr(self, name) or "")
             if current:
                 continue
-            value = identity.get(name) or identity.get(
-                {"decision_id": "decisionId", "correlation_id": "correlationId", "execution_id": "executionId", "settlement_id": "settlementId"}[name]
-            ) or lineage.get(name) or lineage.get(
-                {"decision_id": "decisionId", "correlation_id": "correlationId", "execution_id": "executionId", "settlement_id": "settlementId"}[name]
+            value = (
+                identity.get(name)
+                or identity.get(
+                    {
+                        "decision_id": "decisionId",
+                        "correlation_id": "correlationId",
+                        "execution_id": "executionId",
+                        "settlement_id": "settlementId",
+                    }[name]
+                )
+                or lineage.get(name)
+                or lineage.get(
+                    {
+                        "decision_id": "decisionId",
+                        "correlation_id": "correlationId",
+                        "execution_id": "executionId",
+                        "settlement_id": "settlementId",
+                    }[name]
+                )
             )
             object.__setattr__(self, name, str(value or ""))
 

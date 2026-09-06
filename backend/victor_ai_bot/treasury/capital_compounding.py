@@ -43,12 +43,8 @@ def resolve_profit_promotion(
     realized = max(0, _int_like(realized_profit_wei))
     previous = max(0, _int_like(previous_promoted_profit_wei))
 
-    enabled = bool(
-        engine.get("profit_promotion_enabled", engine.get("compounding_enabled", False))
-    )
-    rate_pct = _rate_pct(
-        engine.get("profit_promotion_rate_pct", policy.get("reinvest_pct", 0.0))
-    )
+    enabled = bool(engine.get("profit_promotion_enabled", engine.get("compounding_enabled", False)))
+    rate_pct = _rate_pct(engine.get("profit_promotion_rate_pct", policy.get("reinvest_pct", 0.0)))
     eligible = int(realized * (rate_pct / 100.0)) if enabled else 0
     promoted_delta = max(0, eligible - previous)
     promoted_total = previous + promoted_delta

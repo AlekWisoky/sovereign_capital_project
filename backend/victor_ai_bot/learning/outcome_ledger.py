@@ -202,14 +202,8 @@ class CanonicalOutcomeLedger:
     ) -> LearningOutcome:
         tx_hash = str(row.get("tx_hash") or "")
         receipt_status = self._int(row.get("receipt_status"), 0)
-        training_extra = (
-            training.get("extra") if isinstance(training.get("extra"), dict) else {}
-        )
-        brain = (
-            training_extra.get("brain")
-            if isinstance(training_extra.get("brain"), dict)
-            else {}
-        )
+        training_extra = training.get("extra") if isinstance(training.get("extra"), dict) else {}
+        brain = training_extra.get("brain") if isinstance(training_extra.get("brain"), dict) else {}
         amount_in = self._int(training.get("amount_in_wei"), 0)
         expected_after = self._int(row.get("expected_profit_after_costs_wei"), 0)
         realized_after = self._int(row.get("realized_profit_after_gas_wei"), 0)
@@ -260,9 +254,11 @@ class CanonicalOutcomeLedger:
                 if isinstance(training_extra.get("capital"), dict)
                 else {}
             ),
-            "internalPrime": dict(internal_prime_context or {})
-            if isinstance(internal_prime_context, dict)
-            else {},
+            "internalPrime": (
+                dict(internal_prime_context or {})
+                if isinstance(internal_prime_context, dict)
+                else {}
+            ),
         }
 
         borrowing = resolve_borrowing_truth(
@@ -272,9 +268,7 @@ class CanonicalOutcomeLedger:
                 "capital_admission": training_extra.get("capital_admission")
                 or training_extra.get("capitalAdmission")
                 or {},
-                "loan_id": training_extra.get("loan_id")
-                or training_extra.get("loanId")
-                or "",
+                "loan_id": training_extra.get("loan_id") or training_extra.get("loanId") or "",
                 "borrowing_truth": training_extra.get("borrowing_truth")
                 or training_extra.get("borrowingTruth")
                 or {},

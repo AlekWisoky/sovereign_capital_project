@@ -228,7 +228,10 @@ class OmarTrainer:
         for outcome in list(outcomes or []):
             seen += 1
             borrowing = getattr(outcome, "borrowing", None)
-            if borrowing is not None and float(getattr(borrowing, "requested_usd", 0.0) or 0.0) > 0.0:
+            if (
+                borrowing is not None
+                and float(getattr(borrowing, "requested_usd", 0.0) or 0.0) > 0.0
+            ):
                 if self._borrowing_learning_ready(outcome):
                     borrowing_settled += 1
                 else:
