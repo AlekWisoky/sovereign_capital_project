@@ -43,7 +43,7 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          pytest -q
+          timeout 180s pytest -vv -x --maxfail=1
 
   mobile:
     runs-on: ubuntu-latest
