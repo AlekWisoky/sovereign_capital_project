@@ -17,14 +17,14 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           p = Path('backend/victor_ai_bot/runtime_services/withdraw_all_service.py')
           s = p.read_text(encoding='utf-8')
           marker = '        items = list(plan.get("items") or [])\n'
           start = s.index(marker)
           block = s[start:]
-          if '        result = {' not in block:
-              raise SystemExit('execution result block not found')
-          block = block.replace('result', 'execute_result')
+          block = re.sub(r'(?<![A-Za-z0-9_])execute_result(?![A-Za-z0-9_])', 'result', block)
+          block = re.sub(r'(?<![A-Za-z0-9_])result(?![A-Za-z0-9_])', 'execute_result', block)
           s = s[:start] + block
           p.write_text(s, encoding='utf-8')
           PY
