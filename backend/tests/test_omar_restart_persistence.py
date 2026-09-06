@@ -2,6 +2,7 @@ from pathlib import Path
 
 from victor_ai_bot.omar.config import OmarConfig
 from victor_ai_bot.omar.runtime import OmarRuntime
+from victor_ai_bot.pathing import CANONICAL_BACKEND_DATA_DIR
 
 
 def _context() -> dict:
@@ -20,6 +21,13 @@ def _context() -> dict:
         "prime_capacity_ratio": 0.9,
         "prime_cost_bps": 2.0,
     }
+
+
+def test_omar_default_root_is_canonical_backend_data(monkeypatch):
+    monkeypatch.delenv("VICTOR_DATA_DIR", raising=False)
+    rt = OmarRuntime(OmarConfig(enabled=False), chain_name="default-root")
+    assert Path(rt.data_dir) == CANONICAL_BACKEND_DATA_DIR / "superstructure"
+    assert Path(rt.omar_data_dir) == CANONICAL_BACKEND_DATA_DIR / "superstructure" / "omar"
 
 
 def test_omar_restart_preserves_settled_learning_and_lineage(tmp_path: Path, monkeypatch):
