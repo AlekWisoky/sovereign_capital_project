@@ -30,8 +30,22 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          # Bound the suite and capture the exact stuck test/thread if one exists.
-          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --timeout=60 --timeout-method=thread --durations=50
+          set +e
+          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --timeout=60 --timeout-method=thread --durations=50 > ../pytest.log 2>&1
+          status=$?
+          cat ../pytest.log
+          echo "$status" > ../pytest.exit
+          exit "$status"
+
+      - name: Upload pytest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-evidence
+          path: |
+            pytest.log
+            pytest.exit
+          if-no-files-found: warn
 
       - name: Black
         run: |
@@ -50,11 +64,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Set up Node
         uses: actions/setup-node@v4
