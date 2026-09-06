@@ -40,7 +40,8 @@ def ensure_decision_identity(
     """Create/preserve one canonical identity and persist it on both objects.
 
     Identity creation is independent of OMAR. Operator intent is immutable
-    decision-time context for attribution only; it never grants authority.
+    decision-time context for attribution only; it never grants authority and
+    cannot be replaced by later operator changes.
     """
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
@@ -85,12 +86,20 @@ def ensure_decision_identity(
         "correlation_id": correlation_id,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
-    if operator_intent is not None:
+
+    existing_intent = lineage.get("operator_intent")
+    existing_fp = _text(lineage.get("intent_fingerprint"))
+    if existing_intent is None:
+        existing_intent = decision_meta.get("operator_intent")
+    if not existing_fp:
+        existing_fp = _text(decision_meta.get("intent_fingerprint"))
+
+    if existing_intent is not None:
+        canonical_lineage["operator_intent"] = _dict(existing_intent)
+        canonical_lineage["intent_fingerprint"] = existing_fp
+    elif operator_intent is not None:
         canonical_lineage["operator_intent"] = _dict(operator_intent)
         canonical_lineage["intent_fingerprint"] = _text(intent_fingerprint)
-    elif lineage.get("operator_intent") is not None:
-        canonical_lineage["operator_intent"] = _dict(lineage.get("operator_intent"))
-        canonical_lineage["intent_fingerprint"] = _text(lineage.get("intent_fingerprint"))
     meta["canonical_lineage"] = canonical_lineage
 
     if decision is not None:
@@ -100,7 +109,10 @@ def ensure_decision_identity(
             "decision_id": decision_id,
             "correlation_id": correlation_id,
         }
-        if operator_intent is not None:
+        if existing_intent is not None:
+            decision_meta["operator_intent"] = _dict(existing_intent)
+            decision_meta["intent_fingerprint"] = existing_fp
+        elif operator_intent is not None:
             decision_meta["operator_intent"] = _dict(operator_intent)
             decision_meta["intent_fingerprint"] = _text(intent_fingerprint)
         try:
