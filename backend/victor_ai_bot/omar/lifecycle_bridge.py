@@ -233,7 +233,9 @@ def _patch_settlement_learning() -> None:
                 slippage_bps=float(
                     outcome.get("slippage_bps", outcome.get("slippageBps", 0.0)) or 0.0
                 ),
-                latency_ms=int(outcome.get("latency_ms", outcome.get("latencyMs", 0)) or 0),
+                latency_ms=int(
+                    outcome.get("latency_ms", outcome.get("latencyMs", 0)) or 0
+                ),
                 route_id=_text(outcome.get("route_id") or getattr(opp, "route_id", "")),
                 tx_hash=_text(outcome.get("tx_hash") or outcome.get("txHash")),
                 outcome_truth_verified=bool(
@@ -313,7 +315,9 @@ def _observe_settled_outcome(
         "slippage_bps": float(
             outcome_map.get("slippage_bps", outcome_map.get("slippageBps", 0.0)) or 0.0
         ),
-        "latency_ms": int(outcome_map.get("latency_ms", outcome_map.get("latencyMs", 0)) or 0),
+        "latency_ms": int(
+            outcome_map.get("latency_ms", outcome_map.get("latencyMs", 0)) or 0
+        ),
         "route_id": route_id,
         "tx_hash": tx_hash,
         "outcome_truth_verified": bool(
