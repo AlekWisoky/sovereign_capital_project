@@ -43,7 +43,9 @@ jobs:
       - name: Pytest
         run: |
           cd backend
-          pytest -q
+          # Bound CI and emit Python thread stacks if a test stalls. This is
+          # diagnostic only; failures remain visible and fail the job.
+          timeout --signal=TERM --kill-after=30s 10m python -m pytest -q --faulthandler-timeout=60 --durations=50
 
   mobile:
     runs-on: ubuntu-latest
