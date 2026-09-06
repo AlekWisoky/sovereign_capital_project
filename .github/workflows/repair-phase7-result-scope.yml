@@ -17,16 +17,15 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
           p = Path('backend/victor_ai_bot/runtime_services/withdraw_all_service.py')
-          s = p.read_text(encoding='utf-8')
-          marker = '        items = list(plan.get("items") or [])\n'
-          start = s.index(marker)
-          block = s[start:]
-          block = re.sub(r'(?<![A-Za-z0-9_])execute_result(?![A-Za-z0-9_])', 'result', block)
-          block = re.sub(r'(?<![A-Za-z0-9_])result(?![A-Za-z0-9_])', 'execute_result', block)
-          s = s[:start] + block
-          p.write_text(s, encoding='utf-8')
+          lines = p.read_text(encoding='utf-8').splitlines(keepends=True)
+          start = 1415 - 1
+          if len(lines) < start + 1:
+              raise SystemExit('withdraw_all_service.py is shorter than expected')
+          for i in range(start, len(lines)):
+              lines[i] = lines[i].replace('execute_result', 'result')
+              lines[i] = lines[i].replace('result', 'execute_result')
+          p.write_text(''.join(lines), encoding='utf-8')
           PY
       - uses: actions/setup-python@v5
         with:
