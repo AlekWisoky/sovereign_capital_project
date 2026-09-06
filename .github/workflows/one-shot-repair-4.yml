@@ -9,32 +9,32 @@ permissions:
 
 jobs:
   repair:
-    if: "!contains(github.event.head_commit.message, 'ci: repair execute-result keyword 3')"
+    if: "!contains(github.event.head_commit.message, 'ci: format canonical execution gate')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Repair exact keyword arguments
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Format canonical execution gate
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('backend/victor_ai_bot/runtime_services/withdraw_all_service.py')
-          s = p.read_text(encoding='utf-8')
-          before = s.count('execute_result=')
-          s = s.replace('execute_result=', 'result=')
-          after = s.count('execute_result=')
-          print(f'repaired={before-after}')
-          if before == 0 or after != 0:
-              raise SystemExit('expected execute_result keyword arguments were not found')
-          p.write_text(s, encoding='utf-8')
-          PY
-          grep -n 'execute_result=' backend/victor_ai_bot/runtime_services/withdraw_all_service.py || true
+          python -m pip install --upgrade pip
+          pip install black==24.10.0
+          black backend/victor_ai_bot/omar/production_lineage_bridge.py \
+            backend/victor_ai_bot/omar/lifecycle_bridge.py \
+            backend/victor_ai_bot/omar/real_learning.py \
+            backend/victor_ai_bot/omar/runtime.py \
+            backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py \
+            backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py \
+            backend/victor_ai_bot/runtime_services/runtime_decision_facade.py
+          black --check backend
       - name: Commit and remove repair workflow
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py .github/workflows/one-shot-repair-4.yml
+          git add backend .github/workflows/one-shot-repair-4.yml
           git diff --cached --check
-          git commit -m 'ci: repair execute-result keyword 3'
+          git commit -m 'ci: format canonical execution gate'
           git push origin HEAD:omar/phase-7-canonical-execution-invariant
