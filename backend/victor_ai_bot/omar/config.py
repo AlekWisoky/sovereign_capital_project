@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 DEFAULT_ROLES = [
@@ -27,11 +27,10 @@ class OmarConfig:
     turn_level_weight: float = 0.6
     role_rotation_interval: int = 10
     human_role_enabled: bool = True
-    roles: List[str] = None
+    roles: List[str] = field(default_factory=lambda: list(DEFAULT_ROLES))
 
     def __post_init__(self):
-        if self.roles is None:
-            self.roles = list(DEFAULT_ROLES)
+        self.roles = list(self.roles or DEFAULT_ROLES)
         self.role_vector_size = max(8, int(self.role_vector_size))
         self.max_turns_per_episode = max(5, int(self.max_turns_per_episode))
         self.self_play_episodes = max(1, int(self.self_play_episodes))
