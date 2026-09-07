@@ -26,6 +26,36 @@ jobs:
       - name: Mypy OMAR integration
         run: mypy $(tr '\n' ' ' < backend/mypy_omar_targets.txt)
 
+  optional-family-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Generate status artifact outside the working tree
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'backend')
+          from victor_ai_bot.optional_family_status import build_optional_family_status, render_optional_family_status_markdown
+          payload = build_optional_family_status()
+          out = Path('/tmp/optional-family-status')
+          out.mkdir(parents=True, exist_ok=True)
+          (out / 'optional_family_status.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+          (out / 'optional_family_status.md').write_text(render_optional_family_status_markdown(payload))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optional-family-status-${{ github.sha }}
+          path: /tmp/optional-family-status
+
   backend-pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -55,8 +85,6 @@ jobs:
           if not tests:
               raise SystemExit('no pytest files found under backend/tests')
 
-          # Shard the complete discovered test-file set deterministically.
-          # Pytest remains authoritative for collection and execution errors.
           shards = [[] for _ in range(8)]
           for index, path in enumerate(tests):
               shards[index % 8].append(path.as_posix())
