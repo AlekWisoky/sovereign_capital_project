@@ -152,7 +152,7 @@ def get_runtime(request: Request):
 
 
 @router.get("/api/treasury/capital")
-def treasury_capital(rt=Depends(get_runtime)):
+def treasury_capital(rt=Depends(RuntimeBundle.dep)):
     if getattr(rt, "_treasury", None) is None:
         return json_safe(_treasury_unavailable())
     return safe_json_route_call(
@@ -172,7 +172,7 @@ def treasury_capital(rt=Depends(get_runtime)):
 
 
 @router.get("/api/treasury/state")
-def treasury_state(rt=Depends(get_runtime)):
+def treasury_state(rt=Depends(RuntimeBundle.dep)):
     if getattr(rt, "_treasury", None) is None:
         return json_safe(_treasury_state_unavailable())
     return safe_json_route_call(
