@@ -45,10 +45,11 @@ jobs:
               text = text.replace(old_chain, new_chain, 1)
 
           lines = text.splitlines(True)
-          result_idx = next((i for i, line in enumerate(lines) if "result: Dict[str, Any]" in line), None)
-          if result_idx is not None:
-              end = min(result_idx + 420, len(lines))
-              for i in range(result_idx, end):
+          result_indices = [i for i, line in enumerate(lines) if "result: Dict[str, Any]" in line]
+          if len(result_indices) >= 2:
+              start = result_indices[1]
+              end = min(start + 420, len(lines))
+              for i in range(start, end):
                   lines[i] = lines[i].replace('"result"', "__RESULT_KEY__")
                   lines[i] = lines[i].replace('result=', '__RESULT_KW__=')
                   lines[i] = re.sub(r"\bresult\b", "execute_result", lines[i])
