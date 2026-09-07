@@ -1,0 +1,27 @@
+name: Reconcile main into OMAR branch
+
+on:
+  push:
+    branches:
+      - omar/phase-7-autonomous-learning-gate-format-repair
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    if: "!contains(github.event.head_commit.message, '[main-reconciled]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge main without destructive strategy
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git push origin HEAD:${GITHUB_REF_NAME}
