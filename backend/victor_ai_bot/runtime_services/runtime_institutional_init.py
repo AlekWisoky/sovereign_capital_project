@@ -30,7 +30,8 @@ from .analytics_service import AnalyticsService
 from .auxiliary_state_service import AuxiliaryStateService
 from .capital_explanation_service import CapitalExplanationService
 from .capital_truth_service import CapitalTruthService
-from .capital_write_service import CapitalWriteService
+from .canonical_capital_write_service import CanonicalCapitalWriteService
+from .canonical_receipt_service import CanonicalReceiptService
 from .cio_service import CIOService
 from .decision_service import DecisionService
 from .engine_service import EngineService
@@ -41,7 +42,6 @@ from .launch_service import LaunchService
 from .lifecycle_service import LifecycleService
 from .operator_summary_service import OperatorSummaryService
 from .opportunity_service import OpportunityService
-from .receipt_service import ReceiptService
 from .replay_service import ReplayService
 from .runtime_control_service import RuntimeControlService
 from .state_service import StateService
@@ -86,7 +86,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._opportunity_service = OpportunityService()
     runtime._decision_service = DecisionService()
     runtime._admission_service = AdmissionService()
-    runtime._receipt_service = ReceiptService()
+    runtime._receipt_service = CanonicalReceiptService()
     runtime._runtime_control_service = RuntimeControlService()
     runtime._capital_explanation_service = CapitalExplanationService()
     runtime._agent_service = AgentService()
@@ -115,7 +115,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._launch_service = LaunchService()
     runtime._family_hardening_service = FamilyHardeningService()
     runtime._capital_truth_service = CapitalTruthService()
-    runtime._capital_write_service = CapitalWriteService()
+    runtime._capital_write_service = CanonicalCapitalWriteService()
     runtime._withdraw_all_service = WithdrawAllService(data_dir=data_dir, chain=cfg.chain.name)
     runtime._fund_master = FundMasterOrchestrator()
     runtime._profit_doctrine = default_profit_doctrine()

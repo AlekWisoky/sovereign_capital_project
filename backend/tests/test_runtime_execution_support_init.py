@@ -32,7 +32,13 @@ def test_execution_support_init_wires_quicksight_and_consensus(monkeypatch, tmp_
     created = {}
 
     monkeypatch.setattr(mod, "PnLStore", lambda path: created.setdefault("pnl", SimpleNamespace(path=path)))
-    monkeypatch.setattr(mod, "BankrollManager", lambda cfg: created.setdefault("bankroll", SimpleNamespace(cfg=cfg)))
+    monkeypatch.setattr(
+        mod,
+        "BankrollManager",
+        lambda cfg, **kwargs: created.setdefault(
+            "bankroll", SimpleNamespace(cfg=cfg, kwargs=kwargs)
+        ),
+    )
     monkeypatch.setattr(mod, "EfficiencyTracker", lambda window: created.setdefault("eff", SimpleNamespace(window=window)))
     monkeypatch.setattr(mod, "BlockspaceIntel", lambda: created.setdefault("blockspace", object()))
     monkeypatch.setattr(mod, "QuickSightAnalyticsRuntime", lambda **kwargs: created.setdefault("qs", SimpleNamespace(kwargs=kwargs)))
@@ -63,7 +69,7 @@ def test_execution_support_init_wires_quicksight_and_consensus(monkeypatch, tmp_
 
 def test_execution_support_init_degrades_locally_without_breaking_follow_on_state(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "PnLStore", lambda path: SimpleNamespace(path=path))
-    monkeypatch.setattr(mod, "BankrollManager", lambda cfg: SimpleNamespace(cfg=cfg))
+    monkeypatch.setattr(mod, "BankrollManager", lambda cfg, **kwargs: SimpleNamespace(cfg=cfg, kwargs=kwargs))
     monkeypatch.setattr(mod, "EfficiencyTracker", lambda window: SimpleNamespace(window=window))
     monkeypatch.setattr(mod, "BlockspaceIntel", lambda: object())
     monkeypatch.setattr(mod, "QuickSightAnalyticsRuntime", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
@@ -96,7 +102,13 @@ def test_execution_support_init_defaults_kelly_disabled_when_config_omits_it(mon
     created = {}
 
     monkeypatch.setattr(mod, "PnLStore", lambda path: SimpleNamespace(path=path))
-    monkeypatch.setattr(mod, "BankrollManager", lambda cfg: created.setdefault("bankroll", SimpleNamespace(cfg=cfg)))
+    monkeypatch.setattr(
+        mod,
+        "BankrollManager",
+        lambda cfg, **kwargs: created.setdefault(
+            "bankroll", SimpleNamespace(cfg=cfg, kwargs=kwargs)
+        ),
+    )
     monkeypatch.setattr(mod, "EfficiencyTracker", lambda window: SimpleNamespace(window=window))
     monkeypatch.setattr(mod, "BlockspaceIntel", lambda: object())
     monkeypatch.setattr(mod, "QuickSightAnalyticsRuntime", lambda **kwargs: None)
