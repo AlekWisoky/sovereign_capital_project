@@ -5,10 +5,12 @@ import os
 import threading
 import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 import numpy as np
 
+from ..pathing import canonical_data_dir
 from .config import OmarConfig
 from .metrics import compute_social_metrics, to_dict
 from .real_learning import ACTIONS, OmarRealLearner, OmarRecommendation
@@ -33,20 +35,21 @@ class OmarRuntime:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.RLock()
-
         self.last_social: Dict[str, Any] = {}
         self.last_train: Dict[str, Any] = {}
         self.last_decision: Dict[str, Any] = {}
         self.last_outcome: Dict[str, Any] = {}
         self._cycle = 0
 
-        base_data_dir = str(os.environ.get("VICTOR_DATA_DIR", "data") or "data")
-        self.data_dir = os.path.join(base_data_dir, "superstructure")
-        os.makedirs(self.data_dir, exist_ok=True)
-        self.audit_path = os.path.join(self.data_dir, f"omar_audit_{chain_name}.jsonl")
-        self.learning_path = os.path.join(
-            self.data_dir, "omar_learning", f"real_policy_{chain_name}.json"
-        )
+        # OMAR owns derived learning state, but the root is canonical VICTOR
+        # backend data. The settlement SQLite ledger remains authoritative.
+        base_data_dir = canonical_data_dir(os.environ.get("VICTOR_DATA_DIR"))
+        self.data_dir = str(Path(base_data_dir) / "superstructure")
+        self.omar_data_dir = str(Path(self.data_dir) / "omar")
+        self.learning_dir = str(Path(self.omar_data_dir) / "learning")
+        os.makedirs(self.learning_dir, exist_ok=True)
+        self.audit_path = str(Path(self.omar_data_dir) / f"omar_audit_{chain_name}.jsonl")
+        self.learning_path = str(Path(self.learning_dir) / f"real_policy_{chain_name}.json")
         self._real_learner: Optional[OmarRealLearner] = None
         if bool(getattr(cfg, "real_learning_enabled", True)):
             self._real_learner = OmarRealLearner(
@@ -56,9 +59,7 @@ class OmarRuntime:
                 min_observations=int(getattr(cfg, "real_learning_min_observations", 20)),
             )
         self._pending_decisions: Dict[str, Dict[str, Any]] = {}
-        self._learning_cursor_path = os.path.join(
-            self.data_dir, "omar_learning", f"cursor_{chain_name}.json"
-        )
+        self._learning_cursor_path = str(Path(self.learning_dir) / f"cursor_{chain_name}.json")
         self._learning_cursor = self._load_learning_cursor()
 
     @property
@@ -74,6 +75,12 @@ class OmarRuntime:
 
     def stop(self):
         self._stop.set()
+        thread = self._thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=5.0)
+        if self._real_learner is not None:
+            self._real_learner.save()
+        self._save_learning_cursor()
 
     def state(self) -> Dict[str, Any]:
         with self._lock:
@@ -81,9 +88,10 @@ class OmarRuntime:
                 "enabled": bool(self.cfg.enabled),
                 "policy_model": self.cfg.policy_model,
                 "cycle": self._cycle,
-                "real_learning": (
-                    self._real_learner.summary() if self._real_learner else {"enabled": False}
-                ),
+                "data_dir": self.data_dir,
+                "omar_data_dir": self.omar_data_dir,
+                "learning_path": self.learning_path,
+                "real_learning": self._real_learner.summary() if self._real_learner else {"enabled": False},
                 "last_decision": dict(self.last_decision),
                 "last_outcome": dict(self.last_outcome),
                 "last_social": dict(self.last_social),
@@ -91,105 +99,40 @@ class OmarRuntime:
             }
 
     def recommend(self, context: Mapping[str, Any]) -> OmarRecommendation:
-        """Return a bounded recommendation for the next real decision."""
         if not self.enabled or not bool(getattr(self.cfg, "live_influence_enabled", True)):
-            return OmarRecommendation(
-                "",
-                "DISABLED",
-                0.0,
-                False,
-                1.0,
-                "standard",
-                False,
-                0,
-                "omar_disabled",
-            )
+            return OmarRecommendation("", "DISABLED", 0.0, False, 1.0, "standard", False, 0, "omar_disabled")
         if self._real_learner is None:
-            return OmarRecommendation(
-                "",
-                "UNAVAILABLE",
-                0.0,
-                False,
-                1.0,
-                "standard",
-                False,
-                0,
-                "real_learner_unavailable",
-            )
+            return OmarRecommendation("", "UNAVAILABLE", 0.0, False, 1.0, "standard", False, 0, "real_learner_unavailable")
         rec = self._real_learner.recommend(context)
         with self._lock:
             self.last_decision = rec.to_dict()
         return rec
 
-    def observe_decision(
-        self,
-        *,
-        decision_id: str,
-        opportunity_id: str,
-        route_id: str,
-        action: str,
-        state_key: str,
-        context: Mapping[str, Any],
-        metadata: Mapping[str, Any] | None = None,
-    ) -> None:
+    def observe_decision(self, *, decision_id: str, opportunity_id: str, route_id: str, action: str,
+                         state_key: str, context: Mapping[str, Any], metadata: Mapping[str, Any] | None = None) -> None:
         if not self.enabled or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return
-        row = {
-            "decision_id": str(decision_id),
-            "opportunity_id": str(opportunity_id),
-            "route_id": str(route_id),
-            "action": str(action),
-            "state_key": str(state_key),
-            "context": dict(context or {}),
-            "metadata": dict(metadata or {}),
-            "ts_ms": int(time.time() * 1000),
-        }
+        row = {"decision_id": str(decision_id), "opportunity_id": str(opportunity_id), "route_id": str(route_id),
+               "action": str(action), "state_key": str(state_key), "context": dict(context or {}),
+               "metadata": dict(metadata or {}), "ts_ms": int(time.time() * 1000)}
         with self._lock:
             self._pending_decisions[str(decision_id)] = row
-            if len(self._pending_decisions) > 512:
-                oldest = sorted(
-                    self._pending_decisions.items(),
-                    key=lambda item: item[1].get("ts_ms", 0),
-                )[:64]
-                for key, _ in oldest:
-                    self._pending_decisions.pop(key, None)
         self._log({"event": "omar_real_decision", **row})
 
-    def observe_outcome(
-        self,
-        *,
-        decision_id: str,
-        ok: bool,
-        realized_net_usd: float,
-        expected_net_usd: float,
-        amount_in_wei: int,
-        gas_cost_usd: float = 0.0,
-        slippage_bps: float = 0.0,
-        latency_ms: int = 0,
-        route_id: str = "",
-        tx_hash: str = "",
-        outcome_truth_verified: bool = True,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> Dict[str, Any]:
-        if (
-            not self.enabled
-            or self._real_learner is None
-            or not bool(getattr(self.cfg, "real_learning_enabled", True))
-        ):
+    def observe_outcome(self, *, decision_id: str, ok: bool, realized_net_usd: float,
+                        expected_net_usd: float, amount_in_wei: int, gas_cost_usd: float = 0.0,
+                        slippage_bps: float = 0.0, latency_ms: int = 0, route_id: str = "",
+                        tx_hash: str = "", outcome_truth_verified: bool = True,
+                        metadata: Mapping[str, Any] | None = None) -> Dict[str, Any]:
+        if not self.enabled or self._real_learner is None or not bool(getattr(self.cfg, "real_learning_enabled", True)):
             return {"ok": False, "reason": "omar_real_learning_disabled"}
         with self._lock:
             pending = dict(self._pending_decisions.pop(str(decision_id), {}) or {})
         state_key = str(pending.get("state_key") or "")
         action = str(pending.get("action") or "")
         if not state_key or action not in ACTIONS:
-            return {
-                "ok": False,
-                "reason": "missing_decision_link",
-                "decision_id": str(decision_id),
-            }
-        reward = float(realized_net_usd) - 0.25 * max(
-            0.0, float(expected_net_usd) - float(realized_net_usd)
-        )
+            return {"ok": False, "reason": "missing_decision_link", "decision_id": str(decision_id)}
+        reward = float(realized_net_usd) - 0.25 * max(0.0, float(expected_net_usd) - float(realized_net_usd))
         reward -= max(0.0, float(slippage_bps)) * 0.01
         reward -= max(0.0, float(latency_ms)) * 0.0001
         if not ok:
@@ -197,39 +140,16 @@ class OmarRuntime:
         if not outcome_truth_verified:
             reward -= 2.0
         reward = float(np.clip(reward, -50.0, 50.0))
-        outcome = {
-            "decision_id": str(decision_id),
-            "route_id": str(route_id or pending.get("route_id") or ""),
-            "tx_hash": str(tx_hash),
-            "ok": bool(ok),
-            "realized_net_usd": float(realized_net_usd),
-            "expected_net_usd": float(expected_net_usd),
-            "amount_in_wei": int(amount_in_wei),
-            "gas_cost_usd": float(gas_cost_usd),
-            "slippage_bps": float(slippage_bps),
-            "latency_ms": int(latency_ms),
-            "outcome_truth_verified": bool(outcome_truth_verified),
-            "metadata": dict(metadata or {}),
-        }
-        result = self._real_learner.observe(
-            state_key=state_key,
-            action=action,
-            reward=reward,
-            outcome=outcome,
-        )
+        outcome = {"decision_id": str(decision_id), "route_id": str(route_id or pending.get("route_id") or ""),
+                   "tx_hash": str(tx_hash), "ok": bool(ok), "realized_net_usd": float(realized_net_usd),
+                   "expected_net_usd": float(expected_net_usd), "amount_in_wei": int(amount_in_wei),
+                   "gas_cost_usd": float(gas_cost_usd), "slippage_bps": float(slippage_bps),
+                   "latency_ms": int(latency_ms), "outcome_truth_verified": bool(outcome_truth_verified),
+                   "metadata": dict(metadata or {})}
+        result = self._real_learner.observe(state_key=state_key, action=action, reward=reward, outcome=outcome)
         with self._lock:
-            self.last_outcome = {
-                **dict(result),
-                "decision_id": str(decision_id),
-                "action": action,
-            }
-        self._log(
-            {
-                "event": "omar_real_learning_update",
-                **dict(result),
-                "outcome": outcome,
-            }
-        )
+            self.last_outcome = {**dict(result), "decision_id": str(decision_id), "action": action}
+        self._log({"event": "omar_real_learning_update", **dict(result), "outcome": outcome})
         return result
 
     def _load_learning_cursor(self) -> Dict[str, Any]:
@@ -256,29 +176,12 @@ class OmarRuntime:
     def _ingest_real_training_log(self) -> None:
         if not self.enabled or self._real_learner is None:
             return
-        base_data_dir = str(os.environ.get("VICTOR_DATA_DIR", "data") or "data")
-        candidates = [
-            os.path.join(
-                base_data_dir,
-                "training",
-                f"rl_training_{self.chain_name}.jsonl",
-            ),
-            os.path.join(
-                "backend",
-                "data",
-                "training",
-                f"rl_training_{self.chain_name}.jsonl",
-            ),
-            os.path.join(
-                "data",
-                "training",
-                f"rl_training_{self.chain_name}.jsonl",
-            ),
-        ]
-        training_path = next((path for path in candidates if os.path.exists(path)), candidates[0])
+        training_path = str(Path(canonical_data_dir(os.environ.get("VICTOR_DATA_DIR"))) / "training" / f"rl_training_{self.chain_name}.jsonl")
         try:
             offset = max(0, int(self._learning_cursor.get("offset") or 0))
             seen = set(str(x) for x in list(self._learning_cursor.get("seen") or []))
+            if not os.path.exists(training_path):
+                return
             with open(training_path, "r", encoding="utf-8") as handle:
                 handle.seek(offset)
                 while True:
@@ -300,47 +203,27 @@ class OmarRuntime:
                     decision_id = str(brain.get("omar_decision_id") or tx_hash)
                     if not state_key or action not in ACTIONS or decision_id in seen:
                         continue
-                    try:
-                        amount_in = int(row.get("amount_in_wei") or 0)
-                    except (TypeError, ValueError):
-                        amount_in = 0
+                    amount_in = int(row.get("amount_in_wei") or 0)
                     expected = float(row.get("expected_after_costs_wei") or 0.0)
                     realized = float(row.get("realized_after_gas_wei") or 0.0)
-                    reward_trace = (
-                        row.get("reward_trace") if isinstance(row.get("reward_trace"), dict) else {}
-                    )
+                    reward_trace = row.get("reward_trace") if isinstance(row.get("reward_trace"), dict) else {}
                     reward = reward_trace.get("reward_scaled_float")
                     if reward is None:
                         denom = max(1.0, float(abs(amount_in)))
                         reward = (realized - expected) / denom * 1_000_000.0
                     result = self._real_learner.observe(
-                        state_key=state_key,
-                        action=action,
-                        reward=float(reward),
-                        outcome={
-                            "tx_hash": tx_hash,
-                            "amount_in_wei": amount_in,
-                            "expected_after_costs_wei": expected,
-                            "realized_after_gas_wei": realized,
-                            "ok": bool(row.get("ok", False)),
-                            "reward_trace": reward_trace,
-                            "route_id": str(row.get("route_id") or ""),
-                            "metadata": extra,
-                        },
+                        state_key=state_key, action=action, reward=float(reward),
+                        outcome={"tx_hash": tx_hash, "amount_in_wei": amount_in,
+                                 "expected_after_costs_wei": expected, "realized_after_gas_wei": realized,
+                                 "ok": bool(row.get("ok", False)), "reward_trace": reward_trace,
+                                 "route_id": str(row.get("route_id") or ""), "metadata": extra},
                     )
                     if result.get("ok"):
                         seen.add(decision_id)
-                        self.last_outcome = {
-                            **dict(result),
-                            "decision_id": decision_id,
-                            "tx_hash": tx_hash,
-                        }
-            self._learning_cursor = {
-                "offset": offset,
-                "seen": list(sorted(seen))[-2048:],
-            }
+                        self.last_outcome = {**dict(result), "decision_id": decision_id, "tx_hash": tx_hash}
+            self._learning_cursor = {"offset": offset, "seen": list(sorted(seen))[-2048:]}
             self._save_learning_cursor()
-        except OSError:
+        except (OSError, TypeError, ValueError):
             return
 
     def _log(self, obj: Dict[str, Any]):
@@ -358,13 +241,7 @@ class OmarRuntime:
             stats = self._trainer.train()
             if stats:
                 self.last_train = asdict(stats[-1])
-            self._log(
-                {
-                    "event": "omar_training_complete",
-                    "last_train": self.last_train,
-                }
-            )
-
+            self._log({"event": "omar_training_complete", "last_train": self.last_train})
         coord_hist = []
         conflict_hist = []
         cap_alloc = {r: 1.0 for r in (self.cfg.roles or [])}
@@ -376,11 +253,8 @@ class OmarRuntime:
                 conflict_hist.append(st.mean_conflict)
                 coord_hist[:] = coord_hist[-200:]
                 conflict_hist[:] = conflict_hist[-200:]
-            m = compute_social_metrics(
-                coord_hist=np.array(coord_hist, dtype=float),
-                conflict_hist=np.array(conflict_hist, dtype=float),
-                capital_alloc=cap_alloc,
-            )
+            m = compute_social_metrics(coord_hist=np.array(coord_hist, dtype=float),
+                                       conflict_hist=np.array(conflict_hist, dtype=float), capital_alloc=cap_alloc)
             self.last_social = to_dict(m)
             self._log({"event": "omar_social_metrics", **self.last_social})
             self._cycle += 1

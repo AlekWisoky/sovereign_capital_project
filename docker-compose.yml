@@ -9,10 +9,13 @@ services:
       # Point to a chain config. You can mount custom configs via volumes.
       - VICTOR_CONFIG=/app/backend/config/ethereum.yaml
       - VICTOR_VALIDATE_CONTRACT=1
+      # Keep all canonical runtime and OMAR durable state beneath /app/backend/data.
+      - VICTOR_DATA_DIR=/app/backend/data
       # Structured logs recommended for production.
       - VICTOR_LOG_JSON=1
       # Optional: set admin key to lock down mutating endpoints.
       - VICTOR_ADMIN_KEY=
     volumes:
       - ./backend/config:/app/backend/config:ro
+      # Persistent host-backed store for the canonical ledger and OMAR checkpoints.
       - ./backend/data:/app/backend/data
