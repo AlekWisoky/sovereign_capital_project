@@ -28,8 +28,6 @@ jobs:
           from pathlib import Path
           import re
 
-          # Canonical OMAR correlation lineage: decision metadata is historical evidence,
-          # but the correlation id must remain available at the decision record's top level.
           path = Path("backend/victor_ai_bot/omar/runtime.py")
           text = path.read_text(encoding="utf-8")
           old = '''        row = {\n            "decision_id": str(decision_id),\n            "opportunity_id": str(opportunity_id),\n            "route_id": str(route_id),\n            "action": str(action),\n            "state_key": str(state_key),\n            "context": copy.deepcopy(dict(context or {})),\n            "metadata": copy.deepcopy(dict(metadata or {})),\n            "ts_ms": int(time.time() * 1000),\n        }'''
@@ -111,17 +109,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install deps
         run: |
           cd mobile
           npm install --no-audit --no-fund
-
       - name: Mobile typecheck + unit smoke
         run: |
           cd mobile
@@ -131,12 +126,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-
       - name: Forge tests
         run: |
           cd contracts
