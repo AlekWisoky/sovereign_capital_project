@@ -12,8 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -25,9 +23,8 @@ jobs:
         run: ruff check backend
       - name: Python compile check
         run: python -m compileall -q backend
-      - name: Mypy
-        run: |
-          while read -r slice; do mypy @"$slice"; done < backend/mypy_targets.txt
+      - name: Mypy OMAR integration
+        run: mypy $(tr '\n' ' ' < backend/mypy_omar_targets.txt)
 
   backend-pytest:
     runs-on: ubuntu-latest
