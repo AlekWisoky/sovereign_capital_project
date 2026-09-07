@@ -124,7 +124,7 @@ def treasury_capital(rt=Depends(RuntimeBundle.dep)):
 
 @router.get("/api/treasury/state")
 def treasury_state(rt=Depends(RuntimeBundle.dep)):
-    if not _treasury_has_goal(rt):
+    if not _treasury_has_goal(rt) or not callable(getattr(rt, "treasury_state", None)):
         return json_safe(_treasury_state_unavailable())
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
