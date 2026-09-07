@@ -153,6 +153,8 @@ def get_runtime(request: Request):
 
 @router.get("/api/treasury/capital")
 def treasury_capital(rt=Depends(get_runtime)):
+    if getattr(rt, "_treasury", None) is None:
+        return json_safe(_treasury_unavailable())
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
             attach_summary_contract(
@@ -171,6 +173,8 @@ def treasury_capital(rt=Depends(get_runtime)):
 
 @router.get("/api/treasury/state")
 def treasury_state(rt=Depends(get_runtime)):
+    if getattr(rt, "_treasury", None) is None:
+        return json_safe(_treasury_state_unavailable())
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
             attach_summary_contract(
@@ -227,9 +231,7 @@ def set_treasury_goal(payload: dict[str, object], rt=Depends(RuntimeBundle.dep))
         capital_commitment_pct = float(g.capital_commitment_pct)
 
         if "target_return_percentage" in payload:
-            _, target_return_percentage = coerce_non_negative_float(
-                payload["target_return_percentage"]
-            )
+            _, target_return_percentage = coerce_non_negative_float(payload["target_return_percentage"])
         if "time_horizon_seconds" in payload:
             _, time_horizon_seconds = coerce_positive_int(payload["time_horizon_seconds"])
         if "risk_tolerance" in payload:
@@ -246,9 +248,7 @@ def set_treasury_goal(payload: dict[str, object], rt=Depends(RuntimeBundle.dep))
             "max_drawdown_pct": max_drawdown_pct,
             "capital_commitment_pct": capital_commitment_pct,
         }
-        if not goal_patch_changes_state(
-            resolved, current_goal=dict(getattr(g, "__dict__", {}) or {})
-        ):
+        if not goal_patch_changes_state(resolved, current_goal=dict(getattr(g, "__dict__", {}) or {})):
             return json_safe({"ok": True, "goal": g.__dict__, "changed": False})
 
         g.target_return_percentage = target_return_percentage
