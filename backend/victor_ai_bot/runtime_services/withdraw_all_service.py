@@ -609,8 +609,10 @@ class WithdrawAllService:
                 reason_code="not_submitted",
                 now_ms=now_ms,
             )
-        result = dict(state.get("last_result") or {})
-        items = [dict(item) for item in list(result.get("items") or []) if isinstance(item, dict)]
+        execute_result = dict(state.get("last_result") or {})
+        items = [
+            dict(item) for item in list(execute_result.get("items") or []) if isinstance(item, dict)
+        ]
         if not items:
             cleared_state = dict(state)
             if _set_idle_refresh_metadata(cleared_state, reason_code="no_items"):
