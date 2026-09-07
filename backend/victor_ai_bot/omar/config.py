@@ -32,6 +32,10 @@ class OmarConfig:
     real_learning_alpha: float = 0.12
     live_exploration_epsilon: float = 0.0
 
+    # Goal advancement shapes learning only; canonical wealth-goal service remains authoritative.
+    goal_objective_enabled: bool = True
+    goal_objective_weight: float = 0.35
+
     # PPO-ish update (lightweight offline/self-play)
     learning_rate: float = 3e-4
     clip_epsilon: float = 0.2
@@ -57,3 +61,4 @@ class OmarConfig:
         self.real_learning_min_observations = max(1, int(self.real_learning_min_observations))
         self.real_learning_alpha = max(0.001, min(1.0, float(self.real_learning_alpha)))
         self.live_exploration_epsilon = max(0.0, min(0.25, float(self.live_exploration_epsilon)))
+        self.goal_objective_weight = max(0.0, min(1.0, float(self.goal_objective_weight)))
