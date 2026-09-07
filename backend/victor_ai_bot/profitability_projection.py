@@ -13,10 +13,20 @@ def profitability_summary_projection(opp: Any) -> Dict[str, Any]:
     post_mutation = post_mutation_revalidation_view(opp)
     truth = inspect_profit_after_costs_truth(opp)
 
-    # Legacy/sparse opportunities must not acquire a false "ok" profitability
-    # state merely because the projection layer has no canonical state yet.
-    # Gross expected profit is not after-cost truth and cannot authorize trade.
-    if not post_mutation and not truth.verified:
+    # Canonical after-cost truth outranks sparse/legacy projection state. A
+    # verified positive legacy value is still authoritative when no upgraded
+    # profitability contract exists; a verified non-positive value is an
+    # explicit economic blocker rather than an "ok" projection.
+    if not post_mutation and truth.verified:
+        stale = bool(truth.stale)
+        reason_code = str(truth.reason_code or "profit_after_costs_unavailable")
+        valid = bool(truth.positive)
+        authoritative = True
+        display_profit_after_costs = int(truth.value_wei if truth.positive else 0)
+    elif not post_mutation and not truth.verified:
+        # Legacy/sparse opportunities must not acquire a false "ok"
+        # profitability state merely because the projection layer has no
+        # canonical state yet. Gross expected profit is not after-cost truth.
         stale = True
         reason_code = str(truth.reason_code or "profit_after_costs_unavailable")
         valid = False
@@ -26,8 +36,8 @@ def profitability_summary_projection(opp: Any) -> Dict[str, Any]:
         reason_code = str(
             post_mutation.get("reason_code")
             or post_mutation.get("reason")
-            or state["reason"]
             or truth.reason_code
+            or state["reason"]
             or "profit_after_costs_unavailable"
         )
         valid = bool(post_mutation.get("valid", state["valid"]))
