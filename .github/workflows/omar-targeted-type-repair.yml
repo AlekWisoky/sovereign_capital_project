@@ -1,0 +1,57 @@
+name: OMAR targeted type repair
+
+on:
+  push:
+    branches:
+      - omar/phase-7-autonomous-learning-gate-format-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply only the CI-reported withdraw-all typing fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          if old_chain not in text:
+              raise SystemExit("expected chain typing block not found")
+          text = text.replace(old_chain, new_chain, 1)
+
+          marker = '        items = list(plan.get("items") or [])\n'
+          start = text.index(marker)
+          next_def = re.search(r"\n    (?:async )?def ", text[start + len(marker):])
+          if next_def is None:
+              raise SystemExit("withdraw execute function boundary not found")
+          end = start + len(marker) + next_def.start()
+          block = text[start:end]
+
+          block = block.replace('"result"', "__RESULT_KEY__")
+          block = block.replace('result=', '__RESULT_KW__=')
+          block = re.sub(r"\bresult\b", "execute_result", block)
+          block = block.replace("__RESULT_KEY__", '"result"')
+          block = block.replace("__RESULT_KW__=", "result=")
+          text = text[:start] + block + text[end:]
+
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit repair and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/omar-targeted-type-repair.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/runtime_services/withdraw_all_service.py
+          git commit -m "fix: resolve withdraw-all mypy errors" || exit 0
+          git push origin HEAD:${GITHUB_REF_NAME}
