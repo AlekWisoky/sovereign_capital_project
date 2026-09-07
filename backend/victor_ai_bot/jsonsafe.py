@@ -33,11 +33,41 @@ def _should_stringify_int(key: str | None, n: int) -> bool:
     return False
 
 
-def to_json_safe(obj: Any, *, _key: str | None = None) -> Any:
+def to_json_safe(
+    obj: Any,
+    *,
+    _key: str | None = None,
+    _active_ids: set[int] | None = None,
+) -> Any:
+    # JSON has no representation for cyclic containers. Keep the guard scoped
+    # to the active recursion path so shared non-cyclic objects still serialize
+    # normally, while a cycle cannot recurse until the interpreter crashes.
+    if _active_ids is None:
+        _active_ids = set()
+
     if isinstance(obj, Mapping):
-        return {str(k): to_json_safe(v, _key=str(k)) for k, v in obj.items()}
+        obj_id = id(obj)
+        if obj_id in _active_ids:
+            return None
+        _active_ids.add(obj_id)
+        try:
+            return {
+                str(k): to_json_safe(v, _key=str(k), _active_ids=_active_ids)
+                for k, v in obj.items()
+            }
+        finally:
+            _active_ids.discard(obj_id)
+
     if isinstance(obj, (list, tuple)):
-        return [to_json_safe(v, _key=_key) for v in obj]
+        obj_id = id(obj)
+        if obj_id in _active_ids:
+            return None
+        _active_ids.add(obj_id)
+        try:
+            return [to_json_safe(v, _key=_key, _active_ids=_active_ids) for v in obj]
+        finally:
+            _active_ids.discard(obj_id)
+
     if isinstance(obj, (bytes, bytearray)):
         return "0x" + bytes(obj).hex()
     if isinstance(obj, int) and not isinstance(obj, bool):
