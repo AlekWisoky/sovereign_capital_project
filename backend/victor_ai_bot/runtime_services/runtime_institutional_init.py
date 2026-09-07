@@ -119,7 +119,10 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._fund_master = FundMasterOrchestrator()
     runtime._profit_doctrine = default_profit_doctrine()
     runtime._event_bus = InMemoryEventBus()
-    runtime._capital_event_repo = CapitalEventRepository(runtime._db, chain=cfg.chain.name)
+    try:
+        runtime._capital_event_repo = CapitalEventRepository(runtime._db, chain=cfg.chain.name)
+    except _SAFE_RUNTIME_EXCEPTIONS:
+        runtime._capital_event_repo = None
     runtime._ledger = TreasuryLedger(data_dir=data_dir, chain=cfg.chain.name)
     runtime._ledger_repo = LedgerRepository(
         runtime._db, capital_event_repo=runtime._capital_event_repo, chain=cfg.chain.name
