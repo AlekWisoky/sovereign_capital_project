@@ -4,7 +4,3 @@ backend/victor_ai_bot/omar/config.py
 backend/victor_ai_bot/omar/learning_integrity.py
 backend/victor_ai_bot/omar/real_learning.py
 backend/victor_ai_bot/omar/runtime.py
-backend/victor_ai_bot/omar/lifecycle_bridge.py
-backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py
-backend/victor_ai_bot/runtime_services/runtime_decision_facade.py
-backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py
