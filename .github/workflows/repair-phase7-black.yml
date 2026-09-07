@@ -1,0 +1,33 @@
+name: repair phase 7 black
+
+on:
+  push:
+    branches:
+      - repair/phase-7-black-check2
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Black
+        run: python -m pip install black==24.10.0
+      - name: Format backend
+        run: black backend
+      - name: Commit formatting repair
+        run: |
+          if git diff --quiet; then
+            echo 'Black already clean'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend
+          git commit -m 'style(omar): apply Black formatting for Linux gate'
+          git push
