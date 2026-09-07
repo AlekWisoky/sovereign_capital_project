@@ -71,13 +71,9 @@ def _goal_state(runtime: Any) -> dict[str, Any]:
 def _goal_snapshot(goal_state: Mapping[str, Any]) -> dict[str, Any]:
     goal = _dict(goal_state.get("goal"))
     target_amount = (
-        goal.get("target_amount")
-        or goal.get("target_wealth_usd")
-        or goal.get("target_capital_usd")
+        goal.get("target_amount") or goal.get("target_wealth_usd") or goal.get("target_capital_usd")
     )
-    target_return_pct = goal.get("target_return_percentage") or goal.get(
-        "target_return_pct"
-    )
+    target_return_pct = goal.get("target_return_percentage") or goal.get("target_return_pct")
     timeframe_days = goal.get("timeframe_days")
     if not timeframe_days and goal.get("time_horizon_seconds"):
         timeframe_days = _number(goal.get("time_horizon_seconds")) / 86400.0
@@ -123,7 +119,5 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
 
 def intent_fingerprint(intent: Mapping[str, Any]) -> str:
     """Stable attribution fingerprint; never use it as the learning state key."""
-    payload = json.dumps(
-        dict(intent), sort_keys=True, separators=(",", ":"), default=str
-    )
+    payload = json.dumps(dict(intent), sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]

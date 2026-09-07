@@ -26,7 +26,11 @@ def _stable_id(prefix: str, *parts: Any) -> str:
 def capital_authority_context(runtime: Any) -> dict[str, Any]:
     """Read-only OMAR view of the runtime's actual capital authority."""
     try:
-        raw = runtime.capital_engine_state() if callable(getattr(runtime, "capital_engine_state", None)) else {}
+        raw = (
+            runtime.capital_engine_state()
+            if callable(getattr(runtime, "capital_engine_state", None))
+            else {}
+        )
         root = _dict(raw)
         cap = _dict(root.get("capital_engine"))
         allocations = _dict(cap.get("family_allocations_wei"))
@@ -36,14 +40,27 @@ def capital_authority_context(runtime: Any) -> dict[str, Any]:
             "capital_authority_source": "capital_engine_state",
             "capital_available_wei": max(0, int(available or 0)),
             "capital_allocatable_wei": max(0, int(deployable or 0)),
-            "capital_family_allocations_wei": {str(k): max(0, int(v or 0)) for k, v in allocations.items()},
+            "capital_family_allocations_wei": {
+                str(k): max(0, int(v or 0)) for k, v in allocations.items()
+            },
             "capital_authority_status": _text(cap.get("status") or root.get("status")) or "unknown",
-            "capital_authority_freshness": _text(cap.get("freshness_class") or root.get("freshness_class")) or "unknown",
-            "capital_authority_id": _text(cap.get("authority_id") or root.get("authority_id")) or "unknown",
+            "capital_authority_freshness": _text(
+                cap.get("freshness_class") or root.get("freshness_class")
+            )
+            or "unknown",
+            "capital_authority_id": _text(cap.get("authority_id") or root.get("authority_id"))
+            or "unknown",
             "capital_source": _text(cap.get("source") or root.get("source")) or "runtime_capital",
-            "internal_prime_available": bool(cap.get("internal_prime_available", cap.get("prime_available", False))),
-            "prime_capacity_ratio": float(cap.get("prime_capacity_ratio", cap.get("internal_prime_capacity_ratio", 0.0)) or 0.0),
-            "prime_cost_bps": float(cap.get("prime_cost_bps", cap.get("internal_prime_cost_bps", 0.0)) or 0.0),
+            "internal_prime_available": bool(
+                cap.get("internal_prime_available", cap.get("prime_available", False))
+            ),
+            "prime_capacity_ratio": float(
+                cap.get("prime_capacity_ratio", cap.get("internal_prime_capacity_ratio", 0.0))
+                or 0.0
+            ),
+            "prime_cost_bps": float(
+                cap.get("prime_cost_bps", cap.get("internal_prime_cost_bps", 0.0)) or 0.0
+            ),
         }
     except _SAFE:
         return {
@@ -67,7 +84,9 @@ def ensure_lineage(opp: Any, decision: Any, current_block: int) -> tuple[str, st
     brain = _dict(meta.get("brain")) if isinstance(meta, dict) else {}
     decision_id = _text(brain.get("canonical_decision_id") or brain.get("omar_decision_id"))
     if not decision_id:
-        decision_id = _stable_id("decision", current_block, getattr(opp, "id", ""), getattr(opp, "route_id", ""))
+        decision_id = _stable_id(
+            "decision", current_block, getattr(opp, "id", ""), getattr(opp, "route_id", "")
+        )
     correlation_id = _text(brain.get("correlation_id") or brain.get("omar_correlation_id"))
     if not correlation_id:
         correlation_id = _stable_id("corr", decision_id)
@@ -126,6 +145,7 @@ def _patch_decision_context() -> None:
 
 def _patch_decision_lineage() -> None:
     from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisionFacade
+
     original = getattr(RuntimeDecisionFacade, "_apply_omar_to_candidate", None)
     if original is None or getattr(original, "_omar_lineage_patched", False):
         return
@@ -170,7 +190,13 @@ def _canonical_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str,
     for ledger in ledgers:
         if ledger is None:
             continue
-        for method_name in ("get_settled", "lookup_settled", "find_settled", "settled_outcome", "get_outcome"):
+        for method_name in (
+            "get_settled",
+            "lookup_settled",
+            "find_settled",
+            "settled_outcome",
+            "get_outcome",
+        ):
             method = getattr(ledger, method_name, None)
             if not callable(method):
                 continue
@@ -182,7 +208,12 @@ def _canonical_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str,
                     if inspect.isawaitable(row):
                         continue
                     row = _dict(row)
-                    if _text(row.get("status")).lower() in {"settled", "closed", "complete", "completed"}:
+                    if _text(row.get("status")).lower() in {
+                        "settled",
+                        "closed",
+                        "complete",
+                        "completed",
+                    }:
                         return row
                 except _SAFE:
                     continue
@@ -193,7 +224,9 @@ def _canonical_settled_outcome(runtime: Any, result: Any, opp: Any) -> dict[str,
     return None
 
 
-def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcome: Mapping[str, Any]) -> dict[str, Any]:
+def _observe_settled_outcome(
+    runtime: Any, *, pending: Mapping[str, Any], outcome: Mapping[str, Any]
+) -> dict[str, Any]:
     """Apply exactly one canonical settled outcome to the real OMAR learner."""
     omar = getattr(runtime, "_omar", None)
     if omar is None or not bool(getattr(omar, "enabled", False)):
@@ -241,11 +274,19 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
     result = omar.observe_outcome(
         decision_id=decision_id,
         ok=bool(outcome_row.get("ok", True)),
-        realized_net_usd=float(outcome_row.get("realized_net_usd", outcome_row.get("realizedNetUsd", 0.0)) or 0.0),
-        expected_net_usd=float(outcome_row.get("expected_net_usd", outcome_row.get("expectedNetUsd", 0.0)) or 0.0),
+        realized_net_usd=float(
+            outcome_row.get("realized_net_usd", outcome_row.get("realizedNetUsd", 0.0)) or 0.0
+        ),
+        expected_net_usd=float(
+            outcome_row.get("expected_net_usd", outcome_row.get("expectedNetUsd", 0.0)) or 0.0
+        ),
         amount_in_wei=int(outcome_row.get("amount_in_wei", outcome_row.get("amountInWei", 0)) or 0),
-        gas_cost_usd=float(outcome_row.get("gas_cost_usd", outcome_row.get("gasCostUsd", 0.0)) or 0.0),
-        slippage_bps=float(outcome_row.get("slippage_bps", outcome_row.get("slippageBps", 0.0)) or 0.0),
+        gas_cost_usd=float(
+            outcome_row.get("gas_cost_usd", outcome_row.get("gasCostUsd", 0.0)) or 0.0
+        ),
+        slippage_bps=float(
+            outcome_row.get("slippage_bps", outcome_row.get("slippageBps", 0.0)) or 0.0
+        ),
         latency_ms=int(outcome_row.get("latency_ms", outcome_row.get("latencyMs", 0)) or 0),
         route_id=_text(outcome_row.get("route_id") or pending_row.get("route_id")),
         tx_hash=_text(outcome_row.get("tx_hash") or outcome_row.get("txHash")),
@@ -271,7 +312,9 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
                     "reward": float(result.get("reward") or 0.0),
                     "observations": int(result.get("observations") or 0),
                     "outcome_truth_verified": bool(
-                        outcome_row.get("truth_verified", outcome_row.get("outcome_truth_verified", True))
+                        outcome_row.get(
+                            "truth_verified", outcome_row.get("outcome_truth_verified", True)
+                        )
                     ),
                     "intent_fingerprint": metadata["intent_fingerprint"],
                 },
@@ -305,7 +348,11 @@ def _patch_settlement_learning() -> None:
             meta = _dict(getattr(opp, "meta", None))
             brain = _dict(meta.get("brain"))
             lineage = _dict(meta.get("canonical_lineage"))
-            decision_id = _text(brain.get("canonical_decision_id") or lineage.get("decision_id") or brain.get("omar_decision_id"))
+            decision_id = _text(
+                brain.get("canonical_decision_id")
+                or lineage.get("decision_id")
+                or brain.get("omar_decision_id")
+            )
             correlation_id = _text(brain.get("correlation_id") or lineage.get("correlation_id"))
             if not decision_id or not correlation_id:
                 return result

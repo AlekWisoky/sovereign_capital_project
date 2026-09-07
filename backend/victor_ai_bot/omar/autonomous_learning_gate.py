@@ -25,9 +25,21 @@ def install_autonomous_learning_gate() -> None:
         except _SAFE:
             pending = {}
 
-        metadata = dict(kwargs.get("metadata") or {}) if isinstance(kwargs.get("metadata"), Mapping) else {}
-        settlement = dict(metadata.get("settlement") or {}) if isinstance(metadata.get("settlement"), Mapping) else {}
-        lineage = dict(metadata.get("canonical_lineage") or {}) if isinstance(metadata.get("canonical_lineage"), Mapping) else {}
+        metadata = (
+            dict(kwargs.get("metadata") or {})
+            if isinstance(kwargs.get("metadata"), Mapping)
+            else {}
+        )
+        settlement = (
+            dict(metadata.get("settlement") or {})
+            if isinstance(metadata.get("settlement"), Mapping)
+            else {}
+        )
+        lineage = (
+            dict(metadata.get("canonical_lineage") or {})
+            if isinstance(metadata.get("canonical_lineage"), Mapping)
+            else {}
+        )
 
         outcome = dict(settlement)
         outcome.update(
@@ -43,12 +55,17 @@ def install_autonomous_learning_gate() -> None:
                 ).strip(),
                 "action": str(settlement.get("action") or pending.get("action") or "").strip(),
                 "route_id": str(
-                    settlement.get("route_id") or kwargs.get("route_id") or pending.get("route_id") or ""
+                    settlement.get("route_id")
+                    or kwargs.get("route_id")
+                    or pending.get("route_id")
+                    or ""
                 ).strip(),
                 "outcome_truth_verified": bool(
                     settlement.get(
                         "truth_verified",
-                        settlement.get("outcome_truth_verified", kwargs.get("outcome_truth_verified", False)),
+                        settlement.get(
+                            "outcome_truth_verified", kwargs.get("outcome_truth_verified", False)
+                        ),
                     )
                 ),
                 "canonical_lineage": {
