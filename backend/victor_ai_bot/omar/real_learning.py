@@ -9,13 +9,11 @@ from typing import Any, Dict, Mapping, Tuple
 
 ACTIONS: Tuple[str, ...] = ("WAIT", "DEFEND", "SEEK_OPP", "INCREASE_RISK", "DECREASE_RISK", "EXECUTE")
 
-
 def _bucket(value: float, edges: tuple[float, ...], labels: tuple[str, ...]) -> str:
     for edge, label in zip(edges, labels):
         if value < edge:
             return label
     return labels[-1]
-
 
 def _text(context: Mapping[str, Any], key: str) -> str:
     value = context.get(key)
@@ -44,7 +42,8 @@ class OmarRealLearner:
 
     @staticmethod
     def state_key(context: Mapping[str, Any]) -> str:
-        intent = context.get("operator_intent") if isinstance(context.get("operator_intent"), Mapping) else {}
+        intent_value = context.get("operator_intent")
+        intent: Mapping[str, Any] = intent_value if isinstance(intent_value, Mapping) else {}
         aggression = str(context.get("aggression_mode") or intent.get("aggression_mode") or "balanced").lower()
         risk = float(context.get("risk_multiplier") or intent.get("risk_multiplier") or 1.0)
         cap = str(context.get("capital_authority_status") or "unknown").lower()
