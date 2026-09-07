@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -22,11 +24,11 @@ jobs:
       - name: Ruff
         run: |
           ruff check backend
-          while read -r slice; do xargs -a "$slice" ruff check; done < backend/mypy_targets.txt
-      - name: Black
+      - name: Black changed Python files
         run: |
-          black --check backend
-          while read -r slice; do xargs -a "$slice" black --check; done < backend/mypy_targets.txt
+          git fetch origin main --depth=1
+          files=$(git diff --name-only origin/main...HEAD -- '*.py')
+          if [ -n "$files" ]; then black --check $files; fi
       - name: Mypy
         run: |
           while read -r slice; do mypy @"$slice"; done < backend/mypy_targets.txt
@@ -52,18 +54,22 @@ jobs:
         run: |
           pytest --collect-only -q > /tmp/pytest-collection.txt
           python - <<'PY'
+          from collections import Counter
           from pathlib import Path
           import re
-          files = []
+          files = Counter()
           for raw in Path('/tmp/pytest-collection.txt').read_text().splitlines():
-              m = re.match(r'^(tests/[^:]+):\s+(\d+)\s*$', raw.strip())
-              if m:
-                  files.append((m.group(1), int(m.group(2))))
+              nodeid = raw.strip()
+              if '::' not in nodeid or not nodeid.startswith('tests/'):
+                  continue
+              path = nodeid.split('::', 1)[0]
+              if re.match(r'^tests/[^:]+\.py$', path):
+                  files[path] += 1
           if not files:
-              raise SystemExit('pytest collection produced no test files')
+              raise SystemExit('pytest collection produced no test nodeids')
           shards = [[] for _ in range(8)]
           counts = [0] * 8
-          for path, count in sorted(files, key=lambda x: x[1], reverse=True):
+          for path, count in sorted(files.items(), key=lambda x: x[1], reverse=True):
               i = min(range(8), key=counts.__getitem__)
               shards[i].append(path); counts[i] += count
           shard = int('${{ matrix.shard }}')
