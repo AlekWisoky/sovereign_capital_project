@@ -36,29 +36,22 @@ jobs:
               text = text.replace(old, new, 1)
 
           path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
-          lines = path.read_text(encoding="utf-8").splitlines(True)
+          text = path.read_text(encoding="utf-8")
+          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
+          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
+          if old_chain in text:
+              text = text.replace(old_chain, new_chain, 1)
 
-          chain_idx = next((i for i, line in enumerate(lines) if line.strip() == "chain = str("), None)
-          if chain_idx is not None and chain_idx + 5 < len(lines):
-              lines[chain_idx:chain_idx + 6] = [
-                  '        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n',
-                  '        chain = str(getattr(chain_cfg, "name", "default") or "default")\n',
-              ]
-
+          lines = text.splitlines(True)
           result_idx = next((i for i, line in enumerate(lines) if "result: Dict[str, Any]" in line), None)
           if result_idx is not None:
-              end_idx = len(lines)
-              for j in range(result_idx + 1, len(lines)):
-                  if lines[j].startswith("    def ") or lines[j].startswith("    async def "):
-                      end_idx = j
-                      break
+              end_idx = min(result_idx + 420, len(lines))
               for i in range(result_idx, end_idx):
                   lines[i] = lines[i].replace('"result"', "__RESULT_KEY__")
                   lines[i] = lines[i].replace('result=', '__RESULT_KW__=')
                   lines[i] = re.sub(r"\bresult\b", "execute_result", lines[i])
                   lines[i] = lines[i].replace("__RESULT_KEY__", '"result"')
                   lines[i] = lines[i].replace("__RESULT_KW__=", "result=")
-
           path.write_text("".join(lines), encoding="utf-8")
           PY
 
