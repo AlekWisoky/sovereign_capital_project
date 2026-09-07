@@ -7,10 +7,11 @@ on:
 permissions:
   contents: read
 
-# Only the newest commit for a branch/PR should consume the test matrix. This
-# prevents stale/hung pytest shards from starving the exact commit under review.
+# Use the source branch as the single concurrency identity for both push and
+# pull-request events. Older push-only runs otherwise occupy a different group
+# from the PR merge-ref run and can starve the current pytest matrix.
 concurrency:
-  group: sovereign-capital-ci-${{ github.event.pull_request.number || github.ref }}
+  group: sovereign-capital-ci-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
