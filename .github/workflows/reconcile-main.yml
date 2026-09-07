@@ -16,12 +16,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Merge main without destructive strategy
+      - name: Merge main and reconcile known architecture overlaps
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          git merge --no-edit origin/main
+          if git merge --no-edit origin/main; then
+            git push origin HEAD:${GITHUB_REF_NAME}
+            exit 0
+          fi
+
+          # These are the intentional architecture overlaps. Keep the Phase 7
+          # versions because they are the superset carrying capital authority,
+          # canonical identity, and production learning lineage. Keep main's
+          # refactored runtime shell because it is the newer canonical runtime.
+          git checkout --ours backend/victor_ai_bot/capital_demand.py
+          git checkout --ours backend/victor_ai_bot/decision_identity.py
+          git checkout --ours backend/victor_ai_bot/omar/lifecycle_bridge.py
+          git checkout --theirs backend/victor_ai_bot/runtime_legacy.py
+          git add backend/victor_ai_bot/capital_demand.py backend/victor_ai_bot/decision_identity.py backend/victor_ai_bot/omar/lifecycle_bridge.py backend/victor_ai_bot/runtime_legacy.py
+          git diff --check
+          git commit -m "merge: reconcile main with Phase 7 capital and lineage [main-reconciled]"
           git push origin HEAD:${GITHUB_REF_NAME}
