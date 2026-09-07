@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180">
+  <title>Sovereign Capital OMAR forensic consolidation map</title>
+  <desc>Keep, revert, delete and merge map for the canonical decision to settlement to OMAR learning architecture.</desc>
+  <style>
+    .bg{fill:#fff}.box{fill:#f8fafc;stroke:#334155;stroke-width:2}.keep{fill:#ecfdf5;stroke:#047857}.revert{fill:#fff7ed;stroke:#c2410c}.delete{fill:#fef2f2;stroke:#b91c1c}.merge{fill:#eff6ff;stroke:#1d4ed8}.title{font:700 28px sans-serif;fill:#0f172a}.h{font:700 19px sans-serif;fill:#0f172a}.t{font:14px sans-serif;fill:#334155}.small{font:12px sans-serif;fill:#475569}.pill{font:700 13px sans-serif;fill:#fff}.arrow{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#arrow)}.danger{fill:#991b1b}.good{fill:#047857}.blue{fill:#1d4ed8}.orange{fill:#c2410c}
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker></defs>
+  <rect class="bg" width="1600" height="1180"/>
+  <text x="70" y="55" class="title">Sovereign Capital — Forensic Consolidation / Keep • Revert • Delete • Merge</text>
+  <text x="70" y="84" class="t">Controlled integration branch: integration/canonical-omar-controlled · source baseline: PR #48 merge f11ba1d</text>
+
+  <rect x="70" y="115" width="1460" height="130" rx="12" class="keep"/>
+  <text x="95" y="148" class="pill good">KEEP — CANONICAL PRODUCTION BASELINE</text>
+  <text x="95" y="179" class="h">PR #48 / f11ba1db — canonical settled economics</text>
+  <text x="95" y="204" class="t">Real receipt → settled ledger → signed P&amp;L → bankroll → capital writer → canonical receipt economics → learning attribution.</text>
+  <text x="95" y="226" class="small">This is the cleanest verified architectural anchor: settlement economics are authoritative and OMAR consumes settled truth.</text>
+
+  <path d="M800 245 L800 285" class="arrow"/>
+  <rect x="70" y="285" width="1460" height="205" rx="12" class="box"/>
+  <text x="95" y="320" class="h">PR chain disposition</text>
+  <rect x="95" y="340" width="330" height="125" rx="10" class="keep"/>
+  <text x="115" y="368" class="pill good">KEEP / EXTRACT</text>
+  <text x="115" y="394" class="t">#20 — autonomous learning gate</text>
+  <text x="115" y="416" class="small">Keep the fail-closed invariant and tests.</text>
+  <text x="115" y="437" class="small">Reimplement as direct runtime gate, not patch stack.</text>
+
+  <rect x="445" y="340" width="330" height="125" rx="10" class="keep"/>
+  <text x="465" y="368" class="pill good">KEEP / EXTRACT</text>
+  <text x="465" y="394" class="t">#29 — canonical identity</text>
+  <text x="465" y="416" class="small">Keep ensure_decision_identity semantics.</text>
+  <text x="465" y="437" class="small">Identity is created once, never as omar-*.</text>
+
+  <rect x="795" y="340" width="330" height="125" rx="10" class="keep"/>
+  <text x="815" y="368" class="pill good">KEEP / EXTRACT</text>
+  <text x="815" y="394" class="t">#39 — physical settlement lineage</text>
+  <text x="815" y="416" class="small">Keep the eight-field physical attribution contract.</text>
+  <text x="815" y="437" class="small">Merge into one canonical settlement reader.</text>
+
+  <rect x="1145" y="340" width="360" height="125" rx="10" class="keep"/>
+  <text x="1165" y="368" class="pill good">KEEP / EXTRACT</text>
+  <text x="1165" y="394" class="t">#48 — canonical economics</text>
+  <text x="1165" y="416" class="small">Already merged; treat as source of truth.</text>
+  <text x="1165" y="437" class="small">Do not replace with compatibility accounting.</text>
+
+  <rect x="95" y="505" width="330" height="125" rx="10" class="merge"/>
+  <text x="115" y="533" class="pill blue">MERGE SELECTIVELY</text>
+  <text x="115" y="559" class="t">#55 — production learning callback</text>
+  <text x="115" y="581" class="small">Keep post-persistence callback concept.</text>
+  <text x="115" y="602" class="small">Merge only after removing duplicate wrappers.</text>
+
+  <rect x="445" y="505" width="330" height="125" rx="10" class="merge"/>
+  <text x="465" y="533" class="pill blue">MERGE SELECTIVELY</text>
+  <text x="465" y="559" class="t">#73 — Linux pytest sharding</text>
+  <text x="465" y="581" class="small">Keep 8-shard / 45-minute / fail-fast=false design.</text>
+  <text x="465" y="602" class="small">Independent of OMAR runtime code.</text>
+
+  <rect x="795" y="505" width="330" height="125" rx="10" class="merge"/>
+  <text x="815" y="533" class="pill blue">MERGE SELECTIVELY</text>
+  <text x="815" y="559" class="t">#78 — NumPy runtime dependency</text>
+  <text x="815" y="581" class="small">Move dependency to requirements contract.</text>
+  <text x="815" y="602" class="small">CI-only installation is not acceptable.</text>
+
+  <rect x="1145" y="505" width="360" height="125" rx="10" class="revert"/>
+  <text x="1165" y="533" class="pill orange">REVERT / REBUILD</text>
+  <text x="1165" y="559" class="t">#83 — reconciled production gate</text>
+  <text x="1165" y="581" class="small">Large reconciliation branch; do not merge wholesale.</text>
+  <text x="1165" y="602" class="small">Extract tests/contracts only after clean integration.</text>
+
+  <rect x="95" y="645" width="680" height="125" rx="10" class="revert"/>
+  <text x="115" y="673" class="pill orange">REVERT / REBUILD</text>
+  <text x="115" y="699" class="t">#85 — OMAR integration</text>
+  <text x="115" y="721" class="small">Too broad: 123 files / 8,886 additions. Do not merge as a unit.</text>
+  <text x="115" y="742" class="small">Extract only canonical runtime components that satisfy the architecture.</text>
+
+  <rect x="795" y="645" width="710" height="125" rx="10" class="delete"/>
+  <text x="815" y="673" class="pill danger">DELETE FROM INTEGRATION</text>
+  <text x="815" y="699" class="t">#86 — gate format repair / reconciliation stack</text>
+  <text x="815" y="721" class="small">Includes brittle source-rewriting CI, overlapping bridges, and stale assumptions.</text>
+  <text x="815" y="742" class="small">Preserve useful tests/intent only; rebuild against canonical main.</text>
+
+  <path d="M800 780 L800 820" class="arrow"/>
+  <rect x="70" y="820" width="1460" height="285" rx="12" class="box"/>
+  <text x="95" y="855" class="h">Controlled target topology</text>
+  <rect x="95" y="880" width="205" height="75" rx="9" class="keep"/><text x="115" y="908" class="t">CANONICAL DECISION</text><text x="115" y="932" class="small">decision + correlation</text>
+  <rect x="330" y="880" width="205" height="75" rx="9" class="keep"/><text x="350" y="908" class="t">OMAR</text><text x="350" y="932" class="small">recommendation only</text>
+  <rect x="565" y="880" width="205" height="75" rx="9" class="keep"/><text x="585" y="908" class="t">GOV / ADMISSION</text><text x="585" y="932" class="small">authority boundary</text>
+  <rect x="800" y="880" width="205" height="75" rx="9" class="keep"/><text x="820" y="908" class="t">RISK / SIZING</text><text x="820" y="932" class="small">sizing_id</text>
+  <rect x="1035" y="880" width="205" height="75" rx="9" class="keep"/><text x="1055" y="908" class="t">EXEC / RECEIPT</text><text x="1055" y="932" class="small">execution_id</text>
+  <rect x="1270" y="880" width="205" height="75" rx="9" class="keep"/><text x="1290" y="908" class="t">SETTLED LEDGER</text><text x="1290" y="932" class="small">physical truth</text>
+  <path d="M300 917 L330 917 M535 917 L565 917 M770 917 L800 917 M1005 917 L1035 917 M1240 917 L1270 917" class="arrow"/>
+  <rect x="330" y="980" width="910" height="90" rx="10" class="merge"/>
+  <text x="355" y="1009" class="pill blue">ONE POST-PERSISTENCE LEARNING GATE</text>
+  <text x="355" y="1034" class="t">Require decision_id + correlation_id + execution_id + outcome_id + sizing_id + opportunity_id + route_id + action.</text>
+  <text x="355" y="1056" class="small">Also require canonical source, verified truth, and decision-time capital_engine_state authority/freshness.</text>
+
+  <text x="70" y="1140" class="small">Forensic anchor: main was 15 commits ahead of f11ba1d; those later additions included decision_identity.py, lifecycle_bridge.py and the temporary PR60 formatter workflow.</text>
+</svg>
