@@ -78,9 +78,10 @@ export function mergeProjectionCompatibility(
 
 export function projectionCompatibilityAlert(
   compatibility: ProjectionCompatibility | undefined,
-  tsMs: number,
+  timestamp: number | { tsMs: number },
 ): AlertItem | undefined {
   if (!compatibility || compatibility.status === "canonical") return undefined;
+  const tsMs = typeof timestamp === "number" ? timestamp : Number(timestamp.tsMs);
   const severity = compatibility.status === "degraded" ? "danger" : "warn";
   const detail = compatibility.reasonCodes.length ? compatibility.reasonCodes.join(" · ") : compatibility.status;
   return { id: `projection-compatibility-${tsMs}`, tsMs, severity, title: "Projection compatibility drift", detail };
