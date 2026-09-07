@@ -160,6 +160,8 @@ def get_runtime(request: Request):
 
 @router.get("/api/treasury/capital")
 def treasury_capital(rt=Depends(RuntimeBundle.dep)):
+    if getattr(rt, "_treasury", None) is None:
+        return json_safe(_capital_engine_unavailable())
     if not _treasury_has_goal(rt):
         return json_safe(_treasury_unavailable())
     return safe_json_route_call(
