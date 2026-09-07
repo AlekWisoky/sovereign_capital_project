@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from victor_ai_bot.capital_demand import Money, matches_execution_plan, selector_scalar
-from test_capital_demand_contract import NOW, demand
+from tests.test_capital_demand_contract import NOW, demand
 
 
 def test_composition_contract_requires_final_inputs_before_selection():
