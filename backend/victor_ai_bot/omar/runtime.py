@@ -120,14 +120,22 @@ class OmarRuntime:
             return
         # A decision is historical evidence. Deep-copy nested human intent,
         # wealth-goal, recommendation, and capital context at decision time.
+        metadata_row = copy.deepcopy(dict(metadata or {}))
+        lineage = metadata_row.get("canonical_lineage") if isinstance(metadata_row.get("canonical_lineage"), Mapping) else {}
+        correlation_value = str(lineage.get("correlation_id") or "").strip()
         row = {
             "decision_id": str(decision_id),
+            "correlation_id": correlation_value,
             "opportunity_id": str(opportunity_id),
             "route_id": str(route_id),
             "action": str(action),
             "state_key": str(state_key),
             "context": copy.deepcopy(dict(context or {})),
-            "metadata": copy.deepcopy(dict(metadata or {})),
+            "metadata": metadata_row,
+            "canonical_lineage": {
+                "decision_id": str(decision_id),
+                "correlation_id": correlation_value,
+            },
             "ts_ms": int(time.time() * 1000),
         }
         with self._lock:
