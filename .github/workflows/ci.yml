@@ -22,6 +22,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install black==24.10.0
           python - <<'PY'
           from pathlib import Path
           import re
@@ -31,7 +33,7 @@ jobs:
           old = '''        row = {\n            "decision_id": str(decision_id),\n            "opportunity_id": str(opportunity_id),\n            "route_id": str(route_id),\n            "action": str(action),\n            "state_key": str(state_key),\n            "context": copy.deepcopy(dict(context or {})),\n            "metadata": copy.deepcopy(dict(metadata or {})),\n            "ts_ms": int(time.time() * 1000),\n        }'''
           new = '''        metadata_row = copy.deepcopy(dict(metadata or {}))\n        lineage = metadata_row.get("canonical_lineage") if isinstance(metadata_row.get("canonical_lineage"), Mapping) else {}\n        correlation_value = str(lineage.get("correlation_id") or "").strip()\n        row = {\n            "decision_id": str(decision_id),\n            "correlation_id": correlation_value,\n            "opportunity_id": str(opportunity_id),\n            "route_id": str(route_id),\n            "action": str(action),\n            "state_key": str(state_key),\n            "context": copy.deepcopy(dict(context or {})),\n            "metadata": metadata_row,\n            "canonical_lineage": {\n                "decision_id": str(decision_id),\n                "correlation_id": correlation_value,\n            },\n            "ts_ms": int(time.time() * 1000),\n        }'''
           if old in text:
-              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+              text = text.replace(old, new, 1)
 
           path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
           text = path.read_text(encoding="utf-8")
