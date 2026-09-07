@@ -551,17 +551,17 @@ class WithdrawAllService:
         state: Dict[str, Any],
         status: str,
         reason_code: str,
-        execute_result: Dict[str, Any],
+        result: Dict[str, Any],
         preview_id: str = "",
         event: str | None = None,
         persisted_state: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         state["last_status"] = str(status or "idle")
         state["last_reason_code"] = str(reason_code or "")
-        state["last_result"] = dict(execute_result or {})
+        state["last_result"] = dict(result or {})
         if preview_id:
             state["last_executed_preview_id"] = str(preview_id)
-            state["last_executed_result"] = dict(execute_result or {})
+            state["last_executed_result"] = dict(result or {})
         try:
             saved = self._save(state)
         except WithdrawAllPersistenceError as exc:
@@ -728,22 +728,24 @@ class WithdrawAllService:
         _clear_refresh_failure(refreshed_state)
         refresh_status = "refreshed_no_change"
         if changed:
-            result["items"] = refreshed_items
+            execute_result["items"] = refreshed_items
             persisted_status, persisted_reason_code, status_payload = _submitted_result_status(
                 refreshed_items
             )
-            result.pop("failed_item", None)
-            result.pop("submission_state", None)
-            result.pop("reason_code", None)
-            result.update(status_payload)
-            result = _attach_lifecycle_summary(
-                result, fallback_status=persisted_status, fallback_reason_code=persisted_reason_code
+            execute_result.pop("failed_item", None)
+            execute_result.pop("submission_state", None)
+            execute_result.pop("reason_code", None)
+            execute_result.update(status_payload)
+            execute_result = _attach_lifecycle_summary(
+                execute_result,
+                fallback_status=persisted_status,
+                fallback_reason_code=persisted_reason_code,
             )
             refreshed_state["last_status"] = persisted_status
             refreshed_state["last_reason_code"] = persisted_reason_code
-            refreshed_state["last_result"] = result
+            refreshed_state["last_result"] = execute_result
             if str(refreshed_state.get("last_executed_preview_id") or ""):
-                refreshed_state["last_executed_result"] = dict(result)
+                refreshed_state["last_executed_result"] = dict(execute_result)
             refresh_status = "refreshed_updated"
         _apply_refresh_metadata(
             refreshed_state, ts_ms=now_ms, status="refreshed", reason_code=refresh_status
