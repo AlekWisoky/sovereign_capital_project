@@ -16,7 +16,7 @@ def profitability_summary_projection(opp: Any) -> Dict[str, Any]:
     # Legacy/sparse opportunities must not acquire a false "ok" profitability
     # state merely because the projection layer has no canonical state yet.
     # Gross expected profit is not after-cost truth and cannot authorize trade.
-    if not post_mutation and not state.get("revalidated") and not truth.verified:
+    if not post_mutation and not truth.verified:
         stale = True
         reason_code = str(truth.reason_code or "profit_after_costs_unavailable")
         valid = False
