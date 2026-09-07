@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# Only the newest commit for a branch/PR should consume the test matrix. This
+# prevents stale/hung pytest shards from starving the exact commit under review.
+concurrency:
+  group: sovereign-capital-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-quality:
     runs-on: ubuntu-latest
