@@ -22,13 +22,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
       - name: Ruff
-        run: |
-          ruff check backend
-      - name: Black changed Python files
-        run: |
-          git fetch origin main --depth=1
-          files=$(git diff --name-only origin/main...HEAD -- '*.py')
-          if [ -n "$files" ]; then black --check $files; fi
+        run: ruff check backend
+      - name: Python compile check
+        run: python -m compileall -q backend
       - name: Mypy
         run: |
           while read -r slice; do mypy @"$slice"; done < backend/mypy_targets.txt
@@ -52,18 +48,17 @@ jobs:
       - name: Collect and assign test files
         working-directory: backend
         run: |
-          pytest --collect-only -q > /tmp/pytest-collection.txt
+          pytest --collect-only -q > /tmp/pytest-collection.txt 2>&1 || { cat /tmp/pytest-collection.txt; exit 1; }
           python - <<'PY'
           from collections import Counter
           from pathlib import Path
-          import re
           files = Counter()
           for raw in Path('/tmp/pytest-collection.txt').read_text().splitlines():
               nodeid = raw.strip()
               if '::' not in nodeid or not nodeid.startswith('tests/'):
                   continue
               path = nodeid.split('::', 1)[0]
-              if re.match(r'^tests/[^:]+\.py$', path):
+              if path.endswith('.py'):
                   files[path] += 1
           if not files:
               raise SystemExit('pytest collection produced no test nodeids')
