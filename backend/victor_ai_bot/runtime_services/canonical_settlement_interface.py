@@ -207,7 +207,9 @@ def canonical_settled_outcome(
 
 def install_canonical_settlement_interface() -> None:
     """Install one stable runtime read surface without replacing the ledger."""
-    from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+    from victor_ai_bot.runtime_services.runtime_receipt_facade import (
+        RuntimeReceiptFacade,
+    )
 
     existing = getattr(RuntimeReceiptFacade, "canonical_settled_outcome", None)
     if existing is not None and getattr(existing, "_phase2_canonical_interface", False):
