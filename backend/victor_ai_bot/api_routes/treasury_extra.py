@@ -147,13 +147,20 @@ def _goal_read_payload(goal: object) -> dict[str, object]:
     }
 
 
+def _treasury_has_goal(rt: object) -> bool:
+    treasury = getattr(rt, "_treasury", None)
+    if treasury is None:
+        return False
+    return getattr(getattr(treasury, "cfg", None), "goal", None) is not None
+
+
 def get_runtime(request: Request):
     return request.app.state.runtime  # type: ignore[attr-defined]
 
 
 @router.get("/api/treasury/capital")
 def treasury_capital(rt=Depends(RuntimeBundle.dep)):
-    if getattr(rt, "_treasury", None) is None:
+    if not _treasury_has_goal(rt):
         return json_safe(_treasury_unavailable())
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
@@ -173,7 +180,7 @@ def treasury_capital(rt=Depends(RuntimeBundle.dep)):
 
 @router.get("/api/treasury/state")
 def treasury_state(rt=Depends(RuntimeBundle.dep)):
-    if getattr(rt, "_treasury", None) is None:
+    if not _treasury_has_goal(rt):
         return json_safe(_treasury_state_unavailable())
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
