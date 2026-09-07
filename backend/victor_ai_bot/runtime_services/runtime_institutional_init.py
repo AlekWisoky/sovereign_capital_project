@@ -51,6 +51,9 @@ from .wealth_goal_service import WealthGoalService
 from .capital_admission_service import CapitalAdmissionService
 from .withdraw_all_service import WithdrawAllService
 
+# Compatibility alias retained for constructor tests and older integrations.
+ReceiptService = CanonicalReceiptService
+
 _SAFE_RUNTIME_EXCEPTIONS = (
     AttributeError,
     KeyError,
@@ -62,13 +65,7 @@ _SAFE_RUNTIME_EXCEPTIONS = (
 
 
 def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str) -> None:
-    """Initialize constructor-time institutional/control-plane state on a runtime.
-
-    This is intentionally non-hot-path constructor wiring. It preserves the
-    existing RuntimeBundle attribute contract while reducing constructor
-    concentration in runtime_legacy.py.
-    """
-
+    """Initialize constructor-time institutional/control-plane state on a runtime."""
     try:
         runtime._cc = CommandCenterOverlay(data_dir=data_dir, chain=cfg.chain.name)
     except _SAFE_RUNTIME_EXCEPTIONS:
@@ -86,7 +83,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._opportunity_service = OpportunityService()
     runtime._decision_service = DecisionService()
     runtime._admission_service = AdmissionService()
-    runtime._receipt_service = CanonicalReceiptService()
+    runtime._receipt_service = ReceiptService()
     runtime._runtime_control_service = RuntimeControlService()
     runtime._capital_explanation_service = CapitalExplanationService()
     runtime._agent_service = AgentService()
@@ -126,9 +123,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
         runtime._db, capital_event_repo=runtime._capital_event_repo, chain=cfg.chain.name
     )
     runtime._capital_recovery_repo = CapitalRecoveryRepository(runtime._db, chain=cfg.chain.name)
-    runtime._auto_trade_recovery_repo = AutoTradeRecoveryRepository(
-        runtime._db, chain=cfg.chain.name
-    )
+    runtime._auto_trade_recovery_repo = AutoTradeRecoveryRepository(runtime._db, chain=cfg.chain.name)
     runtime._internal_prime = InternalPrimeAllocator(
         data_dir=data_dir,
         chain=cfg.chain.name,
@@ -138,11 +133,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     )
     runtime._internal_prime_state_repo = getattr(runtime._internal_prime, "_state_repo", None)
     runtime._rl_registry = PolicyRegistry(data_dir=data_dir, chain=cfg.chain.name)
-    runtime._engine_last = {
-        "items": [],
-        "capabilities": {},
-        "summary": {"engines": []},
-    }
+    runtime._engine_last = {"items": [], "capabilities": {}, "summary": {"engines": []}}
 
     try:
         runtime._research_candidates = CandidateStore(data_dir=data_dir, chain=cfg.chain.name)
@@ -156,9 +147,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
         runtime._alpha_marketplace = AlphaMarketplaceStore(
             data_dir=data_dir,
             chain=cfg.chain.name,
-            enabled=bool(
-                (getattr(cfg.execution, "meta", {}) or {}).get("enable_alpha_marketplace", False)
-            ),
+            enabled=bool((getattr(cfg.execution, "meta", {}) or {}).get("enable_alpha_marketplace", False)),
         )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._alpha_marketplace = None
