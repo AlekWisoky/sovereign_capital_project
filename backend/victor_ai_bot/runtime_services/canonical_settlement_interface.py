@@ -87,9 +87,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         metadata.get("terminalProfitability") or metadata.get("terminal_profitability")
     )
     chain = _dict(metadata.get("profitabilityChain") or metadata.get("profitability_chain"))
-    capital_admission = _dict(
-        metadata.get("capitalAdmission") or metadata.get("capital_admission")
-    )
+    capital_admission = _dict(metadata.get("capitalAdmission") or metadata.get("capital_admission"))
     lineage = _dict(metadata.get("canonical_lineage"))
 
     def first(*keys: str, default: Any = None) -> Any:
