@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import copy
+import inspect
 from typing import Any, Mapping
-
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -14,88 +15,81 @@ def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _canonical_lineage(pending: Mapping[str, Any]) -> dict[str, str]:
-    meta = _dict(pending.get("canonical_lineage"))
-    brain = _dict(pending.get("brain"))
-    decision_id = _text(
-        meta.get("decision_id")
-        or brain.get("canonical_decision_id")
-        or brain.get("decision_id")
-    )
-    correlation_id = _text(meta.get("correlation_id") or brain.get("correlation_id"))
-    return {"decision_id": decision_id, "correlation_id": correlation_id}
+def _chain_name(runtime: Any) -> str:
+    return _text(getattr(getattr(getattr(runtime, "cfg", None), "chain", None), "name", "")) or "default"
 
 
-def _observe_settled_outcome(
-    runtime: Any,
-    *,
-    pending: Mapping[str, Any],
-    outcome: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Feed one canonical settled outcome into OMAR without inventing truth.
-
-    This bridge is deliberately downstream of settlement. It requires a
-    settled outcome and a complete decision/correlation lineage before a
-    learning update is attempted. OMAR remains non-authoritative.
-    """
-    pending_map = _dict(pending)
-    outcome_map = _dict(outcome)
-    status = _text(outcome_map.get("status")).lower()
-    if status not in {"settled", "closed", "complete", "completed"}:
+def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcome: Mapping[str, Any]) -> dict[str, Any]:
+    """Feed exactly one physically persisted canonical settlement into OMAR."""
+    p = _dict(pending)
+    row = _dict(outcome)
+    if _text(row.get("status")).lower() != "settled":
         return {"ok": False, "reason_code": "outcome_not_settled"}
-
     omar = getattr(runtime, "_omar", None)
     if omar is None or not bool(getattr(omar, "enabled", False)):
         return {"ok": False, "reason_code": "omar_disabled"}
-
-    lineage = _canonical_lineage(pending_map)
-    if not lineage["decision_id"] or not lineage["correlation_id"]:
+    lineage = _dict(p.get("canonical_lineage"))
+    decision_id = _text(p.get("canonical_decision_id") or lineage.get("decision_id"))
+    correlation_id = _text(p.get("correlation_id") or lineage.get("correlation_id"))
+    if not decision_id or not correlation_id:
         return {"ok": False, "reason_code": "canonical_lineage_missing"}
-
-    canonical_meta = _dict(pending_map.get("canonical_lineage"))
-    operator_intent = _dict(canonical_meta.get("operator_intent"))
-    intent_fingerprint = _text(canonical_meta.get("intent_fingerprint"))
-    route_id = _text(outcome_map.get("route_id") or pending_map.get("route_id"))
-    tx_hash = _text(outcome_map.get("tx_hash") or outcome_map.get("txHash"))
-
-    kwargs = {
-        "decision_id": lineage["decision_id"],
-        "ok": bool(outcome_map.get("ok", True)),
-        "realized_net_usd": float(
-            outcome_map.get("realized_net_usd", outcome_map.get("realizedNetUsd", 0.0)) or 0.0
-        ),
-        "expected_net_usd": float(
-            outcome_map.get("expected_net_usd", outcome_map.get("expectedNetUsd", 0.0)) or 0.0
-        ),
-        "amount_in_wei": int(
-            outcome_map.get("amount_in_wei", outcome_map.get("amountInWei", 0)) or 0
-        ),
-        "gas_cost_usd": float(
-            outcome_map.get("gas_cost_usd", outcome_map.get("gasCostUsd", 0.0)) or 0.0
-        ),
-        "slippage_bps": float(
-            outcome_map.get("slippage_bps", outcome_map.get("slippageBps", 0.0)) or 0.0
-        ),
-        "latency_ms": int(outcome_map.get("latency_ms", outcome_map.get("latencyMs", 0)) or 0),
-        "route_id": route_id,
-        "tx_hash": tx_hash,
-        "outcome_truth_verified": bool(
-            outcome_map.get("truth_verified", outcome_map.get("outcome_truth_verified", True))
-        ),
-        "metadata": {
-            "canonical_lineage": lineage,
-            "source": "phase2_canonical_outcome_ledger",
-            "settlement": dict(outcome_map),
-        },
+    if _text(row.get("decision_id")) != decision_id or _text(row.get("correlation_id")) != correlation_id:
+        return {"ok": False, "reason_code": "canonical_lineage_mismatch"}
+    metadata = {
+        "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
+        "source": "phase2_canonical_outcome_ledger",
+        "settlement": copy.deepcopy(row),
     }
-    if operator_intent:
-        kwargs["metadata"]["operator_intent"] = operator_intent
-    if intent_fingerprint:
-        kwargs["metadata"]["intent_fingerprint"] = intent_fingerprint
+    return dict(omar.observe_outcome(
+        decision_id=decision_id,
+        ok=bool(row.get("ok", True)),
+        realized_net_usd=float(row.get("realized_net_usd", 0.0) or 0.0),
+        expected_net_usd=float(row.get("expected_net_usd", 0.0) or 0.0),
+        amount_in_wei=int(row.get("amount_in_wei", 0) or 0),
+        gas_cost_usd=float(row.get("gas_cost_usd", 0.0) or 0.0),
+        slippage_bps=float(row.get("slippage_bps", 0.0) or 0.0),
+        latency_ms=int(row.get("latency_ms", 0) or 0),
+        route_id=_text(row.get("route_id")),
+        tx_hash=_text(row.get("tx_hash")),
+        outcome_truth_verified=bool(row.get("truth_verified", False)),
+        metadata=metadata,
+    ))
 
-    try:
-        learned = omar.observe_outcome(**kwargs)
-    except _SAFE as exc:
-        return {"ok": False, "reason_code": "omar_observe_failed", "error": str(exc)}
 
-    return dict(learned) if isinstance(learned, Mapping) else {"ok": True, "result": learned}
+def _patch_receipt_settlement_learning() -> None:
+    from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+    original = getattr(RuntimeReceiptFacade, "_safe_finalize_receipt_side_effects", None)
+    if original is None or getattr(original, "_omar_receipt_learning_patched", False):
+        return
+
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        signature = inspect.signature(original)
+        bound = signature.bind_partial(self, *args, **kwargs)
+        result = original(self, *args, **kwargs)
+        try:
+            runtime = bound.arguments.get("self")
+            pending = _dict(bound.arguments.get("pending"))
+            if runtime is None or not pending:
+                return result
+            sync = _dict(getattr(runtime, "_last_settlement_sync", None))
+            if not bool(sync.get("ok", False)):
+                return result
+            reader = getattr(runtime, "canonical_settled_outcome", None)
+            if not callable(reader):
+                return result
+            lineage = _dict(pending.get("canonical_lineage"))
+            decision_id = _text(pending.get("canonical_decision_id") or lineage.get("decision_id"))
+            correlation_id = _text(pending.get("correlation_id") or lineage.get("correlation_id"))
+            outcome = reader(tx_hash=_text(bound.arguments.get("tx_hash")), decision_id=decision_id, correlation_id=correlation_id, opportunity_id=_text(pending.get("opportunity_id")))
+            if outcome is not None:
+                _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
+        except _SAFE:
+            return result
+        return result
+
+    wrapped._omar_receipt_learning_patched = True
+    RuntimeReceiptFacade._safe_finalize_receipt_side_effects = wrapped
+
+
+def install_omar_lifecycle_hooks() -> None:
+    _patch_receipt_settlement_learning()
