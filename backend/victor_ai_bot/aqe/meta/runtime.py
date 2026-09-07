@@ -110,9 +110,7 @@ class MetaStrategyRuntime:
         gas_cost_usd = 0.0
         expected_profit_usd = 0.0
         route_fail_rate = 0.0
-        top = opps[0] if opps else None
-        if top is None:
-            top = _best_telemetry_opportunity(opps)
+        top = _best_telemetry_opportunity(opps)
         if top is not None:
             meta = _mapping(getattr(top, 'meta', {}) or {})
             unit = _mapping(meta.get('unit_econ') or {})
