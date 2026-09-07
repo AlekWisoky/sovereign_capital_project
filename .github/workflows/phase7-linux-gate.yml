@@ -1,0 +1,51 @@
+name: Phase 7 Linux gate
+
+on:
+  push:
+    branches:
+      - omar/phase-7-reconciled-production-final-2-hook
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+
+      - name: Ruff
+        run: |
+          ruff check backend
+          while read -r slice; do
+            xargs -a "$slice" ruff check
+          done < backend/mypy_targets.txt
+
+      - name: Black
+        run: |
+          black --check backend
+          while read -r slice; do
+            xargs -a "$slice" black --check
+          done < backend/mypy_targets.txt
+
+      - name: Mypy
+        run: |
+          while read -r slice; do
+            mypy @"$slice"
+          done < backend/mypy_targets.txt
+
+      - name: Pytest
+        run: |
+          cd backend
+          pytest -q
