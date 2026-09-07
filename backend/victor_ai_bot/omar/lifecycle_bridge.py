@@ -33,27 +33,41 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
     correlation_id = _text(p.get("correlation_id") or lineage.get("correlation_id"))
     if not decision_id or not correlation_id:
         return {"ok": False, "reason_code": "canonical_lineage_missing"}
-    if _text(row.get("decision_id")) != decision_id or _text(row.get("correlation_id")) != correlation_id:
+
+    # The physical settlement reader may already carry lineage fields, but the
+    # persisted outcome contract is allowed to rely on the pending canonical
+    # lineage when those duplicate fields are absent. Never overwrite a field
+    # that is present with a conflicting value.
+    row_decision_id = _text(row.get("decision_id"))
+    row_correlation_id = _text(row.get("correlation_id"))
+    if row_decision_id and row_decision_id != decision_id:
         return {"ok": False, "reason_code": "canonical_lineage_mismatch"}
+    if row_correlation_id and row_correlation_id != correlation_id:
+        return {"ok": False, "reason_code": "canonical_lineage_mismatch"}
+    row.setdefault("decision_id", decision_id)
+    row.setdefault("correlation_id", correlation_id)
+
     metadata = {
         "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
         "source": "phase2_canonical_outcome_ledger",
         "settlement": copy.deepcopy(row),
     }
-    return dict(omar.observe_outcome(
-        decision_id=decision_id,
-        ok=bool(row.get("ok", True)),
-        realized_net_usd=float(row.get("realized_net_usd", 0.0) or 0.0),
-        expected_net_usd=float(row.get("expected_net_usd", 0.0) or 0.0),
-        amount_in_wei=int(row.get("amount_in_wei", 0) or 0),
-        gas_cost_usd=float(row.get("gas_cost_usd", 0.0) or 0.0),
-        slippage_bps=float(row.get("slippage_bps", 0.0) or 0.0),
-        latency_ms=int(row.get("latency_ms", 0) or 0),
-        route_id=_text(row.get("route_id")),
-        tx_hash=_text(row.get("tx_hash")),
-        outcome_truth_verified=bool(row.get("truth_verified", False)),
-        metadata=metadata,
-    ))
+    return dict(
+        omar.observe_outcome(
+            decision_id=decision_id,
+            ok=bool(row.get("ok", True)),
+            realized_net_usd=float(row.get("realized_net_usd", 0.0) or 0.0),
+            expected_net_usd=float(row.get("expected_net_usd", 0.0) or 0.0),
+            amount_in_wei=int(row.get("amount_in_wei", 0) or 0),
+            gas_cost_usd=float(row.get("gas_cost_usd", 0.0) or 0.0),
+            slippage_bps=float(row.get("slippage_bps", 0.0) or 0.0),
+            latency_ms=int(row.get("latency_ms", 0) or 0),
+            route_id=_text(row.get("route_id")),
+            tx_hash=_text(row.get("tx_hash")),
+            outcome_truth_verified=bool(row.get("truth_verified", False)),
+            metadata=metadata,
+        )
+    )
 
 
 def _patch_receipt_settlement_learning() -> None:
@@ -80,7 +94,12 @@ def _patch_receipt_settlement_learning() -> None:
             lineage = _dict(pending.get("canonical_lineage"))
             decision_id = _text(pending.get("canonical_decision_id") or lineage.get("decision_id"))
             correlation_id = _text(pending.get("correlation_id") or lineage.get("correlation_id"))
-            outcome = reader(tx_hash=_text(bound.arguments.get("tx_hash")), decision_id=decision_id, correlation_id=correlation_id, opportunity_id=_text(pending.get("opportunity_id")))
+            outcome = reader(
+                tx_hash=_text(bound.arguments.get("tx_hash")),
+                decision_id=decision_id,
+                correlation_id=correlation_id,
+                opportunity_id=_text(pending.get("opportunity_id")),
+            )
             if outcome is not None:
                 _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
         except _SAFE:
