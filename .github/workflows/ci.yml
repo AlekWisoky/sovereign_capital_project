@@ -110,7 +110,7 @@ jobs:
             echo "No files assigned to shard ${{ matrix.shard }}; treating empty shard as success."
             exit 0
           fi
-          pytest -q -o faulthandler_timeout=300 "${files[@]}"
+          pytest -vv -o faulthandler_timeout=60 "${files[@]}"
 
   mobile:
     runs-on: ubuntu-latest
