@@ -36,27 +36,21 @@ jobs:
               text = text.replace(old, new, 1)
 
           path = Path("backend/victor_ai_bot/runtime_services/withdraw_all_service.py")
-          text = path.read_text(encoding="utf-8")
-          old_chain = '''        chain = str(\n            getattr(getattr(runtime, "cfg", None), "chain", None).name\n            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None\n            else "default"\n        )'''
-          new_chain = '''        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n        chain = str(getattr(chain_cfg, "name", "default") or "default")'''
-          if old_chain in text:
-              text = text.replace(old_chain, new_chain, 1)
-
-          marker = '        items = list(plan.get("items") or [])\n'
-          if marker in text:
-              start = text.index(marker)
-              next_def = re.search(r"\n    (?:async )?def ", text[start + len(marker):])
-              if next_def is None:
-                  raise SystemExit("withdraw execute function boundary not found")
-              end = start + len(marker) + next_def.start()
-              block = text[start:end]
-              block = block.replace('"result"', "__RESULT_KEY__")
-              block = block.replace('result=', '__RESULT_KW__=')
-              block = re.sub(r"\bresult\b", "execute_result", block)
-              block = block.replace("__RESULT_KEY__", '"result"')
-              block = block.replace("__RESULT_KW__=", "result=")
-              text = text[:start] + block + text[end:]
-          path.write_text(text, encoding="utf-8")
+          lines = path.read_text(encoding="utf-8").splitlines(True)
+          if len(lines) >= 816:
+              i = 815
+              if "getattr(getattr(runtime, \"cfg\", None), \"chain\", None).name" in lines[i]:
+                  lines[i:i+5] = [
+                      '        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)\n',
+                      '        chain = str(getattr(chain_cfg, "name", "default") or "default")\n',
+                  ]
+          for i in range(min(1414, len(lines)), min(1760, len(lines))):
+              lines[i] = lines[i].replace('"result"', "__RESULT_KEY__")
+              lines[i] = lines[i].replace('result=', '__RESULT_KW__=')
+              lines[i] = re.sub(r"\bresult\b", "execute_result", lines[i])
+              lines[i] = lines[i].replace("__RESULT_KEY__", '"result"')
+              lines[i] = lines[i].replace("__RESULT_KW__=", "result=")
+          path.write_text("".join(lines), encoding="utf-8")
           PY
 
           black \
