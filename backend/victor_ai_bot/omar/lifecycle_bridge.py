@@ -34,10 +34,6 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
     if not decision_id or not correlation_id:
         return {"ok": False, "reason_code": "canonical_lineage_missing"}
 
-    # The physical settlement reader may already carry lineage fields, but the
-    # persisted outcome contract is allowed to rely on the pending canonical
-    # lineage when those duplicate fields are absent. Never overwrite a field
-    # that is present with a conflicting value.
     row_decision_id = _text(row.get("decision_id"))
     row_correlation_id = _text(row.get("correlation_id"))
     if row_decision_id and row_decision_id != decision_id:
@@ -47,11 +43,18 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
     row.setdefault("decision_id", decision_id)
     row.setdefault("correlation_id", correlation_id)
 
+    operator_intent = _dict(lineage.get("operator_intent") or p.get("operator_intent"))
     metadata = {
         "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
         "source": "phase2_canonical_outcome_ledger",
         "settlement": copy.deepcopy(row),
     }
+    if operator_intent:
+        metadata["operator_intent"] = copy.deepcopy(operator_intent)
+    intent_fingerprint = _text(lineage.get("intent_fingerprint") or p.get("intent_fingerprint"))
+    if intent_fingerprint:
+        metadata["intent_fingerprint"] = intent_fingerprint
+
     return dict(
         omar.observe_outcome(
             decision_id=decision_id,
