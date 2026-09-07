@@ -48,7 +48,7 @@ REAL MARKET
 ## Repository layout
 
 - `backend/` — FastAPI runtime, capital/decision/governance/execution/settlement/learning services and API routes.
-- `backend/victor_ai_bot/omar/` — bounded OMAR runtime, learning gate, learner, and canonical settlement lifecycle bridge.
+- `backend/victor_ai_bot/omar/` — bounded OMAR runtime, learning gate, learner, and settlement-learning adapter.
 - `contracts/` — Foundry Solidity contracts and tests.
 - `mobile/` — Expo React Native operator console, settings, telemetry, controls, off-ramp, and WalletConnect integration.
 - `docs/` — architecture, security, API contracts, deployment, Sentry, and engineering decisions.
@@ -72,12 +72,14 @@ The single integration PR is #88 against `main`.
 
 ## Withdrawals and WalletConnect
 
-The default withdrawal posture is **external signing**:
+The default withdrawal posture is **external signing**.
 
 1. Backend validates destination, amount, executor, capital truth, and produces deterministic transaction calldata through `/api/withdraw/prepare` or `/api/withdraw/convert/prepare`.
-2. Mobile uses WalletConnect/EIP-1193 to obtain an external wallet provider.
-3. The external wallet signs/broadcasts the prepared transaction.
+2. Mobile's WalletConnect/EIP-1193 session provides the external wallet provider.
+3. **Current gap:** the OffRamp screen still stops at preparation; the final action that verifies the prepared sender/chain/transaction fields, invokes `eth_sendTransaction`, records the returned hash as submitted/pending, and reconciles it against backend/read-RPC truth is not yet wired.
 4. Backend hot-signing (`withdraw_mode=backend`) is a separate privileged mode and is disabled in public/staging deployments.
+
+Until step 3 is complete and tested, external-wallet withdrawal is **not** considered end-to-end complete. Do not replace this gap with client-side calldata construction or automatic broadcast.
 
 Withdrawal controls remain fail-closed on invalid input, missing dependencies, destination policy violations, degraded capital truth, and public-mode execution restrictions.
 
@@ -133,7 +135,7 @@ WalletConnect configuration:
 EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID=<project id>
 ```
 
-The app's WalletConnect bootstrap is mounted globally, and the EIP-1193 provider session is exposed through `mobile/src/walletConnect/session.ts` for transaction signing flows.
+The app's WalletConnect bootstrap is mounted globally, and the EIP-1193 provider session is exposed through `mobile/src/walletConnect/session.ts`.
 
 ## Staging safety
 
@@ -178,6 +180,7 @@ Historical PR chains that were superseded by the controlled integration are froz
 ## Architecture references
 
 - `docs/architecture/omar-keep-revert-delete-merge-map.svg` — OMAR integration disposition map.
+- `docs/END_TO_END_WIRING_MATRIX.md` — authoritative responsibility and synchronization matrix.
 - `docs/SECURITY_MODEL.md` — security and withdrawal model.
 - `docs/API_CONTRACT.md` — backend/mobile API contract.
 - `docs/SENTRY_SETUP.md` — Sentry setup and verification.
