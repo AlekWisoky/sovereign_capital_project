@@ -36,11 +36,13 @@ def _transactions(runtime: Any) -> list[dict[str, Any]]:
 def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     metadata = _dict(row.get("metadata"))
     lineage = _dict(metadata.get("canonical_lineage"))
+
     def first(*keys: str, default: Any = None) -> Any:
         for key in keys:
             if metadata.get(key) not in (None, ""):
                 return metadata[key]
         return default
+
     return {
         "status": "settled",
         "source": "phase2_canonical_outcome_ledger",
@@ -68,7 +70,15 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def canonical_settled_outcome(runtime: Any, *, tx_hash: str = "", decision_id: str = "", correlation_id: str = "", opportunity_id: str = "") -> dict[str, Any] | None:
+def canonical_settled_outcome(
+    runtime: Any,
+    *,
+    tx_hash: str = "",
+    decision_id: str = "",
+    correlation_id: str = "",
+    opportunity_id: str = "",
+) -> dict[str, Any] | None:
+    """Read one exact canonical settled outcome from the physical ledger."""
     rows = [row for row in _transactions(runtime) if _text(row.get("tx_type")) == _SETTLEMENT_TX_TYPE]
     matches = []
     for row in rows:
@@ -88,12 +98,4 @@ def canonical_settled_outcome(runtime: Any, *, tx_hash: str = "", decision_id: s
     return matches[0]
 
 
-def install_canonical_settlement_interface() -> None:
-    from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
-    existing = getattr(RuntimeReceiptFacade, "canonical_settled_outcome", None)
-    if existing is not None and getattr(existing, "_phase2_canonical_interface", False):
-        return
-    def runtime_canonical_settled_outcome(self: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return canonical_settled_outcome(self, **kwargs)
-    runtime_canonical_settled_outcome._phase2_canonical_interface = True
-    RuntimeReceiptFacade.canonical_settled_outcome = runtime_canonical_settled_outcome
+__all__ = ["canonical_settled_outcome"]
