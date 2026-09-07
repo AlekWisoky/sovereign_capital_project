@@ -7,11 +7,11 @@ on:
 permissions:
   contents: read
 
-# Use the source branch as the single concurrency identity for both push and
-# pull-request events. Older push-only runs otherwise occupy a different group
-# from the PR merge-ref run and can starve the current pytest matrix.
+# Use the normalized source branch name as the single concurrency identity for
+# both push and pull-request events. This prevents a stale push run from
+# occupying a different group than the PR run for the same branch.
 concurrency:
-  group: sovereign-capital-ci-${{ github.head_ref || github.ref }}
+  group: sovereign-capital-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
