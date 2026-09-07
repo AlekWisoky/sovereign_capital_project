@@ -1,4 +1,4 @@
-name: Temporary Phase8 Black Formatter Runner
+name: Temporary Phase7 Black Formatter Runner
 
 on:
   push:
@@ -9,12 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  format_phase8:
+  format_phase7:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: omar/phase-8-oos-promotion
+          ref: omar/phase-7-human-control-contract
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -22,39 +22,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-      - name: Format Phase8 OMAR files
-        run: |
-          black \
-            backend/victor_ai_bot/omar/production_lineage_bridge.py \
-            backend/victor_ai_bot/omar/promotion_runtime.py \
-            backend/victor_ai_bot/omar/lifecycle_bridge.py \
-            backend/victor_ai_bot/omar/promotion.py \
-            backend/victor_ai_bot/omar/real_learning.py \
-            backend/victor_ai_bot/omar/runtime.py \
-            backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py \
-            backend/victor_ai_bot/runtime_services/omar_human_context.py \
-            backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py \
-            backend/victor_ai_bot/runtime_services/runtime_decision_facade.py \
-            backend/tests/test_omar_promotion.py
-      - name: Commit formatting changes to Phase8 branch
+      - name: Format Phase7 human context
+        run: black backend/victor_ai_bot/runtime_services/omar_human_context.py
+      - name: Commit formatting changes to Phase7 branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            backend/victor_ai_bot/omar/production_lineage_bridge.py \
-            backend/victor_ai_bot/omar/promotion_runtime.py \
-            backend/victor_ai_bot/omar/lifecycle_bridge.py \
-            backend/victor_ai_bot/omar/promotion.py \
-            backend/victor_ai_bot/omar/real_learning.py \
-            backend/victor_ai_bot/omar/runtime.py \
-            backend/victor_ai_bot/runtime_services/canonical_settlement_interface.py \
-            backend/victor_ai_bot/runtime_services/omar_human_context.py \
-            backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py \
-            backend/victor_ai_bot/runtime_services/runtime_decision_facade.py \
-            backend/tests/test_omar_promotion.py
+          git add backend/victor_ai_bot/runtime_services/omar_human_context.py
           if git diff --cached --quiet; then
             echo "Formatting already clean"
             exit 0
           fi
-          git commit -m "style: format Phase8 OMAR files"
-          git push origin HEAD:omar/phase-8-oos-promotion
+          git commit -m "style: format OMAR human context"
+          git push origin HEAD:omar/phase-7-human-control-contract
