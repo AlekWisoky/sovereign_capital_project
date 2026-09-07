@@ -28,6 +28,8 @@ jobs:
           from pathlib import Path
           import re
 
+          # Canonical OMAR correlation lineage: decision metadata is historical evidence,
+          # but the correlation id must remain available at the decision record's top level.
           path = Path("backend/victor_ai_bot/omar/runtime.py")
           text = path.read_text(encoding="utf-8")
           old = '''        row = {\n            "decision_id": str(decision_id),\n            "opportunity_id": str(opportunity_id),\n            "route_id": str(route_id),\n            "action": str(action),\n            "state_key": str(state_key),\n            "context": copy.deepcopy(dict(context or {})),\n            "metadata": copy.deepcopy(dict(metadata or {})),\n            "ts_ms": int(time.time() * 1000),\n        }'''
@@ -43,10 +45,11 @@ jobs:
               text = text.replace(old_chain, new_chain, 1)
 
           lines = text.splitlines(True)
-          result_idx = next((i for i, line in enumerate(lines) if "result: Dict[str, Any]" in line), None)
-          if result_idx is not None:
-              end_idx = min(result_idx + 420, len(lines))
-              for i in range(result_idx, end_idx):
+          result_indices = [i for i, line in enumerate(lines) if "result: Dict[str, Any]" in line]
+          if len(result_indices) >= 2:
+              start = result_indices[1]
+              end = min(start + 420, len(lines))
+              for i in range(start, end):
                   lines[i] = lines[i].replace('"result"', "__RESULT_KEY__")
                   lines[i] = lines[i].replace('result=', '__RESULT_KW__=')
                   lines[i] = re.sub(r"\bresult\b", "execute_result", lines[i])
