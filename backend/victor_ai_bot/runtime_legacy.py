@@ -140,5 +140,42 @@ class RuntimeBundle(
 ):
     """Thin compatibility-shell runtime wrapper.
 
-    The complete implementation continues below this declaration unchanged.
+    Constructor sequencing and outer entry wrappers remain here; hot-path
+    behavior stays in runtime_services facades.
     """
+
+    @staticmethod
+    def dep(request):
+        try:
+            return request.app.state.runtime  # type: ignore
+        except AttributeError:
+            return None
+
+    def __init__(self, cfg):
+        self._initialize_runtime_constructor_core(cfg)
+        data_dir = self.data_dir
+        initialize_execution_capture_stack(self, cfg=cfg, data_dir=data_dir)
+        initialize_runtime_institutional_stack(self, cfg=cfg, data_dir=data_dir)
+        initialize_optional_overlay_runtimes(self, cfg=cfg, data_dir=data_dir)
+        initialize_execution_support_stack(self, cfg=cfg, data_dir=data_dir)
+        initialize_optional_family_runtimes(self, cfg=cfg, data_dir=data_dir)
+
+    async def _loop(self) -> None:
+        while not self._stop.is_set():
+            t0 = time.perf_counter()
+            await self._run_loop_entry_iteration(loop_started_at=t0)
+
+    async def _execute_auto(self, opp, bn: int, decision: Any = None) -> None:
+        """Delegate auto-execution to the canonical dispatch/wrapper facades."""
+        prep = await RuntimeExecuteDispatchFacade._prepare_auto_execution_dispatch(
+            self, opp=opp, bn=int(bn), decision=decision
+        )
+        if prep is None:
+            return
+        await RuntimeExecuteWrapperFacade._run_prepared_auto_execution(
+            self,
+            opp=prep.opportunity,
+            bn=int(bn),
+            decision=decision,
+            prep=prep,
+        )
