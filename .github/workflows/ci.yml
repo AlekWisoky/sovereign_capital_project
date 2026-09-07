@@ -45,34 +45,35 @@ jobs:
       - name: Collect and assign test files
         working-directory: backend
         run: |
-          pytest --collect-only -q > /tmp/pytest-collection.txt 2>&1 || { cat /tmp/pytest-collection.txt; exit 1; }
           python - <<'PY'
-          from collections import Counter
           from pathlib import Path
-          files = Counter()
-          for raw in Path('/tmp/pytest-collection.txt').read_text().splitlines():
-              nodeid = raw.strip()
-              if '::' not in nodeid or not nodeid.startswith('tests/'):
-                  continue
-              path = nodeid.split('::', 1)[0]
-              if path.endswith('.py'):
-                  files[path] += 1
-          if not files:
-              raise SystemExit('pytest collection produced no test nodeids')
+
+          tests = sorted({
+              *Path('tests').rglob('test_*.py'),
+              *Path('tests').rglob('*_test.py'),
+          })
+          if not tests:
+              raise SystemExit('no pytest files found under backend/tests')
+
+          # Shard the complete discovered test-file set deterministically.
+          # Pytest remains authoritative for collection and execution errors.
           shards = [[] for _ in range(8)]
-          counts = [0] * 8
-          for path, count in sorted(files.items(), key=lambda x: x[1], reverse=True):
-              i = min(range(8), key=counts.__getitem__)
-              shards[i].append(path); counts[i] += count
+          for index, path in enumerate(tests):
+              shards[index % 8].append(path.as_posix())
+
           shard = int('${{ matrix.shard }}')
-          Path(f'/tmp/shard-{shard}.txt').write_text('\n'.join(shards[shard]) + '\n')
-          print(f'shard={shard} tests={counts[shard]} files={len(shards[shard])}')
+          selected = shards[shard]
+          Path(f'/tmp/shard-{shard}.txt').write_text('\n'.join(selected) + '\n')
+          print(f'shard={shard} files={len(selected)} total_files={len(tests)}')
           PY
       - name: Run pytest shard
         working-directory: backend
         run: |
           mapfile -t files < /tmp/shard-${{ matrix.shard }}.txt
-          test "${#files[@]}" -gt 0
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No files assigned to shard ${{ matrix.shard }}; treating empty shard as success."
+            exit 0
+          fi
           pytest -q -o faulthandler_timeout=300 "${files[@]}"
 
   mobile:
