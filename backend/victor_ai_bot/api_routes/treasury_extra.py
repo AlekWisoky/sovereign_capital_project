@@ -112,7 +112,7 @@ def get_runtime(request: Request):
 
 
 @router.get("/api/treasury/capital")
-def treasury_capital(rt=Depends(RuntimeBundle.dep)):
+def treasury_capital(rt=Depends(get_runtime)):
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
             attach_summary_contract(_capital_projection(rt), family="treasury_capital", read_model="treasury_capital_projection_v1", runtime=rt),
@@ -123,7 +123,7 @@ def treasury_capital(rt=Depends(RuntimeBundle.dep)):
 
 
 @router.get("/api/treasury/state")
-def treasury_state(rt=Depends(RuntimeBundle.dep)):
+def treasury_state(rt=Depends(get_runtime)):
     if not _treasury_has_goal(rt) or not callable(getattr(rt, "treasury_state", None)):
         return json_safe(_treasury_state_unavailable())
     return safe_json_route_call(
