@@ -178,9 +178,9 @@ def _item_status_counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def _lifecycle_summary(
-    result: Dict[str, Any], *, fallback_status: str = "", fallback_reason_code: str = ""
+    execute_result: Dict[str, Any], *, fallback_status: str = "", fallback_reason_code: str = ""
 ) -> Dict[str, Any]:
-    payload = dict(result or {})
+    payload = dict(execute_result or {})
     items = [dict(item) for item in list(payload.get("items") or []) if isinstance(item, dict)]
     failed_item = (
         dict(payload.get("failed_item") or {})
@@ -231,9 +231,9 @@ def _lifecycle_summary(
 
 
 def _attach_lifecycle_summary(
-    result: Dict[str, Any], *, fallback_status: str = "", fallback_reason_code: str = ""
+    execute_result: Dict[str, Any], *, fallback_status: str = "", fallback_reason_code: str = ""
 ) -> Dict[str, Any]:
-    payload = dict(result or {})
+    payload = dict(execute_result or {})
     payload["lifecycle_summary"] = _lifecycle_summary(
         payload,
         fallback_status=fallback_status,
@@ -551,17 +551,17 @@ class WithdrawAllService:
         state: Dict[str, Any],
         status: str,
         reason_code: str,
-        result: Dict[str, Any],
+        execute_result: Dict[str, Any],
         preview_id: str = "",
         event: str | None = None,
         persisted_state: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         state["last_status"] = str(status or "idle")
         state["last_reason_code"] = str(reason_code or "")
-        state["last_result"] = dict(result or {})
+        state["last_result"] = dict(execute_result or {})
         if preview_id:
             state["last_executed_preview_id"] = str(preview_id)
-            state["last_executed_result"] = dict(result or {})
+            state["last_executed_result"] = dict(execute_result or {})
         try:
             saved = self._save(state)
         except WithdrawAllPersistenceError as exc:
@@ -572,7 +572,7 @@ class WithdrawAllService:
                     "attempted_status": str(status or "idle"),
                     "attempted_reason_code": str(reason_code or ""),
                     "attempted_preview_id": str(preview_id or ""),
-                    "result_available": bool(result),
+                    "result_available": bool(execute_result),
                     "result_persisted": False,
                 },
             )
@@ -812,11 +812,8 @@ class WithdrawAllService:
     def _ledger_event(self, runtime: Any, *, event: str, metadata: Dict[str, Any]) -> None:
         ledger = getattr(runtime, "_ledger", None)
         repo = getattr(runtime, "_ledger_repo", None)
-        chain = str(
-            getattr(getattr(runtime, "cfg", None), "chain", None).name
-            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
-            else "default"
-        )
+        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)
+        chain = str(getattr(chain_cfg, "name", "default") or "default")
         if ledger is None or not hasattr(ledger, "append_transaction"):
             return
         metadata_payload = dict(metadata or {})
