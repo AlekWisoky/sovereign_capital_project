@@ -19,8 +19,6 @@ from ..rpc_manager import RpcManager
 from ..security.audit import SecurityAuditStore
 from ..omar.config import OmarConfig
 from ..omar.runtime import OmarRuntime
-from .canonical_settlement_interface import install_canonical_settlement_interface
-from ..omar.lifecycle_bridge import install_omar_lifecycle_hooks
 
 
 class RuntimeConstructorFacade:
@@ -28,7 +26,11 @@ class RuntimeConstructorFacade:
 
     def _initialize_runtime_constructor_core(self, cfg: Any) -> None:
         self.cfg = cfg
-        self.rpc_manager = RpcManager(rpc_read=cfg.chain.rpc_read, rpc_send=cfg.chain.rpc_send or cfg.chain.rpc_read, rpc_private=getattr(cfg.chain, "rpc_private", []))
+        self.rpc_manager = RpcManager(
+            rpc_read=cfg.chain.rpc_read,
+            rpc_send=cfg.chain.rpc_send or cfg.chain.rpc_read,
+            rpc_private=getattr(cfg.chain, "rpc_private", []),
+        )
         self.cache = PerBlockCache()
         self.metrics = Metrics(gas_mode=cfg.execution.gas_mode, send_mode=cfg.execution.send_mode)
         self._lat = LatencyProfiler(window=int(os.environ.get("VICTOR_LAT_WINDOW", "400")))
@@ -43,7 +45,9 @@ class RuntimeConstructorFacade:
         self._auto_trading = bool(cfg.execution.auto_trading)
         self._cb = CircuitBreaker.from_env()
         self._anomaly = AnomalyBreaker(window=int(os.environ.get("VICTOR_ANOM_WINDOW", "60")))
-        self._receipt_q: asyncio.Queue[str] = asyncio.Queue(maxsize=int(os.environ.get("VICTOR_RECEIPT_QUEUE_MAX", "20")))
+        self._receipt_q: asyncio.Queue[str] = asyncio.Queue(
+            maxsize=int(os.environ.get("VICTOR_RECEIPT_QUEUE_MAX", "20"))
+        )
         self._receipt_task: asyncio.Task | None = None
         self._pending = {}
         data_dir = canonical_data_dir(os.environ.get("VICTOR_DATA_DIR", "backend/data"))
@@ -51,7 +55,11 @@ class RuntimeConstructorFacade:
         self.data_dir = data_dir
         self._db = PersistenceDB(os.path.join(data_dir, "state", "xdv_runtime_state.sqlite3"))
         self._security_audit = SecurityAuditStore(self._db)
-        self._decision = DecisionEngine(chain_name=cfg.chain.name, data_dir=data_dir, brain_mode=str(getattr(cfg.execution, "brain_mode", "off") or "off"))
+        self._decision = DecisionEngine(
+            chain_name=cfg.chain.name,
+            data_dir=data_dir,
+            brain_mode=str(getattr(cfg.execution, "brain_mode", "off") or "off"),
+        )
 
         env_enabled = (os.environ.get("VICTOR_ENABLE_OMAR", "") or "").strip() == "1"
         configured = getattr(getattr(cfg, "superstructure", None), "omar", None)
@@ -59,8 +67,6 @@ class RuntimeConstructorFacade:
         if env_enabled:
             omar_cfg.enabled = True
         self._omar = OmarRuntime(cfg=omar_cfg, chain_name=cfg.chain.name)
-        install_canonical_settlement_interface()
-        install_omar_lifecycle_hooks()
         if bool(omar_cfg.enabled):
             self._omar.start()
 
