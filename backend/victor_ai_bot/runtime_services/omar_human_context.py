@@ -28,10 +28,11 @@ def _raw_mapping(source: Any) -> Dict[str, Any]:
 
 
 def _normalize_mode(raw: Dict[str, Any]) -> str:
-    mode = str(
-        raw.get("aggressiveness_mode", raw.get("aggressiveness", "balanced"))
-        or "balanced"
-    ).strip().lower()
+    mode = (
+        str(raw.get("aggressiveness_mode", raw.get("aggressiveness", "balanced")) or "balanced")
+        .strip()
+        .lower()
+    )
     return mode if mode in {"conservative", "balanced", "aggressive"} else "balanced"
 
 
