@@ -4,78 +4,98 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  backend:
+  backend-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-
       - name: Ruff
         run: |
           ruff check backend
-          while read -r slice; do
-            xargs -a "$slice" ruff check
-          done < backend/mypy_targets.txt
-
+          while read -r slice; do xargs -a "$slice" ruff check; done < backend/mypy_targets.txt
       - name: Black
         run: |
           black --check backend
-          while read -r slice; do
-            xargs -a "$slice" black --check
-          done < backend/mypy_targets.txt
-
-      - name: Mypy (expanded typed slices)
+          while read -r slice; do xargs -a "$slice" black --check; done < backend/mypy_targets.txt
+      - name: Mypy
         run: |
-          while read -r slice; do
-            mypy @"$slice"
-          done < backend/mypy_targets.txt
+          while read -r slice; do mypy @"$slice"; done < backend/mypy_targets.txt
 
-      - name: Pytest
+  backend-pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
         run: |
-          cd backend
-          pytest -q
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Collect and assign test files
+        working-directory: backend
+        run: |
+          pytest --collect-only -q > /tmp/pytest-collection.txt
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          files = []
+          for raw in Path('/tmp/pytest-collection.txt').read_text().splitlines():
+              m = re.match(r'^(tests/[^:]+):\s+(\d+)\s*$', raw.strip())
+              if m:
+                  files.append((m.group(1), int(m.group(2))))
+          if not files:
+              raise SystemExit('pytest collection produced no test files')
+          shards = [[] for _ in range(8)]
+          counts = [0] * 8
+          for path, count in sorted(files, key=lambda x: x[1], reverse=True):
+              i = min(range(8), key=counts.__getitem__)
+              shards[i].append(path); counts[i] += count
+          shard = int('${{ matrix.shard }}')
+          Path(f'/tmp/shard-{shard}.txt').write_text('\n'.join(shards[shard]) + '\n')
+          print(f'shard={shard} tests={counts[shard]} files={len(shards[shard])}')
+          PY
+      - name: Run pytest shard
+        working-directory: backend
+        run: |
+          mapfile -t files < /tmp/shard-${{ matrix.shard }}.txt
+          test "${#files[@]}" -gt 0
+          pytest -q -o faulthandler_timeout=300 "${files[@]}"
 
   mobile:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
-
-      - name: Install deps
-        run: |
+      - run: |
           cd mobile
           npm install --no-audit --no-fund
-
-      - name: Mobile typecheck + unit smoke
-        run: |
-          cd mobile
           npm run ci:test
 
   contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-
-      - name: Forge tests
-        run: |
+      - run: |
           cd contracts
           forge test -q
