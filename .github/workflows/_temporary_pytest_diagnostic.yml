@@ -1,0 +1,32 @@
+name: Temporary Pytest Diagnostic
+
+on:
+  push:
+    branches:
+      - omar/phase-7-human-control-contract
+
+permissions:
+  contents: write
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Run pytest and capture full output
+        run: |
+          cd backend
+          pytest -q 2>&1 | tee /tmp/pytest.log
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-pytest-log
+          path: /tmp/pytest.log
