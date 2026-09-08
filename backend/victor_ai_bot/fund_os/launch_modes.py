@@ -14,11 +14,11 @@ class LaunchMode(str, Enum):
     FULL_MULTI_STRATEGY = "FULL_MULTI_STRATEGY"
 
 
-# The production V1 operating system has one reachable strategy family.
-# Additional strategies remain an explicit extension catalog and must not enter
-# V1 capital demand, bankroll, internal-prime, or rollout decisions implicitly.
+# V1 is deliberately constrained to the only production-reachable strategy.
 V1_ACTIVATION_ORDER = ["flash_arb"]
-FUTURE_ACTIVATION_ORDER = [
+# Future strategies remain an explicit extension catalog. They are not active in V1.
+DEFAULT_ACTIVATION_ORDER = [
+    "flash_arb",
     "funding_arb",
     "cex_cex_arb",
     "liquidation_capture",
@@ -27,7 +27,6 @@ FUTURE_ACTIVATION_ORDER = [
     "volatility_market_making",
     "treasury_yield",
 ]
-DEFAULT_ACTIVATION_ORDER = list(V1_ACTIVATION_ORDER)
 
 
 @dataclass
@@ -37,9 +36,7 @@ class LaunchProfile:
     requested_families: List[str] = field(default_factory=list)
     rollout_order: List[str] = field(default_factory=lambda: list(V1_ACTIVATION_ORDER))
     family_states: Dict[str, str] = field(
-        default_factory=lambda: {
-            "flash_arb": HealthState.LIVE.value,
-        }
+        default_factory=lambda: {"flash_arb": HealthState.LIVE.value}
     )
     history: List[Dict[str, Any]] = field(default_factory=list)
     exploration_budget: Dict[str, Any] = field(
