@@ -107,6 +107,15 @@ def _capital_projection(rt: object) -> dict[str, object]:
     return projection
 
 
+def _treasury_state_projection(rt: object) -> dict[str, object]:
+    if not _treasury_has_goal(rt) or not callable(getattr(rt, "treasury_state", None)):
+        return _treasury_state_unavailable()
+    return with_auto_trade_route_projection(
+        attach_summary_contract(AuxiliaryStateService().treasury_state(rt, capital_truth=AuxiliaryStateService().capital_truth(rt)), family="treasury_state", read_model="treasury_state_projection_v1", runtime=rt),
+        runtime=rt,
+    )
+
+
 def get_runtime(request: Request):
     return request.app.state.runtime  # type: ignore[attr-defined]
 
@@ -124,13 +133,8 @@ def treasury_capital(rt=Depends(get_runtime)):
 
 @router.get("/api/treasury/state")
 def treasury_state(rt=Depends(get_runtime)):
-    if not _treasury_has_goal(rt) or not callable(getattr(rt, "treasury_state", None)):
-        return json_safe(_treasury_state_unavailable())
     return safe_json_route_call(
-        lambda: with_auto_trade_route_projection(
-            attach_summary_contract(AuxiliaryStateService().treasury_state(rt, capital_truth=AuxiliaryStateService().capital_truth(rt)), family="treasury_state", read_model="treasury_state_projection_v1", runtime=rt),
-            runtime=rt,
-        ),
+        lambda: _treasury_state_projection(rt),
         on_error=lambda exc: _treasury_state_failed_payload(),
     )
 
