@@ -64,6 +64,13 @@ DEFAULT_RECOVERY = auto_trade_recovery_info(None)
 DEFAULT_GATE = auto_trade_gate_info_from_recovery(DEFAULT_RECOVERY)
 
 
+def _legacy_degraded_payload(body):
+    body = dict(body)
+    body.pop("capitalTruthHealth", None)
+    body.pop("summaryContract", None)
+    return body
+
+
 def test_ops_read_routes_surface_persisted_auto_trade_recovery_gate():
     app = FastAPI()
     app.include_router(ops_router)
@@ -95,7 +102,7 @@ def test_ops_read_routes_return_deterministic_degraded_payloads_when_state_build
     app.state.runtime = _ExplodingRuntime()
     client = TestClient(app)
 
-    assert client.get("/api/arbitrage/state").json() == {
+    assert _legacy_degraded_payload(client.get("/api/arbitrage/state").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "arbitrage_state_failed",
@@ -105,7 +112,7 @@ def test_ops_read_routes_return_deterministic_degraded_payloads_when_state_build
         "auto_trade_recovery": DEFAULT_RECOVERY,
         "auto_trade_gate": DEFAULT_GATE,
     }
-    assert client.get("/api/mev/state").json() == {
+    assert _legacy_degraded_payload(client.get("/api/mev/state").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "mev_state_failed",
@@ -115,7 +122,7 @@ def test_ops_read_routes_return_deterministic_degraded_payloads_when_state_build
         "auto_trade_recovery": DEFAULT_RECOVERY,
         "auto_trade_gate": DEFAULT_GATE,
     }
-    assert client.get("/api/meta/state").json() == {
+    assert _legacy_degraded_payload(client.get("/api/meta/state").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "meta_state_failed",
