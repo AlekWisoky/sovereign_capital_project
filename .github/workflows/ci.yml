@@ -58,6 +58,8 @@ jobs:
           (out / 'optional_family_status.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
           (out / 'optional_family_status.md').write_text(render_optional_family_status_markdown(payload))
           PY
+          python scripts/render_system_truth.py > /tmp/optional-family-status/system_truth_generation.json
+          cp docs/generated/system_truth.json /tmp/optional-family-status/system_truth.json
       - uses: actions/upload-artifact@v4
         with:
           name: optional-family-status-${{ github.sha }}
