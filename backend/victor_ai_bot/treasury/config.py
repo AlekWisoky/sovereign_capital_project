@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -38,6 +38,10 @@ class TreasuryConfig:
 
     # If set, used for goal progress calculations (optional)
     estimated_capital_wei: int = 0
+
+    # V1 capital authority is intentionally scoped to the only production-reachable family.
+    # Future strategies can be added here explicitly when their runtime/evidence gates exist.
+    active_families: List[str] = field(default_factory=lambda: ["flash_arb"])
 
     # Primary goal object (preferred name)
     goal: ProfitGoal = field(default_factory=ProfitGoal)
