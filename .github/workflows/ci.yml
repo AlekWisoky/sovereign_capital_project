@@ -2,14 +2,16 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
   contents: read
 
-# Use the normalized source branch name as the single concurrency identity for
-# both push and pull-request events. This prevents a stale push run from
-# occupying a different group than the PR run for the same branch.
+# Keep feature-branch validation on the PR check only. Main still receives
+# post-merge push validation, avoiding duplicate push+PR runs competing for the
+# same concurrency group.
 concurrency:
   group: sovereign-capital-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
