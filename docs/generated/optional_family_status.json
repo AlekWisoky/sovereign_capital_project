@@ -237,7 +237,6 @@
           "backend/victor_ai_bot/aqe/core/smmae_engine.py",
           "backend/victor_ai_bot/aqe/mev/runtime.py",
           "backend/victor_ai_bot/decision_engine.py",
-          "backend/victor_ai_bot/runtime_legacy.py",
           "backend/victor_ai_bot/runtime_services/execution_service.py",
           "backend/victor_ai_bot/runtime_services/receipt_service.py",
           "backend/victor_ai_bot/runtime_services/runtime_agent_consensus_facade.py",
@@ -282,13 +281,13 @@
       },
       "family": "caq_kds",
       "path": "backend/victor_ai_bot/caq_kds",
-      "primaryEvidenceCount": 41,
+      "primaryEvidenceCount": 40,
       "pythonFileCount": 8,
-      "referenceCount": 46,
+      "referenceCount": 45,
       "status": "live",
       "statusInputs": {
         "gatingConditions": 0,
-        "importReachability": 30,
+        "importReachability": 29,
         "mountedRoutes": 1,
         "runtimeInitialization": 10
       },
@@ -552,35 +551,48 @@
       "evidence": {
         "docsAndScripts": [],
         "gatingConditions": [
+          "backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py",
           "backend/victor_ai_bot/server.py"
         ],
         "importReachability": [
+          "backend/tests/test_canonical_omar_closed_loop.py",
+          "backend/tests/test_canonical_omar_decision_context.py",
+          "backend/tests/test_omar_operator_intent.py",
           "backend/tests/test_omar_runtime.py",
+          "backend/tests/test_runtime_method_chain_learning_attribution.py",
           "backend/victor_ai_bot/runtime.py",
+          "backend/victor_ai_bot/runtime_services/omar_receipt_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py",
           "backend/victor_ai_bot/server.py"
         ],
         "mountedRoutes": [],
         "runtimeInitialization": [
+          "backend/victor_ai_bot/runtime_services/omar_receipt_facade.py",
+          "backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py",
           "backend/victor_ai_bot/server.py"
         ],
         "tests": [
-          "backend/tests/test_omar_runtime.py"
+          "backend/tests/test_canonical_omar_closed_loop.py",
+          "backend/tests/test_canonical_omar_decision_context.py",
+          "backend/tests/test_omar_operator_intent.py",
+          "backend/tests/test_omar_runtime.py",
+          "backend/tests/test_runtime_method_chain_learning_attribution.py"
         ]
       },
       "family": "omar",
       "path": "backend/victor_ai_bot/omar",
-      "primaryEvidenceCount": 5,
-      "pythonFileCount": 11,
-      "referenceCount": 6,
+      "primaryEvidenceCount": 14,
+      "pythonFileCount": 16,
+      "referenceCount": 19,
       "status": "staged",
       "statusInputs": {
-        "gatingConditions": 1,
-        "importReachability": 3,
+        "gatingConditions": 2,
+        "importReachability": 9,
         "mountedRoutes": 0,
-        "runtimeInitialization": 1
+        "runtimeInitialization": 3
       },
-      "supplementalReferenceCount": 1,
-      "why": "Runtime or server reachability exists, but only behind explicit gating or optional initialization."
+      "supplementalReferenceCount": 5,
+      "why": "Explicit lifecycle policy keeps this family staged until production authority is intentionally promoted."
     },
     {
       "evidence": {

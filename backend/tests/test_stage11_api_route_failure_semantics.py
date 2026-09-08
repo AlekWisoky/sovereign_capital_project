@@ -86,7 +86,10 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
     calibration = client.get("/api/execution/calibration")
     system_execution_quality = client.get("/api/system/execution/quality")
     assert telemetry.status_code == 200
-    assert telemetry.json() == {
+    telemetry_body = telemetry.json()
+    telemetry_core = dict(telemetry_body)
+    telemetry_core.pop("summaryContract", None)
+    assert telemetry_core == {
         "ok": False,
         "status": "degraded",
         "reason_code": "telemetry_summary_failed",
@@ -160,6 +163,26 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "reasonCodes": [],
             "suggestedNextAction": "",
         },
+    }
+    assert telemetry_body["summaryContract"] == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "telemetry",
+        "readModel": "telemetry_summary_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "",
+        "capitalPolicyVersion": "",
+        "stateContract": {
+            "phase": "telemetry_summary",
+            "status": "degraded",
+            "reason_code": "telemetry_summary_failed",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
     }
     assert calibration.status_code == 200
     assert calibration.json() == {
@@ -368,7 +391,10 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
 
     monkeypatch.setattr(app.state, "runtime", _MetaRuntime(), raising=False)
     meta = client.get("/api/meta/candidates")
-    assert meta.json() == {
+    meta_body = meta.json()
+    meta_core = dict(meta_body)
+    meta_core.pop("summaryContract", None)
+    assert meta_core == {
         "ok": False,
         "status": "degraded",
         "reason_code": "meta_candidates_failed",
@@ -376,6 +402,26 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
         "error": "meta_candidates_failed",
         "items": [],
         "candidates": [],
+    }
+    assert meta_body["summaryContract"] == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "meta_candidates",
+        "readModel": "meta_candidates_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "",
+        "capitalPolicyVersion": "",
+        "stateContract": {
+            "phase": "meta_candidates_summary",
+            "status": "degraded",
+            "reason_code": "meta_candidates_failed",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
     }
 
 
@@ -425,7 +471,10 @@ def test_meta_candidate_route_does_not_report_success_when_meta_is_unavailable(m
 
     meta = client.get("/api/meta/candidates")
     assert meta.status_code == 200
-    assert meta.json() == {
+    meta_body = meta.json()
+    meta_core = dict(meta_body)
+    meta_core.pop("summaryContract", None)
+    assert meta_core == {
         "ok": False,
         "status": "unavailable",
         "reason_code": "meta_unavailable",
@@ -433,6 +482,26 @@ def test_meta_candidate_route_does_not_report_success_when_meta_is_unavailable(m
         "error": "meta_unavailable",
         "items": [],
         "candidates": [],
+    }
+    assert meta_body["summaryContract"] == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "meta_candidates",
+        "readModel": "meta_candidates_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "canonical_capital_summary_v1",
+        "capitalPolicyVersion": "capital_policy_v1",
+        "stateContract": {
+            "phase": "meta_candidates_summary",
+            "status": "degraded",
+            "reason_code": "meta_unavailable",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
     }
 
 
