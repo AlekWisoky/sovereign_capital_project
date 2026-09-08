@@ -10,10 +10,10 @@ permissions:
   contents: read
 
 # Keep feature-branch validation on the PR check only. Main still receives
-# post-merge push validation, avoiding duplicate push+PR runs competing for the
-# same concurrency group.
+# post-merge push validation. Event-specific groups prevent a legacy push run
+# from occupying the PR concurrency slot while it drains.
 concurrency:
-  group: sovereign-capital-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: sovereign-capital-ci-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
