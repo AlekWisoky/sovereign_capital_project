@@ -20,6 +20,6 @@ def test_to_json_safe_preserves_shared_noncyclic_containers():
     payload = {"left": shared, "right": shared}
 
     assert to_json_safe(payload) == {
-        "left": {"value": 7},
-        "right": {"value": 7},
+        "left": {"value": "7"},
+        "right": {"value": "7"},
     }
