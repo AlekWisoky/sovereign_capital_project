@@ -59,9 +59,11 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
     risk = max(0.10, min(1.0, _number(getattr(controls, "risk_multiplier", 1.0), 1.0)))
     goal_state = _goal_state(runtime)
     goal = _dict(goal_state.get("goal"))
+    if not goal:
+        goal = goal_state
     recommendation = _recommendation(runtime)
-    target = goal.get("target_amount") or goal.get("target_wealth_usd") or goal.get("target_capital_usd")
-    horizon = goal.get("timeframe_days")
+    target = goal.get("target_amount") or goal.get("targetAmount") or goal.get("target_wealth_usd") or goal.get("target_capital_usd")
+    horizon = goal.get("timeframe_days") or goal.get("timeframeDays")
     if not horizon and goal.get("time_horizon_seconds"):
         horizon = _number(goal.get("time_horizon_seconds")) / 86400.0
     return {
@@ -69,7 +71,7 @@ def resolve_operator_intent(runtime: Any) -> dict[str, Any]:
         "risk_multiplier": round(risk, 6),
         "goal": {
             "target_amount": _text(target),
-            "target_return_pct": round(_number(goal.get("target_return_percentage") or goal.get("target_return_pct")), 6),
+            "target_return_pct": round(_number(goal.get("target_return_percentage") or goal.get("target_return_pct") or goal.get("targetReturnPct")), 6),
             "timeframe_days": round(_number(horizon), 6),
             "goal_id": _text(_dict(goal_state.get("meta")).get("active_goal_id")),
             "goal_revision": int(_number(_dict(goal_state.get("meta")).get("goal_revision"), 1)),
