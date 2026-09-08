@@ -16,7 +16,7 @@ from victor_ai_bot.api_routes.ops_routes import router as ops_router
 from victor_ai_bot.api_routes.overlay_routes import router as overlay_router
 from victor_ai_bot.api_routes.runtime_routes import router as runtime_router
 from victor_ai_bot.api_routes.superstructure_routes import router as superstructure_router
-from victor_ai_bot.optional_family_status import build_optional_family_status
+from victor_ai_bot.optional_family_status import EXPLICIT_STAGED_FAMILIES, build_optional_family_status
 from victor_ai_bot.runtime import RuntimeBundle
 from victor_ai_bot.runtime_services.runtime_capital_facade import RuntimeCapitalFacade
 
@@ -308,19 +308,22 @@ def test_optional_family_status_report_is_generated_and_classified() -> None:
 
     for row in payload["families"]:
         evidence = row["evidence"]
-        ungated_runtime = [
-            item
-            for item in evidence["runtimeInitialization"]
-            if item not in set(evidence["gatingConditions"])
-        ]
-        if evidence["mountedRoutes"] or ungated_runtime:
-            expected_status = "live"
-        elif evidence["runtimeInitialization"] or evidence["gatingConditions"]:
+        if row["family"] in EXPLICIT_STAGED_FAMILIES:
             expected_status = "staged"
-        elif evidence["importReachability"]:
-            expected_status = "shadow"
         else:
-            expected_status = "dead"
+            ungated_runtime = [
+                item
+                for item in evidence["runtimeInitialization"]
+                if item not in set(evidence["gatingConditions"])
+            ]
+            if evidence["mountedRoutes"] or ungated_runtime:
+                expected_status = "live"
+            elif evidence["runtimeInitialization"] or evidence["gatingConditions"]:
+                expected_status = "staged"
+            elif evidence["importReachability"]:
+                expected_status = "shadow"
+            else:
+                expected_status = "dead"
         assert row["status"] == expected_status
 
     families = {row["family"]: row for row in payload["families"]}
