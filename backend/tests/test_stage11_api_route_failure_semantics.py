@@ -114,7 +114,6 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "component_reliability_class": "stable",
             "component_reliability_reason_code": "ok",
             "component_reliability_reason_codes": [],
-            "component_reliability_next_action": "",
             "component_recovered_fragile": False,
             "recent_events": [],
         },
@@ -185,7 +184,10 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
         "sourceContracts": {},
     }
     assert calibration.status_code == 200
-    assert calibration.json() == {
+    calibration_body = calibration.json()
+    calibration_core = dict(calibration_body)
+    calibration_core.pop("summaryContract", None)
+    assert calibration_core == {
         "ok": False,
         "status": "degraded",
         "reason_code": "execution_calibration_failed",
@@ -209,9 +211,7 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "component_reliability_class": "stable",
             "component_reliability_reason_code": "ok",
             "component_reliability_reason_codes": [],
-            "component_reliability_next_action": "",
             "component_recovered_fragile": False,
-            "recent_events": [],
         },
         "auto_trade_recovery_view": {
             "blocked": False,
@@ -258,6 +258,26 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "reasonCodes": [],
             "suggestedNextAction": "",
         },
+    }
+    assert calibration_body["summaryContract"] == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "execution_calibration",
+        "readModel": "execution_calibration_summary_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "",
+        "capitalPolicyVersion": "",
+        "stateContract": {
+            "phase": "execution_calibration_summary",
+            "status": "degraded",
+            "reason_code": "execution_calibration_failed",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
     }
     assert system_execution_quality.status_code == 200
     assert system_execution_quality.json() == {
@@ -339,9 +359,7 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "component_reliability_class": "stable",
             "component_reliability_reason_code": "ok",
             "component_reliability_reason_codes": [],
-            "component_reliability_next_action": "",
             "component_recovered_fragile": False,
-            "recent_events": [],
         },
         "auto_trade_gate": {
             "allowed": True,
