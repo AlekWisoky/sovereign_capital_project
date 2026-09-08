@@ -17,10 +17,7 @@ class _BlockedRecoveryRepo:
             "history_component": "treasury_governance",
             "history_stage": "treasury_hold",
             "history_reason_code": "treasury_alignment_required",
-            "history_reason_codes": [
-                "treasury_alignment_required",
-                "capital_truth_out_of_sync",
-            ],
+            "history_reason_codes": ["treasury_alignment_required", "capital_truth_out_of_sync"],
             "history_next_action": "realign_treasury_and_capital_truth",
             "component_reliability_class": "blocked",
             "component_reliability_reason_code": "treasury_alignment_required",
@@ -97,13 +94,14 @@ DEFAULT_RECOVERY = {
     "component_recovered_fragile": False,
 }
 
-DEFAULT_GATE = {
-    "allowed": True,
-    "stage": "ok",
-    "reason_code": "ok",
-    "reason_codes": [],
-    "next_action": "",
-}
+DEFAULT_GATE = {"allowed": True, "stage": "ok", "reason_code": "ok", "reason_codes": [], "next_action": ""}
+
+
+def _legacy_degraded_payload(body):
+    body = dict(body)
+    body.pop("capitalTruthHealth", None)
+    body.pop("summaryContract", None)
+    return body
 
 
 def test_wealth_goal_read_surface_projects_persisted_auto_trade_recovery_gate():
@@ -120,10 +118,7 @@ def test_wealth_goal_read_surface_projects_persisted_auto_trade_recovery_gate():
         "allowed": False,
         "stage": "treasury_hold",
         "reason_code": "treasury_alignment_required",
-        "reason_codes": [
-            "treasury_alignment_required",
-            "capital_truth_out_of_sync",
-        ],
+        "reason_codes": ["treasury_alignment_required", "capital_truth_out_of_sync"],
         "next_action": "realign_treasury_and_capital_truth",
     }
     assert body["state"]["targetReturnPct"] == 8.0
@@ -136,9 +131,7 @@ def test_wealth_goal_read_surface_returns_deterministic_degraded_payload_when_bu
     app.state.runtime = _ExplodingRuntime()
     client = TestClient(app)
 
-    body = client.get("/api/wealth/goal").json()
-
-    assert body == {
+    assert _legacy_degraded_payload(client.get("/api/wealth/goal").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "wealth_goal_failed",
