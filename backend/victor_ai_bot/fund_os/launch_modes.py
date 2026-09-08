@@ -14,8 +14,11 @@ class LaunchMode(str, Enum):
     FULL_MULTI_STRATEGY = "FULL_MULTI_STRATEGY"
 
 
-DEFAULT_ACTIVATION_ORDER = [
-    "flash_arb",
+# The production V1 operating system has one reachable strategy family.
+# Additional strategies remain an explicit extension catalog and must not enter
+# V1 capital demand, bankroll, internal-prime, or rollout decisions implicitly.
+V1_ACTIVATION_ORDER = ["flash_arb"]
+FUTURE_ACTIVATION_ORDER = [
     "funding_arb",
     "cex_cex_arb",
     "liquidation_capture",
@@ -24,20 +27,18 @@ DEFAULT_ACTIVATION_ORDER = [
     "volatility_market_making",
     "treasury_yield",
 ]
+DEFAULT_ACTIVATION_ORDER = list(V1_ACTIVATION_ORDER)
 
 
 @dataclass
 class LaunchProfile:
     mode: str = LaunchMode.V1_ONLY.value
-    active_families: List[str] = field(default_factory=lambda: ["flash_arb"])
+    active_families: List[str] = field(default_factory=lambda: list(V1_ACTIVATION_ORDER))
     requested_families: List[str] = field(default_factory=list)
-    rollout_order: List[str] = field(default_factory=lambda: list(DEFAULT_ACTIVATION_ORDER))
+    rollout_order: List[str] = field(default_factory=lambda: list(V1_ACTIVATION_ORDER))
     family_states: Dict[str, str] = field(
         default_factory=lambda: {
-            family: (
-                HealthState.LIVE.value if family == "flash_arb" else HealthState.OBSERVE_ONLY.value
-            )
-            for family in DEFAULT_ACTIVATION_ORDER
+            "flash_arb": HealthState.LIVE.value,
         }
     )
     history: List[Dict[str, Any]] = field(default_factory=list)
