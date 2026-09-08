@@ -24,6 +24,9 @@ STATUS_DERIVATION = [
     "importReachability",
     "gatingConditions",
 ]
+# Explicit lifecycle policy: OMAR is mounted as a learning component but remains
+# staged until its production authority is intentionally promoted.
+EXPLICIT_STAGED_FAMILIES = {"omar"}
 
 CORE_EXCLUDES = {
     "agents",
@@ -86,7 +89,10 @@ class FamilyAccumulator:
         primary_reference_count = len(mounted) + len(runtime) + len(imports) + len(gating)
         supplemental_reference_count = len(tests) + len(docs_scripts)
 
-        if mounted or ungated_runtime:
+        if self.family in EXPLICIT_STAGED_FAMILIES:
+            status = "staged"
+            why = "Explicit lifecycle policy keeps this family staged until production authority is intentionally promoted."
+        elif mounted or ungated_runtime:
             status = "live"
             why = "Mounted routes or ungated runtime initialization establish live reachability."
         elif runtime or gating:
@@ -299,7 +305,7 @@ def build_optional_family_status() -> dict[str, Any]:
         "contractVersion": CONTRACT_VERSION,
         "classificationEngine": CLASSIFICATION_ENGINE,
         "statusDerivation": STATUS_DERIVATION,
-        "evidencePolicy": "status derives only from mounted routes, runtime initialization, import reachability, and gating conditions; tests and docs are supplemental evidence only",
+        "evidencePolicy": "status derives from mounted routes, runtime initialization, import reachability, gating conditions, and explicit lifecycle staging policy; tests and docs are supplemental evidence only",
         "summary": {
             "familyCount": len(rows),
             "statusCounts": status_counts,
