@@ -7,7 +7,7 @@ from .family_allocator import compute_dynamic_family_weights
 from .risk_controls import drawdown_contraction
 
 
-# Capital targets use canonical treasury/runtime family identifiers.  Aliases are
+# Capital targets use canonical treasury/runtime family identifiers. Aliases are
 # deliberately explicit so V1 cannot accidentally allocate to an unavailable family.
 _CAPITAL_FAMILY_ALIASES = {
     "flash_arb": "flashloan_atomic",
@@ -20,6 +20,7 @@ _CAPITAL_FAMILY_ALIASES = {
     "mev_search": "mev_search",
     "volatility_market_making": "volatility_event_overlay",
 }
+_DEFAULT_V1_ELIGIBLE_FAMILIES = ("flash_arb",)
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -27,7 +28,10 @@ def _clip(x: float, lo: float, hi: float) -> float:
 
 
 def family_targets(
-    *, regime: str, aggressiveness_level: str, eligible_families: Iterable[str] | None = None
+    *,
+    regime: str,
+    aggressiveness_level: str,
+    eligible_families: Iterable[str] | None = _DEFAULT_V1_ELIGIBLE_FAMILIES,
 ) -> Dict[str, float]:
     base = {
         "flashloan_atomic": 0.46,
@@ -68,8 +72,6 @@ def family_targets(
             for family in eligible_families
             if str(family)
         }
-        # An empty/unknown eligibility set is fail-closed rather than a reason to
-        # re-enable the historical multi-family target table.
         if not eligible:
             eligible = {"flashloan_atomic"}
         base = {key: value for key, value in base.items() if key in eligible}
@@ -89,7 +91,7 @@ def allocate_capital(
     scorecards: Dict[str, Any] | None = None,
     capital_metrics: Dict[str, Any] | None = None,
     covariance_penalties: Dict[str, float] | None = None,
-    eligible_families: Iterable[str] | None = None,
+    eligible_families: Iterable[str] | None = _DEFAULT_V1_ELIGIBLE_FAMILIES,
 ) -> Dict[str, Any]:
     buckets = default_buckets(drawdown_pct=drawdown_pct, aggressiveness_level=aggressiveness_level)
     cap = max(1, int(estimated_capital_wei))
@@ -118,8 +120,6 @@ def allocate_capital(
             capital_metrics=capital_metrics or {},
             covariance_penalties=covariance_penalties or {},
         )
-        # Dynamic weighting is allowed to re-rank eligible families, never to add
-        # an ineligible historical family back into the capital plan.
         if eligible_families is not None:
             eligible = {
                 _CAPITAL_FAMILY_ALIASES.get(str(family), str(family))
@@ -128,9 +128,8 @@ def allocate_capital(
             }
             if not eligible:
                 eligible = {"flashloan_atomic"}
-            fam_targets = {
-                key: value for key, value in fam_targets.items() if key in eligible
-            } or {"flashloan_atomic": 1.0}
+            fam_targets = {key: value for key, value in fam_targets.items() if key in eligible}
+            fam_targets = fam_targets or {"flashloan_atomic": 1.0}
             total = sum(max(0.0, float(value)) for value in fam_targets.values())
             fam_targets = {
                 key: round(max(0.0, float(value)) / max(1e-9, total), 6)
