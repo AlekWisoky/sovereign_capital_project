@@ -44,6 +44,7 @@ from .operator_summary_service import OperatorSummaryService
 from .opportunity_service import OpportunityService
 from .replay_service import ReplayService
 from .runtime_control_service import RuntimeControlService
+from .runtime_family_hardening_service import RuntimeFamilyHardeningService
 from .state_service import StateService
 from .state_summary_service import StateSummaryService
 from .treasury_service import TreasuryService
@@ -112,7 +113,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._fund_service = FundService()
     runtime._cio_service = CIOService()
     runtime._launch_service = LaunchService()
-    runtime._family_hardening_service = FamilyHardeningService()
+    runtime._family_hardening_service = RuntimeFamilyHardeningService()
     runtime._capital_truth_service = CapitalTruthService()
     runtime._capital_write_service = CanonicalCapitalWriteService()
     runtime._withdraw_all_service = WithdrawAllService(data_dir=data_dir, chain=cfg.chain.name)
