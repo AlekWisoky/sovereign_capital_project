@@ -41,14 +41,30 @@ def test_explicit_insecure_local_admin_opt_in(monkeypatch):
     assert r.status_code == 200
 
 
+class _LaunchService:
+    def enable_next(self, runtime, requested_family=''):
+        del runtime, requested_family
+        return {'ok': True, 'family': 'flash_arb'}
+
+
+class _LaunchRT:
+    _security_audit = None
+    _launch_service = _LaunchService()
+    cfg = type('Cfg', (), {'chain': type('C', (), {'name': 'eth'})()})()
+
+
 def test_launch_mutation_requires_admin_key(monkeypatch):
     monkeypatch.setenv('VICTOR_ADMIN_KEY', 'secret')
     from victor_ai_bot.server import app
+    # Exercise the real auth dependency and route registration, but isolate the
+    # mutation target so this security test cannot invoke the production launch
+    # rollout/context graph or start background runtime work.
+    monkeypatch.setattr(app.state, 'runtime', _LaunchRT(), raising=False)
     client = TestClient(app)
     denied = client.post('/api/launch/enable-next')
     assert denied.status_code == 401
     allowed = client.post('/api/launch/enable-next', headers={'X-Admin-Key': 'secret'})
-    assert allowed.status_code in {200, 401}
+    assert allowed.status_code == 200
 
 
 class _ExplodingAuditStore:
