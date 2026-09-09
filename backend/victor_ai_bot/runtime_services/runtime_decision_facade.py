@@ -7,6 +7,7 @@ from typing import Any, Awaitable, List, Optional
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
 from ..rpc import JsonRpcClient
+from .capital_demand import CapitalDemand, compose_capital_demand
 from .profitability_truth import inspect_profit_after_costs_truth, opportunity_profit_sort_key
 
 _SAFE_DECISION_EXCEPTIONS = (
@@ -55,6 +56,7 @@ class RuntimeDecisionFacade:
     _spread_last: dict[str, Any]
     _engine_last: dict[str, Any]
     _state_lock: Any
+    _last_capital_demand: CapitalDemand | None
 
     def capital_engine_state(self) -> dict[str, Any]:
         raise NotImplementedError
@@ -124,23 +126,52 @@ class RuntimeDecisionFacade:
     ) -> Optional[Any]:
         capital_budget_remaining_wei = None
         family_capital_remaining_wei: dict[str, int] = {}
+        self._last_capital_demand = None
         try:
             capital_state = (
                 self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
             )
-            capital_engine = dict((capital_state or {}).get("capital_engine") or {})
-            raw_capital_budget = capital_engine.get("deployable_bankroll_wei")
-            if raw_capital_budget not in (None, ""):
-                capital_budget_remaining_wei = _coerce_nonnegative_int(raw_capital_budget, None)
-            family_capital_remaining_wei = {
-                str(k): int(parsed_value)
-                for k, raw_value in dict(capital_engine.get("family_allocations_wei") or {}).items()
-                if str(k or "")
-                if (parsed_value := _coerce_nonnegative_int(raw_value, None)) is not None
-            }
+            prime_state = {}
+            try:
+                prime_state = self.internal_prime_state() if hasattr(self, "internal_prime_state") else {}
+            except _SAFE_DECISION_EXCEPTIONS:
+                prime_state = {}
+            goal_state = {}
+            try:
+                goal_state = self.wealth_goal_state() if hasattr(self, "wealth_goal_state") else {}
+            except _SAFE_DECISION_EXCEPTIONS:
+                goal_state = {}
+
+            demand = compose_capital_demand(
+                opps,
+                capital_engine_state=capital_state,
+                internal_prime_state=prime_state,
+                wealth_goal_state=goal_state,
+            )
+            self._last_capital_demand = demand
+            capital_budget_remaining_wei = demand.authorized_bankroll_wei
+            family_capital_remaining_wei = dict(demand.family_caps_wei)
         except _SAFE_DECISION_EXCEPTIONS:
-            capital_budget_remaining_wei = None
-            family_capital_remaining_wei = {}
+            # Preserve the existing fail-safe behavior: if the additive composer
+            # cannot read an optional authority, fall back to the canonical
+            # capital-engine inputs rather than inventing capacity.
+            try:
+                capital_state = (
+                    self.capital_engine_state() if hasattr(self, "capital_engine_state") else {}
+                )
+                capital_engine = dict((capital_state or {}).get("capital_engine") or {})
+                raw_capital_budget = capital_engine.get("deployable_bankroll_wei")
+                if raw_capital_budget not in (None, ""):
+                    capital_budget_remaining_wei = _coerce_nonnegative_int(raw_capital_budget, None)
+                family_capital_remaining_wei = {
+                    str(k): int(parsed_value)
+                    for k, raw_value in dict(capital_engine.get("family_allocations_wei") or {}).items()
+                    if str(k or "")
+                    if (parsed_value := _coerce_nonnegative_int(raw_value, None)) is not None
+                }
+            except _SAFE_DECISION_EXCEPTIONS:
+                capital_budget_remaining_wei = None
+                family_capital_remaining_wei = {}
         try:
             return self._decision.annotate_and_decide(
                 opps,
