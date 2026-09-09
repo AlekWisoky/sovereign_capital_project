@@ -65,6 +65,7 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
     system_body = system_execution_quality.json()
     assert system_body["ok"] is False and system_body["reason_code"] == "system_execution_quality_failed"
     assert system_body["calibration"] == {"items": []}
+    assert system_body["auto_trade_recovery"]["recent_events"] == []
 
     monkeypatch.setattr(app.state, "runtime", _RiskLiveStateRuntime(), raising=False)
     risk_live = client.get("/api/risk/live-state"); risk_body = risk_live.json()
