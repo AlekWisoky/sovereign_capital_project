@@ -87,10 +87,8 @@ def _treasury_has_goal(rt: object) -> bool:
 
 
 def _capital_projection(rt: object) -> dict[str, object]:
-    if getattr(rt, "_treasury", None) is None:
+    if getattr(rt, "_treasury", None) is None and not callable(getattr(rt, "capital_engine_state", None)):
         return _capital_engine_unavailable()
-    if not _treasury_has_goal(rt):
-        return _treasury_unavailable()
     capital_state = getattr(rt, "capital_engine_state", None)
     if not callable(capital_state):
         return _capital_engine_unavailable()
@@ -108,7 +106,7 @@ def _capital_projection(rt: object) -> dict[str, object]:
 
 
 def _treasury_state_projection(rt: object) -> dict[str, object]:
-    if not _treasury_has_goal(rt) or not callable(getattr(rt, "treasury_state", None)):
+    if not callable(getattr(rt, "treasury_state", None)) and getattr(rt, "_treasury", None) is None:
         return _treasury_state_unavailable()
     return with_auto_trade_route_projection(
         attach_summary_contract(AuxiliaryStateService().treasury_state(rt, capital_truth=AuxiliaryStateService().capital_truth(rt)), family="treasury_state", read_model="treasury_state_projection_v1", runtime=rt),
