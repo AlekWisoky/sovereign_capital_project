@@ -371,7 +371,29 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
     monkeypatch.setattr(app.state, "runtime", _AgentRuntime(), raising=False)
     agent_state = client.get("/api/agents/state")
     attribution = client.get("/api/agents/attribution")
-    assert agent_state.json() == {
+    agent_state_body = agent_state.json()
+    agent_state_contract = agent_state_body.pop("summaryContract")
+    assert agent_state_contract == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "agent_hub",
+        "readModel": "agent_hub_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "canonical_capital_summary_v1",
+        "capitalPolicyVersion": "capital_policy_v1",
+        "stateContract": {
+            "phase": "agent_hub_summary",
+            "status": "degraded",
+            "reason_code": "agent_hub_state_failed",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
+    }
+    assert agent_state_body == {
         "ok": False,
         "status": "degraded",
         "reason_code": "agent_hub_state_failed",
@@ -381,7 +403,29 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
         "attribution": {"agents": []},
         "weights": {},
     }
-    assert attribution.json() == {
+    attribution_body = attribution.json()
+    attribution_contract = attribution_body.pop("summaryContract")
+    assert attribution_contract == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "agent_attribution",
+        "readModel": "agent_attribution_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "canonical_capital_summary_v1",
+        "capitalPolicyVersion": "capital_policy_v1",
+        "stateContract": {
+            "phase": "agent_attribution_summary",
+            "status": "degraded",
+            "reason_code": "agent_attribution_failed",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
+    }
+    assert attribution_body == {
         "ok": False,
         "status": "degraded",
         "reason_code": "agent_attribution_failed",
@@ -392,7 +436,29 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
 
     monkeypatch.setattr(app.state, "runtime", _StrategyRuntime(), raising=False)
     scorecards = client.get("/api/strategies/scorecards")
-    assert scorecards.json() == {
+    scorecards_body = scorecards.json()
+    scorecards_contract = scorecards_body.pop("summaryContract")
+    assert scorecards_contract == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "strategy_scorecards",
+        "readModel": "strategy_scorecards_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "canonical_capital_summary_v1",
+        "capitalPolicyVersion": "capital_policy_v1",
+        "stateContract": {
+            "phase": "strategy_scorecards_summary",
+            "status": "degraded",
+            "reason_code": "strategy_scorecards_failed",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
+    }
+    assert scorecards_body == {
         "ok": False,
         "status": "degraded",
         "reason_code": "strategy_scorecards_failed",
