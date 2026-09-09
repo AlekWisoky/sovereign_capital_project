@@ -19,14 +19,15 @@ class _RouteErrorRuntime:
         raise RuntimeError("meta_state_unavailable")
 
 
-
 def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch):
     monkeypatch.setattr(app.state, "runtime", _RouteErrorRuntime(), raising=False)
     client = TestClient(app)
 
     agent_state = client.get("/api/agents/state")
     assert agent_state.status_code == 200
-    assert agent_state.json() == {
+    agent_body = agent_state.json()
+    agent_contract = agent_body.pop("summaryContract")
+    assert agent_body == {
         "ok": False,
         "status": "degraded",
         "reason_code": "agent_hub_state_failed",
@@ -36,6 +37,10 @@ def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch
         "attribution": {"agents": []},
         "weights": {},
     }
+    assert agent_contract["contractVersion"] == "canonical_summary_read_contract_v1"
+    assert agent_contract["truthFamily"] == "agent_hub_state"
+    assert agent_contract["readModel"] == "agent_hub_state_projection_v1"
+    assert agent_contract["stateContract"]["reason_code"] == "agent_hub_state_failed"
 
     attribution = client.get("/api/agents/attribution")
     assert attribution.status_code == 200
@@ -72,7 +77,9 @@ def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch
 
     candidates = client.get("/api/meta/candidates")
     assert candidates.status_code == 200
-    assert candidates.json() == {
+    candidates_body = candidates.json()
+    candidates_contract = candidates_body.pop("summaryContract")
+    assert candidates_body == {
         "ok": False,
         "status": "degraded",
         "reason_code": "meta_candidates_failed",
@@ -81,3 +88,7 @@ def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch
         "items": [],
         "candidates": [],
     }
+    assert candidates_contract["contractVersion"] == "canonical_summary_read_contract_v1"
+    assert candidates_contract["truthFamily"] == "meta_candidates"
+    assert candidates_contract["readModel"] == "meta_candidates_projection_v1"
+    assert candidates_contract["stateContract"]["reason_code"] == "meta_candidates_failed"
