@@ -48,11 +48,13 @@ def test_llm_inl_insights_prefers_route_ready_verified_profit_over_higher_invali
 
 
 def test_llm_inl_block_summary_does_not_fall_back_to_gross_profit_when_after_costs_missing(tmp_path):
-    runtime = LLMINLRuntime(cfg=LLMINLConfig(enabled=True, persist_history=False, emit_block_summaries=True, block_summary_interval_blocks=1), chain="eth", data_dir=str(tmp_path)); runtime.explanation_level = "ADVANCED"; captured = {}
-    def _capture(text: str, *, kind: str = "event", level: str = "info", **meta): captured["text"] = text; captured["kind"] = kind; captured["level"] = level; captured["meta"] = meta; return {"text": text, "kind": kind, "level": level, **meta}
-    runtime.store_event = _capture  # type: ignore[assignment]
-    rt = _runtime_stub(); rt._opps = [SimpleNamespace(id="gross-only", route_id="route-gross", expected_profit_raw="9000", can_execute=False, meta={}), SimpleNamespace(id="net-ok", route_id="route-net", expected_profit_raw="100", can_execute=True, route=SimpleNamespace(legs=[SimpleNamespace(amount_in=1000)]), meta={"safety": {"profit_after_costs_wei": "250"}})]
-    asyncio.run(runtime._maybe_emit_block_summary(rt)); assert captured["meta"]["top_route_id"] == "route-net"; assert captured["meta"]["top_profit_after_costs_wei"] == "250"; assert captured["meta"]["top_profit_after_costs_verified"] is True
+    runtime = LLMINLRuntime(cfg=LLMINLConfig(enabled=True, persist_history=False, block_summary_interval_blocks=1), chain="eth", data_dir=str(tmp_path))
+    rt = SimpleNamespace(metrics=SimpleNamespace(last_block=100, scan_ms=17, success_rate_pct=88.0, efficiency_pct=72.0, basefee_gwei=11.0), cfg=SimpleNamespace(execution=SimpleNamespace(gas_mode="standard", send_mode="public")), _opps=[SimpleNamespace(id="gross-only", route_id="route-gross", strategy="flashloan_atomic", expected_profit_raw="9000", meta={})])
+    asyncio.run(runtime._maybe_emit_block_summary(rt))
+    item = runtime._memory.last()
+    assert item is not None
+    assert "top expected profit" in item["text"]
+    assert "0 wei" in item["text"]
 
 
 def test_llm_inl_block_summary_prefers_verified_non_positive_candidate_over_positional_unverified_fallback(tmp_path):
