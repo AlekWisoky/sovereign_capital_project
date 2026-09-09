@@ -45,7 +45,13 @@ def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch
 
     scorecards = client.get("/api/strategies/scorecards")
     assert scorecards.status_code == 200
-    assert scorecards.json() == {"ok": False, "status": "degraded", "reason_code": "strategy_scorecards_failed", "reason": "strategy_scorecards_failed", "error": "strategy_scorecards_failed", "families": []}
+    scorecards_body = scorecards.json()
+    scorecards_contract = scorecards_body.pop("summaryContract")
+    assert scorecards_body == {"ok": False, "status": "degraded", "reason_code": "strategy_scorecards_failed", "reason": "strategy_scorecards_failed", "error": "strategy_scorecards_failed", "families": []}
+    assert scorecards_contract["contractVersion"] == "canonical_summary_read_contract_v1"
+    assert scorecards_contract["truthFamily"] == "strategy_scorecards"
+    assert scorecards_contract["readModel"] == "strategy_scorecards_projection_v1"
+    assert scorecards_contract["stateContract"]["reason_code"] == "strategy_scorecards_failed"
 
     evolution = client.get("/api/evolution/state")
     assert evolution.status_code == 200
