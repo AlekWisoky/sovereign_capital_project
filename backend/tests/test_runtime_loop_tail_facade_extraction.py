@@ -121,3 +121,29 @@ def test_run_loop_iteration_tail_broadcasts_records_and_sleeps(monkeypatch):
     assert runtime.metrics.last_tick_ms == 1000
     assert runtime.metrics.db_latency_ms == 1.5
     assert sleeps == [0.1]
+
+
+class _Queue:
+    def __init__(self):
+        self.items = []
+
+    def put_nowait(self, item):
+        self.items.append(item)
+
+
+class _BroadcastRuntime(RuntimeLoopTailFacade):
+    def __init__(self):
+        self._ws_clients = [_Queue()]
+
+    async def snapshot(self):
+        return {"chain": "ethereum", "metrics": {"last_block": 123}}
+
+
+def test_broadcast_publishes_state_snapshot_to_operator_queue():
+    runtime = _BroadcastRuntime()
+
+    asyncio.run(runtime._broadcast())
+
+    assert runtime._ws_clients[0].items == [
+        {"type": "state", "data": {"chain": "ethereum", "metrics": {"last_block": 123}}}
+    ]
