@@ -78,7 +78,7 @@ class RuntimeStateFacade:
     def agent_attribution_state(self) -> Dict[str, Any]: return self._state_summary_payload("agent_attribution", default={"agents": []})
     def engine_state(self) -> Dict[str, Any]: return to_json_safe(dict(getattr(self, "_engine_last", {}) or {"items": [], "capabilities": {}, "summary": {"engines": []}}))
     def capital_engine_state(self) -> Dict[str, Any]: return self._state_summary_payload("capital_engine", default={"capital_engine": {}, "reinvestment_policy": {}, "capital_efficiency_metrics": {}})
-    def fund_summary_state(self) -> Dict[str, Any]: return self._state_summary_payload("fund_summary", default={}, default_factory=lambda: fund_summary_unavailable_payload(self))
+    def fund_summary_state(self) -> Dict[str, Any]: return self._state_summary_payload("fund_summary", default={}, default_factory=lambda: fund_summary_unavailable_payload(None))
     def research_pipeline_state(self) -> Dict[str, Any]: return self._auxiliary_state_payload("research_pipeline_state", default={"items": [], "pipelineCounts": {}, "throughput": {}})
     def doctrine_state(self) -> Dict[str, Any]: return self._auxiliary_state_payload("doctrine_state", default={"optimizationObjectives": {}})
     def ledger_state(self) -> Dict[str, Any]: return self._auxiliary_state_payload("ledger_state", default={"balances": {}, "tail": [], "transactions": []})
