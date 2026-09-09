@@ -16,7 +16,6 @@ class _EvolutionRuntime:
 
 def test_system_truth_excludes_private_helper_modules_and_exposes_canonical_counts():
     truth = build_system_truth()
-
     assert '_route_helpers' not in truth['api_route_modules']
     assert truth['runtime_service_module_count'] == truth['runtime_service_count']
     assert truth['api_route_module_count'] == len(truth['api_route_modules'])
@@ -24,11 +23,8 @@ def test_system_truth_excludes_private_helper_modules_and_exposes_canonical_coun
 
 
 def test_generated_docs_match_live_truth_for_service_inventory_counts():
-    docs_truth = json.loads(
-        (Path(__file__).resolve().parents[2] / 'docs' / 'generated' / 'system_truth.json').read_text(encoding='utf-8')
-    )
+    docs_truth = json.loads((Path(__file__).resolve().parents[2] / 'docs' / 'generated' / 'system_truth.json').read_text(encoding='utf-8'))
     truth = build_system_truth()
-
     assert docs_truth['api_route_modules'] == truth['api_route_modules']
     assert docs_truth['api_route_module_count'] == truth['api_route_module_count']
     assert docs_truth['runtime_services'] == truth['runtime_services']
@@ -38,16 +34,19 @@ def test_generated_docs_match_live_truth_for_service_inventory_counts():
 
 def test_evolution_route_returns_deterministic_error_payload(monkeypatch):
     monkeypatch.setattr(app.state, 'runtime', _EvolutionRuntime(), raising=False)
-    client = TestClient(app)
-
-    resp = client.get('/api/evolution/state')
-
+    resp = TestClient(app).get('/api/evolution/state')
     assert resp.status_code == 200
-    assert resp.json() == {
-        'ok': False,
-        'status': 'degraded',
-        'reason_code': 'meta_state_failed',
-        'reason': 'meta_state_failed',
-        'error': 'meta_state_failed',
-        'enabled': False,
+    body = resp.json()
+    core = dict(body); contract = core.pop('summaryContract')
+    assert core == {'ok': False, 'status': 'degraded', 'reason_code': 'meta_state_failed', 'reason': 'meta_state_failed', 'error': 'meta_state_failed', 'enabled': False}
+    assert contract == {
+        'ok': True,
+        'contractVersion': 'canonical_summary_read_contract_v1',
+        'truthFamily': 'evolution_state',
+        'readModel': 'evolution_state_projection_v1',
+        'synthesized': True,
+        'capitalContractVersion': 'canonical_capital_summary_v1',
+        'capitalPolicyVersion': 'capital_policy_v1',
+        'stateContract': {'phase': 'evolution_state_summary', 'status': 'degraded', 'reason_code': 'meta_state_failed', 'degraded': True, 'blocked': False, 'denied': False, 'sticky_cycle': True, 'details': {}},
+        'sourceContracts': {},
     }
