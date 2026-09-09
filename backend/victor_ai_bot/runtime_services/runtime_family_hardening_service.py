@@ -5,6 +5,21 @@ from typing import Any, Dict
 from .family_hardening_service import FamilyHardeningService as _FamilyHardeningService
 
 
+class _NonRecursiveFamilyHardeningRuntimeProxy:
+    """Delegate runtime reads but keep family hardening from re-entering capital truth."""
+
+    def __init__(self, runtime: Any):
+        self._runtime = runtime
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._runtime, name)
+
+    def capital_truth_state(self) -> Dict[str, Any]:
+        # Family hardening is a dependency of the capital-truth summary. Asking
+        # for capital truth here would recurse through launch -> family hardening.
+        return {}
+
+
 class RuntimeFamilyHardeningService(_FamilyHardeningService):
     """Runtime-safe family hardening view that avoids launch/fund summary recursion."""
 
@@ -61,10 +76,11 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
 
         fund_summary = {
             "fundStage": stage,
-            "capitalReady": bool(capital_state.get("capital_engine")) if isinstance(capital_state, dict) else False,
+            "capitalReady": bool(capital_state.get("capital_engine"))
+            if isinstance(capital_state, dict)
+            else False,
             "internalPrimeReady": bool((internal_prime or {}).get("stateReady", True)),
             "privateRoutingReady": True,
-            # Do not consult this service's own status while it is being computed.
             "familyHardeningStatus": "ok",
             "familyHardeningReasonCodes": [],
             "drawdownState": drawdown,
@@ -77,7 +93,9 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
                 if hasattr(runtime, "strategy_scorecards_state")
                 else {"families": []}
             ),
-            "engine_state": runtime.engine_state() if hasattr(runtime, "engine_state") else {},
+            "engine_state": runtime.engine_state()
+            if hasattr(runtime, "engine_state")
+            else {},
             "telemetry": (
                 runtime.telemetry_summary() if hasattr(runtime, "telemetry_summary") else {}
             ),
@@ -113,3 +131,11 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
             ),
             "capital_state": capital_state,
         }
+
+    def family_state(self, runtime: Any, family: str) -> Dict[str, Any]:
+        # The base implementation performs capital_truth_state() after
+        # readiness. During capital-truth/launch evaluation that is the exact
+        # edge that re-enters family hardening. Cut only that edge.
+        return super().family_state(
+            _NonRecursiveFamilyHardeningRuntimeProxy(runtime), family
+        )
