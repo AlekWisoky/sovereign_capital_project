@@ -47,7 +47,6 @@ class _NoTreasuryStateRuntime:
         self._treasury = _Treasury(_Goal())
 
 
-
 def test_wealth_goal_fallback_read_surface_is_canonical():
     app = FastAPI()
     app.include_router(wealth_router)
@@ -70,7 +69,6 @@ def test_wealth_goal_fallback_read_surface_is_canonical():
     assert body['recommendation']['target_return_pct'] >= 8.0
 
 
-
 def test_wealth_goal_read_fails_closed_when_goal_missing():
     app = FastAPI()
     app.include_router(wealth_router)
@@ -87,7 +85,6 @@ def test_wealth_goal_read_fails_closed_when_goal_missing():
     assert body['goal'] is None
     assert body['state'] == {}
     assert body['history'] == []
-
 
 
 def test_treasury_goal_read_surface_is_canonical():
@@ -109,8 +106,7 @@ def test_treasury_goal_read_surface_is_canonical():
     assert state['allocator'] == 'treasury'
 
 
-
-def test_treasury_read_surfaces_fail_closed_when_state_or_goal_missing():
+def test_treasury_state_synthesizes_from_canonical_treasury_when_runtime_state_method_is_missing():
     app = FastAPI()
     app.include_router(treasury_router)
     runtime = _NoTreasuryStateRuntime()
@@ -119,9 +115,9 @@ def test_treasury_read_surfaces_fail_closed_when_state_or_goal_missing():
     client = TestClient(app)
 
     state = client.get('/api/treasury/state').json()
-    assert state['ok'] is False
-    assert state['status'] == 'unavailable'
-    assert state['reason_code'] == 'treasury_state_unavailable'
+    assert state['ok'] is True
+    assert state['status'] in {'available', 'degraded'}
+    assert state['enabled'] is True
 
     runtime._treasury.cfg.goal = None
     goal = client.get('/api/treasury/goal').json()
