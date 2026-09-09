@@ -444,8 +444,8 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
         "truthFamily": "strategy_scorecards",
         "readModel": "strategy_scorecards_projection_v1",
         "synthesized": True,
-        "capitalContractVersion": "canonical_capital_summary_v1",
-        "capitalPolicyVersion": "capital_policy_v1",
+        "capitalContractVersion": "",
+        "capitalPolicyVersion": "",
         "stateContract": {
             "phase": "strategy_scorecards_summary",
             "status": "degraded",
