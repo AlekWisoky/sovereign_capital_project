@@ -90,3 +90,23 @@ class RuntimeConstructorFacade:
         self._exec_task: asyncio.Task | None = None
         self._auto_queue = []
         self._auto_queue_block = 0
+
+        # The constructor is the production bootstrap boundary. Install the
+        # canonical settlement interface plus identity/learning bridges here so
+        # the real RuntimeBundle path does not depend on test-only installation.
+        try:
+            from ..omar.lifecycle_bridge import install_omar_lifecycle_hooks
+            from ..omar.production_lineage_bridge import install_production_lineage_bridge
+            from .canonical_settlement_interface import (
+                install_canonical_settlement_bridge,
+                install_canonical_settlement_interface,
+            )
+
+            install_canonical_settlement_interface()
+            install_canonical_settlement_bridge()
+            install_production_lineage_bridge()
+            install_omar_lifecycle_hooks()
+        except (AttributeError, ImportError, KeyError, RuntimeError, TypeError, ValueError):
+            # Bridge installation is additive; it must never make the runtime
+            # constructor unavailable when an optional learning component fails.
+            pass

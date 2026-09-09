@@ -39,7 +39,7 @@ def _patch_decision_identity() -> None:
         return
 
     def wrapped(self: Any, opp: Any, decision: Any | None, *, current_block: int):
-        ensure_decision_identity(
+        identity = ensure_decision_identity(
             opp,
             decision,
             chain_name=_text(
@@ -49,7 +49,23 @@ def _patch_decision_identity() -> None:
             ),
             current_block=int(current_block),
         )
-        return original(self, opp, decision, current_block=current_block)
+        omar = getattr(self, "_omar", None)
+        observe_decision = getattr(omar, "observe_decision", None) if omar is not None else None
+        if not callable(observe_decision):
+            return original(self, opp, decision, current_block=current_block)
+
+        def canonical_observe_decision(*args: Any, **kwargs: Any):
+            if "decision_id" in kwargs:
+                kwargs["decision_id"] = identity.decision_id
+            elif args:
+                args = (identity.decision_id, *args[1:])
+            return observe_decision(*args, **kwargs)
+
+        omar.observe_decision = canonical_observe_decision
+        try:
+            return original(self, opp, decision, current_block=current_block)
+        finally:
+            omar.observe_decision = observe_decision
 
     wrapped._production_identity_patched = True
     RuntimeDecisionFacade._apply_omar_to_candidate = wrapped
