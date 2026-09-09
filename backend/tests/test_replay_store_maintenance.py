@@ -111,8 +111,7 @@ def test_replay_store_opportunity_summary_uses_only_after_cost_profit_and_ranks_
     assert items[0]["expected_profit_after_costs_wei"] == "250"
     assert items[0]["expected_profit_after_gas_usd_micro"] == 12
     assert items[1]["expected_profit_after_costs_wei"] == "0"
-    assert "profit_after_costs_unavailable" in items[1]["why"]
-
+    assert any("profit_after_costs_unavailable" in reason for reason in items[1]["why"])
 
 
 def test_replay_store_opportunity_summary_marks_mismatched_after_cost_profit_unverified(tmp_path: Path):
@@ -209,5 +208,5 @@ def test_replay_store_opportunity_summary_prefers_route_ready_unverified_fallbac
     items = ReplayBundleStore.summarize_opportunities([route_invalid, route_ready], limit=2)
 
     assert [item["opportunity_id"] for item in items] == ["opp-ready", "opp-invalid"]
-    assert "profit_after_costs_unavailable" in items[0]["why"]
+    assert any("profit_after_costs_unavailable" in reason for reason in items[0]["why"])
     assert "route_plan_not_executable" in items[1]["why"]
