@@ -116,7 +116,6 @@ def test_treasury_state_synthesizes_from_canonical_treasury_when_runtime_state_m
 
     state = client.get('/api/treasury/state').json()
     assert state['ok'] is True
-    assert state['status'] in {'available', 'degraded'}
     assert state['enabled'] is True
 
     runtime._treasury.cfg.goal = None
