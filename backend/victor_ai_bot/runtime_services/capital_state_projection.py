@@ -47,9 +47,9 @@ def build_capital_ledger_truth_projection(
     transactions = list(ledger.get("transactions") or [])
     internal_prime = _safe_dict(summary.get("internalPrime"))
     last_settlement = _safe_dict(summary.get("lastSettlement"))
-    if not last_settlement:
+    if not (last_settlement.get("receiptId") or last_settlement.get("transactionId")):
         last_settlement = _safe_dict(truth_projection.get("lastSettlement"))
-    if not last_settlement:
+    if not (last_settlement.get("receiptId") or last_settlement.get("transactionId")):
         for candidate in reversed([*tail, *transactions]):
             item = _safe_dict(candidate)
             receipt_id = str(item.get("receipt_id") or item.get("receiptId") or "")
