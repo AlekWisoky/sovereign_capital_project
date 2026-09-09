@@ -283,16 +283,30 @@ class RuntimeStateFacade:
         )
 
     def capital_truth(self):
-        return self._auxiliary_state_service.capital_truth(self)
+        service = getattr(self, "_auxiliary_state_service", None)
+        if service is None or not hasattr(service, "capital_truth"):
+            return self._unavailable_state("capital_truth_service_unavailable")
+        try:
+            return service.capital_truth(self)
+        except _RUNTIME_STATE_FACADE_FAILURES:
+            return self._unavailable_state("capital_truth_service_unavailable")
 
     def capital_summary(self) -> Dict[str, Any]:
-        return self.capital_truth().capital_summary
+        truth = self.capital_truth()
+        return to_json_safe(getattr(truth, "capital_summary", truth))
 
     def capital_contract(self) -> Dict[str, Any]:
-        return self.capital_truth().capital_contract
+        truth = self.capital_truth()
+        return to_json_safe(getattr(truth, "capital_contract", {}))
 
     def capital_policy(self) -> Dict[str, Any]:
-        return self._auxiliary_state_service.capital_policy(self)
+        service = getattr(self, "_auxiliary_state_service", None)
+        if service is None or not hasattr(service, "capital_policy"):
+            return {}
+        try:
+            return to_json_safe(service.capital_policy(self))
+        except _RUNTIME_STATE_FACADE_FAILURES:
+            return {}
 
     def capital_truth_state(self) -> Dict[str, Any]:
         return self._service_payload(
@@ -328,146 +342,3 @@ class RuntimeStateFacade:
             return to_json_safe(decision.brain_state())
         except _RUNTIME_STATE_FACADE_FAILURES:
             return {}
-
-    def unified_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "unified_state",
-            default=self._unavailable_state("unified_state_unavailable", extra={"enabled": False}),
-        )
-
-    def spread_opportunities(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "spread_opportunities",
-            default=self._unavailable_state(
-                "spread_opportunities_unavailable",
-                extra={"count": 0, "opps": []},
-            ),
-        )
-
-    def consensus_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "consensus_state",
-            default=self._unavailable_state("consensus_state_unavailable", extra={"last": {}}),
-        )
-
-    def orchestrator_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "orchestrator_state",
-            default=self._unavailable_state(
-                "orchestrator_state_unavailable", extra={"enabled": False}
-            ),
-        )
-
-    def behaveagent_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "behaveagent_state",
-            default=self._unavailable_state(
-                "behaveagent_state_unavailable", extra={"enabled": False}
-            ),
-        )
-
-    def treasury_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload("treasury_state", default={})
-
-    def governance_layer_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "governance_layer_state",
-            default=self._unavailable_state(
-                "governance_layer_unavailable", extra={"enabled": False}
-            ),
-        )
-
-    def blockspace_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "blockspace_state",
-            default=self._unavailable_state(
-                "blockspace_state_unavailable", extra={"enabled": False}
-            ),
-        )
-
-    def quicksight_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "quicksight_state",
-            default=self._unavailable_state(
-                "quicksight_unavailable", extra={"enabled": False}, include_error=True
-            ),
-        )
-
-    def quicksight_dataset(self, name: str) -> Dict[str, Any]:
-        dataset = str(name)
-        return self._auxiliary_state_payload(
-            "quicksight_dataset",
-            default=self._unavailable_state(
-                "quicksight_unavailable",
-                extra={"dataset": dataset, "rows": []},
-                include_error=True,
-            ),
-            args=(dataset,),
-        )
-
-    def quicksight_dashboards(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "quicksight_dashboards",
-            default=self._unavailable_state(
-                "quicksight_unavailable", extra={"dashboards": []}, include_error=True
-            ),
-        )
-
-    def quicksight_ask(
-        self, question: str, role: str = "EXECUTIVE_VIEW", token: str = ""
-    ) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "quicksight_ask",
-            default=self._unavailable_state("quicksight_unavailable", include_error=True),
-            kwargs={"question": str(question), "role": str(role), "token": str(token)},
-        )
-
-    def quicksight_scenario(
-        self, params: Dict[str, Any], role: str = "RISK_MANAGER", token: str = ""
-    ) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "quicksight_scenario",
-            default=self._unavailable_state("quicksight_unavailable", include_error=True),
-            kwargs={"params": dict(params or {}), "role": str(role), "token": str(token)},
-        )
-
-    def agent_hub_state(self) -> Dict[str, Any]:
-        return self._auxiliary_state_payload(
-            "agent_hub_state",
-            default=self._unavailable_state("agent_hub_state_unavailable", extra={"state": {}}),
-            kwargs={"agent_attribution": self.agent_attribution_state()},
-        )
-
-    def _public_mode_for_capture(self) -> bool:
-        return service_public_mode_for_capture(self)
-
-    def service_health_state(self) -> Dict[str, Any]:
-        return self._state_summary_payload(
-            "service_health",
-            default={
-                "admission": self._unavailable_state("admission_service_unavailable"),
-                "execution": self._unavailable_state("execution_service_unavailable"),
-                "receipt": self._unavailable_state("receipt_service_unavailable"),
-                "telemetry": self._unavailable_state("telemetry_service_unavailable"),
-            },
-        )
-
-    def capital_explain(self, snapshot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return self._state_summary_payload(
-            "capital_explain",
-            default=self._unavailable_state(
-                "capital_explanation_unavailable",
-                extra={"facts": {}, "causal": {}},
-                include_reason=False,
-                include_text=True,
-            ),
-            kwargs={"snapshot": snapshot or {}},
-        )
-
-    def analytics_state(self) -> Dict[str, Any]:
-        return self._state_summary_payload(
-            "analytics",
-            default=self._unavailable_state(
-                "analytics_service_unavailable", include_reason=False, include_error=True
-            ),
-        )

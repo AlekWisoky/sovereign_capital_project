@@ -1,5 +1,6 @@
 backend/mypy_targets/base_api_runtime.txt
 backend/mypy_targets/core_trading_capital.txt
+backend/mypy_targets/decision_engine_baseline.txt
 backend/mypy_targets/governance_reporting.txt
 backend/mypy_targets/auxiliary_dashboard_readiness.txt
 backend/mypy_targets/dashboard_auxiliary_capital_lifecycle.txt

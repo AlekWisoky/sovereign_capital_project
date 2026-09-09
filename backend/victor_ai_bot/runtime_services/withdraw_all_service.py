@@ -812,11 +812,8 @@ class WithdrawAllService:
     def _ledger_event(self, runtime: Any, *, event: str, metadata: Dict[str, Any]) -> None:
         ledger = getattr(runtime, "_ledger", None)
         repo = getattr(runtime, "_ledger_repo", None)
-        chain = str(
-            getattr(getattr(runtime, "cfg", None), "chain", None).name
-            if getattr(getattr(runtime, "cfg", None), "chain", None) is not None
-            else "default"
-        )
+        chain_cfg = getattr(getattr(runtime, "cfg", None), "chain", None)
+        chain = str(getattr(chain_cfg, "name", "default") or "default")
         if ledger is None or not hasattr(ledger, "append_transaction"):
             return
         metadata_payload = dict(metadata or {})
@@ -1308,25 +1305,25 @@ class WithdrawAllService:
         preview_id = str(raw_payload.get("preview_id") or "")
         confirm_text = str(raw_payload.get("confirm_text") or "")
         if not preview_id or preview_id != str(state.get("last_preview_id") or ""):
-            result = {"ok": False, "reason_code": "preview_id_mismatch"}
+            blocked_result = {"ok": False, "reason_code": "preview_id_mismatch"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="preview_id_mismatch",
-                result=result,
+                result=blocked_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "preview_id_mismatch", **saved, "result": result}
+            return {"ok": False, "reason_code": "preview_id_mismatch", **saved, "result": blocked_result}
         if confirm_text != "WITHDRAW EVERYTHING":
-            result = {"ok": False, "reason_code": "confirmation_text_mismatch"}
+            blocked_result = {"ok": False, "reason_code": "confirmation_text_mismatch"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="confirmation_text_mismatch",
-                result=result,
+                result=blocked_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
@@ -1334,20 +1331,20 @@ class WithdrawAllService:
                 "ok": False,
                 "reason_code": "confirmation_text_mismatch",
                 **saved,
-                "result": result,
+                "result": blocked_result,
             }
         if self._preview_expired(state):
-            result = {"ok": False, "reason_code": "preview_expired"}
+            blocked_result = {"ok": False, "reason_code": "preview_expired"}
             saved = self._persist_execute_outcome(
                 runtime,
                 state=state,
                 status="execute_blocked",
                 reason_code="preview_expired",
-                result=result,
+                result=blocked_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "preview_expired", **saved, "result": result}
+            return {"ok": False, "reason_code": "preview_expired", **saved, "result": blocked_result}
         if (
             preview_id == str(state.get("last_executed_preview_id") or "")
             and isinstance(state.get("last_executed_result"), dict)
@@ -1367,7 +1364,7 @@ class WithdrawAllService:
         withdraw_control = dict(plan.get("withdraw_control") or {})
         capital_truth_health = dict(plan.get("capital_truth_health") or {})
         if current_digest != str(state.get("last_preview_digest") or ""):
-            result = {
+            blocked_result = {
                 "ok": False,
                 "reason_code": "preview_stale",
                 "current_reason_code": current_reason,
@@ -1381,13 +1378,13 @@ class WithdrawAllService:
                 state=state,
                 status="execute_blocked",
                 reason_code="preview_stale",
-                result=result,
+                result=blocked_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": "preview_stale", **saved, "result": result}
+            return {"ok": False, "reason_code": "preview_stale", **saved, "result": blocked_result}
         if current_reason != "ok":
-            result = {
+            blocked_result = {
                 "ok": False,
                 "reason_code": current_reason,
                 "capital_truth_reason_code": str(withdraw_control.get("reasonCode") or ""),
@@ -1400,11 +1397,11 @@ class WithdrawAllService:
                 state=state,
                 status="execute_blocked",
                 reason_code=current_reason,
-                result=result,
+                result=blocked_result,
                 event="withdraw_all_execute_blocked",
                 persisted_state=persisted_state,
             )
-            return {"ok": False, "reason_code": current_reason, **saved, "result": result}
+            return {"ok": False, "reason_code": current_reason, **saved, "result": blocked_result}
 
         items = list(plan.get("items") or [])
         mode = str(plan.get("mode") or "txdata")

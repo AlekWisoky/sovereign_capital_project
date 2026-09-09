@@ -94,7 +94,6 @@ export function mergeProjectionCompatibility(
 
 export function projectionCompatibilityAlert(
   compatibility: ProjectionCompatibility | undefined,
-  *,
   tsMs: number,
 ): AlertItem | undefined {
   if (!compatibility || compatibility.status === "canonical") return undefined;
