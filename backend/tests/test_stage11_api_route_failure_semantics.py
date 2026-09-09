@@ -332,45 +332,40 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
 
     monkeypatch.setattr(app.state, "runtime", _RiskLiveStateRuntime(), raising=False)
     risk_live = client.get("/api/risk/live-state")
-    assert risk_live.json() == {
-        "ok": False,
-        "status": "degraded",
-        "reason_code": "risk_live_state_failed",
-        "reason": "risk_live_state_failed",
-        "error": "risk_live_state_failed",
-        "drawdown": {},
-        "kill_switch": {"suppressed": []},
-        "capital": {},
-        "endpoint_quality": {},
-        "endpoint_universe": {},
-        "route_quality": {},
-        "live_execution": {"items": []},
-        "auto_trade_recovery": {
+    risk_live_body = risk_live.json()
+    assert risk_live.status_code == 200
+    assert risk_live_body["ok"] is True
+    assert risk_live_body["drawdown"] == {}
+    assert risk_live_body["kill_switch"] == {"suppressed": []}
+    assert risk_live_body["capital"] == {}
+    assert risk_live_body["endpoint_quality"] == {}
+    assert risk_live_body["endpoint_universe"] == {}
+    assert risk_live_body["route_quality"] == {}
+    assert risk_live_body["live_execution"] == {"items": []}
+    assert risk_live_body["auto_trade_recovery"]["component_reliability_next_action"] == ""
+    assert risk_live_body["capitalTruthHealth"]["reasonCode"] == "ok"
+    assert risk_live_body["capitalTruthHealth"]["freshnessClass"] == "unknown"
+    assert risk_live_body["capitalTruthHealth"]["recoveryStatus"] == "ready"
+    assert risk_live_body["capitalTruthHealth"]["reliabilityClass"] == "unknown"
+    assert risk_live_body["summaryContract"] == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "risk_live_state",
+        "readModel": "risk_live_state_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "canonical_capital_summary_v1",
+        "capitalPolicyVersion": "capital_policy_v1",
+        "stateContract": {
+            "phase": "risk_live_state_summary",
+            "status": "ok",
+            "reason_code": "ok",
+            "degraded": False,
             "blocked": False,
-            "ready": True,
-            "stage": "ok",
-            "status": "ready",
-            "reason_code": "ok",
-            "reason_codes": [],
-            "next_action": "",
-            "component": "",
-            "history_status": "steady",
-            "reliability_class": "stable",
-            "reliability_reason_code": "ok",
-            "reliability_reason_codes": [],
-            "reliability_next_action": "",
-            "component_reliability_class": "stable",
-            "component_reliability_reason_code": "ok",
-            "component_reliability_reason_codes": [],
-            "component_recovered_fragile": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
         },
-        "auto_trade_gate": {
-            "allowed": True,
-            "stage": "ok",
-            "reason_code": "ok",
-            "reason_codes": [],
-            "next_action": "",
-        },
+        "sourceContracts": {},
     }
 
     monkeypatch.setattr(app.state, "runtime", _AgentRuntime(), raising=False)
