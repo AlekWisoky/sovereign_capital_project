@@ -22,16 +22,34 @@ def _safe_runtime_mapping(runtime: Any, method_name: str) -> Dict[str, Any]:
     return dict(payload or {}) if isinstance(payload, dict) else {}
 
 
+def _launch_stage(runtime: Any) -> str:
+    """Read only the launch stage without re-entering the full fund summary graph."""
+    try:
+        snapshot = (
+            runtime._cc.snapshot()
+            if getattr(runtime, "_cc", None) is not None
+            and hasattr(runtime._cc, "snapshot")
+            else {}
+        )
+        return str((snapshot or {}).get("fundStage") or "internal_capital")
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return "internal_capital"
+
+
 def build_launch_context(runtime: Any) -> Dict[str, Any]:
-    state = getattr(runtime, "fund_summary_state", lambda: {})() or {}
-    stage = str((state.get("health") or state).get("fundStage") if isinstance(state, dict) else "internal_capital") or "internal_capital"
+    # Launch is an upstream advisory surface for the fund summary. Calling
+    # fund_summary_state() here creates a cycle:
+    # launch -> fund summary -> family hardening -> launch. Keep this context
+    # limited to the canonical inputs the rollout recommendation actually uses.
+    stage = _launch_stage(runtime)
+    fund_summary = {"fundStage": stage}
     return {
         "stage": stage,
         "scorecards": _safe_runtime_mapping(runtime, "strategy_scorecards_state"),
         "engine_state": _safe_runtime_mapping(runtime, "engine_state"),
         "telemetry": _safe_runtime_mapping(runtime, "telemetry_summary"),
         "calibration": _safe_runtime_mapping(runtime, "execution_calibration_state"),
-        "fund_summary": state.get("health") if isinstance(state, dict) and isinstance(state.get("health"), dict) else state,
+        "fund_summary": fund_summary,
         "capital_state": _safe_runtime_mapping(runtime, "capital_engine_state"),
     }
 
