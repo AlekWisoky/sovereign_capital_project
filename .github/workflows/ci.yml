@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-# Keep feature-branch validation on the PR check only. Main still receives
-# post-merge push validation. Event-specific groups prevent a legacy push run
-# from occupying the PR concurrency slot while it drains.
 concurrency:
   group: sovereign-capital-ci-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
@@ -46,7 +43,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-      - name: Generate status artifact outside the working tree
+      - name: Generate status artifacts outside the working tree
         run: |
           python - <<'PY'
           import json
@@ -54,11 +51,14 @@ jobs:
           from pathlib import Path
           sys.path.insert(0, 'backend')
           from victor_ai_bot.optional_family_status import build_optional_family_status, render_optional_family_status_markdown
+          from victor_ai_bot.verification_report import build_verification_report
           payload = build_optional_family_status()
+          report = build_verification_report()
           out = Path('/tmp/optional-family-status')
           out.mkdir(parents=True, exist_ok=True)
           (out / 'optional_family_status.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
           (out / 'optional_family_status.md').write_text(render_optional_family_status_markdown(payload))
+          (out / 'verification_report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
           PY
           python scripts/render_system_truth.py > /tmp/optional-family-status/system_truth_generation.json
           cp docs/generated/system_truth.json /tmp/optional-family-status/system_truth.json
@@ -89,18 +89,12 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          tests = sorted({
-              *Path('tests').rglob('test_*.py'),
-              *Path('tests').rglob('*_test.py'),
-          })
+          tests = sorted({*Path('tests').rglob('test_*.py'), *Path('tests').rglob('*_test.py')})
           if not tests:
               raise SystemExit('no pytest files found under backend/tests')
-
           shards = [[] for _ in range(8)]
           for index, path in enumerate(tests):
               shards[index % 8].append(path.as_posix())
-
           shard = int('${{ matrix.shard }}')
           selected = shards[shard]
           Path(f'/tmp/shard-{shard}.txt').write_text('\n'.join(selected) + '\n')
@@ -109,8 +103,6 @@ jobs:
       - name: Run pytest shard
         working-directory: backend
         run: |
-          # Keep the complete 8-way Linux matrix authoritative; never replace
-          # a shard with a local/Termux test shortcut.
           mapfile -t files < /tmp/shard-${{ matrix.shard }}.txt
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No files assigned to shard ${{ matrix.shard }}; treating empty shard as success."
