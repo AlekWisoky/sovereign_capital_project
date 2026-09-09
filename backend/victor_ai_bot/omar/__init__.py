@@ -5,6 +5,7 @@ bypasses governance, execution, or capital authority.
 """
 
 from .config import OmarConfig
+from .lifecycle_bridge import build_canonical_settled_outcome, settlement_hook
 from .operator_intent import OperatorIntentSnapshot, capture_operator_intent
 from .real_learning import (
     ActionAttribution,
@@ -27,4 +28,6 @@ __all__ = [
     "ActionAttribution",
     "OperatorIntentSnapshot",
     "capture_operator_intent",
+    "build_canonical_settled_outcome",
+    "settlement_hook",
 ]
