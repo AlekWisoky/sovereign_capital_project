@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable, Tuple
 
 from ..execution import try_execute_opportunity
 from ..latency_profiler import LatencySpan
+from ..omar.native_hooks import execution_hook
 from ..rpc import JsonRpcClient
 from .execution_service import ExecutionService
 from .runtime_execute_dispatch_facade import AutoExecutionDispatchContext
@@ -46,11 +47,11 @@ def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryE
 
 
 class RuntimeExecuteWrapperFacade:
-    """Compatibility facade for prepared auto-execution wrapper flow.
+    """Native prepared auto-execution lifecycle boundary.
 
     This isolates the prepared RPC execution wrapper and post-execution
-    bookkeeping from RuntimeBundle._execute_auto while preserving the
-    current execution semantics.
+    bookkeeping from RuntimeBundle._execute_auto while explicitly publishing
+    the execution lifecycle to OMAR without monkey-patching runtime classes.
     """
 
     async def _run_prepared_auto_execution(
@@ -136,6 +137,19 @@ class RuntimeExecuteWrapperFacade:
                     if res.ok and (not res.dry_run) and getattr(res, "submitted", False):
                         self._last_submitted_block = bn
                         self.metrics.last_submitted_block = bn
+
+                # Native execution hook is deliberately after canonical execution
+                # bookkeeping so the learning identity describes what was actually
+                # captured, not a hypothetical execution.
+                execution_hook(
+                    self,
+                    opp,
+                    decision,
+                    res,
+                    bn=int(bn),
+                    latency_ms=int(latency_ms),
+                    mode="auto",
+                )
         finally:
             execution_service = getattr(self, "_execution_service", None)
             if execution_service is not None:
