@@ -48,7 +48,8 @@ class RuntimeStateFacade:
 
     def _state_summary_payload(self, method_name: str, *, default: Dict[str, Any], default_factory: Optional[Callable[[], Dict[str, Any]]] = None, args: tuple[Any, ...] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         service = getattr(self, "_state_summary_service", None)
-        fallback = lambda: default_factory() if default_factory is not None else default
+        def fallback() -> Dict[str, Any]:
+            return default_factory() if default_factory is not None else default
         if service is None or not hasattr(service, method_name):
             return to_json_safe(dict(fallback()))
         try:
