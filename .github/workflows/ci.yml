@@ -109,6 +109,8 @@ jobs:
       - name: Run pytest shard
         working-directory: backend
         run: |
+          # Keep the complete 8-way Linux matrix authoritative; never replace
+          # a shard with a local/Termux test shortcut.
           mapfile -t files < /tmp/shard-${{ matrix.shard }}.txt
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No files assigned to shard ${{ matrix.shard }}; treating empty shard as success."
