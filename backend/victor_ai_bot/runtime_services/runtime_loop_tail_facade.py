@@ -24,6 +24,23 @@ class RuntimeLoopTailFacade:
     - each iteration still yields with the existing bounded sleep
     """
 
+    async def _broadcast(self) -> None:
+        """Publish one operator state snapshot to subscribed websocket queues.
+
+        Broadcasting is observability only: queue backpressure or a snapshot
+        failure must never stop the runtime loop or affect execution authority.
+        """
+        try:
+            snapshot = await self.snapshot()
+            message = {"type": "state", "data": snapshot}
+        except _SAFE_LOOP_TAIL_EXCEPTIONS:
+            return
+        for queue in list(getattr(self, "_ws_clients", []) or []):
+            try:
+                queue.put_nowait(message)
+            except (asyncio.QueueFull, AttributeError, RuntimeError, TypeError, ValueError):
+                continue
+
     def _record_loop_latency_tail(self, *, loop_started_at: float) -> None:
         try:
             loop_ms = float((time.perf_counter() - float(loop_started_at)) * 1000.0)
