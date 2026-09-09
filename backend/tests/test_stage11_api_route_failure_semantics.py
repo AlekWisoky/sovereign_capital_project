@@ -214,7 +214,6 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "component_reliability_reason_codes": [],
             "component_reliability_next_action": "",
             "component_recovered_fragile": False,
-            "recent_events": [],
         },
         "auto_trade_recovery_view": {
             "blocked": False,
@@ -364,7 +363,6 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "component_reliability_reason_code": "ok",
             "component_reliability_reason_codes": [],
             "component_recovered_fragile": False,
-            "recent_events": [],
         },
         "auto_trade_gate": {
             "allowed": True,
