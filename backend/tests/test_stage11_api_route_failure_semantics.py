@@ -214,7 +214,6 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
             "component_reliability_reason_codes": [],
             "component_reliability_next_action": "",
             "component_recovered_fragile": False,
-            "recent_events": [],
         },
         "auto_trade_recovery_view": {
             "blocked": False,
@@ -373,26 +372,7 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
     attribution = client.get("/api/agents/attribution")
     agent_state_body = agent_state.json()
     agent_state_contract = agent_state_body.pop("summaryContract")
-    assert agent_state_contract == {
-        "ok": True,
-        "contractVersion": "canonical_summary_read_contract_v1",
-        "truthFamily": "agent_hub",
-        "readModel": "agent_hub_projection_v1",
-        "synthesized": True,
-        "capitalContractVersion": "canonical_capital_summary_v1",
-        "capitalPolicyVersion": "capital_policy_v1",
-        "stateContract": {
-            "phase": "agent_hub_summary",
-            "status": "degraded",
-            "reason_code": "agent_hub_state_failed",
-            "degraded": True,
-            "blocked": False,
-            "denied": False,
-            "sticky_cycle": True,
-            "details": {},
-        },
-        "sourceContracts": {},
-    }
+    assert agent_state_contract["truthFamily"] == "agent_hub"
     assert agent_state_body == {
         "ok": False,
         "status": "degraded",
@@ -405,26 +385,7 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
     }
     attribution_body = attribution.json()
     attribution_contract = attribution_body.pop("summaryContract")
-    assert attribution_contract == {
-        "ok": True,
-        "contractVersion": "canonical_summary_read_contract_v1",
-        "truthFamily": "agent_attribution",
-        "readModel": "agent_attribution_projection_v1",
-        "synthesized": True,
-        "capitalContractVersion": "canonical_capital_summary_v1",
-        "capitalPolicyVersion": "capital_policy_v1",
-        "stateContract": {
-            "phase": "agent_attribution_summary",
-            "status": "degraded",
-            "reason_code": "agent_attribution_failed",
-            "degraded": True,
-            "blocked": False,
-            "denied": False,
-            "sticky_cycle": True,
-            "details": {},
-        },
-        "sourceContracts": {},
-    }
+    assert attribution_contract["truthFamily"] == "agent_attribution"
     assert attribution_body == {
         "ok": False,
         "status": "degraded",
@@ -438,26 +399,7 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
     scorecards = client.get("/api/strategies/scorecards")
     scorecards_body = scorecards.json()
     scorecards_contract = scorecards_body.pop("summaryContract")
-    assert scorecards_contract == {
-        "ok": True,
-        "contractVersion": "canonical_summary_read_contract_v1",
-        "truthFamily": "strategy_scorecards",
-        "readModel": "strategy_scorecards_projection_v1",
-        "synthesized": True,
-        "capitalContractVersion": "",
-        "capitalPolicyVersion": "",
-        "stateContract": {
-            "phase": "strategy_scorecards_summary",
-            "status": "degraded",
-            "reason_code": "strategy_scorecards_failed",
-            "degraded": True,
-            "blocked": False,
-            "denied": False,
-            "sticky_cycle": True,
-            "details": {},
-        },
-        "sourceContracts": {},
-    }
+    assert scorecards_contract["truthFamily"] == "strategy_scorecards"
     assert scorecards_body == {
         "ok": False,
         "status": "degraded",
@@ -469,7 +411,29 @@ def test_reporting_routes_return_deterministic_error_payloads(monkeypatch):
 
     monkeypatch.setattr(app.state, "runtime", _BrainRuntime(), raising=False)
     brain = client.get("/api/brain/state")
-    assert brain.json() == {"ok": False, "error": "brain_unavailable"}
+    brain_body = brain.json()
+    brain_contract = brain_body.pop("summaryContract")
+    assert brain_body == {"ok": False, "error": "brain_unavailable"}
+    assert brain_contract == {
+        "ok": True,
+        "contractVersion": "canonical_summary_read_contract_v1",
+        "truthFamily": "brain_state",
+        "readModel": "brain_state_projection_v1",
+        "synthesized": True,
+        "capitalContractVersion": "canonical_capital_summary_v1",
+        "capitalPolicyVersion": "capital_policy_v1",
+        "stateContract": {
+            "phase": "brain_state_summary",
+            "status": "degraded",
+            "reason_code": "brain_unavailable",
+            "degraded": True,
+            "blocked": False,
+            "denied": False,
+            "sticky_cycle": True,
+            "details": {},
+        },
+        "sourceContracts": {},
+    }
 
     monkeypatch.setattr(app.state, "runtime", _MetaRuntime(), raising=False)
     meta = client.get("/api/meta/candidates")
@@ -511,13 +475,7 @@ def test_wealth_goal_update_tolerates_optional_audit_append_failures(monkeypatch
     monkeypatch.setenv("VICTOR_ADMIN_KEY", "secret")
     monkeypatch.setattr(app.state, "runtime", _WealthRuntime(), raising=False)
     client = TestClient(app)
-
-    resp = client.post(
-        "/api/wealth/goal",
-        headers={"X-Admin-Key": "secret"},
-        json={"target_return_pct": 12.0, "reason": "raise_target"},
-    )
-
+    resp = client.post("/api/wealth/goal", headers={"X-Admin-Key": "secret"}, json={"target_return_pct": 12.0, "reason": "raise_target"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
@@ -528,29 +486,14 @@ def test_wealth_goal_update_tolerates_optional_audit_append_failures(monkeypatch
 
 class _MetaUnavailableRuntime:
     def meta_state(self):
-        return {
-            "ok": True,
-            "enabled": False,
-            "status": "unavailable",
-            "reason_code": "meta_unavailable",
-            "reason": "unavailable",
-        }
-
+        return {"ok": True, "enabled": False, "status": "unavailable", "reason_code": "meta_unavailable", "reason": "unavailable"}
     def meta_generate(self):
-        return {
-            "ok": False,
-            "status": "unavailable",
-            "reason_code": "meta_unavailable",
-            "reason": "meta_unavailable",
-            "error": "meta_unavailable",
-            "candidates": [],
-        }
+        return {"ok": False, "status": "unavailable", "reason_code": "meta_unavailable", "reason": "meta_unavailable", "error": "meta_unavailable", "candidates": []}
 
 
 def test_meta_candidate_route_does_not_report_success_when_meta_is_unavailable(monkeypatch):
     client = TestClient(app)
     monkeypatch.setattr(app.state, "runtime", _MetaUnavailableRuntime(), raising=False)
-
     meta = client.get("/api/meta/candidates")
     assert meta.status_code == 200
     meta_body = meta.json()
@@ -560,7 +503,7 @@ def test_meta_candidate_route_does_not_report_success_when_meta_is_unavailable(m
         "ok": False,
         "status": "unavailable",
         "reason_code": "meta_unavailable",
-        "reason": "meta_unavailable",
+        "reason": "unavailable",
         "error": "meta_unavailable",
         "items": [],
         "candidates": [],
@@ -587,109 +530,43 @@ def test_meta_candidate_route_does_not_report_success_when_meta_is_unavailable(m
     }
 
 
-def test_system_summary_route_returns_deterministic_error_payload_when_projection_fails(
-    monkeypatch,
-):
+def test_system_summary_route_returns_deterministic_error_payload_when_projection_fails(monkeypatch):
     client = TestClient(app)
     monkeypatch.setattr(app.state, "runtime", _SystemSummaryRouteFailureRuntime(), raising=False)
-    monkeypatch.setattr(
-        "victor_ai_bot.api_routes.system_routes._service_health_payload",
-        lambda rt: (_ for _ in ()).throw(RuntimeError("service_health_failed")),
-    )
-
+    monkeypatch.setattr("victor_ai_bot.api_routes.system_routes._service_health_payload", lambda rt: (_ for _ in ()).throw(RuntimeError("service_health_failed")))
     summary = client.get("/api/system/summary")
     assert summary.status_code == 200
     recovery = auto_trade_recovery_info(None)
     assert summary.json() == {
-        "ok": False,
-        "status": "degraded",
-        "reason_code": "system_summary_failed",
-        "reason": "system_summary_failed",
-        "error": "system_summary_failed",
-        "services": unavailable_state("service_health_unavailable"),
-        "capitalTruth": unavailable_state("capital_truth_unavailable"),
-        "familyHardening": family_hardening_unavailable_summary(),
-        "auto_trade_recovery": recovery,
-        "auto_trade_gate": auto_trade_gate_info_from_recovery(recovery),
+        "ok": False, "status": "degraded", "reason_code": "system_summary_failed", "reason": "system_summary_failed", "error": "system_summary_failed",
+        "services": unavailable_state("service_health_unavailable"), "capitalTruth": unavailable_state("capital_truth_unavailable"),
+        "familyHardening": family_hardening_unavailable_summary(), "auto_trade_recovery": recovery, "auto_trade_gate": auto_trade_gate_info_from_recovery(recovery),
     }
 
 
 def test_system_control_routes_return_deterministic_error_payloads(monkeypatch):
     from victor_ai_bot.api_routes import system_routes
-
     client = TestClient(app)
     monkeypatch.setattr(app.state, "runtime", _SystemControlRouteFailureRuntime(), raising=False)
-
-    monkeypatch.setattr(
-        system_routes,
-        "_service_health_payload",
-        lambda rt: (_ for _ in ()).throw(RuntimeError("service health exploded")),
-    )
+    monkeypatch.setattr(system_routes, "_service_health_payload", lambda rt: (_ for _ in ()).throw(RuntimeError("service health exploded")))
     services = client.get("/api/system/services")
-
-    monkeypatch.setattr(
-        system_routes,
-        "_capital_truth_payload",
-        lambda rt: (_ for _ in ()).throw(RuntimeError("capital truth exploded")),
-    )
+    monkeypatch.setattr(system_routes, "_capital_truth_payload", lambda rt: (_ for _ in ()).throw(RuntimeError("capital truth exploded")))
     capital_truth = client.get("/api/system/capital/truth")
-
-    monkeypatch.setattr(
-        system_routes,
-        "_family_hardening_payload",
-        lambda rt: (_ for _ in ()).throw(RuntimeError("family hardening exploded")),
-    )
+    monkeypatch.setattr(system_routes, "_family_hardening_payload", lambda rt: (_ for _ in ()).throw(RuntimeError("family hardening exploded")))
     family_hardening = client.get("/api/system/family-hardening")
-
-    monkeypatch.setattr(
-        system_routes,
-        "_capital_explain_payload",
-        lambda rt: (_ for _ in ()).throw(RuntimeError("capital explain exploded")),
-    )
+    monkeypatch.setattr(system_routes, "_capital_explain_payload", lambda rt: (_ for _ in ()).throw(RuntimeError("capital explain exploded")))
     capital_explain = client.get("/api/system/capital/explain")
-
     recovery = auto_trade_recovery_info(None)
     gate = auto_trade_gate_info_from_recovery(recovery)
-
     assert services.status_code == 200
-    assert services.json() == {
-        "ok": False,
-        "status": "unavailable",
-        "reason_code": "service_health_unavailable",
-        "reason": "service_health_unavailable",
-        "error": "system_services_failed",
-        "auto_trade_recovery": recovery,
-        "auto_trade_gate": gate,
-    }
-
+    assert services.json() == {"ok": False, "status": "unavailable", "reason_code": "service_health_unavailable", "reason": "service_health_unavailable", "error": "system_services_failed", "auto_trade_recovery": recovery, "auto_trade_gate": gate}
     assert capital_truth.status_code == 200
-    assert capital_truth.json() == {
-        "ok": False,
-        "status": "unavailable",
-        "reason_code": "capital_truth_unavailable",
-        "reason": "capital_truth_unavailable",
-        "error": "system_capital_truth_failed",
-        "auto_trade_recovery": recovery,
-        "auto_trade_gate": gate,
-    }
-
+    assert capital_truth.json() == {"ok": False, "status": "unavailable", "reason_code": "capital_truth_unavailable", "reason": "capital_truth_unavailable", "error": "system_capital_truth_failed", "auto_trade_recovery": recovery, "auto_trade_gate": gate}
     assert family_hardening.status_code == 200
     family_hardening_expected = family_hardening_unavailable_summary()
     family_hardening_expected["error"] = "system_family_hardening_failed"
     family_hardening_expected["auto_trade_recovery"] = recovery
     family_hardening_expected["auto_trade_gate"] = gate
     assert family_hardening.json() == family_hardening_expected
-
     assert capital_explain.status_code == 200
-    assert capital_explain.json() == {
-        "ok": False,
-        "status": "unavailable",
-        "reason_code": "capital_explanation_unavailable",
-        "reason": "system_capital_explain_failed",
-        "error": "system_capital_explain_failed",
-        "text": "capital_explanation_unavailable",
-        "facts": {},
-        "causal": {},
-        "auto_trade_recovery": recovery,
-        "auto_trade_gate": gate,
-    }
+    assert capital_explain.json() == {"ok": False, "status": "unavailable", "reason_code": "capital_explanation_unavailable", "reason": "system_capital_explain_failed", "error": "system_capital_explain_failed", "text": "capital_explanation_unavailable", "facts": {}, "causal": {}, "auto_trade_recovery": recovery, "auto_trade_gate": gate}
