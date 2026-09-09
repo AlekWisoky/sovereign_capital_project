@@ -68,6 +68,12 @@ def build_capital_ledger_truth_projection(
     capital_admission = _safe_dict(summary.get("capitalAdmission"))
     if not capital_admission:
         capital_admission = _safe_dict(truth_projection.get("capitalAdmission"))
+    if "stateContract" not in capital_admission and (
+        str(truth_projection.get("status") or "") == "ok"
+        or str(health.get("status") or "") == "ok"
+        or bool(health.get("ok", False))
+    ):
+        capital_admission["ok"] = True
     if "ok" not in capital_admission:
         capital_admission["ok"] = bool(
             str(truth_projection.get("status") or "") == "ok"
