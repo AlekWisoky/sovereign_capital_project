@@ -27,8 +27,8 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
     def _context(runtime: Any) -> Dict[str, Any]:
         # Family hardening is itself part of the fund summary. Calling
         # runtime.fund_summary_state() here re-enters FundService.summary(),
-        # which asks for family hardening again and can deadlock a TestClient
-        # request. Build only the non-recursive context required by readiness.
+        # which asks for family hardening again. Keep this context on
+        # non-summary runtime state only.
         stage = "internal_capital"
         try:
             snapshot = (
@@ -41,14 +41,13 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
         except (AttributeError, KeyError, TypeError, ValueError):
             pass
 
-        try:
-            capital_state = (
-                runtime.capital_engine_state()
-                if hasattr(runtime, "capital_engine_state")
-                else {}
-            )
-        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+        # Do not call capital_engine_state(): it is a RuntimeStateFacade summary
+        # accessor and can re-enter launch/capital-truth while launch is already
+        # asking family hardening for readiness. Use materialized runtime state.
+        capital_state = getattr(runtime, "_capital_engine_state", {})
+        if not isinstance(capital_state, dict):
             capital_state = {}
+
         try:
             internal_prime = (
                 runtime.internal_prime_state()
@@ -58,27 +57,19 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             internal_prime = {}
         try:
-            drawdown = (
-                runtime.drawdown_state()
-                if hasattr(runtime, "drawdown_state")
-                else {}
-            )
+            drawdown = runtime.drawdown_state() if hasattr(runtime, "drawdown_state") else {}
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             drawdown = {}
         try:
             kill_switch = (
-                runtime.kill_switch_state()
-                if hasattr(runtime, "kill_switch_state")
-                else {}
+                runtime.kill_switch_state() if hasattr(runtime, "kill_switch_state") else {}
             )
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             kill_switch = {}
 
         fund_summary = {
             "fundStage": stage,
-            "capitalReady": bool(capital_state.get("capital_engine"))
-            if isinstance(capital_state, dict)
-            else False,
+            "capitalReady": bool(capital_state.get("capital_engine")),
             "internalPrimeReady": bool((internal_prime or {}).get("stateReady", True)),
             "privateRoutingReady": True,
             "familyHardeningStatus": "ok",
@@ -93,9 +84,7 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
                 if hasattr(runtime, "strategy_scorecards_state")
                 else {"families": []}
             ),
-            "engine_state": runtime.engine_state()
-            if hasattr(runtime, "engine_state")
-            else {},
+            "engine_state": runtime.engine_state() if hasattr(runtime, "engine_state") else {},
             "telemetry": (
                 runtime.telemetry_summary() if hasattr(runtime, "telemetry_summary") else {}
             ),
@@ -134,8 +123,6 @@ class RuntimeFamilyHardeningService(_FamilyHardeningService):
 
     def family_state(self, runtime: Any, family: str) -> Dict[str, Any]:
         # The base implementation performs capital_truth_state() after
-        # readiness. During capital-truth/launch evaluation that is the exact
-        # edge that re-enters family hardening. Cut only that edge.
-        return super().family_state(
-            _NonRecursiveFamilyHardeningRuntimeProxy(runtime), family
-        )
+        # readiness. During capital-truth/launch evaluation that edge would
+        # re-enter family hardening, so cut only that dependency edge.
+        return super().family_state(_NonRecursiveFamilyHardeningRuntimeProxy(runtime), family)
