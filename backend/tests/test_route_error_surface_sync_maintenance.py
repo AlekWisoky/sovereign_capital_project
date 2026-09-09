@@ -55,7 +55,13 @@ def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch
 
     evolution = client.get("/api/evolution/state")
     assert evolution.status_code == 200
-    assert evolution.json() == {"ok": False, "status": "degraded", "reason_code": "meta_state_failed", "reason": "meta_state_failed", "error": "meta_state_failed", "enabled": False}
+    evolution_body = evolution.json()
+    evolution_contract = evolution_body.pop("summaryContract")
+    assert evolution_body == {"ok": False, "status": "degraded", "reason_code": "meta_state_failed", "reason": "meta_state_failed", "error": "meta_state_failed", "enabled": False}
+    assert evolution_contract["contractVersion"] == "canonical_summary_read_contract_v1"
+    assert evolution_contract["truthFamily"] == "evolution_state"
+    assert evolution_contract["readModel"] == "evolution_state_projection_v1"
+    assert evolution_contract["stateContract"]["reason_code"] == "meta_state_failed"
 
     candidates = client.get("/api/meta/candidates")
     assert candidates.status_code == 200
