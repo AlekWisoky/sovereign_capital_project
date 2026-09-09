@@ -53,6 +53,7 @@ from .deploy_mode import enforce_public_defaults
 from .logging_utils import configure_logging
 from .ratelimit import RateLimitMiddleware
 from .runtime_core import attach_runtime, build_runtime, load_runtime_configs, make_runtime_lifespan
+from .sentry_config import init_sentry
 
 log = logging.getLogger(__name__)
 
@@ -175,6 +176,8 @@ def _maybe_attach_omar(
 
 def create_app() -> FastAPI:
     configure_logging()
+    # Sentry is observability-only and no-ops safely when SENTRY_DSN is absent.
+    init_sentry()
 
     lifespan = make_runtime_lifespan()
     app = FastAPI(title="x∆v — Sovereign Capital", lifespan=lifespan)

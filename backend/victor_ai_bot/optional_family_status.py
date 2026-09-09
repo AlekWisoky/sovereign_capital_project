@@ -24,41 +24,18 @@ STATUS_DERIVATION = [
     "importReachability",
     "gatingConditions",
 ]
+EXPLICIT_STAGED_FAMILIES = {"omar"}
 
 CORE_EXCLUDES = {
-    "agents",
-    "analytics",
-    "api_facades",
-    "api_routes",
-    "engine_control",
-    "event_bus",
-    "execution_capture",
-    "fund_os",
-    "governance",
-    "internal_prime",
-    "persistence",
-    "risk_engine",
-    "runtime_core",
-    "runtime_services",
-    "runtime_subsystems",
-    "security",
-    "strategies",
-    "telemetry",
-    "treasury",
+    "agents", "analytics", "api_facades", "api_routes", "engine_control", "event_bus",
+    "execution_capture", "fund_os", "governance", "internal_prime", "persistence",
+    "risk_engine", "runtime_core", "runtime_services", "runtime_subsystems", "security",
+    "strategies", "telemetry", "treasury",
 }
 
 GATING_KEYWORDS = (
-    "enable",
-    "enabled",
-    "disable",
-    "disabled",
-    "optional",
-    "flag",
-    "gate",
-    "when configured",
-    "unless explicitly",
-    "allow meta",
-    "controls permit",
+    "enable", "enabled", "disable", "disabled", "optional", "flag", "gate",
+    "when configured", "unless explicitly", "allow meta", "controls permit",
     "production focus default",
 )
 
@@ -85,8 +62,10 @@ class FamilyAccumulator:
         ungated_runtime = [item for item in runtime if item not in self.gating_conditions]
         primary_reference_count = len(mounted) + len(runtime) + len(imports) + len(gating)
         supplemental_reference_count = len(tests) + len(docs_scripts)
-
-        if mounted or ungated_runtime:
+        if self.family in EXPLICIT_STAGED_FAMILIES:
+            status = "staged"
+            why = "Explicit lifecycle policy keeps this family staged until production authority is intentionally promoted."
+        elif mounted or ungated_runtime:
             status = "live"
             why = "Mounted routes or ungated runtime initialization establish live reachability."
         elif runtime or gating:
@@ -98,33 +77,16 @@ class FamilyAccumulator:
         else:
             status = "dead"
             why = "No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree."
-
         if status not in ALLOWED:
             raise SystemExit(f"invalid status for {self.family}: {status}")
-
         return {
-            "family": self.family,
-            "path": self.path,
-            "status": status,
-            "why": why,
+            "family": self.family, "path": self.path, "status": status, "why": why,
             "pythonFileCount": self.python_file_count,
             "referenceCount": primary_reference_count + supplemental_reference_count,
             "primaryEvidenceCount": primary_reference_count,
             "supplementalReferenceCount": supplemental_reference_count,
-            "statusInputs": {
-                "mountedRoutes": len(mounted),
-                "runtimeInitialization": len(runtime),
-                "importReachability": len(imports),
-                "gatingConditions": len(gating),
-            },
-            "evidence": {
-                "mountedRoutes": mounted,
-                "runtimeInitialization": runtime,
-                "importReachability": imports,
-                "gatingConditions": gating,
-                "tests": tests,
-                "docsAndScripts": docs_scripts,
-            },
+            "statusInputs": {"mountedRoutes": len(mounted), "runtimeInitialization": len(runtime), "importReachability": len(imports), "gatingConditions": len(gating)},
+            "evidence": {"mountedRoutes": mounted, "runtimeInitialization": runtime, "importReachability": imports, "gatingConditions": gating, "tests": tests, "docsAndScripts": docs_scripts},
         }
 
 
@@ -134,13 +96,8 @@ def _discover_families() -> dict[str, FamilyAccumulator]:
         if not entry.is_dir() or entry.name in CORE_EXCLUDES or entry.name.startswith("__"):
             continue
         py_count = sum(1 for _ in entry.rglob("*.py"))
-        if py_count == 0:
-            continue
-        found[entry.name] = FamilyAccumulator(
-            family=entry.name,
-            path=str(entry.relative_to(ROOT)),
-            python_file_count=py_count,
-        )
+        if py_count:
+            found[entry.name] = FamilyAccumulator(entry.name, str(entry.relative_to(ROOT)), py_count)
     return found
 
 
@@ -153,8 +110,7 @@ def _module_for(path: Path) -> str:
 
 
 def _resolve_import_module(path: Path, node: ast.ImportFrom) -> str | None:
-    current_module = _module_for(path)
-    current_package_parts = current_module.split(".")[:-1]
+    current_package_parts = _module_for(path).split(".")[:-1]
     level = int(node.level or 0)
     module = str(node.module or "")
     if level <= 0:
@@ -163,9 +119,7 @@ def _resolve_import_module(path: Path, node: ast.ImportFrom) -> str | None:
     if keep < 0:
         return None
     base = current_package_parts[:keep]
-    if module:
-        return ".".join(base + module.split("."))
-    return ".".join(base) if base else None
+    return ".".join(base + module.split(".")) if module else (".".join(base) if base else None)
 
 
 def _imports_for_file(path: Path) -> set[str]:
@@ -180,8 +134,7 @@ def _imports_for_file(path: Path) -> set[str]:
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                modules.add(alias.name)
+            modules.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             resolved = _resolve_import_module(path, node)
             if resolved:
@@ -190,14 +143,7 @@ def _imports_for_file(path: Path) -> set[str]:
 
 
 def _relevant_files() -> list[Path]:
-    roots = [
-        PKG_ROOT,
-        ROOT / "backend" / "tests",
-        ROOT / "scripts",
-        ROOT / "docs",
-        ROOT / "mobile",
-        ROOT / ".github",
-    ]
+    roots = [PKG_ROOT, ROOT / "backend" / "tests", ROOT / "scripts", ROOT / "docs", ROOT / "mobile", ROOT / ".github"]
     files: list[Path] = []
     for root in roots:
         if root.exists():
@@ -207,19 +153,17 @@ def _relevant_files() -> list[Path]:
 
 def _mounted_route_files() -> set[str]:
     from victor_ai_bot.server import app
-
     files: set[str] = set()
     for route in app.routes:
         endpoint = getattr(route, "endpoint", None)
         if endpoint is None:
             continue
         src = inspect.getsourcefile(endpoint)
-        if not src:
-            continue
-        try:
-            files.add(str(Path(src).relative_to(ROOT)))
-        except ValueError:
-            continue
+        if src:
+            try:
+                files.add(str(Path(src).relative_to(ROOT)))
+            except ValueError:
+                pass
     return files
 
 
@@ -227,54 +171,37 @@ def _has_gating(path: Path, family: str) -> bool:
     lines = path.read_text(encoding="utf-8", errors="ignore").lower().splitlines()
     family_l = family.lower()
     for idx, line in enumerate(lines):
-        if family_l not in line:
-            continue
-        window = " ".join(lines[max(0, idx - 1) : min(len(lines), idx + 2)])
-        if any(keyword in window for keyword in GATING_KEYWORDS):
-            return True
+        if family_l in line:
+            window = " ".join(lines[max(0, idx - 1): min(len(lines), idx + 2)])
+            if any(keyword in window for keyword in GATING_KEYWORDS):
+                return True
     return False
 
 
 def build_optional_family_status() -> dict[str, Any]:
     families = _discover_families()
     mounted_route_files = _mounted_route_files()
-    files = _relevant_files()
-
-    for path in files:
+    for path in _relevant_files():
         rel = str(path.relative_to(ROOT))
         imports = _imports_for_file(path)
         for family, acc in families.items():
             family_module = f"victor_ai_bot.{family}"
             named_route_module = f"victor_ai_bot.api_routes.{family}"
-            imports_family = any(
-                mod == family_module
-                or mod.startswith(f"{family_module}.")
-                or mod == named_route_module
-                for mod in imports
-            )
+            imports_family = any(mod == family_module or mod.startswith(f"{family_module}.") or mod == named_route_module for mod in imports)
             is_named_route_file = rel == f"backend/victor_ai_bot/api_routes/{family}.py"
             if not imports_family and not is_named_route_file:
                 continue
-
             family_dir = ROOT / acc.path
             try:
                 path.relative_to(family_dir)
                 continue
             except ValueError:
                 pass
-
             if imports_family:
                 acc.import_reachability.add(rel)
-            if is_named_route_file and rel in mounted_route_files:
+            if (is_named_route_file and rel in mounted_route_files) or (imports_family and rel in mounted_route_files):
                 acc.mounted_routes.add(rel)
-            if imports_family and rel in mounted_route_files:
-                acc.mounted_routes.add(rel)
-            if (
-                rel == "backend/victor_ai_bot/server.py"
-                or rel.startswith("backend/victor_ai_bot/runtime_services/")
-                or rel.startswith("backend/victor_ai_bot/runtime_core/")
-                or rel.startswith("backend/victor_ai_bot/runtime_subsystems/")
-            ):
+            if rel == "backend/victor_ai_bot/server.py" or rel.startswith("backend/victor_ai_bot/runtime_services/") or rel.startswith("backend/victor_ai_bot/runtime_core/") or rel.startswith("backend/victor_ai_bot/runtime_subsystems/"):
                 if imports_family:
                     acc.runtime_initialization.add(rel)
                     if _has_gating(path, family):
@@ -282,15 +209,9 @@ def build_optional_family_status() -> dict[str, Any]:
             elif rel.startswith("backend/tests/"):
                 if imports_family:
                     acc.tests.add(rel)
-            elif (
-                rel.startswith("docs/")
-                or rel.startswith("scripts/")
-                or rel.startswith("mobile/")
-                or rel.startswith(".github/")
-            ):
+            elif rel.startswith(("docs/", "scripts/", "mobile/", ".github/")):
                 if imports_family:
                     acc.docs_and_scripts.add(rel)
-
     rows = [acc.to_row() for _, acc in sorted(families.items())]
     status_counts = {status: 0 for status in sorted(ALLOWED)}
     for row in rows:
@@ -300,47 +221,22 @@ def build_optional_family_status() -> dict[str, Any]:
         "classificationEngine": CLASSIFICATION_ENGINE,
         "statusDerivation": STATUS_DERIVATION,
         "evidencePolicy": "status derives only from mounted routes, runtime initialization, import reachability, and gating conditions; tests and docs are supplemental evidence only",
-        "summary": {
-            "familyCount": len(rows),
-            "statusCounts": status_counts,
-        },
+        "summary": {"familyCount": len(rows), "statusCounts": status_counts},
         "families": rows,
     }
 
 
 def render_optional_family_status_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# Optional family status",
-        "",
-        f"- Contract: {payload['contractVersion']}",
-        f"- Classification engine: {payload['classificationEngine']}",
-        f"- Evidence policy: {payload['evidencePolicy']}",
-        f"- Status counts: {json.dumps(payload['summary']['statusCounts'], sort_keys=True)}",
-        "",
-        "| Family | Status | Py files | Refs | Primary evidence | Mounted | Runtime init | Imports | Gating |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
+    lines = ["# Optional family status", "", f"- Contract: {payload['contractVersion']}", f"- Classification engine: {payload['classificationEngine']}", f"- Evidence policy: {payload['evidencePolicy']}", f"- Status counts: {json.dumps(payload['summary']['statusCounts'], sort_keys=True)}", "", "| Family | Status | Py files | Refs | Primary evidence | Mounted | Runtime init | Imports | Gating |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for row in payload["families"]:
         inputs = row["statusInputs"]
-        lines.append(
-            f"| {row['family']} | {row['status']} | {row['pythonFileCount']} | {row['referenceCount']} | {row['primaryEvidenceCount']} | {inputs['mountedRoutes']} | {inputs['runtimeInitialization']} | {inputs['importReachability']} | {inputs['gatingConditions']} |"
-        )
-        lines.append("")
-        lines.append(row["why"])
-        lines.append("")
-        for key in (
-            "mountedRoutes",
-            "runtimeInitialization",
-            "importReachability",
-            "gatingConditions",
-            "tests",
-            "docsAndScripts",
-        ):
+        lines.append(f"| {row['family']} | {row['status']} | {row['pythonFileCount']} | {row['referenceCount']} | {row['primaryEvidenceCount']} | {inputs['mountedRoutes']} | {inputs['runtimeInitialization']} | {inputs['importReachability']} | {inputs['gatingConditions']} |")
+        lines.extend(["", row["why"], ""])
+        for key in ("mountedRoutes", "runtimeInitialization", "importReachability", "gatingConditions", "tests", "docsAndScripts"):
             items = row["evidence"][key]
             if items:
                 lines.append(f"- **{row['family']} {key}**")
-                for item in items[:8]:
-                    lines.append(f"  - {item}")
+                lines.extend(f"  - {item}" for item in items[:8])
         lines.append("")
     return "\n".join(lines)
 
@@ -350,20 +246,12 @@ def optional_family_status_is_fresh(existing: dict[str, Any], live: dict[str, An
 
 
 def build_optional_family_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "ok": True,
-        "contractVersion": payload["contractVersion"],
-        "classificationEngine": payload["classificationEngine"],
-        "familyCount": payload["summary"]["familyCount"],
-        "statusCounts": payload["summary"]["statusCounts"],
-    }
+    return {"ok": True, "contractVersion": payload["contractVersion"], "classificationEngine": payload["classificationEngine"], "familyCount": payload["summary"]["familyCount"], "statusCounts": payload["summary"]["statusCounts"]}
 
 
 def write_optional_family_status() -> dict[str, Any]:
     payload = build_optional_family_status()
-    json_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    md_text = render_optional_family_status_markdown(payload)
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUT_JSON.write_text(json_text, encoding="utf-8")
-    OUT_MD.write_text(md_text, encoding="utf-8")
+    OUT_JSON.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    OUT_MD.write_text(render_optional_family_status_markdown(payload), encoding="utf-8")
     return payload

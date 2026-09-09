@@ -110,27 +110,39 @@ class MetaStrategyRuntime:
         gas_cost_usd = 0.0
         expected_profit_usd = 0.0
         route_fail_rate = 0.0
-        top = opps[0] if opps else None
-        if top is None:
-            top = _best_telemetry_opportunity(opps)
-        if top is not None:
-            meta = _mapping(getattr(top, 'meta', {}) or {})
-            unit = _mapping(meta.get('unit_econ') or {})
-            projection = profitability_summary_projection(top)
-            expected_profit_usd = float(projection.get('displayExpectedProfitUsd') or 0.0)
-            gas_cost_usd = float(unit.get('gas_cost_usd_micro') or 0.0)
-            if gas_cost_usd > 1000.0:
-                gas_cost_usd /= 1_000_000.0
+        route_fail_ok = True
+        safety_ok = True
+
         try:
             route_fail_rate = float(rt._route_fail_rate())
         except _SAFE_META_RUNTIME_EXCEPTIONS:
+            route_fail_ok = False
             route_fail_rate = 0.0
+
         safety = {}
         try:
             s = rt.cfg.safety
             safety = {'minProfitAbs': getattr(s, 'minProfitAbs', '0'), 'minProfitBps': getattr(s, 'minProfitBps', 0), 'slippage_bps': getattr(s, 'slippage_bps', 50)}
         except _SAFE_META_RUNTIME_EXCEPTIONS:
+            safety_ok = False
             safety = {}
+
+        top = _best_telemetry_opportunity(opps)
+        gas_source = top
+        if gas_source is None and opps and route_fail_ok and safety_ok:
+            _, verified, reason = opportunity_profit_after_costs_info(opps[0])
+            if not (not verified and reason == 'profit_after_costs_mismatch'):
+                gas_source = opps[0]
+        if top is not None:
+            projection = profitability_summary_projection(top)
+            expected_profit_usd = float(projection.get('displayExpectedProfitUsd') or 0.0)
+        if gas_source is not None:
+            meta = _mapping(getattr(gas_source, 'meta', {}) or {})
+            unit = _mapping(meta.get('unit_econ') or {})
+            gas_cost_usd = float(unit.get('gas_cost_usd_micro') or 0.0)
+            if gas_cost_usd > 1000.0:
+                gas_cost_usd /= 1_000_000.0
+
         scan_ms = float(metrics.get('scan_ms') or 0.0)
         fail_streak = float(metrics.get('fail_streak') or 0.0)
         vol_proxy = min(1.0, 0.15 * fail_streak + min(0.4, scan_ms / 1500.0))

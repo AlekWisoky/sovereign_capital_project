@@ -11,6 +11,8 @@ import os
 import time
 from typing import Any, Dict, List
 
+from .rpc import JsonRpcClient
+from .execution import try_execute_opportunity
 from .runtime_services.runtime_agent_consensus_facade import RuntimeAgentConsensusFacade
 from .runtime_services.runtime_after_tick_facade import RuntimeAfterTickFacade
 from .runtime_services.runtime_auto_queue_facade import RuntimeAutoQueueFacade
@@ -18,6 +20,7 @@ from .runtime_services.runtime_blockspace_facade import RuntimeBlockspaceFacade
 from .runtime_services.runtime_budget_facade import RuntimeBudgetFacade
 from .runtime_services.runtime_caq_kds_facade import RuntimeCaqKdsFacade
 from .runtime_services.runtime_can_execute_facade import RuntimeCanExecuteFacade
+from .runtime_services.runtime_capital_facade import RuntimeCapitalFacade
 from .runtime_services.runtime_constructor_facade import RuntimeConstructorFacade
 from .runtime_services.runtime_decision_facade import RuntimeDecisionFacade
 from .runtime_services.runtime_decision_finalize_facade import RuntimeDecisionFinalizeFacade
@@ -44,7 +47,7 @@ from .runtime_services.runtime_post_tick_facade import RuntimePostTickFacade
 from .runtime_services.runtime_postdecision_state_facade import RuntimePostdecisionStateFacade
 from .runtime_services.runtime_predecision_state_facade import RuntimePredecisionStateFacade
 from .runtime_services.runtime_primary_scan_facade import RuntimePrimaryScanFacade
-from .runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
+from .runtime_services.omar_receipt_facade import OmarReceiptFacade
 from .runtime_services.runtime_replay_facade import RuntimeReplayFacade
 from .runtime_services.runtime_score_overlay_facade import RuntimeScoreOverlayFacade
 from .runtime_services.runtime_spread_facade import RuntimeSpreadFacade
@@ -82,9 +85,7 @@ class MultiRuntimeBundle(
             raise ValueError("cfgs empty")
         if len(cfgs) > self.MAX_CHAINS:
             cfgs = cfgs[: self.MAX_CHAINS]
-        self._runtimes: Dict[str, RuntimeBundle] = {
-            c.chain.name: RuntimeBundle(c) for c in cfgs
-        }
+        self._runtimes: Dict[str, RuntimeBundle] = {c.chain.name: RuntimeBundle(c) for c in cfgs}
         self._active_chain = cfgs[0].chain.name
         self._ws_clients: List[asyncio.Queue] = []
         self._fan_tasks: List[asyncio.Task] = []
@@ -103,7 +104,7 @@ class RuntimeBundle(
     RuntimeOperatorFacade,
     RuntimeReplayFacade,
     RuntimeCapitalFacade,
-    RuntimeReceiptFacade,
+    OmarReceiptFacade,
     RuntimeLifecycleFacade,
     RuntimeMarketFacade,
     RuntimeBudgetFacade,
@@ -139,7 +140,7 @@ class RuntimeBundle(
 ):
     """Thin compatibility-shell runtime wrapper.
 
-    Constructor sequencing and outer entry wrappers remain here; hot-path
+    Constructor sequencing and outer entry wrappers remain here; hot path
     behavior stays in runtime_services facades.
     """
 

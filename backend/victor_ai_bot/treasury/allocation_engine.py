@@ -1,17 +1,38 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 from .capital_buckets import CapitalBuckets, default_buckets
 from .family_allocator import compute_dynamic_family_weights
 from .risk_controls import drawdown_contraction
 
 
+# Capital targets use canonical treasury/runtime family identifiers. Aliases are
+# deliberately explicit so V1 cannot accidentally allocate to an unavailable family.
+_CAPITAL_FAMILY_ALIASES = {
+    "flash_arb": "flashloan_atomic",
+    "flashloan_atomic": "flashloan_atomic",
+    "funding_arb": "funding_arb",
+    "cex_dex_arb": "cross_cex_dex",
+    "cross_cex_dex": "cross_cex_dex",
+    "liquidation_capture": "liquidation_anticipation",
+    "liquidation_anticipation": "liquidation_anticipation",
+    "mev_search": "mev_search",
+    "volatility_market_making": "volatility_event_overlay",
+}
+_DEFAULT_V1_ELIGIBLE_FAMILIES = ("flash_arb",)
+
+
 def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
-def family_targets(*, regime: str, aggressiveness_level: str) -> Dict[str, float]:
+def family_targets(
+    *,
+    regime: str,
+    aggressiveness_level: str,
+    eligible_families: Iterable[str] | None = _DEFAULT_V1_ELIGIBLE_FAMILIES,
+) -> Dict[str, float]:
     base = {
         "flashloan_atomic": 0.46,
         "liquidation_anticipation": 0.10,
@@ -44,6 +65,19 @@ def family_targets(*, regime: str, aggressiveness_level: str) -> Dict[str, float
         base["oracle_drift"] += 0.04
         base["flashloan_atomic"] -= 0.05
         base["funding_arb"] += 0.03
+
+    if eligible_families is not None:
+        eligible = {
+            _CAPITAL_FAMILY_ALIASES.get(str(family), str(family))
+            for family in eligible_families
+            if str(family)
+        }
+        if not eligible:
+            eligible = {"flashloan_atomic"}
+        base = {key: value for key, value in base.items() if key in eligible}
+        if not base:
+            base = {"flashloan_atomic": 1.0}
+
     total = sum(base.values())
     return {k: round(v / max(1e-9, total), 6) for k, v in base.items()}
 
@@ -57,6 +91,7 @@ def allocate_capital(
     scorecards: Dict[str, Any] | None = None,
     capital_metrics: Dict[str, Any] | None = None,
     covariance_penalties: Dict[str, float] | None = None,
+    eligible_families: Iterable[str] | None = _DEFAULT_V1_ELIGIBLE_FAMILIES,
 ) -> Dict[str, Any]:
     buckets = default_buckets(drawdown_pct=drawdown_pct, aggressiveness_level=aggressiveness_level)
     cap = max(1, int(estimated_capital_wei))
@@ -72,7 +107,11 @@ def allocate_capital(
     )
     buffer = int(cap * buckets.drawdown_buffer_pct)
     treasury = int(cap * buckets.treasury_offramp_pct)
-    fam_targets = family_targets(regime=regime, aggressiveness_level=aggressiveness_level)
+    fam_targets = family_targets(
+        regime=regime,
+        aggressiveness_level=aggressiveness_level,
+        eligible_families=eligible_families,
+    )
     if scorecards is not None or capital_metrics is not None or covariance_penalties is not None:
         fam_targets = compute_dynamic_family_weights(
             base_targets=fam_targets,
@@ -81,6 +120,21 @@ def allocate_capital(
             capital_metrics=capital_metrics or {},
             covariance_penalties=covariance_penalties or {},
         )
+        if eligible_families is not None:
+            eligible = {
+                _CAPITAL_FAMILY_ALIASES.get(str(family), str(family))
+                for family in eligible_families
+                if str(family)
+            }
+            if not eligible:
+                eligible = {"flashloan_atomic"}
+            fam_targets = {key: value for key, value in fam_targets.items() if key in eligible}
+            fam_targets = fam_targets or {"flashloan_atomic": 1.0}
+            total = sum(max(0.0, float(value)) for value in fam_targets.values())
+            fam_targets = {
+                key: round(max(0.0, float(value)) / max(1e-9, total), 6)
+                for key, value in fam_targets.items()
+            }
     fam_alloc = {k: int(deployable * float(v)) for k, v in fam_targets.items()}
     return {
         "deployable_bankroll_wei": deployable,

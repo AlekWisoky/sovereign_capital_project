@@ -16,10 +16,10 @@ class _Runtime:
         self.cfg = SimpleNamespace(chain=SimpleNamespace(name="ethereum"))
 
     def capital_contract(self) -> dict:
-        return {"contractVersion": "capital_truth_contract_v1", "ok": True}
+        return {"contractVersion": "canonical_capital_summary_v1", "ok": True}
 
     def capital_policy(self) -> dict:
-        return {"contractVersion": "capital_policy_contract_v1", "ok": True}
+        return {"contractVersion": "capital_policy_v1", "ok": True}
 
     def meta_state(self) -> dict:
         return {"ok": True, "enabled": True}
@@ -60,8 +60,8 @@ def test_operator_command_state_emits_summary_contract(monkeypatch) -> None:
     monkeypatch.setattr(operator_command_routes, "get_runtime", lambda request: runtime)
     body = asyncio.run(operator_command_routes.command_state(request=SimpleNamespace()))
     assert body["summaryContract"]["truthFamily"] == "operator_command_state"
-    assert body["summaryContract"]["capitalContractVersion"] == "capital_truth_contract_v1"
-    assert body["summaryContract"]["capitalPolicyVersion"] == "capital_policy_contract_v1"
+    assert body["summaryContract"]["capitalContractVersion"] == "canonical_capital_summary_v1"
+    assert body["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"
 
 
 def test_command_center_audit_and_explain_emit_summary_contract(monkeypatch) -> None:
@@ -71,11 +71,11 @@ def test_command_center_audit_and_explain_emit_summary_contract(monkeypatch) -> 
 
     audit = asyncio.run(command_center_routes.commandcenter_audit_tail(SimpleNamespace(), limit=5))
     assert audit["summaryContract"]["truthFamily"] == "command_center_audit"
-    assert audit["summaryContract"]["capitalContractVersion"] == "capital_truth_contract_v1"
+    assert audit["summaryContract"]["capitalContractVersion"] == "canonical_capital_summary_v1"
 
     explain = asyncio.run(command_center_routes.commandcenter_explain(SimpleNamespace()))
     assert explain["summaryContract"]["truthFamily"] == "command_center_explain"
-    assert explain["summaryContract"]["capitalPolicyVersion"] == "capital_policy_contract_v1"
+    assert explain["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"
 
 
 def test_withdraw_all_state_and_preview_emit_summary_contract(monkeypatch) -> None:
@@ -90,8 +90,8 @@ def test_withdraw_all_state_and_preview_emit_summary_contract(monkeypatch) -> No
 
     state_body = asyncio.run(withdraw_all_routes.withdraw_all_state(SimpleNamespace()))
     assert state_body["summaryContract"]["truthFamily"] == "withdraw_all_state"
-    assert state_body["summaryContract"]["capitalContractVersion"] == "capital_truth_contract_v1"
+    assert state_body["summaryContract"]["capitalContractVersion"] == "canonical_capital_summary_v1"
 
     preview_body = asyncio.run(withdraw_all_routes.withdraw_all_preview(SimpleNamespace()))
     assert preview_body["summaryContract"]["truthFamily"] == "withdraw_all_preview"
-    assert preview_body["summaryContract"]["capitalPolicyVersion"] == "capital_policy_contract_v1"
+    assert preview_body["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"

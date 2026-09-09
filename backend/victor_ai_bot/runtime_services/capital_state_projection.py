@@ -47,14 +47,43 @@ def build_capital_ledger_truth_projection(
     transactions = list(ledger.get("transactions") or [])
     internal_prime = _safe_dict(summary.get("internalPrime"))
     last_settlement = _safe_dict(summary.get("lastSettlement"))
-    if not last_settlement:
+    if not (last_settlement.get("receiptId") or last_settlement.get("transactionId")):
         last_settlement = _safe_dict(truth_projection.get("lastSettlement"))
+    if not (last_settlement.get("receiptId") or last_settlement.get("transactionId")):
+        for candidate in reversed([*tail, *transactions]):
+            item = _safe_dict(candidate)
+            receipt_id = str(item.get("receipt_id") or item.get("receiptId") or "")
+            transaction_id = str(item.get("transaction_id") or item.get("transactionId") or "")
+            if not receipt_id and not transaction_id:
+                continue
+            last_settlement = {
+                "receiptId": receipt_id,
+                "transactionId": transaction_id,
+                "status": str(item.get("status") or "settled"),
+            }
+            break
     terminal_authority = _safe_dict(summary.get("terminalProfitabilityAuthority"))
     if not terminal_authority:
         terminal_authority = _safe_dict(truth_projection.get("terminalProfitabilityAuthority"))
     capital_admission = _safe_dict(summary.get("capitalAdmission"))
     if not capital_admission:
         capital_admission = _safe_dict(truth_projection.get("capitalAdmission"))
+    if "stateContract" not in capital_admission and (
+        str(truth_projection.get("status") or "") == "ok"
+        or str(health.get("status") or "") == "ok"
+        or bool(health.get("ok", False))
+    ):
+        capital_admission["ok"] = True
+    if "ok" not in capital_admission:
+        capital_admission["ok"] = bool(
+            str(truth_projection.get("status") or "") == "ok"
+            or str(health.get("status") or "") == "ok"
+            or bool(health.get("ok", False))
+        )
+    if "reasonCode" not in capital_admission:
+        capital_admission["reasonCode"] = str(
+            truth_projection.get("reasonCode") or health.get("reasonCode") or "capital_truth_unavailable"
+        )
     nav_usd = _safe_float(summary.get("navUsd"))
     nav_source = str(summary.get("navSource") or "unavailable")
     ledger_usd_balance = _safe_float(
@@ -126,7 +155,6 @@ def build_capital_ledger_truth_projection(
             "stateContract": state_contract,
         }
     )
-
 
 
 def build_capital_operator_projection(

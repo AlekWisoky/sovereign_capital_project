@@ -1,0 +1,6 @@
+backend/victor_ai_bot/decision_identity.py
+backend/victor_ai_bot/operator_intent.py
+backend/victor_ai_bot/omar/config.py
+backend/victor_ai_bot/omar/learning_integrity.py
+backend/victor_ai_bot/omar/real_learning.py
+backend/victor_ai_bot/omar/runtime.py

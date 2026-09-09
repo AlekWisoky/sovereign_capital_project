@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+from typing import Any, Dict
+
+from .family_hardening_service import FamilyHardeningService as _FamilyHardeningService
+
+
+class _NonRecursiveFamilyHardeningRuntimeProxy:
+    """Delegate runtime reads but keep family hardening from re-entering capital truth."""
+
+    def __init__(self, runtime: Any):
+        self._runtime = runtime
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._runtime, name)
+
+    def capital_truth_state(self) -> Dict[str, Any]:
+        # Family hardening is a dependency of the capital-truth summary. Asking
+        # for capital truth here would recurse through launch -> family hardening.
+        return {}
+
+
+class RuntimeFamilyHardeningService(_FamilyHardeningService):
+    """Runtime-safe family hardening view that avoids launch/fund summary recursion."""
+
+    @staticmethod
+    def _context(runtime: Any) -> Dict[str, Any]:
+        # Family hardening is itself part of the fund summary. Calling
+        # runtime.fund_summary_state() here re-enters FundService.summary(),
+        # which asks for family hardening again. Keep this context on
+        # non-summary runtime state only.
+        stage = "internal_capital"
+        try:
+            snapshot = (
+                runtime._cc.snapshot()
+                if getattr(runtime, "_cc", None) is not None
+                and hasattr(runtime._cc, "snapshot")
+                else {}
+            )
+            stage = str((snapshot or {}).get("fundStage") or stage)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+
+        # Do not call capital_engine_state(): it is a RuntimeStateFacade summary
+        # accessor and can re-enter launch/capital-truth while launch is already
+        # asking family hardening for readiness. Use materialized runtime state.
+        capital_state = getattr(runtime, "_capital_engine_state", {})
+        if not isinstance(capital_state, dict):
+            capital_state = {}
+
+        try:
+            internal_prime = (
+                runtime.internal_prime_state()
+                if hasattr(runtime, "internal_prime_state")
+                else {}
+            )
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            internal_prime = {}
+        try:
+            drawdown = runtime.drawdown_state() if hasattr(runtime, "drawdown_state") else {}
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            drawdown = {}
+        try:
+            kill_switch = (
+                runtime.kill_switch_state() if hasattr(runtime, "kill_switch_state") else {}
+            )
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            kill_switch = {}
+
+        fund_summary = {
+            "fundStage": stage,
+            "capitalReady": bool(capital_state.get("capital_engine")),
+            "internalPrimeReady": bool((internal_prime or {}).get("stateReady", True)),
+            "privateRoutingReady": True,
+            "familyHardeningStatus": "ok",
+            "familyHardeningReasonCodes": [],
+            "drawdownState": drawdown,
+            "killSwitch": kill_switch,
+        }
+        return {
+            "stage": stage,
+            "scorecards": (
+                runtime.strategy_scorecards_state()
+                if hasattr(runtime, "strategy_scorecards_state")
+                else {"families": []}
+            ),
+            "engine_state": runtime.engine_state() if hasattr(runtime, "engine_state") else {},
+            "telemetry": (
+                runtime.telemetry_summary() if hasattr(runtime, "telemetry_summary") else {}
+            ),
+            "calibration": (
+                runtime.execution_calibration_state()
+                if hasattr(runtime, "execution_calibration_state")
+                else {}
+            ),
+            "fund_summary": fund_summary,
+            "active_families": list(
+                getattr(
+                    getattr(getattr(runtime, "_launch_rollout", None), "profile", None),
+                    "active_families",
+                    [],
+                )
+                or []
+            ),
+            "family_states": dict(
+                getattr(
+                    getattr(getattr(runtime, "_launch_rollout", None), "profile", None),
+                    "family_states",
+                    {},
+                )
+                or {}
+            ),
+            "exploration_budget": dict(
+                getattr(
+                    getattr(getattr(runtime, "_launch_rollout", None), "profile", None),
+                    "exploration_budget",
+                    {},
+                )
+                or {}
+            ),
+            "capital_state": capital_state,
+        }
+
+    def family_state(self, runtime: Any, family: str) -> Dict[str, Any]:
+        # The base implementation performs capital_truth_state() after
+        # readiness. During capital-truth/launch evaluation that edge would
+        # re-enter family hardening, so cut only that dependency edge.
+        return super().family_state(_NonRecursiveFamilyHardeningRuntimeProxy(runtime), family)

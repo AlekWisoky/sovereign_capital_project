@@ -1,0 +1,2 @@
+# Deployment compatibility entrypoint. Runtime dependencies are canonical in backend/requirements.txt.
+-r backend/requirements.txt

@@ -43,7 +43,11 @@ def initialize_execution_support_stack(runtime: Any, cfg: Any, data_dir: str) ->
 
     max_borrow = int(cfg.safety.max_borrow_amount or "0")
     base_override = int(getattr(cfg.execution, "base_borrow_amount", "0") or "0")
-    runtime._bankroll_history_repo = BankrollEventRepository(runtime._db, chain=cfg.chain.name)
+    runtime._bankroll_history_repo = (
+        BankrollEventRepository(runtime._db, chain=cfg.chain.name)
+        if getattr(runtime, "_db", None) is not None
+        else None
+    )
     runtime._bankroll = BankrollManager(
         BankrollConfig(
             auto_reinvest_enabled=bool(getattr(cfg.execution, "auto_reinvest_enabled", False)),

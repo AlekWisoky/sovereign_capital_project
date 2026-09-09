@@ -129,6 +129,10 @@ def test_governance_read_routes_return_deterministic_degraded_payloads():
         intent = client.get("/api/governance/intent/intent-9").json()
         threat = client.get("/api/governance/threat_status").json()
 
+        for body in (intent, threat):
+            body.pop("capitalTruthHealth", None)
+            body.pop("summaryContract", None)
+
         assert intent == {
             "ok": False,
             "status": "degraded",

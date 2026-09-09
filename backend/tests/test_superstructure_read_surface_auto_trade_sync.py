@@ -16,10 +16,7 @@ class _BlockedRecoveryRepo:
             "history_component": "treasury_governance",
             "history_stage": "fund_hold",
             "history_reason_code": "governance_review_required",
-            "history_reason_codes": [
-                "governance_review_required",
-                "capital_truth_out_of_sync",
-            ],
+            "history_reason_codes": ["governance_review_required", "capital_truth_out_of_sync"],
             "history_next_action": "review_governance_and_capital_truth",
             "component_reliability_class": "blocked",
             "component_reliability_reason_code": "governance_review_required",
@@ -38,12 +35,7 @@ class _RuntimeWithSuperstructure:
         self._auto_trade_recovery_repo = _BlockedRecoveryRepo()
 
     def superstructure_state(self):
-        return {
-            "ok": True,
-            "enabled": True,
-            "agents": [{"id": "agent-1", "status": "running"}],
-            "stability": {"score": 0.97, "status": "steady"},
-        }
+        return {"ok": True, "enabled": True, "agents": [{"id": "agent-1", "status": "running"}], "stability": {"score": 0.97, "status": "steady"}}
 
     def governance_state(self):
         return {"ok": True, "enabled": True, "threat": {"level": "low"}}
@@ -84,13 +76,14 @@ DEFAULT_RECOVERY = {
     "component_recovered_fragile": False,
 }
 
-DEFAULT_GATE = {
-    "allowed": True,
-    "stage": "ok",
-    "reason_code": "ok",
-    "reason_codes": [],
-    "next_action": "",
-}
+DEFAULT_GATE = {"allowed": True, "stage": "ok", "reason_code": "ok", "reason_codes": [], "next_action": ""}
+
+
+def _legacy_degraded_payload(body):
+    body = dict(body)
+    body.pop("capitalTruthHealth", None)
+    body.pop("summaryContract", None)
+    return body
 
 
 def test_superstructure_read_routes_surface_persisted_auto_trade_recovery_gate(monkeypatch):
@@ -125,12 +118,7 @@ def test_superstructure_read_routes_return_deterministic_degraded_payloads(monke
     monkeypatch.setattr(app.state, "runtime", runtime, raising=False)
     client = TestClient(app)
 
-    org = client.get("/api/org/state").json()
-    stability = client.get("/api/org/stability").json()
-    legacy_governance = client.get("/api/governance/state_legacy").json()
-    governance_health = client.get("/api/governance/health").json()
-
-    assert org == {
+    assert _legacy_degraded_payload(client.get("/api/org/state").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "superstructure_state_failed",
@@ -140,8 +128,7 @@ def test_superstructure_read_routes_return_deterministic_degraded_payloads(monke
         "auto_trade_recovery": DEFAULT_RECOVERY,
         "auto_trade_gate": DEFAULT_GATE,
     }
-
-    assert stability == {
+    assert _legacy_degraded_payload(client.get("/api/org/stability").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "superstructure_stability_failed",
@@ -152,8 +139,7 @@ def test_superstructure_read_routes_return_deterministic_degraded_payloads(monke
         "auto_trade_recovery": DEFAULT_RECOVERY,
         "auto_trade_gate": DEFAULT_GATE,
     }
-
-    assert legacy_governance == {
+    assert _legacy_degraded_payload(client.get("/api/governance/state_legacy").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "governance_state_legacy_failed",
@@ -163,8 +149,7 @@ def test_superstructure_read_routes_return_deterministic_degraded_payloads(monke
         "auto_trade_recovery": DEFAULT_RECOVERY,
         "auto_trade_gate": DEFAULT_GATE,
     }
-
-    assert governance_health == {
+    assert _legacy_degraded_payload(client.get("/api/governance/health").json()) == {
         "ok": False,
         "status": "degraded",
         "reason_code": "governance_health_failed",

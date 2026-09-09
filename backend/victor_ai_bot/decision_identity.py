@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 @dataclass(frozen=True)
 class DecisionExecutionIdentity:
-    """Canonical identity carried from decision through execution to settlement."""
+    """One canonical identity carried from decision through settlement."""
 
     decision_id: str
     correlation_id: str
@@ -39,9 +39,8 @@ def ensure_decision_identity(
 ) -> DecisionExecutionIdentity:
     """Create/preserve one canonical decision/correlation identity.
 
-    The identity is independent of OMAR and is persisted on both the
-    opportunity and decision so execution and settlement can carry the same
-    lineage even when learning is disabled.
+    Identity belongs to the canonical decision boundary, not to OMAR.
+    Operator intent is a write-once decision-time attribution snapshot.
     """
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
@@ -50,7 +49,6 @@ def ensure_decision_identity(
             opp.meta = meta
         except (AttributeError, TypeError):
             pass
-
     brain = _dict(meta.get("brain"))
     lineage = _dict(meta.get("canonical_lineage"))
     decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
@@ -60,51 +58,53 @@ def ensure_decision_identity(
         or lineage.get("decision_id")
         or decision_meta.get("canonical_decision_id")
         or decision_meta.get("decision_id")
+    ) or _stable_id(
+        "decision", chain_name, int(current_block), getattr(opp, "id", ""), getattr(opp, "route_id", "")
     )
-    if not decision_id:
-        decision_id = _stable_id(
-            "decision",
-            chain_name,
-            int(current_block),
-            getattr(opp, "id", ""),
-            getattr(opp, "route_id", ""),
-        )
-
     correlation_id = _text(
-        brain.get("correlation_id")
-        or lineage.get("correlation_id")
-        or decision_meta.get("correlation_id")
+        brain.get("correlation_id") or lineage.get("correlation_id") or decision_meta.get("correlation_id")
+    ) or _stable_id("corr", decision_id, chain_name)
+
+    intent_snapshot = _dict(
+        brain.get("operator_intent") or lineage.get("operator_intent") or decision_meta.get("operator_intent")
     )
-    if not correlation_id:
-        correlation_id = _stable_id("corr", decision_id, chain_name)
+    if not intent_snapshot and operator_intent is not None:
+        intent_snapshot = dict(operator_intent)
+    fingerprint = _text(
+        brain.get("intent_fingerprint") or lineage.get("intent_fingerprint") or decision_meta.get("intent_fingerprint")
+    ) or _text(intent_fingerprint)
 
-    brain["canonical_decision_id"] = decision_id
-    brain["correlation_id"] = correlation_id
-    meta["brain"] = brain
-
-    canonical_lineage = {
+    canonical_lineage: dict[str, Any] = {
         "decision_id": decision_id,
         "correlation_id": correlation_id,
         "created_at_ms": int(lineage.get("created_at_ms") or time.time() * 1000),
     }
-    if operator_intent is not None:
-        canonical_lineage["operator_intent"] = dict(operator_intent)
-    if intent_fingerprint:
-        canonical_lineage["intent_fingerprint"] = _text(intent_fingerprint)
+    if intent_snapshot:
+        canonical_lineage["operator_intent"] = dict(intent_snapshot)
+    if fingerprint:
+        canonical_lineage["intent_fingerprint"] = fingerprint
+
+    brain["canonical_decision_id"] = decision_id
+    brain["correlation_id"] = correlation_id
+    if intent_snapshot:
+        brain["operator_intent"] = dict(intent_snapshot)
+    if fingerprint:
+        brain["intent_fingerprint"] = fingerprint
+    meta["brain"] = brain
     meta["canonical_lineage"] = canonical_lineage
 
     if decision is not None:
         decision_meta["canonical_decision_id"] = decision_id
         decision_meta["correlation_id"] = correlation_id
-        decision_meta["decision_lineage"] = {
-            "decision_id": decision_id,
-            "correlation_id": correlation_id,
-        }
+        if intent_snapshot:
+            decision_meta["operator_intent"] = dict(intent_snapshot)
+        if fingerprint:
+            decision_meta["intent_fingerprint"] = fingerprint
+        decision_meta["decision_lineage"] = {"decision_id": decision_id, "correlation_id": correlation_id}
         try:
             decision.metadata = decision_meta
         except (AttributeError, TypeError):
             pass
-
     return DecisionExecutionIdentity(decision_id=decision_id, correlation_id=correlation_id)
 
 
