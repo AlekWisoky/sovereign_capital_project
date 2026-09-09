@@ -51,8 +51,7 @@ class OmarRuntime:
         correlation_id = str(lineage.get("correlation_id") or metadata_row.get("correlation_id") or "").strip()
         expected = expected_net_usd if expected_net_usd is not None else metadata_row.get("expected_net_usd", context.get("expected_net_usd"))
         row = {"decision_id": str(decision_id), "correlation_id": correlation_id, "opportunity_id": str(opportunity_id), "route_id": str(route_id), "action": str(action), "state_key": str(state_key), "context": copy.deepcopy(dict(context or {})), "metadata": metadata_row, "canonical_lineage": {"decision_id": str(decision_id), "correlation_id": correlation_id}, "ts_ms": int(time.time() * 1000)}
-        if expected is not None:
-            row["expected_net_usd"] = expected
+        if expected is not None: row["expected_net_usd"] = expected
         with self._lock:
             self._pending_decisions[str(decision_id)] = row
             if len(self._pending_decisions) > 512:
@@ -68,14 +67,11 @@ class OmarRuntime:
         outcome.update({"status": str(settlement.get("status") or metadata_row.get("status") or "").strip(), "source": str(settlement.get("source") or metadata_row.get("source") or "").strip(), "decision_id": str(settlement.get("decision_id") or lineage.get("decision_id") or decision_id).strip(), "correlation_id": str(settlement.get("correlation_id") or lineage.get("correlation_id") or pending.get("correlation_id") or "").strip(), "opportunity_id": str(settlement.get("opportunity_id") or pending.get("opportunity_id") or "").strip(), "action": str(settlement.get("action") or pending.get("action") or "").strip(), "route_id": str(settlement.get("route_id") or route_id or pending.get("route_id") or "").strip(), "truth_verified": bool(settlement.get("truth_verified", settlement.get("outcome_truth_verified", outcome_truth_verified))), "settlement_verified": bool(settlement.get("settlement_verified", settlement.get("truth_verified", outcome_truth_verified))), "execution_id": str(settlement.get("execution_id") or "").strip(), "outcome_id": str(settlement.get("outcome_id") or "").strip(), "sizing_id": str(settlement.get("sizing_id") or "").strip(), "canonical_lineage": {"decision_id": str(lineage.get("decision_id") or settlement.get("decision_id") or decision_id).strip(), "correlation_id": str(lineage.get("correlation_id") or settlement.get("correlation_id") or pending.get("correlation_id") or "").strip()}})
         outcome["expected_net_usd"] = expected_net_usd if expected_net_usd is not None else settlement.get("expected_net_usd", pending.get("expected_net_usd"))
         outcome["realized_net_usd"] = realized_net_usd if realized_net_usd is not None else settlement.get("realized_net_usd")
-        expected = pending.get("expected_net_usd")
-        realized = outcome.get("realized_net_usd")
+        expected = pending.get("expected_net_usd"); realized = outcome.get("realized_net_usd")
         if expected is not None and realized is not None:
             try:
-                if math.isfinite(float(expected)) and math.isfinite(float(realized)):
-                    outcome["expectation_error"] = float(realized) - float(expected)
-            except (TypeError, ValueError, OverflowError):
-                pass
+                if math.isfinite(float(expected)) and math.isfinite(float(realized)): outcome["expectation_error"] = float(realized) - float(expected)
+            except (TypeError, ValueError, OverflowError): pass
         gate = validate_learning_transition(pending, outcome, decision_id=str(decision_id))
         if not gate.allowed:
             result = {"ok": False, "learned": False, "reason": gate.reason, "decision_id": str(decision_id)}; self._log({"event": "omar_learning_gate_rejected", **result}); return result
@@ -86,7 +82,8 @@ class OmarRuntime:
         reward = max(-50.0, min(50.0, reward))
         learner_outcome = {"decision_id": str(decision_id), "correlation_id": str(outcome.get("correlation_id") or ""), "route_id": str(outcome.get("route_id") or ""), "tx_hash": str(tx_hash), "ok": bool(ok), "expected_net_usd": expected, "realized_net_usd": realized, "expectation_error": expectation_error, "settlement_verified": True, "amount_in_wei": int(amount_in_wei), "gas_cost_usd": float(gas_cost_usd or 0.0), "slippage_bps": float(slippage_bps or 0.0), "latency_ms": int(latency_ms or 0), "outcome_truth_verified": True, "metadata": metadata_row}
         result = self._real_learner.observe(state_key=state_key, action=action, reward=reward, outcome=learner_outcome)
-        with self._lock: self._pending_decisions.pop(str(decision_id), None); self.last_outcome = {**dict(result), "decision_id": str(decision_id), "action": action, "expected_net_usd": expected, "realized_net_usd": realized, "expectation_error": expectation_error}
+        result = {**dict(result), "learned": True, "decision_id": str(decision_id), "expected_net_usd": expected, "realized_net_usd": realized, "expectation_error": expectation_error, "settlement_verified": True}
+        with self._lock: self._pending_decisions.pop(str(decision_id), None); self.last_outcome = {**dict(result), "action": action}
         self._log({"event": "omar_real_learning_update", **dict(result), "outcome": learner_outcome, "decision_snapshot": pending}); return result
 
     def _log(self, obj: Dict[str, Any]) -> None:
