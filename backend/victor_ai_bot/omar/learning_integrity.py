@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
@@ -21,6 +22,11 @@ def _text(value: Any) -> str:
 def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
+def _finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or value is None: return False
+    try: return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError): return False
+
 def validate_learning_transition(pending: Mapping[str, Any], outcome: Mapping[str, Any], *, decision_id: str) -> LearningIntegrityResult:
     """Fail closed until settlement is physically and exactly attributed."""
     p = _dict(pending); row = _dict(outcome); did = _text(decision_id)
@@ -38,8 +44,15 @@ def validate_learning_transition(pending: Mapping[str, Any], outcome: Mapping[st
             return LearningIntegrityResult(False, f"missing_{field}", did, correlation, action)
     if _text(p.get("opportunity_id")) != _text(row.get("opportunity_id") or lineage.get("opportunity_id")): return LearningIntegrityResult(False, "opportunity_lineage_mismatch", did, correlation, action)
     if _text(p.get("route_id")) != _text(row.get("route_id") or lineage.get("route_id")): return LearningIntegrityResult(False, "route_attribution_mismatch", did, correlation, action)
-    if not bool(row.get("truth_verified", row.get("outcome_truth_verified", False))): return LearningIntegrityResult(False, "outcome_truth_unverified", did, correlation, action)
+    if not bool(row.get("settlement_verified", row.get("truth_verified", row.get("outcome_truth_verified", False)))): return LearningIntegrityResult(False, "settlement_unverified", did, correlation, action)
     if _text(row.get("source")) not in CANONICAL_SETTLEMENT_SOURCES: return LearningIntegrityResult(False, "noncanonical_learning_source", did, correlation, action)
+    if not _finite_number(p.get("expected_net_usd")): return LearningIntegrityResult(False, "missing_or_invalid_expected_net", did, correlation, action)
+    if not _finite_number(row.get("realized_net_usd")): return LearningIntegrityResult(False, "missing_or_invalid_realized_net", did, correlation, action)
+    if not _finite_number(row.get("expected_net_usd")): return LearningIntegrityResult(False, "missing_or_invalid_settlement_expected_net", did, correlation, action)
+    if float(row["expected_net_usd"]) != float(p["expected_net_usd"]): return LearningIntegrityResult(False, "expected_net_attribution_mismatch", did, correlation, action)
+    if not _finite_number(row.get("expectation_error")): return LearningIntegrityResult(False, "missing_or_invalid_expectation_error", did, correlation, action)
+    expected = float(p["expected_net_usd"]); realized = float(row["realized_net_usd"])
+    if float(row["expectation_error"]) != realized - expected: return LearningIntegrityResult(False, "expectation_error_mismatch", did, correlation, action)
     context = _dict(p.get("context")); capital = _dict(context.get("capital_authority")) or context
     if _text(capital.get("capital_authority_source")) != "capital_engine_state": return LearningIntegrityResult(False, "capital_authority_not_canonical", did, correlation, action)
     if _text(capital.get("capital_authority_status")).lower() in {"", "unknown", "unavailable"}: return LearningIntegrityResult(False, "capital_authority_unavailable", did, correlation, action)
