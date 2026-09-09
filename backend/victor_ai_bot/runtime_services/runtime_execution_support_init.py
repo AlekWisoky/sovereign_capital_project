@@ -3,22 +3,27 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from ..analytics.quicksight.runtime import QuickSightAnalyticsRuntime
-from ..arbitrage import SpreadEngine
-from ..bankroll import BankrollConfig, BankrollManager
-from ..bankroll_history import BankrollEventRepository
-from ..consensus_engine import AgentConsensusEngine, AgentPerformanceTracker
-from ..execution import ExecutionOrchestrator
-from ..fioa.runtime import BehaveAgentRuntime
-from ..governance import GovernanceRuntime
-from ..agent_hub import AgentHub
-from ..blockspace_intel import BlockspaceIntel
+from ..analytics import BlockspaceIntel, QuickSightAnalyticsRuntime
+from ..aqe.agents.hub import AgentHub
+from ..aqe.coordination import SharedFeatureBus, AgentConsensusEngine, AgentPerformanceTracker
+from ..aqe.execution import ExecutionOrchestrator
+from ..aqe.spread import SpreadEngine
+from ..bankroll import BankrollManager, BankrollConfig
+from ..behaveagent import BehaveAgentRuntime
 from ..efficiency import EfficiencyTracker
+from ..governance import GovernanceRuntime
 from ..pnl import PnLStore
-from ..shared_feature_bus import SharedFeatureBus
+from ..persistence.repositories.bankroll_repository import BankrollEventRepository
 from ..treasury import TreasuryRuntime
 
-_SAFE_RUNTIME_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+_SAFE_RUNTIME_EXCEPTIONS = (
+    AttributeError,
+    KeyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 def initialize_execution_support_stack(runtime: Any, cfg: Any, data_dir: str) -> None:
@@ -103,7 +108,11 @@ def initialize_execution_support_stack(runtime: Any, cfg: Any, data_dir: str) ->
 
     try:
         runtime._treasury = TreasuryRuntime(
-            cfg=getattr(cfg.execution, "treasury", None), data_dir=data_dir
+            cfg=getattr(cfg.execution, "treasury", None),
+            data_dir=data_dir,
+            db=runtime._db,
+            chain=cfg.chain.name,
+            capital_event_repo=getattr(runtime, "_capital_event_repo", None),
         )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._treasury = None
@@ -117,15 +126,14 @@ def initialize_execution_support_stack(runtime: Any, cfg: Any, data_dir: str) ->
 
     try:
         runtime._orchestrator = ExecutionOrchestrator(
-            cfg=cfg, runtime=runtime
+            allow_live=(not bool(getattr(cfg.execution, "dry_run", True)))
         )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._orchestrator = None
 
     try:
-        runtime._agent_hub = AgentHub(
-            cfg=getattr(cfg.execution, "agent_hub", None), runtime=runtime
-        )
+        runtime._agent_hub = AgentHub(data_dir=data_dir)
+        runtime._agent_hub_last = {}
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._agent_hub = None
-    runtime._agent_hub_last = {}
+        runtime._agent_hub_last = {}
