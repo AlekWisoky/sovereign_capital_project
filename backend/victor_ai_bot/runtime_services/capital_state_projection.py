@@ -49,6 +49,19 @@ def build_capital_ledger_truth_projection(
     last_settlement = _safe_dict(summary.get("lastSettlement"))
     if not last_settlement:
         last_settlement = _safe_dict(truth_projection.get("lastSettlement"))
+    if not last_settlement:
+        for candidate in reversed([*tail, *transactions]):
+            item = _safe_dict(candidate)
+            receipt_id = str(item.get("receipt_id") or item.get("receiptId") or "")
+            transaction_id = str(item.get("transaction_id") or item.get("transactionId") or "")
+            if not receipt_id and not transaction_id:
+                continue
+            last_settlement = {
+                "receiptId": receipt_id,
+                "transactionId": transaction_id,
+                "status": str(item.get("status") or "settled"),
+            }
+            break
     terminal_authority = _safe_dict(summary.get("terminalProfitabilityAuthority"))
     if not terminal_authority:
         terminal_authority = _safe_dict(truth_projection.get("terminalProfitabilityAuthority"))
@@ -126,7 +139,6 @@ def build_capital_ledger_truth_projection(
             "stateContract": state_contract,
         }
     )
-
 
 
 def build_capital_operator_projection(
