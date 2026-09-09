@@ -36,10 +36,11 @@ def test_core_paths_are_declared_and_targeted_explicitly() -> None:
     union_targets = set().union(*targets_by_slice.values()) if targets_by_slice else set()
     assert core_paths
     assert core_paths.issubset(union_targets)
-    assert "while read -r slice; do" in workflow
-    assert 'xargs -a "$slice" ruff check' in workflow
-    assert 'xargs -a "$slice" black --check' in workflow
-    assert 'mypy @"$slice"' in workflow
+    assert "python -m compileall -q backend" in workflow
+    assert "mypy $(tr '\\n' ' ' < backend/mypy_omar_targets.txt)" in workflow
+    assert "Path(f'/tmp/shard-{shard}.txt').write_text" in workflow
+    assert "for index, path in enumerate(tests):" in workflow
+    assert "shards[index % 8].append(path.as_posix())" in workflow
 
 
 def test_governance_reporting_slice_contains_next_ring_contract_consumers() -> None:
@@ -95,9 +96,7 @@ def test_dashboard_auxiliary_capital_lifecycle_slice_contains_route_and_withdraw
     assert "backend/victor_ai_bot/runtime_services/withdraw_all_service.py" in lifecycle_slice
 
 
-def test_optional_family_aux_reads_slice_contains_noncore_read_and_capital_facade_surfaces() -> (
-    None
-):
+def test_optional_family_aux_reads_slice_contains_noncore_read_and_capital_facade_surfaces() -> None:
     targets_by_slice = _slice_targets()
     extra_slice = targets_by_slice["backend/mypy_targets/optional_family_aux_reads.txt"]
 
