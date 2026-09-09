@@ -61,7 +61,7 @@ class OmarRealLearner:
 
     def recommend(self, context: Mapping[str, Any]) -> OmarRecommendation:
         with self._lock:
-            key = self.state_key(context); self._ensure(key); obs = self.total_observations
+            key = self.state_key(context); self._ensure(key); obs = self.n[key]
             if obs < self.min_observations:
                 rec = OmarRecommendation(key, "EXECUTE", 0.0, False, 1.0, "standard", False, obs, "insufficient_real_outcomes")
             else:
@@ -78,9 +78,9 @@ class OmarRealLearner:
             if not state_key or action not in ACTIONS: return {"ok": False, "reason": "invalid_real_learning_transition"}
             self._ensure(state_key); old = float(self.q[state_key].get(action, 0.0)); reward = max(-50.0, min(50.0, float(reward)))
             self.q[state_key][action] = old + self.alpha * (reward - old); self.n[state_key] += 1; self.total_observations += 1
-            self._append_event({"event": "omar_real_outcome", "ts_ms": int(time.time() * 1000), "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations, "outcome": dict(outcome or {})})
+            self._append_event({"event": "omar_real_outcome", "ts_ms": int(time.time() * 1000), "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations, "state_observations": self.n[state_key], "outcome": dict(outcome or {})})
             self.save()
-            return {"ok": True, "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations}
+            return {"ok": True, "state_key": state_key, "action": action, "reward": reward, "observations": self.total_observations, "state_observations": self.n[state_key]}
 
     def summary(self) -> Dict[str, Any]:
         return {"enabled": True, "states": len(self.q), "total_observations": self.total_observations, "min_observations": self.min_observations, "alpha": self.alpha, "epsilon": self.epsilon, "last_recommendation": dict(self.last_recommendation)}
