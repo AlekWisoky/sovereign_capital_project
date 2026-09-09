@@ -38,8 +38,8 @@ def test_route_error_surface_returns_deterministic_degraded_payloads(monkeypatch
         "weights": {},
     }
     assert agent_contract["contractVersion"] == "canonical_summary_read_contract_v1"
-    assert agent_contract["truthFamily"] == "agent_hub_state"
-    assert agent_contract["readModel"] == "agent_hub_state_projection_v1"
+    assert agent_contract["truthFamily"] == "agent_hub"
+    assert agent_contract["readModel"] == "agent_hub_projection_v1"
     assert agent_contract["stateContract"]["reason_code"] == "agent_hub_state_failed"
 
     attribution = client.get("/api/agents/attribution")
