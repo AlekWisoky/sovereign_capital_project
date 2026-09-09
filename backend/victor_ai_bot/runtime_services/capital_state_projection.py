@@ -68,6 +68,16 @@ def build_capital_ledger_truth_projection(
     capital_admission = _safe_dict(summary.get("capitalAdmission"))
     if not capital_admission:
         capital_admission = _safe_dict(truth_projection.get("capitalAdmission"))
+    if "ok" not in capital_admission:
+        capital_admission["ok"] = bool(
+            str(truth_projection.get("status") or "") == "ok"
+            or str(health.get("status") or "") == "ok"
+            or bool(health.get("ok", False))
+        )
+    if "reasonCode" not in capital_admission:
+        capital_admission["reasonCode"] = str(
+            truth_projection.get("reasonCode") or health.get("reasonCode") or "capital_truth_unavailable"
+        )
     nav_usd = _safe_float(summary.get("navUsd"))
     nav_source = str(summary.get("navSource") or "unavailable")
     ledger_usd_balance = _safe_float(
