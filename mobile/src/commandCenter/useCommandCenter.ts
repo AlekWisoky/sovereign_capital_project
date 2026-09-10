@@ -21,7 +21,7 @@ const CommandCenterContext = createContext<CommandCenterValue | null>(null);
 
 function useCommandCenterController(): CommandCenterValue {
   const { state } = useStore();
-  const [source, setSource] = useState<DataSource>((state as any).ccDataSource ?? "mock");
+  const [source, setSource] = useState<DataSource>(state.ccDataSource ?? "backend");
   const [snapshot, setSnapshot] = useState<CommandCenterSnapshot | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
@@ -48,7 +48,7 @@ function useCommandCenterController(): CommandCenterValue {
   useEffect(() => {
     void refresh();
     if (timer.current) clearInterval(timer.current);
-    const ms = Number((state as any).ccRefreshMs ?? 4500);
+    const ms = Number(state.ccRefreshMs ?? 4500);
     timer.current = setInterval(() => void refresh(), Math.max(1500, ms));
     return () => {
       if (timer.current) clearInterval(timer.current);
@@ -57,8 +57,7 @@ function useCommandCenterController(): CommandCenterValue {
   }, [provider]);
 
   async function setControls(patch: ControlPatch, reason: string) {
-    const result = await provider.setControls(patch, reason);
-    return result;
+    return await provider.setControls(patch, reason);
   }
 
   async function explain(): Promise<ExplainResponse> {
