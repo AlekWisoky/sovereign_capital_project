@@ -77,7 +77,7 @@ const DEFAULTS: AppSettings = {
   unitTokenAddress: '',
   baseBorrowAmount: '0',
   maxBorrowAmount: '0',
-  ccDataSource: 'mock',
+  ccDataSource: 'backend',
   ccRefreshMs: 4500,
 };
 
@@ -220,68 +220,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           } catch {}
         }
       }
+      try {
+        if (boot.activeChain || boot.chain) {
+          const r = await fetchChains(boot.baseUrl);
+          const chains = (r?.chains ?? []).map((x: unknown) => String(x));
+          const active = String(r?.active ?? boot.activeChain ?? boot.chain ?? '');
+          setMultichain({ ok: !!r?.ok, active, chains, last_refresh_ms: Date.now() });
+          dispatch({ type: 'set', patch: { activeChain: active, chain: active } });
+        }
+      } catch {}
       setHydrated(true);
     })();
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    if (state.role !== 'operator') {
-      setSessionState({ locked: false, armed: false });
-      return;
-    }
-    if (!state.adminKey && !state.hasAdminKeySecure) {
-      setSessionState((s) => ({ ...s, locked: true, armed: false }));
-      return;
-    }
-    setSessionState((s) => ({ ...s, locked: true, armed: false }));
-  }, [hydrated, state.role, state.hasAdminKeySecure, state.adminKey]);
-
-  useEffect(() => {
-    if (!hydrated) return;
     (async () => {
       try {
-        const safe = { ...state, adminKey: '' };
-        await AsyncStorage.setItem('victor.settings', JSON.stringify(safe));
+        const persist: AppSettings = { ...state, adminKey: '' };
+        await AsyncStorage.setItem('victor.settings', JSON.stringify(persist));
       } catch {}
     })();
-  }, [hydrated, state]);
+  }, [state, hydrated]);
 
-  useEffect(() => {
-    if (!hydrated) return;
-    (async () => {
-      try {
-        if (state.role === 'operator' && state.adminKey) {
-          await setSecureString(
-            'victor.adminKey',
-            String(state.adminKey || ''),
-            state.biometricsEnabled
-              ? { requireAuthentication: true, authenticationPrompt: 'Unlock x∆v operator key' }
-              : undefined,
-          );
-          if (!state.hasAdminKeySecure) {
-            dispatch({ type: 'set', patch: { hasAdminKeySecure: true } });
-          }
-          return;
-        }
-        if (state.role !== 'operator' && state.hasAdminKeySecure) {
-          await deleteSecureString('victor.adminKey');
-          dispatch({ type: 'set', patch: { hasAdminKeySecure: false } });
-        }
-      } catch {}
-    })();
-  }, [hydrated, state.adminKey, state.role, state.biometricsEnabled, state.hasAdminKeySecure]);
-
-  useEffect(() => {
-    if (!hydrated || !state.baseUrl) return;
-    void refreshMultichain();
-  }, [hydrated, state.baseUrl]);
-
-  return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
+  const value = useMemo(() => api, [api]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useStore() {
-  const v = useContext(Ctx);
-  if (!v) throw new Error('StoreProvider missing');
-  return v;
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error('useStore must be used inside StoreProvider');
+  return ctx;
 }
