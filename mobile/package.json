@@ -11,7 +11,7 @@
     "dev:web": "expo start --web",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:ci": "tsc -p tsconfig.ci.json --outDir .ci-build",
-    "test:unit": "node --test .ci-build/tests/amounts.test.js .ci-build/tests/launch-utils.test.js .ci-build/tests/launch-store.test.js .ci-build/tests/execution-summary.test.js .ci-build/tests/explain-summary.test.js .ci-build/tests/wealth-goal-summary.test.js .ci-build/tests/offramp-status.test.js .ci-build/tests/capital-truth-health.test.js .ci-build/tests/command-utils.test.js .ci-build/tests/fund-utils.test.js .ci-build/tests/projection-compatibility.test.js",
+    "test:unit": "node --test .ci-build/tests/amounts.test.js .ci-build/tests/launch-utils.test.js .ci-build/tests/launch-store.test.js .ci-build/tests/execution-summary.test.js .ci-build/tests/explain-summary.test.js .ci-build/tests/wealth-goal-summary.test.js .ci-build/tests/offramp-status.test.js .ci-build/tests/capital-truth-health.test.js .ci-build/tests/command-utils.test.js .ci-build/tests/fund-utils.test.js .ci-build/tests/projection-compatibility.test.js .ci-build/tests/mutation-guard.test.js",
     "ci:test": "npm run typecheck:ci && npm run test:unit",
     "export:web": "expo export --platform web --output-dir dist",
     "build:web": "npm run export:web",
@@ -41,6 +41,8 @@
     "expo-secure-store": "~15.0.8",
     "expo-linear-gradient": "~12.7.2",
     "react-native-svg": "14.1.0",
+    "expo-status-bar": "~1.11.1",
+    "react-native-gesture-handler": "~2.14.0",
     "expo-status-bar": "~1.11.1",
     "@walletconnect/react-native-compat": "2.23.8"
   },
