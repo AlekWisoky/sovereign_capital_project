@@ -1,4 +1,5 @@
-import React, { Alert, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Alert } from "react-native";
 import type { CommandCenterSnapshot, ControlPatch, ExplainResponse } from "./types";
 import { createBackendCommandCenterProvider, createMockCommandCenterProvider } from "./provider";
 import { useStore } from "../state/store";
@@ -22,15 +23,26 @@ const CommandCenterContext = createContext<CommandCenterValue | null>(null);
 
 function confirmMutation(title: string, message: string): Promise<boolean> {
   return new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-      { text: "Confirm", style: "destructive", onPress: () => resolve(true) },
-    ], { cancelable: true, onDismiss: () => resolve(false) });
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => finish(false) },
+        { text: "Confirm", style: "destructive", onPress: () => finish(true) },
+      ],
+      { cancelable: true, onDismiss: () => finish(false) },
+    );
   });
 }
 
 function useCommandCenterController(): CommandCenterValue {
-  const { state } = useStore();
+  const { state, session } = useStore();
   const [source, setSource] = useState<DataSource>(state.ccDataSource ?? "backend");
   const [snapshot, setSnapshot] = useState<CommandCenterSnapshot | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -69,11 +81,10 @@ function useCommandCenterController(): CommandCenterValue {
   async function setControls(patch: ControlPatch, reason: string) {
     const context = {
       role: state.role === "operator" ? "operator" as const : "read_only" as const,
-      locked: sessionLocked(state),
+      locked: Boolean(session.locked),
       adminKeyPresent: Boolean(state.adminKey?.trim()),
       backendReachable: source === "backend" && snapshot !== null && !error,
-      // Live authority is deliberately false until the backend reports an
-      // explicit activation state. Issue #89 is the activation gate.
+      // Live authority remains closed until the explicit Issue #89 activation review.
       backendLiveAuthority: false,
       explicitConfirmation: false,
     };
@@ -83,7 +94,10 @@ function useCommandCenterController(): CommandCenterValue {
       return { ok: false, error: `mutation_denied:${preflight.reasonCode}` };
     }
 
-    const confirmed = await confirmMutation("Confirm operator change", `${reason}\n\nThis changes backend operator state. Confirm only if this action is intentional.`);
+    const confirmed = await confirmMutation(
+      "Confirm operator change",
+      `${reason}\n\nThis changes backend operator state. Confirm only if this action is intentional.`,
+    );
     if (!confirmed) return { ok: false, error: "mutation_cancelled" };
 
     const allowed = guardMutation(kind, { ...context, explicitConfirmation: true });
@@ -110,10 +124,6 @@ function useCommandCenterController(): CommandCenterValue {
     explain,
     auditTail,
   };
-}
-
-function sessionLocked(state: ReturnType<typeof useStore>["state"]): boolean {
-  return Boolean(state.role !== "operator" || false);
 }
 
 export function CommandCenterProvider({ children }: { children: React.ReactNode }) {
