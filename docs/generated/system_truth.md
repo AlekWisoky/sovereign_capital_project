@@ -1,12 +1,12 @@
 # System Truth
 
-- generated_at: 2026-04-10T23:45:52.213000Z
-- generated_at_ms: 1775864752213
-- generated_at_iso: 2026-04-10T23:45:52.213000Z
+- generated_at: 2026-09-10T23:55:26.807000Z
+- generated_at_ms: 1789084526807
+- generated_at_iso: 2026-09-10T23:55:26.807000Z
 - thin_shell_runtime_py_lines: 47
 - thin_shell_api_py_lines: 21
-- backend_test_file_count: 323
-- mobile_test_file_count: 11
+- backend_test_file_count: 332
+- mobile_test_file_count: 12
 - route_count: 162
 - route_count_basis: app_routes
 - http_route_count: 158
@@ -15,7 +15,7 @@
 - framework_route_count: 4
 - app_route_count: 162
 - websocket_route_count: 4
-- runtime_legacy_lines: 243
+- runtime_legacy_lines: 181
 - api_legacy_lines: 83
 - runtime_bundle_definition_count: 1
 - runtime_legacy_broad_except_count: 0
@@ -35,6 +35,9 @@
 - agent_service
 - analytics_service
 - auxiliary_state_service
+- canonical_capital_write_service
+- canonical_receipt_service
+- canonical_settlement_interface
 - capital_admission_service
 - capital_explanation_service
 - capital_state_projection
@@ -64,6 +67,7 @@
 - fund_service
 - launch_service
 - lifecycle_service
+- omar_receipt_facade
 - operator_summary_service
 - opportunity_service
 - profitability_truth
@@ -89,6 +93,7 @@
 - runtime_execute_wrapper_facade
 - runtime_execution_capture_init
 - runtime_execution_support_init
+- runtime_family_hardening_service
 - runtime_feature_bus_facade
 - runtime_institutional_init
 - runtime_lifecycle_facade
