@@ -4,11 +4,13 @@ import {
   withdrawExecute,
   withdrawAllExecute,
   convertWithdrawExecute,
+  saveRpcPreferences,
   setLaunchMode,
   enableNextFamily,
   pauseLaunchFamily,
   revertLaunchFamily,
   quarantineLaunchFamily,
+  applyPreset,
   selectChain,
   type JsonObject,
   type OpportunityActionResult,
@@ -36,6 +38,16 @@ export async function guardedSetSettings(
 ): Promise<JsonObject> {
   assertAllowed(mutationKindForSettingsPatch(patch), context);
   return setSettings(baseUrl, patch, adminKey);
+}
+
+export async function guardedSaveRpcPreferences(
+  baseUrl: string,
+  body: Record<string, unknown>,
+  adminKey: string,
+  context: MutationGuardContext,
+): Promise<JsonObject> {
+  assertAllowed('settings', context);
+  return saveRpcPreferences(baseUrl, body, adminKey);
 }
 
 export async function guardedTradeOpportunity(
@@ -87,6 +99,17 @@ export async function guardedSetLaunchMode(
 ): Promise<JsonObject> {
   assertAllowed('launch_control', context);
   return setLaunchMode(baseUrl, mode, adminKey);
+}
+
+export async function guardedApplyPreset(
+  baseUrl: string,
+  chain: string,
+  name: string,
+  adminKey: string,
+  context: MutationGuardContext,
+): Promise<JsonObject> {
+  assertAllowed('launch_control', context);
+  return applyPreset(baseUrl, chain, name, adminKey);
 }
 
 export async function guardedEnableNextFamily(
