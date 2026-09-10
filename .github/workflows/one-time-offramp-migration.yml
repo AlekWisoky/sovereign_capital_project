@@ -1,0 +1,55 @@
+name: one-time-offramp-migration
+
+on:
+  push:
+    branches:
+      - mobile/guarded-mutations
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.head_commit.author.name != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mobile/guarded-mutations
+          fetch-depth: 0
+      - name: Migrate OffRamp mutation calls
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('mobile/src/screens/cc/OffRampScreen.tsx')
+          s = p.read_text()
+          old_import = 'import { withdrawConfig, withdrawPrepare, withdrawExecute, convertWithdrawQuote, convertWithdrawPrepare, convertWithdrawExecute, withdrawAllState, withdrawAllConfig, withdrawAllPreview, withdrawAllExecute } from "../../api/client";'
+          new_import = 'import { withdrawConfig, withdrawPrepare, convertWithdrawQuote, convertWithdrawPrepare, withdrawAllState, withdrawAllConfig, withdrawAllPreview } from "../../api/client";\nimport { guardedWithdrawExecute, guardedConvertWithdrawExecute, guardedWithdrawAllExecute } from "../../api/guardedMutations";\nimport type { MutationGuardContext } from "../../api/mutationGuard";'
+          if old_import not in s:
+              raise SystemExit('expected OffRamp import not found')
+          s = s.replace(old_import, new_import, 1)
+          marker = '  const operator = state.role === "operator" && !session.locked;\n'
+          addition = '''  const [backendReachable, setBackendReachable] = useState(false);\n\n  const mutationContext = (): MutationGuardContext => ({\n    role: state.role === "operator" ? "operator" : "read_only",\n    locked: session.locked,\n    adminKeyPresent: Boolean(state.adminKey?.trim()),\n    backendReachable,\n    backendLiveAuthority: false,\n    explicitConfirmation: true,\n  });\n'''
+          if marker not in s:
+              raise SystemExit('operator marker not found')
+          s = s.replace(marker, marker + addition, 1)
+          s = s.replace('''        setCfg(c as Record<string, unknown>);\n''', '''        setCfg(c as Record<string, unknown>);\n        setBackendReachable(true);\n''', 1)
+          s = s.replace('''      } catch (e: unknown) {\n        setStatus(e instanceof Error ? e.message : String(e));\n      }\n''', '''      } catch (e: unknown) {\n        setBackendReachable(false);\n        setStatus(e instanceof Error ? e.message : String(e));\n      }\n''', 1)
+          s = s.replace('''      const res = await convertWithdrawExecute(\n        state.baseUrl,''', '''      const res = await guardedConvertWithdrawExecute(\n        state.baseUrl,''', 1)
+          s = s.replace('''        state.adminKey,\n      );\n      setDrawer({ open: true, title: "Convert+Withdraw Execute Result", payload: res as unknown as JsonValue });''', '''        state.adminKey,\n        mutationContext(),\n      );\n      setDrawer({ open: true, title: "Convert+Withdraw Execute Result", payload: res as unknown as JsonValue });''', 1)
+          s = s.replace('''      const res = await withdrawExecute(state.baseUrl, { token: wToken, to: dest, amount: wAmount, reason }, state.adminKey);''', '''      const res = await guardedWithdrawExecute(state.baseUrl, { token: wToken, to: dest, amount: wAmount, reason }, state.adminKey, mutationContext());''', 1)
+          s = s.replace('''      const res = await withdrawAllExecute(\n        state.baseUrl,\n        { preview_id: previewId, confirm_text: wipeConfirmationText, dry_run: withdrawMode !== "backend" },\n        state.adminKey,\n      );''', '''      const res = await guardedWithdrawAllExecute(\n        state.baseUrl,\n        { preview_id: previewId, confirm_text: wipeConfirmationText, dry_run: withdrawMode !== "backend" },\n        state.adminKey,\n        mutationContext(),\n      );''', 1)
+          if 'await convertWithdrawExecute(' in s or 'await withdrawExecute(' in s or 'await withdrawAllExecute(' in s:
+              raise SystemExit('raw mutation call remains')
+          p.write_text(s)
+          PY
+          if git diff --quiet -- mobile/src/screens/cc/OffRampScreen.tsx; then
+            echo 'No OffRamp changes needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mobile/src/screens/cc/OffRampScreen.tsx
+          git commit -m 'feat(mobile): guard OffRamp mutations'
+          git push origin HEAD:mobile/guarded-mutations
