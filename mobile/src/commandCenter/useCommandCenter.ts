@@ -21,13 +21,14 @@ const CommandCenterContext = createContext<CommandCenterValue | null>(null);
 
 function useCommandCenterController(): CommandCenterValue {
   const { state } = useStore();
-  const [source, setSource] = useState<DataSource>((state as any).ccDataSource ?? "mock");
+  const [source, setSource] = useState<DataSource>((state as any).ccDataSource ?? "backend");
   const [snapshot, setSnapshot] = useState<CommandCenterSnapshot | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const provider = useMemo(() => {
+    // Backend is the production truth source. Mock remains available only as an explicit demo mode.
     if (source === "backend") return createBackendCommandCenterProvider(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
     return createMockCommandCenterProvider();
   }, [source, state.baseUrl, state.adminKey, state.role]);
@@ -35,6 +36,9 @@ function useCommandCenterController(): CommandCenterValue {
   async function refresh() {
     setLoading(true);
     try {
+      if (source === "backend" && !state.baseUrl) {
+        throw new Error("Backend URL is not configured. Select Demo mode explicitly to use mock data.");
+      }
       const snap = await provider.snapshot();
       setSnapshot(snap);
       setError("");
@@ -54,9 +58,10 @@ function useCommandCenterController(): CommandCenterValue {
       if (timer.current) clearInterval(timer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider]);
+  }, [provider, source, state.baseUrl]);
 
   async function setControls(patch: ControlPatch, reason: string) {
+    if (source !== "backend") return { ok: false, error: "Demo mode is read-only." };
     const result = await provider.setControls(patch, reason);
     return result;
   }
