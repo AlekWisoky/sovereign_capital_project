@@ -77,7 +77,8 @@ const DEFAULTS: AppSettings = {
   unitTokenAddress: '',
   baseBorrowAmount: '0',
   maxBorrowAmount: '0',
-  ccDataSource: 'mock',
+  // Production operator surfaces use backend truth by default. Demo/mock is an explicit mode.
+  ccDataSource: 'backend',
   ccRefreshMs: 4500,
 };
 
@@ -206,6 +207,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const raw = await AsyncStorage.getItem('victor.settings');
         if (raw) {
           patch = JSON.parse(raw) as Partial<AppSettings>;
+          // Migrate the old mock-default setting when a backend URL is configured.
+          if (patch.ccDataSource === 'mock' && (patch.baseUrl || ENV.defaultBackendUrl)) {
+            patch = { ...patch, ccDataSource: 'backend' };
+          }
           dispatch({ type: 'set', patch });
         }
       } catch {}
