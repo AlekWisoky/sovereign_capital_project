@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Switch } from 'react-native';
+import { Alert, View, Text, TextInput, Pressable, ScrollView, Switch } from 'react-native';
 import { useStore } from '../../state/store';
 import { BrandHeader } from '../../components/v2/BrandHeader';
 import { SurfaceCard } from '../../components/v2/SurfaceCard';
@@ -8,7 +8,9 @@ import { SegmentedTabs } from '../../components/v2/SegmentedTabs';
 import { getTheme, type ThemeName } from '../../utils/theme';
 import { useTheme } from '../../utils/useTheme';
 import { pageContentContainerStyle, pageShellStyle } from '../../utils/layout';
-import { health, deployInfo, rpcPreferences, saveRpcPreferences, launchState, setLaunchMode, listPresets, applyPreset } from '../../api/client';
+import { health, deployInfo, rpcPreferences, launchState, listPresets } from '../../api/client';
+import { guardedApplyPreset, guardedSaveRpcPreferences, guardedSelectChain, guardedSetLaunchMode } from '../../api/guardedMutations';
+import { guardMutation, type MutationGuardContext } from '../../api/mutationGuard';
 
 const LAUNCH_MODES = ['V1_ONLY', 'V1_PLUS_STABLE_ALPHA', 'STAGED_MULTI_STRATEGY', 'FULL_MULTI_STRATEGY'] as const;
 const ROLES = ['read_only', 'operator'] as const;
@@ -95,6 +97,7 @@ export function SetupScreen() {
   const [role, setRole] = useState<Role>(state.role);
   const [themeName, setThemeName] = useState<ThemeName>(state.themeName);
   const [status, setStatus] = useState('');
+  const [backendReachable, setBackendReachable] = useState(false);
   const [premiumRead, setPremiumRead] = useState((state.premiumRpcReadUrls ?? []).join('\n'));
   const [premiumSend, setPremiumSend] = useState((state.premiumRpcSendUrls ?? []).join('\n'));
   const [premiumPrivate, setPremiumPrivate] = useState((state.premiumRpcPrivateUrls ?? []).join('\n'));
@@ -136,10 +139,38 @@ export function SetupScreen() {
     });
   }, [safeBaseUrl, state.backendUrls]);
 
+  function mutationContext(explicitConfirmation: boolean): MutationGuardContext {
+    return {
+      role: isOperator ? 'operator' : 'read_only',
+      locked: Boolean(state.locked),
+      adminKeyPresent: isOperator && Boolean(adminKey.trim()),
+      backendReachable,
+      backendLiveAuthority: false,
+      explicitConfirmation,
+    };
+  }
+
+  function confirmBackendSync(): Promise<boolean> {
+    return new Promise((resolve) => {
+      Alert.alert(
+        'Confirm backend synchronization',
+        'This will send the selected chain, premium RPC preferences, launch mode, and preset to the configured backend. Local-only profile changes remain local. Live authority is still disabled.',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Confirm', style: 'default', onPress: () => resolve(true) },
+        ],
+        { cancelable: false },
+      );
+    });
+  }
+
   useEffect(() => {
     let alive = true;
     async function boot() {
-      if (!safeBaseUrl) return;
+      if (!safeBaseUrl) {
+        setBackendReachable(false);
+        return;
+      }
       try {
         await refreshMultichain();
       } catch {
@@ -188,8 +219,10 @@ export function SetupScreen() {
       const h = await health(safeBaseUrl, isOperator ? adminKey.trim() : undefined);
       const info = await deployInfo(safeBaseUrl, isOperator ? adminKey.trim() : undefined);
       const mode = Boolean((info as Record<string, unknown>)?.public_mode) ? 'public_mode' : 'private_mode';
+      setBackendReachable(true);
       setStatus(`Connected · health=${String((h as any)?.ok ?? true)} · ${mode}`);
     } catch (e: unknown) {
+      setBackendReachable(false);
       setStatus(e instanceof Error ? `Failed · ${e.message}` : `Failed · ${String(e)}`);
     }
   }
@@ -202,6 +235,7 @@ export function SetupScreen() {
     const sendUrls = parseList(premiumSend).slice(0, 8);
     const privateUrls = parseList(premiumPrivate).slice(0, 8);
     const walletAddresses = parseList(walletAddressesText).slice(0, 12);
+
     set({
       onboarded: true,
       baseUrl: url,
@@ -237,32 +271,51 @@ export function SetupScreen() {
       ccDataSource,
       ccRefreshMs: Math.max(1500, Number(ccRefreshMs) || 4500),
     });
-    setStatus('Saved locally. Synchronizing backend…');
-    if (url && chain) {
-      try {
-        await selectActiveChain(chain);
-      } catch {
-        // local state already updated
-      }
-    }
-    if (isOperator && key && url) {
-      try {
-        await saveRpcPreferences(url, { read: readUrls, send: sendUrls, private: privateUrls }, key);
-        await setLaunchMode(url, launchModeLocal, key);
-        if (preset) {
-          try {
-            await applyPreset(url, chain, preset, key);
-          } catch {
-            // preset may be missing on some backends
-          }
-        }
-        setStatus('Saved and synchronized.');
-      } catch (e: unknown) {
-        setStatus(e instanceof Error ? `Saved locally · backend sync pending · ${e.message}` : `Saved locally · backend sync pending · ${String(e)}`);
-      }
+
+    if (!isOperator || !key || !url) {
+      setStatus('Saved locally. Backend synchronization requires operator role, admin key, and backend URL.');
       return;
     }
-    setStatus('Saved.');
+
+    setStatus('Checking backend before synchronization…');
+    try {
+      await health(url, key);
+      await deployInfo(url, key);
+      setBackendReachable(true);
+    } catch (e: unknown) {
+      setBackendReachable(false);
+      setStatus(e instanceof Error ? `Saved locally · backend unreachable · ${e.message}` : `Saved locally · backend unreachable · ${String(e)}`);
+      return;
+    }
+
+    const preflight = mutationContext(false);
+    const checks = [
+      guardMutation('chain_control', preflight),
+      guardMutation('settings', preflight),
+      guardMutation('launch_control', preflight),
+    ];
+    const denied = checks.find((result) => !result.allowed);
+    if (denied && denied.reasonCode !== 'explicit_confirmation_required') {
+      setStatus(`Saved locally · backend sync denied · ${denied.reasonCode}`);
+      return;
+    }
+
+    if (!(await confirmBackendSync())) {
+      setStatus('Saved locally. Backend synchronization cancelled.');
+      return;
+    }
+
+    const context = mutationContext(true);
+    try {
+      await guardedSelectChain(url, chain, key, context);
+      await guardedSaveRpcPreferences(url, { read: readUrls, send: sendUrls, private: privateUrls }, key, context);
+      await guardedSetLaunchMode(url, launchModeLocal, key, context);
+      if (preset) await guardedApplyPreset(url, chain, preset, key, context);
+      await selectActiveChain(chain);
+      setStatus('Saved and synchronized. Live authority remains disabled.');
+    } catch (e: unknown) {
+      setStatus(e instanceof Error ? `Saved locally · backend sync pending · ${e.message}` : `Saved locally · backend sync pending · ${String(e)}`);
+    }
   }
 
   return (
@@ -274,11 +327,11 @@ export function SetupScreen() {
       <View style={{ height: theme.spacing.lg }} />
       <SurfaceCard glow="violet">
         <Text style={{ color: theme.colors.text, ...theme.typography.h1 }}>Backend + Identity</Text>
-        <Text style={{ color: theme.colors.textMuted, marginTop: 6, ...theme.typography.body }}>This app is an operator-first command surface. The backend remains the source of truth for execution, capital, and governance state.</Text>
+        <Text style={{ color: theme.colors.textMuted, marginTop: 6, ...theme.typography.body }}>The mobile operator console connects to the configured backend URL. Test verifies reachability before any backend synchronization; the backend remains the source of truth for execution, capital, and governance state.</Text>
 
         <View style={{ marginTop: theme.spacing.md }}>
-          <FieldLabel title="Backend base URL" subtitle="Primary VPS or tunnel URL for the x∆v backend." />
-          <Input value={baseUrl} onChangeText={setBaseUrl} placeholder="https://your-vps.example" keyboardType="url" />
+          <FieldLabel title="Backend base URL" subtitle="Primary VPS, Render service, or tunnel URL for the x∆v backend. This is the endpoint the mobile client uses." />
+          <Input value={baseUrl} onChangeText={(value) => { setBaseUrl(value); setBackendReachable(false); }} placeholder="https://your-vps.example" keyboardType="url" />
         </View>
 
         {recentUrls.length ? (
@@ -286,13 +339,18 @@ export function SetupScreen() {
             <FieldLabel title="Saved backends" />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
               {recentUrls.map((url) => (
-                <Pressable key={url} onPress={() => setBaseUrl(url)} style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: theme.radii.pill, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1 }}>
+                <Pressable key={url} onPress={() => { setBaseUrl(url); setBackendReachable(false); }} style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: theme.radii.pill, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1 }}>
                   <Text style={{ color: theme.colors.textMuted, fontSize: 12, fontWeight: '800' }}>{url}</Text>
                 </Pressable>
               ))}
             </View>
           </View>
         ) : null}
+
+        <View style={{ marginTop: theme.spacing.md }}>
+          <FieldLabel title="Backend connection status" subtitle={backendReachable ? 'Reachability verified by a successful backend health/deploy-info read.' : 'Not verified. Test the configured URL before backend synchronization.'} />
+          <Text style={{ color: backendReachable ? theme.colors.cyan : theme.colors.textFaint, fontWeight: '900' }}>{backendReachable ? 'REACHABLE' : 'UNVERIFIED'}</Text>
+        </View>
 
         <View style={{ marginTop: theme.spacing.md }}>
           <FieldLabel title="Role" subtitle="Operator can mutate state. Read-only shows the same context, but controls stay locked." />
@@ -317,7 +375,7 @@ export function SetupScreen() {
         <Text style={{ color: theme.colors.textMuted, marginTop: 6, ...theme.typography.body }}>V1-first rollout remains the safety baseline. Use launch mode and readiness data to expand only when the backend says the family is ready.</Text>
 
         <View style={{ marginTop: theme.spacing.md }}>
-          <FieldLabel title="Preferred launch mode" subtitle="Persisted locally and synchronized to backend when operator credentials are available." />
+          <FieldLabel title="Preferred launch mode" subtitle="Persisted locally and synchronized to backend only after explicit operator confirmation." />
           <View style={{ gap: 10 }}>
             {LAUNCH_MODES.map((mode) => {
               const active = launchModeLocal === mode;
@@ -344,7 +402,7 @@ export function SetupScreen() {
         </View>
 
         <View style={{ marginTop: theme.spacing.md }}>
-          <FieldLabel title="Preset" subtitle="Backend preset bundle to apply for live/runtime defaults." />
+          <FieldLabel title="Preset" subtitle="Backend preset bundle to apply only after explicit confirmation; presets may include auto_start=true." />
           <SegmentedTabs options={((presetList.length ? presetList : ['default']) as readonly string[])} value={preset} onChange={(next) => setPresetLocal(next)} />
         </View>
       </SurfaceCard>
@@ -468,22 +526,23 @@ export function SetupScreen() {
       </SurfaceCard>
 
       <View style={{ height: theme.spacing.lg }} />
-      <SurfaceCard glow="none">
+      <SurfaceCard glow="violet">
         <Text style={{ color: theme.colors.text, ...theme.typography.h1 }}>Premium Routing Endpoints</Text>
-        <Text style={{ color: theme.colors.textMuted, marginTop: 6, ...theme.typography.body }}>Optional premium read, send, and private RPC lists. Stored for backend preference wiring and operator governance, never to bypass safety controls.</Text>
+        <Text style={{ color: theme.colors.textMuted, marginTop: 6, ...theme.typography.body }}>Optional premium read, send, and private RPC endpoints. Add the provider URLs supplied by your premium RPC provider; these values are stored as backend routing preferences and never bypass governance or execution guards.</Text>
 
         <View style={{ marginTop: theme.spacing.md }}>
-          <FieldLabel title="Premium read RPCs" />
-          <Input value={premiumRead} onChangeText={setPremiumRead} multiline placeholder="https://read-rpc-1" />
+          <FieldLabel title="Premium read RPCs" subtitle="Provider endpoint(s) for reads, one per line." />
+          <Input value={premiumRead} onChangeText={setPremiumRead} multiline placeholder="https://read-rpc-1.example" keyboardType="url" />
         </View>
         <View style={{ marginTop: theme.spacing.md }}>
-          <FieldLabel title="Premium send RPCs" />
-          <Input value={premiumSend} onChangeText={setPremiumSend} multiline placeholder="https://send-rpc-1" />
+          <FieldLabel title="Premium send RPCs" subtitle="Provider endpoint(s) for transaction submission, one per line." />
+          <Input value={premiumSend} onChangeText={setPremiumSend} multiline placeholder="https://send-rpc-1.example" keyboardType="url" />
         </View>
         <View style={{ marginTop: theme.spacing.md }}>
-          <FieldLabel title="Premium private / bundle RPCs" />
-          <Input value={premiumPrivate} onChangeText={setPremiumPrivate} multiline placeholder="https://private-rpc-1" />
+          <FieldLabel title="Premium private / bundle RPCs" subtitle="Provider endpoint(s) for private transaction or bundle routing, one per line." />
+          <Input value={premiumPrivate} onChangeText={setPremiumPrivate} multiline placeholder="https://private-rpc-1.example" keyboardType="url" />
         </View>
+        <Text style={{ color: theme.colors.textFaint, marginTop: theme.spacing.md, fontSize: 12 }}>Contact the RPC provider separately for endpoint URLs, authentication requirements, rate limits, and private-routing eligibility. Do not paste provider secrets into these fields.</Text>
       </SurfaceCard>
 
       <View style={{ height: theme.spacing.lg }} />
