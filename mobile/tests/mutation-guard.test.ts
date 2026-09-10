@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { guardMutation, mutationKindForSettingsPatch, type MutationGuardContext } from '../src/api/mutationGuard';
 
@@ -49,6 +51,14 @@ test('disabling live trading is allowed only after explicit confirmation', () =>
   assert.deepEqual(allowed, { allowed: true });
 });
 
+test('all backend operator mutation classes require explicit confirmation', () => {
+  for (const kind of ['settings', 'chain_control', 'launch_control', 'disable_live_trading'] as const) {
+    const denied = guardMutation(kind, { ...base, explicitConfirmation: false });
+    assert.deepEqual(denied, { allowed: false, reasonCode: 'explicit_confirmation_required' }, kind);
+    assert.deepEqual(guardMutation(kind, base), { allowed: true }, kind);
+  }
+});
+
 test('ordinary settings require explicit confirmation', () => {
   const result = guardMutation('settings', { ...base, explicitConfirmation: false });
   assert.deepEqual(result, { allowed: false, reasonCode: 'explicit_confirmation_required' });
@@ -59,4 +69,81 @@ test('settings classification treats activation-shaped patches as live authority
   assert.equal(mutationKindForSettingsPatch({ dry_run: false }), 'enable_live_trading');
   assert.equal(mutationKindForSettingsPatch({ auto_trading: false }), 'disable_live_trading');
   assert.equal(mutationKindForSettingsPatch({ send_mode: 'private' }), 'settings');
+});
+
+const ACTIVE_OPERATOR_SCREENS = [
+  'v2/DashScreen.tsx',
+  'v2/SetupScreen.tsx',
+  'v2/TrackerScreen.tsx',
+  'v2/WalletScreen.tsx',
+  'cc/OffRampScreen.tsx',
+  'LaunchSetupScreen.tsx',
+] as const;
+
+const RAW_MUTATION_NAMES = [
+  'setSettings',
+  'tradeOpportunity',
+  'withdrawExecute',
+  'withdrawAllExecute',
+  'convertWithdrawExecute',
+  'saveRpcPreferences',
+  'setLaunchMode',
+  'applyPreset',
+  'selectChain',
+  'selectActiveChain',
+  'enableNextFamily',
+  'pauseLaunchFamily',
+  'revertLaunchFamily',
+  'quarantineLaunchFamily',
+] as const;
+
+function readOperatorScreen(relativePath: string): string {
+  const filePath = path.resolve(__dirname, '../src/screens', relativePath);
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+test('active operator screens do not import raw backend mutation APIs', () => {
+  for (const relativePath of ACTIVE_OPERATOR_SCREENS) {
+    const source = readOperatorScreen(relativePath);
+    for (const name of RAW_MUTATION_NAMES) {
+      const rawImport = new RegExp(`(?:import|require)[^\\n]*\\b${name}\\b[^\\n]*api/client`);
+      assert.equal(rawImport.test(source), false, `${relativePath} imports raw mutation ${name}`);
+    }
+  }
+});
+
+test('active operator screens do not invoke raw backend mutation APIs', () => {
+  for (const relativePath of ACTIVE_OPERATOR_SCREENS) {
+    const source = readOperatorScreen(relativePath);
+    for (const name of RAW_MUTATION_NAMES) {
+      const rawInvocation = new RegExp(`\\b${name}\\s*\\(`);
+      assert.equal(rawInvocation.test(source), false, `${relativePath} invokes raw mutation ${name}`);
+    }
+  }
+});
+
+test('guarded mutation boundary is present for every migrated operator screen', () => {
+  for (const relativePath of ACTIVE_OPERATOR_SCREENS) {
+    const source = readOperatorScreen(relativePath);
+    assert.match(source, /guarded[A-Za-z]+\(/, `${relativePath} must call a guarded adapter`);
+  }
+});
+
+test('Setup preserves backend URL wiring and premium RPC preference fields', () => {
+  const source = readOperatorScreen('v2/SetupScreen.tsx');
+  assert.match(source, /Backend base URL/);
+  assert.match(source, /health\(safeBaseUrl/);
+  assert.match(source, /deployInfo\(safeBaseUrl/);
+  assert.match(source, /guardedSaveRpcPreferences\(/);
+  assert.match(source, /Premium read RPCs/);
+  assert.match(source, /Premium send RPCs/);
+  assert.match(source, /Premium private \/ bundle RPCs/);
+});
+
+test('Setup backend synchronization is explicit and keeps live authority disabled', () => {
+  const source = readOperatorScreen('v2/SetupScreen.tsx');
+  assert.match(source, /Confirm backend synchronization/);
+  assert.match(source, /backendLiveAuthority: false/);
+  assert.match(source, /if \(!\(await confirmBackendSync\(\)\)\)/);
+  assert.match(source, /guardedApplyPreset\(/);
 });
