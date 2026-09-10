@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { Alert, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CommandCenterSnapshot, ControlPatch, ExplainResponse } from "./types";
 import { createBackendCommandCenterProvider, createMockCommandCenterProvider } from "./provider";
 import { useStore } from "../state/store";
+import { guardMutation, mutationKindForSettingsPatch } from "../api/mutationGuard";
 
 export type DataSource = "backend" | "mock";
 
@@ -18,6 +19,15 @@ type CommandCenterValue = {
 };
 
 const CommandCenterContext = createContext<CommandCenterValue | null>(null);
+
+function confirmMutation(title: string, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      { text: "Confirm", style: "destructive", onPress: () => resolve(true) },
+    ], { cancelable: true, onDismiss: () => resolve(false) });
+  });
+}
 
 function useCommandCenterController(): CommandCenterValue {
   const { state } = useStore();
@@ -57,6 +67,27 @@ function useCommandCenterController(): CommandCenterValue {
   }, [provider]);
 
   async function setControls(patch: ControlPatch, reason: string) {
+    const context = {
+      role: state.role === "operator" ? "operator" as const : "read_only" as const,
+      locked: sessionLocked(state),
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable: source === "backend" && snapshot !== null && !error,
+      // Live authority is deliberately false until the backend reports an
+      // explicit activation state. Issue #89 is the activation gate.
+      backendLiveAuthority: false,
+      explicitConfirmation: false,
+    };
+    const kind = mutationKindForSettingsPatch(patch as Record<string, unknown>);
+    const preflight = guardMutation(kind, context);
+    if (!preflight.allowed && preflight.reasonCode !== "explicit_confirmation_required") {
+      return { ok: false, error: `mutation_denied:${preflight.reasonCode}` };
+    }
+
+    const confirmed = await confirmMutation("Confirm operator change", `${reason}\n\nThis changes backend operator state. Confirm only if this action is intentional.`);
+    if (!confirmed) return { ok: false, error: "mutation_cancelled" };
+
+    const allowed = guardMutation(kind, { ...context, explicitConfirmation: true });
+    if (!allowed.allowed) return { ok: false, error: `mutation_denied:${allowed.reasonCode}` };
     return await provider.setControls(patch, reason);
   }
 
@@ -79,6 +110,10 @@ function useCommandCenterController(): CommandCenterValue {
     explain,
     auditTail,
   };
+}
+
+function sessionLocked(state: ReturnType<typeof useStore>["state"]): boolean {
+  return Boolean(state.role !== "operator" || false);
 }
 
 export function CommandCenterProvider({ children }: { children: React.ReactNode }) {
