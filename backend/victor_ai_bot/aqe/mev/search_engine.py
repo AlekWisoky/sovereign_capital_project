@@ -20,7 +20,6 @@ class MEVSearchEngine:
             realized = expected * max(0.25, 0.85 - high_risk * 0.35)
             risk_flags = ['private_send']
             conf = max(0.35, min(0.90, 0.58 + (0.15 if 'sandwich_risk' not in tags else -0.10)))
-            lifecycle = 'capped_live' if conf >= 0.68 else 'paper'
             out.append(EngineOpportunity(
                 opportunity_id=f"mev:{tx.get('hash')}",
                 engine_type=self.engine_type,
@@ -36,10 +35,14 @@ class MEVSearchEngine:
                 regime=str(regime),
                 latency_sensitivity=0.95,
                 risk_flags=risk_flags,
-                lifecycle_eligibility=lifecycle,
-                policy_eligibility='capped_live',
+                lifecycle_eligibility='observe_only',
+                policy_eligibility='observe_only',
                 venues=['private_relay'],
-                metadata={'tx_hash': tx.get('hash'), 'candidate_type': 'backrun_or_protection'},
+                metadata={
+                    'tx_hash': tx.get('hash'),
+                    'candidate_type': 'backrun_or_protection',
+                    'economics_status': 'heuristic_non_authoritative',
+                },
             ))
         for base in list(base_opportunities or [])[:4]:
             meta = dict(getattr(base, 'meta', {}) or {}) if isinstance(getattr(base, 'meta', None), dict) else {}
@@ -65,10 +68,14 @@ class MEVSearchEngine:
                 regime=str(regime),
                 latency_sensitivity=0.98,
                 risk_flags=['private_send'],
-                lifecycle_eligibility='capped_live',
-                policy_eligibility='capped_live',
+                lifecycle_eligibility='observe_only',
+                policy_eligibility='observe_only',
                 venues=['private_relay'],
-                metadata={'base_opportunity_id': getattr(base, 'id', ''), 'candidate_type': 'route_protection'},
+                metadata={
+                    'base_opportunity_id': getattr(base, 'id', ''),
+                    'candidate_type': 'route_protection',
+                    'economics_status': 'heuristic_non_authoritative',
+                },
             ))
         out.sort(key=lambda o: (-float(o.expected_realized_profit_usd), str(o.opportunity_id)))
         return out
