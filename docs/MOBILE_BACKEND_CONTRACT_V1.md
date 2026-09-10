@@ -46,7 +46,7 @@ Status: implementation contract for the operator mobile surface.
 
 ## Mobile transaction history
 
-The primary activity/history source is `/api/fund/ledger`. The mobile must render transaction provider, venue/lane, chain, transaction/receipt IDs, decision ID when present, status, realized net, gas, borrow cost, and timestamps from backend evidence. It must never infer settlement from a submitted transaction alone.
+The primary activity/history source is `/api/fund/ledger`. The mobile must render transaction provider, venue/lane, chain, transaction/receipt IDs, decision ID when present, status, realized net, gas, borrow cost, and timestamps from backend evidence. It must never infer settlement from a submitted transaction alone. **Submitted, pending, mined, receipt-verified, and settled are distinct states and must remain distinct in the UI.**
 
 ## Realtime contract
 
