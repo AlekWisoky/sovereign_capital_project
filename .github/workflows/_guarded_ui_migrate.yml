@@ -1,0 +1,128 @@
+name: _guarded-ui-migrate
+
+on:
+  push:
+    branches:
+      - mobile/guarded-mutations
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[ui-migrate]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mobile/guarded-mutations
+          fetch-depth: 0
+
+      - name: Migrate guarded operator UI calls
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Tracker: execution already has a confirmation dialog; route the final
+          # broadcast through the centralized guarded adapter and keep live authority
+          # fail-closed until Issue #89.
+          p = Path('mobile/src/screens/v2/TrackerScreen.tsx')
+          s = p.read_text()
+          s = s.replace(
+              'import { fetchState, simulateOpportunity, tradeOpportunity, txReceipt } from "../../api/client";',
+              'import { fetchState, simulateOpportunity, txReceipt } from "../../api/client";\nimport { guardedTradeOpportunity } from "../../api/guardedMutations";'
+          )
+          s = s.replace(
+              '  const [scanHist, setScanHist] = useState<number[]>([]);',
+              '  const [scanHist, setScanHist] = useState<number[]>([]);\n  const [backendReachable, setBackendReachable] = useState(false);\n  const [backendLiveAuthority, setBackendLiveAuthority] = useState(false);'
+          )
+          s = s.replace(
+              '          setOpps(st.opportunities || []);',
+              '          setOpps(st.opportunities || []);\n          setBackendReachable(true);\n          const raw = st as unknown as Record<string, unknown>;\n          setBackendLiveAuthority(Boolean(raw.live_authority ?? raw.liveAuthority ?? false));'
+          )
+          s = s.replace(
+              '        } catch {\n          // ignore\n        }\n        await new Promise((r) => setTimeout(r, 2200));',
+              '        } catch {\n          setBackendReachable(false);\n          setBackendLiveAuthority(false);\n        }\n        await new Promise((r) => setTimeout(r, 2200));',
+              1,
+          )
+          s = s.replace(
+              '      const res = await tradeOpportunity(state.baseUrl, selectedOpp.id, state.adminKey, amountOverride.trim() || undefined);',
+              '      const res = await guardedTradeOpportunity(\n        state.baseUrl,\n        selectedOpp.id,\n        state.adminKey,\n        {\n          role: state.role === "operator" ? "operator" : "read_only",\n          locked: session.locked,\n          adminKeyPresent: Boolean(state.adminKey?.trim()),\n          backendReachable,\n          backendLiveAuthority,\n          explicitConfirmation: true,\n        },\n        amountOverride.trim() || undefined,\n      );'
+          )
+          p.write_text(s)
+
+          # Dash: replace the raw settings write with the guarded adapter and a
+          # mandatory confirmation. Activation-shaped settings remain blocked by the
+          # backend-live-authority requirement.
+          p = Path('mobile/src/screens/v2/DashScreen.tsx')
+          s = p.read_text()
+          s = s.replace(
+              'import { adminState, pnlSummary, pnlIncome, setSettings } from "../../api/client";',
+              'import { adminState, pnlSummary, pnlIncome } from "../../api/client";\nimport { guardedSetSettings } from "../../api/guardedMutations";\nimport { Alert } from "react-native";'
+          )
+          old = '''  async function patchSettings(patch: Record<string, unknown>) {
+    if (!operatorControlsEnabled) return;
+    try {
+      await setSettings(state.baseUrl, patch, state.adminKey);
+    } catch {
+      // ignore
+    }
+  }'''
+          new = '''  async function patchSettings(patch: Record<string, unknown>) {
+    if (!operatorControlsEnabled) return;
+    const confirmed = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      Alert.alert(
+        "Confirm operator change",
+        "This changes backend operator state. Confirm only if this action is intentional.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => finish(false) },
+          { text: "Confirm", style: "destructive", onPress: () => finish(true) },
+        ],
+        { cancelable: true, onDismiss: () => finish(false) },
+      );
+    });
+    if (!confirmed) return;
+    try {
+      await guardedSetSettings(state.baseUrl, patch, state.adminKey, {
+        role: state.role === "operator" ? "operator" : "read_only",
+        locked: session.locked,
+        adminKeyPresent: Boolean(state.adminKey?.trim()),
+        backendReachable: Object.keys(adminSnap).length > 0,
+        backendLiveAuthority: false,
+        explicitConfirmation: true,
+      });
+    } catch {
+      // ignore; guard/API failure is intentionally not treated as success.
+    }
+  }'''
+          if old not in s:
+              raise SystemExit('Dash patchSettings block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+          git status --short
+          git diff --check
+          git diff -- mobile/src/screens/v2/TrackerScreen.tsx mobile/src/screens/v2/DashScreen.tsx
+
+      - name: Commit migration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/_guarded_ui_migrate.yml
+          git add mobile/src/screens/v2/TrackerScreen.tsx mobile/src/screens/v2/DashScreen.tsx .github/workflows/_guarded_ui_migrate.yml
+          if git diff --cached --quiet; then
+            echo "No migration changes"
+            exit 0
+          fi
+          git commit -m "feat(mobile): migrate operator UI to guarded mutations [ui-migrate]"
+          git push origin mobile/guarded-mutations
