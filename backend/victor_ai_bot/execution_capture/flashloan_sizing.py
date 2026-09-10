@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ..capital_family_policy import family_alias_candidates, resolve_family_target as resolve_canonical_family_target
-from ..economics.institutional_capital_scale import INSTITUTIONAL_V1_POLICY
+from .institutional_capital_scale import INSTITUTIONAL_V1_POLICY
 from ..runtime_services.treasury_governance_truth import treasury_governance_view
 from .models import OpportunityEnvelope, SafeSizePoint
 
@@ -39,22 +39,12 @@ def _family_target_candidates(envelope: OpportunityEnvelope) -> List[str]:
     meta = dict(metadata.get("meta") or {}) if isinstance(metadata.get("meta"), dict) else {}
     route_family = str(envelope.route_family or "")
     route_prefix = str(route_family.split("|", 1)[0] or "")
-    candidates = _unique(
-        [
-            str(metadata.get("strategy_family") or ""),
-            str(meta.get("strategy_family") or ""),
-            route_prefix,
-            route_family,
-        ]
-    )
+    candidates = _unique([str(metadata.get("strategy_family") or ""), str(meta.get("strategy_family") or ""), route_prefix, route_family])
     return family_alias_candidates(candidates)
 
 
 def _resolve_family_target(*, envelope: OpportunityEnvelope, family_targets: Dict[str, Any]) -> tuple[str, float, bool]:
-    resolved_key, target, known = resolve_canonical_family_target(
-        family_targets=family_targets,
-        family=_family_target_candidates(envelope),
-    )
+    resolved_key, target, known = resolve_canonical_family_target(family_targets=family_targets, family=_family_target_candidates(envelope))
     return resolved_key, float(target), bool(known)
 
 
