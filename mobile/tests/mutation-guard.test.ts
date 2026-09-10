@@ -98,7 +98,7 @@ const RAW_MUTATION_NAMES = [
 ] as const;
 
 function readOperatorScreen(relativePath: string): string {
-  const filePath = path.resolve(__dirname, '../src/screens', relativePath);
+  const filePath = path.resolve(__dirname, '../../src/screens', relativePath);
   return fs.readFileSync(filePath, 'utf8');
 }
 
