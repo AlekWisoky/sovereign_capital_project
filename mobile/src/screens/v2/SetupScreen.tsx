@@ -90,7 +90,7 @@ function ToggleLine({ title, subtitle, value, onValueChange }: { title: string; 
 
 export function SetupScreen() {
   const theme = useTheme();
-  const { state, set, multichain, refreshMultichain, selectActiveChain } = useStore();
+  const { state, set, multichain, refreshMultichain } = useStore();
 
   const [baseUrl, setBaseUrl] = useState(state.baseUrl);
   const [adminKey, setAdminKey] = useState(state.adminKey);
@@ -311,7 +311,6 @@ export function SetupScreen() {
       await guardedSaveRpcPreferences(url, { read: readUrls, send: sendUrls, private: privateUrls }, key, context);
       await guardedSetLaunchMode(url, launchModeLocal, key, context);
       if (preset) await guardedApplyPreset(url, chain, preset, key, context);
-      await selectActiveChain(chain);
       setStatus('Saved and synchronized. Live authority remains disabled.');
     } catch (e: unknown) {
       setStatus(e instanceof Error ? `Saved locally · backend sync pending · ${e.message}` : `Saved locally · backend sync pending · ${String(e)}`);
