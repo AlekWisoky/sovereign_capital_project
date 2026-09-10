@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, ScrollView, Text, View, Pressable } from 'react-native';
 import { launchFamilyDetail } from '../api/launchApi';
-import { guardedEnableNextFamily, guardedPauseLaunchFamily, guardedQuarantineLaunchFamily, guardedRevertLaunchFamily, guardedSetLaunchMode } from '../api/guardedMutations';
-import type { MutationGuardContext } from '../api/mutationGuard';
+import { guardedEnableNextFamily, guardedQuarantineLaunchFamily, guardedRevertLaunchFamily, guardedSetLaunchMode } from '../api/guardedMutations';
+import { guardMutation, type MutationGuardContext } from '../api/mutationGuard';
 import { useCommandCenter } from '../commandCenter/useCommandCenter';
 import { FamilyReadinessCard } from '../components/FamilyReadinessCard';
 import { LaunchRecommendationCard } from '../components/LaunchRecommendationCard';
@@ -59,10 +59,13 @@ export function LaunchSetupScreen() {
   }
 
   async function confirmLaunchAction(action: string): Promise<boolean> {
-    const context = guardContext();
+    const preflight = guardMutation('launch_control', guardContext());
+    if (!preflight.allowed && preflight.reasonCode !== 'explicit_confirmation_required') {
+      setDetail(`Launch control blocked · ${preflight.reasonCode}`);
+      return false;
+    }
     const confirmed = await confirmMutation('Confirm launch control', `${action}\n\nThis changes backend launch state. Confirm only if this action is intentional.`);
-    if (!confirmed) return false;
-    return true;
+    return confirmed;
   }
 
   async function selectMode(nextMode: string) {
