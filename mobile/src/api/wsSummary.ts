@@ -96,7 +96,7 @@ export type SummaryData = {
 
 export type SummaryMessage = { type: "summary"; data: SummaryData };
 export type DeltaMessage = { type: "delta"; data: Partial<SummaryData> };
-export type WsMessage = SummaryMessage | DeltaMessage | { type: string; data: JsonValue };
+export type WsMessage = SummaryMessage | DeltaMessage;
 
 type SummaryHandler = (msg: WsMessage) => void;
 type ErrorHandler = (err: string) => void;
@@ -114,7 +114,7 @@ export class VictorSummaryWS {
   connect(baseUrl: string, opts?: { mode?: "summary" | "delta"; fullEvery?: number }) {
     this.alive = true;
     this.backoff = 500;
-    this.open(baseUrl, opts);
+    this.openSocket(baseUrl, opts);
   }
 
   disconnect() {
@@ -123,7 +123,7 @@ export class VictorSummaryWS {
     this.ws = undefined;
   }
 
-  private open(baseUrl: string, opts?: { mode?: "summary" | "delta"; fullEvery?: number }) {
+  private openSocket(baseUrl: string, opts?: { mode?: "summary" | "delta"; fullEvery?: number }) {
     if (!this.alive) return;
     const mode = opts?.mode ?? "delta";
     const fullEvery = Number(opts?.fullEvery ?? 10);
@@ -138,7 +138,6 @@ export class VictorSummaryWS {
       ws.onmessage = (ev) => {
         try {
           const parsed: unknown = JSON.parse(String(ev.data));
-          // best-effort typing (backend message is already JSON-safe)
           for (const h of this.handlers) h(parsed as WsMessage);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -152,12 +151,12 @@ export class VictorSummaryWS {
         if (!this.alive) return;
         const wait = this.backoff;
         this.backoff = Math.min(8000, this.backoff * 1.6);
-        setTimeout(() => this.open(baseUrl, opts), wait);
+        setTimeout(() => this.openSocket(baseUrl, opts), wait);
       };
     } catch {
       const wait = this.backoff;
       this.backoff = Math.min(8000, this.backoff * 1.6);
-      setTimeout(() => this.open(baseUrl, opts), wait);
+      setTimeout(() => this.openSocket(baseUrl, opts), wait);
     }
   }
 }
