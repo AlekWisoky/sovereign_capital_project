@@ -149,7 +149,17 @@ def test_invalid_or_missing_economics_fail_closed(tmp_path):
         omar = _runtime(tmp_path / str(index), min_observations=1)
         decision_id = f"decision-invalid-{index}"
         omar._pending_decisions[decision_id] = _pending(decision_id, f"corr-invalid-{index}", expected=expected)
-        settlement = _settlement(decision_id, f"corr-invalid-{index}", expected=expected, realized=realized)
+        settlement = _settlement(decision_id, f"corr-invalid-{index}", expected=100.0, realized=70.0)
+        if expected is None:
+            settlement.pop("expected_net_usd", None)
+            settlement.pop("expectation_error", None)
+        elif realized is None:
+            settlement.pop("realized_net_usd", None)
+            settlement.pop("expectation_error", None)
+        elif not math.isfinite(float(expected)) or not math.isfinite(float(realized)):
+            settlement["expected_net_usd"] = expected
+            settlement["realized_net_usd"] = realized
+            settlement["expectation_error"] = realized - expected
         result = omar.observe_outcome(decision_id=decision_id, ok=True, realized_net_usd=realized, expected_net_usd=expected, amount_in_wei=100, route_id="route-1", tx_hash="0xtx", metadata={"settlement": settlement, "canonical_lineage": {"decision_id": decision_id, "correlation_id": f"corr-invalid-{index}"}, "source": "phase2_canonical_outcome_ledger"})
         assert result["learned"] is False
         assert omar._real_learner.total_observations == 0
