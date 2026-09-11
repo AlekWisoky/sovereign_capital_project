@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from victor_ai_bot.decision_identity import ensure_decision_identity
 from victor_ai_bot.omar.config import OmarConfig
+from victor_ai_bot.omar.learning_integrity import validate_learning_transition
 from victor_ai_bot.omar.lifecycle_bridge import _observe_settled_outcome
 from victor_ai_bot.omar.real_learning import OmarRealLearner
 from victor_ai_bot.omar.runtime import OmarRuntime
@@ -49,6 +50,7 @@ def _settlement(decision_id="decision-1", correlation_id="corr-1", expected=100.
         "ok": True,
         "realized_net_usd": realized,
         "expected_net_usd": expected,
+        "expectation_error": realized - expected,
         "amount_in_wei": 100,
         "gas_cost_usd": 0.2,
         "slippage_bps": 3.0,
@@ -147,7 +149,17 @@ def test_invalid_or_missing_economics_fail_closed(tmp_path):
         omar = _runtime(tmp_path / str(index), min_observations=1)
         decision_id = f"decision-invalid-{index}"
         omar._pending_decisions[decision_id] = _pending(decision_id, f"corr-invalid-{index}", expected=expected)
-        settlement = _settlement(decision_id, f"corr-invalid-{index}", expected=expected, realized=realized)
+        settlement = _settlement(decision_id, f"corr-invalid-{index}", expected=100.0, realized=70.0)
+        if expected is None:
+            settlement.pop("expected_net_usd", None)
+            settlement.pop("expectation_error", None)
+        elif realized is None:
+            settlement.pop("realized_net_usd", None)
+            settlement.pop("expectation_error", None)
+        else:
+            settlement["expected_net_usd"] = expected
+            settlement["realized_net_usd"] = realized
+            settlement["expectation_error"] = realized - expected
         result = omar.observe_outcome(decision_id=decision_id, ok=True, realized_net_usd=realized, expected_net_usd=expected, amount_in_wei=100, route_id="route-1", tx_hash="0xtx", metadata={"settlement": settlement, "canonical_lineage": {"decision_id": decision_id, "correlation_id": f"corr-invalid-{index}"}, "source": "phase2_canonical_outcome_ledger"})
         assert result["learned"] is False
         assert omar._real_learner.total_observations == 0
@@ -166,3 +178,54 @@ def test_canonical_decision_id_is_the_only_learning_identity(tmp_path):
     duplicate = omar.observe_outcome(decision_id=decision_id, ok=True, realized_net_usd=70.0, expected_net_usd=100.0, amount_in_wei=100, route_id="route-1", tx_hash="0xtx-5", metadata={"settlement": _settlement(decision_id, "corr-5", 100.0, 70.0), "canonical_lineage": {"decision_id": decision_id, "correlation_id": "corr-5"}, "source": "phase2_canonical_outcome_ledger"})
     assert duplicate["learned"] is False
     assert omar._real_learner.total_observations == 1
+
+
+def test_learning_integrity_rejects_authority_and_lineage_mutations():
+    pending = _pending("decision-negative", "corr-negative", expected=12.0)
+    settled = _settlement("decision-negative", "corr-negative", expected=12.0, realized=15.0)
+
+    cases = [
+        ("noncanonical_learning_source", {"source": "receipt"}),
+        ("settlement_unverified", {"settlement_verified": False, "truth_verified": False}),
+        ("correlation_lineage_mismatch", {"correlation_id": "corr-other"}),
+        ("action_attribution_mismatch", {"action": "WAIT"}),
+        ("expected_net_attribution_mismatch", {"expected_net_usd": 99.0}),
+        ("expectation_error_mismatch", {"expectation_error": 999.0}),
+        ("capital_authority_not_canonical", {"pending_context": {"capital_authority_source": "ui_balance"}}),
+        ("capital_authority_unavailable", {"pending_context": {"capital_authority_status": "unavailable"}}),
+        ("capital_authority_freshness_unknown", {"pending_context": {"capital_authority_freshness": "unknown"}}),
+    ]
+
+    for expected_reason, mutation in cases:
+        pending_case = dict(pending)
+        pending_case["context"] = dict(pending["context"])
+        outcome_case = dict(settled)
+        for key, value in mutation.items():
+            if key == "pending_context":
+                pending_case["context"].update(value)
+            else:
+                outcome_case[key] = value
+        result = validate_learning_transition(pending_case, outcome_case, decision_id="decision-negative")
+        assert result.allowed is False
+        assert result.reason == expected_reason
+
+
+def test_learning_integrity_rejects_each_required_physical_identity():
+    pending = _pending("decision-identities", "corr-identities", expected=5.0)
+    settled = _settlement("decision-identities", "corr-identities", expected=5.0, realized=6.0)
+    for field in ("execution_id", "outcome_id", "sizing_id", "opportunity_id", "route_id"):
+        outcome = dict(settled)
+        outcome[field] = ""
+        result = validate_learning_transition(pending, outcome, decision_id="decision-identities")
+        assert result.allowed is False
+        assert result.reason == f"missing_{field}"
+
+
+def test_learning_integrity_rejects_unsettled_outcome_before_economic_processing():
+    pending = _pending("decision-pending", "corr-pending", expected=8.0)
+    outcome = _settlement("decision-pending", "corr-pending", expected=8.0, realized=9.0)
+    outcome["status"] = "pending"
+    outcome["realized_net_usd"] = None
+    result = validate_learning_transition(pending, outcome, decision_id="decision-pending")
+    assert result.allowed is False
+    assert result.reason == "outcome_not_canonically_settled"
