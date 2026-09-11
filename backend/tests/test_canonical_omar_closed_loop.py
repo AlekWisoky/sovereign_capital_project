@@ -156,7 +156,7 @@ def test_invalid_or_missing_economics_fail_closed(tmp_path):
         elif realized is None:
             settlement.pop("realized_net_usd", None)
             settlement.pop("expectation_error", None)
-        elif not math.isfinite(float(expected)) or not math.isfinite(float(realized)):
+        else:
             settlement["expected_net_usd"] = expected
             settlement["realized_net_usd"] = realized
             settlement["expectation_error"] = realized - expected
