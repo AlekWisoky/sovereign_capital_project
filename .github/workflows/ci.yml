@@ -67,37 +67,6 @@ jobs:
           name: optional-family-status-${{ github.sha }}
           path: /tmp/optional-family-status
 
-  refresh-generated-truth-pr99:
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 99 && github.head_ref == 'mobile/guarded-mutations'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: mobile/guarded-mutations
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-      - name: Regenerate canonical system truth
-        run: python scripts/render_system_truth.py
-      - name: Commit generated truth when stale
-        run: |
-          if git diff --quiet -- docs/generated/system_truth.json docs/generated/system_truth.md; then
-            echo "Generated truth already current."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/generated/system_truth.json docs/generated/system_truth.md
-          git commit -m "chore(generated): refresh system truth for guarded mutations"
-          git push origin HEAD:mobile/guarded-mutations
-
   backend-pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 45
