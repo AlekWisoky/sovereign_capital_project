@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 from victor_ai_bot.execution_capture.flashloan_sizing import choose_flashloan_size
 from victor_ai_bot.execution_capture.institutional_sizing import (
     build_institutional_sizing_contract,
@@ -80,9 +78,8 @@ def _contract_from_v1_inputs(inputs):
     wealth = inputs["wealth_goal_state"].get("state", {})
     drawdown = inputs["drawdown_state"]
     resilience = inputs["flashloan_resilience"]
-    adversarial = inputs["adversarial_state"]
 
-    contract = build_institutional_sizing_contract(
+    return build_institutional_sizing_contract(
         requested_notional_usd=250_000.0,
         target_notional_usd=250_000.0,
         strategy_family="flash_arb",
@@ -152,11 +149,9 @@ def _contract_from_v1_inputs(inputs):
             "kill_switch": bool(inputs["kill_switch_state"].get("suppressions")),
         },
     )
-    return contract
 
 
 def _sizing_projection(result):
-    # Only fields that define the legacy sizing decision are compared here.
     return {
         "allowed": result["allowed"],
         "size_mult": result["size_mult"],
@@ -180,8 +175,7 @@ def test_contract_is_observational_only_and_v1_output_is_unchanged():
     assert valid is True, errors
     assert contract.metadata["behavior_change"] == "none"
 
-    # This is the gate for the next refactor: the canonical contract exists,
-    # but it has no execution path and cannot alter the legacy sizing result.
+    # Gate for the next refactor: contract construction is parallel only.
     projected_before = _sizing_projection(legacy)
     projected_after = _sizing_projection(legacy)
     assert projected_after == projected_before
