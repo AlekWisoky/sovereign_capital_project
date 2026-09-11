@@ -7,7 +7,10 @@ from victor_ai_bot.runtime_services.runtime_decision_facade import RuntimeDecisi
 
 class _Runtime(RuntimeDecisionFacade):
     def __init__(self):
-        self.cfg = SimpleNamespace(execution=SimpleNamespace(brain_mode="off", max_pending_txs=1))
+        self.cfg = SimpleNamespace(
+            chain=SimpleNamespace(name="test"),
+            execution=SimpleNamespace(brain_mode="off", max_pending_txs=1),
+        )
         self._auto_trading = True
         self._opps = [SimpleNamespace(id="opp-1", can_execute=True, meta={"safety": {"exec_ready": True}})]
         self._pending = {}
