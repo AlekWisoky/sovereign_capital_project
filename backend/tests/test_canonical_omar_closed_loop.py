@@ -50,6 +50,7 @@ def _settlement(decision_id="decision-1", correlation_id="corr-1", expected=100.
         "ok": True,
         "realized_net_usd": realized,
         "expected_net_usd": expected,
+        "expectation_error": realized - expected,
         "amount_in_wei": 100,
         "gas_cost_usd": 0.2,
         "slippage_bps": 3.0,
