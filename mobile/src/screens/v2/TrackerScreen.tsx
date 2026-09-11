@@ -15,7 +15,9 @@ import { Sparkline } from "../../components/v2/charts/Sparkline";
 import { fmtCompact } from "../../utils/format";
 import type { Opportunity } from "../../utils/types";
 import type { JsonValue } from "../../utils/types";
-import { fetchState, simulateOpportunity, tradeOpportunity, txReceipt } from "../../api/client";
+import { fetchState, simulateOpportunity, txReceipt } from "../../api/client";
+import { guardedTradeOpportunity } from "../../api/guardedMutations";
+import type { MutationGuardContext } from "../../api/mutationGuard";
 import { VictorSummaryWS, type WsMessage } from "../../api/wsSummary";
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -39,6 +41,7 @@ export function TrackerScreen() {
   const [routeOpen, setRouteOpen] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [scanHist, setScanHist] = useState<number[]>([]);
+  const [backendReachable, setBackendReachable] = useState(false);
 
   const selectedOpp = useMemo(() => opps.find((o) => o.id === selectedOppId) ?? null, [opps, selectedOppId]);
 
@@ -51,8 +54,10 @@ export function TrackerScreen() {
         try {
           const st = await fetchState(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
           if (stop) break;
+          setBackendReachable(true);
           setOpps(st.opportunities || []);
         } catch {
+          setBackendReachable(false);
           // ignore
         }
         await new Promise((r) => setTimeout(r, 2200));
@@ -126,7 +131,21 @@ export function TrackerScreen() {
     setConfirmExec(false);
     setStatus("Executing…");
     try {
-      const res = await tradeOpportunity(state.baseUrl, selectedOpp.id, state.adminKey, amountOverride.trim() || undefined);
+      const context: MutationGuardContext = {
+        role: state.role,
+        locked: session.locked,
+        adminKeyPresent: Boolean(state.adminKey),
+        backendReachable,
+        backendLiveAuthority: false,
+        explicitConfirmation: true,
+      };
+      const res = await guardedTradeOpportunity(
+        state.baseUrl,
+        selectedOpp.id,
+        state.adminKey,
+        context,
+        amountOverride.trim() || undefined,
+      );
       const txHash = typeof res.tx_hash === "string" ? res.tx_hash : "";
       await patch(activeTicket.id, { stage: "EXEC_SENT", trade: res });
       setStatus(txHash ? `Sent · ${txHash}` : "Sent");

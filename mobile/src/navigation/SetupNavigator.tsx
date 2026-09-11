@@ -4,11 +4,13 @@ import { useStore } from "../state/store";
 import { SetupScreen } from "../screens/v2/SetupScreen";
 import { LoginScreen } from "../screens/v2/LoginScreen";
 import { MainTabs } from "./MainTabs";
+import { CanonicalDecisionDetailScreen } from "../screens/CanonicalDecisionDetailScreen";
 
 export type RootStackParamList = {
   Setup: undefined;
   Login: undefined;
   Main: undefined;
+  DecisionDetail: { decisionId: string };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -26,7 +28,10 @@ export function RootStack() {
       ) : needsLogin ? (
         <Stack.Screen name="Login" component={LoginScreen} />
       ) : (
-        <Stack.Screen name="Main" component={MainTabs} />
+        <>
+          <Stack.Screen name="Main" component={MainTabs} />
+          <Stack.Screen name="DecisionDetail" component={CanonicalDecisionDetailScreen} />
+        </>
       )}
     </Stack.Navigator>
   );

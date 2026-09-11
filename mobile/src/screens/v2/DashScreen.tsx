@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { Alert, View, Text, ScrollView, Pressable } from "react-native";
 import { useStore } from "../../state/store";
 import { useTheme } from "../../utils/useTheme";
 import { pageContentContainerStyle, pageShellStyle } from '../../utils/layout';
@@ -11,12 +11,13 @@ import { AreaChart } from "../../components/v2/charts/AreaChart";
 import { Histogram } from "../../components/v2/charts/Histogram";
 import { fmtCompact, fmtMs, fmtPct } from "../../utils/format";
 import { VictorSummaryWS, type SummaryData, type WsMessage } from "../../api/wsSummary";
-import { adminState, pnlSummary, pnlIncome, setSettings } from "../../api/client";
+import { adminState, pnlSummary, pnlIncome } from "../../api/client";
+import { guardedSelectChain, guardedSetSettings } from "../../api/guardedMutations";
+import { guardMutation, mutationKindForSettingsPatch, type MutationGuardContext } from "../../api/mutationGuard";
 
 type RangeKey = "1H" | "24H" | "7D" | "30D" | "ALL";
 
 function rangeToWindow(r: RangeKey): number {
-  // pnl.summary is trade-window based, so we approximate by a trade count.
   if (r === "1H") return 30;
   if (r === "24H") return 120;
   if (r === "7D") return 600;
@@ -53,13 +54,14 @@ function num(v: unknown, fallback: number = 0): number {
 
 export function DashScreen() {
   const theme = useTheme();
-  const { state, session, multichain, refreshMultichain, selectActiveChain } = useStore();
+  const { state, session, multichain, refreshMultichain } = useStore();
   const [range, setRange] = useState<RangeKey>("24H");
   const [summary, setSummary] = useState<SummaryData>({});
   const [adminSnap, setAdminSnap] = useState<Record<string, unknown>>({});
   const [pnlCurve, setPnlCurve] = useState<number[]>([]);
   const [evBins, setEvBins] = useState<number[]>([]);
   const [income, setIncome] = useState<Record<string, unknown>>({});
+  const [backendReachable, setBackendReachable] = useState(false);
 
   const wsRef = useRef<VictorSummaryWS | null>(null);
 
@@ -81,15 +83,17 @@ export function DashScreen() {
   }, [state.baseUrl]);
 
   useEffect(() => {
-    // Poll admin snapshot and pnl summary (kept lightweight).
     let stop = false;
     const loop = async () => {
       while (!stop) {
         try {
           const a = await adminState(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
-          if (!stop) setAdminSnap(a as Record<string, unknown>);
+          if (!stop) {
+            setAdminSnap(a as Record<string, unknown>);
+            setBackendReachable(true);
+          }
         } catch {
-          // ignore
+          if (!stop) setBackendReachable(false);
         }
         try {
           const p = await pnlSummary(state.baseUrl, rangeToWindow(range), state.role === "operator" ? state.adminKey : undefined);
@@ -113,7 +117,7 @@ export function DashScreen() {
             }
           }
         } catch {
-          // ignore
+          // read-only analytics failure does not affect mutation reachability
         }
         try {
           const inc = await pnlIncome(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
@@ -159,10 +163,71 @@ export function DashScreen() {
   const kellyEnabled = Boolean(settings["kelly_enabled"]);
   const brainMode = String(settings["brain_mode"] ?? "off");
 
-  async function patchSettings(patch: Record<string, unknown>) {
+  function confirmMutation(title: string, message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      Alert.alert(
+        title,
+        message,
+        [
+          { text: "Cancel", style: "cancel", onPress: () => finish(false) },
+          { text: "Confirm", style: "destructive", onPress: () => finish(true) },
+        ],
+        { cancelable: true, onDismiss: () => finish(false) },
+      );
+    });
+  }
+
+  function mutationContext(explicitConfirmation: boolean): MutationGuardContext {
+    return {
+      role: state.role === "operator" ? "operator" : "read_only",
+      locked: Boolean(session.locked),
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable,
+      backendLiveAuthority: false,
+      explicitConfirmation,
+    };
+  }
+
+  async function patchSettings(patch: Record<string, unknown>, reason: string) {
     if (!operatorControlsEnabled) return;
+    const kind = mutationKindForSettingsPatch(patch);
+    const preflight = guardMutation(kind, mutationContext(false));
+    if (!preflight.allowed && preflight.reasonCode !== "explicit_confirmation_required") return;
+    const confirmed = await confirmMutation(
+      "Confirm operator change",
+      `${reason}\n\nThis changes backend operator state. Confirm only if this action is intentional.`,
+    );
+    if (!confirmed) return;
+    const context = mutationContext(true);
+    const allowed = guardMutation(kind, context);
+    if (!allowed.allowed) return;
     try {
-      await setSettings(state.baseUrl, patch, state.adminKey);
+      await guardedSetSettings(state.baseUrl, patch, state.adminKey, context);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function changeChain(chain: string) {
+    if (!operatorControlsEnabled) return;
+    const preflight = guardMutation("chain_control", mutationContext(false));
+    if (!preflight.allowed && preflight.reasonCode !== "explicit_confirmation_required") return;
+    const confirmed = await confirmMutation(
+      "Confirm chain change",
+      `Change the active backend chain to ${chain}?\n\nThis changes backend operator state. Confirm only if this action is intentional.`,
+    );
+    if (!confirmed) return;
+    const context = mutationContext(true);
+    const allowed = guardMutation("chain_control", context);
+    if (!allowed.allowed) return;
+    try {
+      await guardedSelectChain(state.baseUrl, chain, state.adminKey, context);
     } catch {
       // ignore
     }
@@ -229,122 +294,37 @@ export function DashScreen() {
         </Text>
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: theme.spacing.md }}>
-          <Pressable
-            disabled={!operatorControlsEnabled}
-            onPress={() => patchSettings({ auto_trading: !Boolean(settings["auto_trading"]) })}
-            style={{
-              flexBasis: "48%",
-              paddingVertical: 12,
-              borderRadius: theme.radii.md,
-              backgroundColor: operatorControlsEnabled ? theme.colors.surface2 : theme.colors.surface1,
-              borderWidth: 1,
-              borderColor: operatorControlsEnabled ? theme.colors.cyan : theme.colors.border,
-              alignItems: "center",
-            }}
-          >
+          <Pressable disabled={!operatorControlsEnabled} onPress={() => void patchSettings({ auto_trading: !Boolean(settings["auto_trading"]) }, "Change auto-trading mode")} style={{ flexBasis: "48%", paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: operatorControlsEnabled ? theme.colors.surface2 : theme.colors.surface1, borderWidth: 1, borderColor: operatorControlsEnabled ? theme.colors.cyan : theme.colors.border, alignItems: "center" }}>
             <Text style={{ color: theme.colors.text, fontWeight: "900" }}>auto_trading: {String(Boolean(settings["auto_trading"]))}</Text>
           </Pressable>
 
-          <Pressable
-            disabled={!operatorControlsEnabled}
-            onPress={() => patchSettings({ dry_run: !Boolean(settings["dry_run"]) })}
-            style={{
-              flexBasis: "48%",
-              paddingVertical: 12,
-              borderRadius: theme.radii.md,
-              backgroundColor: operatorControlsEnabled ? theme.colors.surface2 : theme.colors.surface1,
-              borderWidth: 1,
-              borderColor: operatorControlsEnabled ? theme.colors.violet : theme.colors.border,
-              alignItems: "center",
-            }}
-          >
+          <Pressable disabled={!operatorControlsEnabled} onPress={() => void patchSettings({ dry_run: !Boolean(settings["dry_run"]) }, "Change dry-run mode")} style={{ flexBasis: "48%", paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: operatorControlsEnabled ? theme.colors.surface2 : theme.colors.surface1, borderWidth: 1, borderColor: operatorControlsEnabled ? theme.colors.violet : theme.colors.border, alignItems: "center" }}>
             <Text style={{ color: theme.colors.text, fontWeight: "900" }}>dry_run: {String(Boolean(settings["dry_run"]))}</Text>
           </Pressable>
 
-          <View
-            style={{
-              flexBasis: "48%",
-              paddingVertical: 12,
-              borderRadius: theme.radii.md,
-              backgroundColor: theme.colors.surface1,
-              borderWidth: 1,
-              borderColor: kellyEnabled ? theme.colors.good : theme.colors.border,
-              alignItems: "center",
-            }}
-          >
+          <View style={{ flexBasis: "48%", paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.surface1, borderWidth: 1, borderColor: kellyEnabled ? theme.colors.good : theme.colors.border, alignItems: "center" }}>
             <Text style={{ color: kellyEnabled ? theme.colors.good : theme.colors.textMuted, fontWeight: "900" }}>kelly_enabled: {String(kellyEnabled)}</Text>
           </View>
 
-          <Pressable
-            disabled={!operatorControlsEnabled}
-            onPress={() => patchSettings({ send_mode: settings["send_mode"] === "flashbots" ? "public" : "flashbots" })}
-            style={{
-              flexBasis: "48%",
-              paddingVertical: 12,
-              borderRadius: theme.radii.md,
-              backgroundColor: theme.colors.surface1,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              alignItems: "center",
-              opacity: operatorControlsEnabled ? 1 : 0.5,
-            }}
-          >
+          <Pressable disabled={!operatorControlsEnabled} onPress={() => void patchSettings({ send_mode: settings["send_mode"] === "flashbots" ? "public" : "flashbots" }, "Change transaction send mode")} style={{ flexBasis: "48%", paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.surface1, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", opacity: operatorControlsEnabled ? 1 : 0.5 }}>
             <Text style={{ color: theme.colors.textMuted, fontWeight: "900" }}>send_mode: {String(settings["send_mode"] ?? "-")}</Text>
           </Pressable>
 
-          <Pressable
-            disabled={!operatorControlsEnabled}
-            onPress={() => {
-              const modes = ["off", "shadow", "suggest", "auto"];
-              const idx = Math.max(0, modes.indexOf(brainMode));
-              const next = modes[(idx + 1) % modes.length];
-              patchSettings({ brain_mode: next });
-            }}
-            style={{
-              flexBasis: "48%",
-              paddingVertical: 12,
-              borderRadius: theme.radii.md,
-              backgroundColor: theme.colors.surface1,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              alignItems: "center",
-              opacity: operatorControlsEnabled ? 1 : 0.5,
-            }}
-          >
+          <Pressable disabled={!operatorControlsEnabled} onPress={() => { const modes = ["off", "shadow", "suggest", "auto"]; const idx = Math.max(0, modes.indexOf(brainMode)); const next = modes[(idx + 1) % modes.length]; void patchSettings({ brain_mode: next }, "Change brain mode"); }} style={{ flexBasis: "48%", paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.surface1, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", opacity: operatorControlsEnabled ? 1 : 0.5 }}>
             <Text style={{ color: theme.colors.textMuted, fontWeight: "900" }}>brain_mode: {brainMode}</Text>
           </Pressable>
 
-          <Pressable
-            disabled={!operatorControlsEnabled}
-            onPress={() => patchSettings({ gas_mode: settings["gas_mode"] === "aggressive" ? "normal" : "aggressive" })}
-            style={{
-              flexBasis: "48%",
-              paddingVertical: 12,
-              borderRadius: theme.radii.md,
-              backgroundColor: theme.colors.surface1,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              alignItems: "center",
-              opacity: operatorControlsEnabled ? 1 : 0.5,
-            }}
-          >
+          <Pressable disabled={!operatorControlsEnabled} onPress={() => void patchSettings({ gas_mode: settings["gas_mode"] === "aggressive" ? "normal" : "aggressive" }, "Change gas mode")} style={{ flexBasis: "48%", paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.surface1, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", opacity: operatorControlsEnabled ? 1 : 0.5 }}>
             <Text style={{ color: theme.colors.textMuted, fontWeight: "900" }}>gas_mode: {String(settings["gas_mode"] ?? "-")}</Text>
           </Pressable>
         </View>
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: theme.spacing.md }}>
-          <Pressable
-            onPress={() => void refreshMultichain()}
-            style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1, alignItems: "center" }}
-          >
+          <Pressable onPress={() => void refreshMultichain()} style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1, alignItems: "center" }}>
             <Text style={{ color: theme.colors.textMuted, fontWeight: "900" }}>Refresh chains</Text>
           </Pressable>
 
-          <Pressable
-            disabled={!operatorControlsEnabled}
-            onPress={() => void patchSettings({ auto_trading: false })}
-            style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.danger, alignItems: "center", opacity: operatorControlsEnabled ? 1 : 0.5 }}
-          >
+          <Pressable disabled={!operatorControlsEnabled} onPress={() => void patchSettings({ auto_trading: false }, "Emergency stop")} style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.danger, alignItems: "center", opacity: operatorControlsEnabled ? 1 : 0.5 }}>
             <Text style={{ color: theme.colors.bg0, fontWeight: "900" }}>Emergency Stop</Text>
           </Pressable>
         </View>
@@ -355,20 +335,7 @@ export function DashScreen() {
             {(multichain.chains.length ? multichain.chains : [chainLabel]).slice(0, 12).map((c) => {
               const active = String(c) === chainLabel;
               return (
-                <Pressable
-                  key={c}
-                  disabled={!operatorControlsEnabled}
-                  onPress={() => void selectActiveChain(String(c))}
-                  style={{
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                    borderRadius: theme.radii.pill,
-                    borderWidth: 1,
-                    borderColor: active ? theme.colors.cyan : theme.colors.border,
-                    backgroundColor: active ? theme.colors.surface2 : theme.colors.surface1,
-                    opacity: operatorControlsEnabled ? 1 : 0.5,
-                  }}
-                >
+                <Pressable key={c} disabled={!operatorControlsEnabled} onPress={() => void changeChain(String(c))} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: theme.radii.pill, borderWidth: 1, borderColor: active ? theme.colors.cyan : theme.colors.border, backgroundColor: active ? theme.colors.surface2 : theme.colors.surface1, opacity: operatorControlsEnabled ? 1 : 0.5 }}>
                   <Text style={{ color: active ? theme.colors.text : theme.colors.textMuted, ...theme.typography.mono }}>{String(c).toUpperCase()}</Text>
                 </Pressable>
               );

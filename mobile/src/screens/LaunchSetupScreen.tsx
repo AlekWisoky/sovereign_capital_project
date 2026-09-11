@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, View, Pressable } from 'react-native';
-import { enableNextFamily, launchFamilyDetail, quarantineLaunchFamily, revertLaunchFamily, setLaunchMode } from '../api/launchApi';
+import { Alert, ScrollView, Text, View, Pressable } from 'react-native';
+import { launchFamilyDetail } from '../api/launchApi';
+import { guardedEnableNextFamily, guardedQuarantineLaunchFamily, guardedRevertLaunchFamily, guardedSetLaunchMode } from '../api/guardedMutations';
+import { guardMutation, type MutationGuardContext } from '../api/mutationGuard';
 import { useCommandCenter } from '../commandCenter/useCommandCenter';
 import { FamilyReadinessCard } from '../components/FamilyReadinessCard';
 import { LaunchRecommendationCard } from '../components/LaunchRecommendationCard';
@@ -14,39 +16,85 @@ import { HeatMatrixChart } from '../components/v2/charts/HeatMatrixChart';
 
 const MODES = ['V1_ONLY', 'V1_PLUS_STABLE_ALPHA', 'STAGED_MULTI_STRATEGY', 'FULL_MULTI_STRATEGY'] as const;
 
+function confirmMutation(title: string, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => finish(false) },
+        { text: 'Confirm', style: 'destructive', onPress: () => finish(true) },
+      ],
+      { cancelable: true, onDismiss: () => finish(false) },
+    );
+  });
+}
+
 export function LaunchSetupScreen() {
   const theme = useTheme();
   const cc = useCommandCenter();
-  const { state } = useStore();
+  const { state, session } = useStore();
   const launch = cc.snapshot?.launch;
   const [step, setStep] = useState(0);
   const [detail, setDetail] = useState<string>('');
   const mode = launch?.currentLaunchMode ?? 'V1_ONLY';
   const families = useMemo(() => launch?.families ?? [], [launch]);
-  const adminKey = state.role === 'operator' ? state.adminKey : undefined;
+  const adminKey = state.role === 'operator' ? state.adminKey : '';
+
+  function guardContext(): MutationGuardContext {
+    return {
+      role: state.role === 'operator' ? 'operator' : 'read_only',
+      locked: session.locked,
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable: cc.source === 'backend' && cc.snapshot !== null && !cc.error,
+      backendLiveAuthority: false,
+      explicitConfirmation: false,
+    };
+  }
+
+  async function confirmLaunchAction(action: string): Promise<boolean> {
+    const preflight = guardMutation('launch_control', guardContext());
+    if (!preflight.allowed && preflight.reasonCode !== 'explicit_confirmation_required') {
+      setDetail(`Launch control blocked · ${preflight.reasonCode}`);
+      return false;
+    }
+    const confirmed = await confirmMutation('Confirm launch control', `${action}\n\nThis changes backend launch state. Confirm only if this action is intentional.`);
+    return confirmed;
+  }
 
   async function selectMode(nextMode: string) {
-    await setLaunchMode(state.baseUrl, nextMode, adminKey);
+    if (!(await confirmLaunchAction(`Set launch mode to ${nextMode}?`))) return;
+    await guardedSetLaunchMode(state.baseUrl, nextMode, adminKey, { ...guardContext(), explicitConfirmation: true });
     await cc.refresh();
   }
 
   async function enableFamily(family: string) {
-    await enableNextFamily(state.baseUrl, family, adminKey);
+    if (!family) return;
+    if (!(await confirmLaunchAction(`Enable launch family ${family}?`))) return;
+    await guardedEnableNextFamily(state.baseUrl, family, adminKey, { ...guardContext(), explicitConfirmation: true });
     await cc.refresh();
   }
 
   async function revertFamily(family: string) {
-    await revertLaunchFamily(state.baseUrl, family, adminKey);
+    if (!(await confirmLaunchAction(`Revert launch family ${family} to the safer state?`))) return;
+    await guardedRevertLaunchFamily(state.baseUrl, family, adminKey, { ...guardContext(), explicitConfirmation: true });
     await cc.refresh();
   }
 
   async function quarantineFamily(family: string) {
-    await quarantineLaunchFamily(state.baseUrl, family, 'operator_quarantine', adminKey);
+    if (!(await confirmLaunchAction(`Quarantine launch family ${family}?`))) return;
+    await guardedQuarantineLaunchFamily(state.baseUrl, family, adminKey, { ...guardContext(), explicitConfirmation: true }, 'operator_quarantine');
     await cc.refresh();
   }
 
   async function inspectFamily(family: string) {
-    const resp = await launchFamilyDetail(state.baseUrl, family, adminKey);
+    const resp = await launchFamilyDetail(state.baseUrl, family, adminKey || undefined);
     const item = (resp as { item?: { blockers?: string[]; reasons?: string[]; suggestedNextAction?: string; degradedState?: string; currentHealthState?: string } }).item;
     setDetail(item ? `Blockers: ${(item.blockers ?? item.reasons ?? []).join(', ') || 'none'} · Next: ${item.suggestedNextAction ?? 'hold'} · State: ${item.currentHealthState ?? item.degradedState ?? 'live'}` : 'No detail available');
   }

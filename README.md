@@ -1,6 +1,6 @@
 # Sovereign Capital
 
-Sovereign Capital is a safety-first capital operating system: market observation, strategy signals, one canonical decision, OMAR recommendation/learning, governance, adaptive risk-budget sizing, execution, receipt verification, physical settlement, and outcome learning. The Expo mobile app is the operator surface.
+Sovereign Capital is a safety-first capital operating system: market observation, strategy signals, agent research/views, portfolio aggregation, one canonical decision, OMAR recommendation/learning, governance, adaptive risk-budget sizing, deterministic simulation, execution, receipt verification, physical settlement, and outcome learning. The Expo mobile app is the operator surface.
 
 > **Current engineering rule:** CI is authoritative. No PR is ready for merge or staging deployment until the complete Linux test gate and all companion gates are green.
 
@@ -8,20 +8,33 @@ Sovereign Capital is a safety-first capital operating system: market observation
 
 ```text
 REAL MARKET
-  -> MARKET / STRATEGY SIGNAL
+  -> AQE / SIGNAL + BLOCKSPACE INTELLIGENCE
+  -> OPPORTUNITY ENGINE
+  -> EXECUTION CAPTURE
+       liquidity / route / latency
+  -> AGENT RESEARCH / VIEWS
+       valuation / sentiment / fundamentals / technicals
+       Graham / Ackman / Wood / Munger / Fisher / Druckenmiller / Buffett
+  -> PORTFOLIO MANAGER
+       aggregation only
+  -> OMAR CONTEXT
+       recommendation / learning context
   -> CANONICAL DECISION
        decision_id
        correlation_id
        operator-intent snapshot
        wealth-goal context
        capital_engine_state()
-  -> OMAR
-       recommendation / action / size preference / gas preference / learning state
+  -> HUMAN COGNITIVE CONTROL / DECISION HYGIENE
+       clarity / counterfactuals / uncertainty / decision discipline
+       advisory only; never execution authority
   -> GOVERNANCE / ADMISSION
+  -> INTERNAL PRIME + RISK CONTROL
   -> ADAPTIVE RISK-BUDGET SIZING
        sizing_id
-  -> EXECUTION
-       execution_id / tx / actual economics
+  -> DETERMINISTIC SIMULATION
+  -> PRIVATE EXECUTION
+       execution_id
   -> RECEIPT
   -> PHYSICAL CANONICAL SETTLEMENT LEDGER
        decision_id / correlation_id / execution_id / outcome_id
@@ -29,10 +42,10 @@ REAL MARKET
   -> SETTLED OUTCOME
        realized P&L / net profit after costs / gas / slippage / latency / truth verification
   -> OMAR LEARNING GATE
-  -> EXACT ACTION ATTRIBUTION
+  -> EXACT AGENT / STRATEGY ATTRIBUTION
   -> POLICY UPDATE
   -> OOS EVIDENCE
-  -> PERFORMANCE PROMOTION
+  -> PERFORMANCE PROMOTION / RETIREMENT
 ```
 
 ### Non-negotiable semantics
@@ -41,9 +54,39 @@ REAL MARKET
 2. **Decision-time authority is immutable.** `capital_engine_state()` belongs to the decision snapshot.
 3. **Sizing is downstream of admission.** OMAR recommends; governance admits; adaptive risk budgeting creates `sizing_id`.
 4. **Settlement is physical truth.** OMAR learns only from a verified canonical settled outcome.
-5. **Attribution is exact.** Learning must preserve decision, correlation, execution, outcome, sizing, opportunity, route, and action lineage.
-6. **CI validates; CI never rewrites source.** No workflow may edit, commit, or push repository code.
-7. **Public/staging posture is non-live.** Live broadcast/auto-trading authority must not be enabled in staging.
+5. **Attribution is exact.** Learning must preserve decision, correlation, execution, outcome, sizing, opportunity, route, and action lineage, plus the contributing agent/strategy view where available.
+6. **Realtime is advisory, not canonical.** Polling/read-model reconciliation remains authoritative. Realtime observations may improve latency of operator awareness but must never overwrite canonical truth or advance canonical freshness without authoritative confirmation.
+7. **Human cognitive controls are non-authoritative.** Cognitive support may improve decision clarity, consistency, memory, counterfactual analysis, and postmortems, but it must not alter execution commands, silently change risk, infer psychological state as fact, or bypass governance.
+8. **CI validates; CI never rewrites source.** No workflow may edit, commit, or push repository code.
+9. **Public/staging posture is non-live.** Live broadcast/auto-trading authority must not be enabled in staging.
+
+## Operator cognitive layer
+
+The system may provide a bounded **Cognitive Operating System** for the human operator. This is an interface and decision-quality layer, not a second trading brain.
+
+It should:
+
+- expose the current decision context and material assumptions;
+- force explicit uncertainty and confidence where useful;
+- surface counterfactuals and disconfirming evidence;
+- detect repeated operator workflow patterns such as impulsive overrides or skipped review steps without diagnosing the operator;
+- preserve decision journals and postmortems so lessons are recoverable;
+- measure decision latency and process adherence as operational telemetry;
+- encourage pause/escalation when the operator is about to violate a safety boundary.
+
+It must not:
+
+- manufacture confidence or emotional states;
+- use hidden psychological profiling to steer capital decisions;
+- replace governance, risk controls, or canonical decision authority;
+- mutate capital state without the existing guarded mutation path;
+- turn a conversational prompt into execution permission.
+
+## Realtime reconciliation boundary
+
+The mobile read path uses a single reconciliation kernel. Authoritative polling establishes canonical read truth and canonical freshness. Realtime events, when connected through an approved transport, are retained as advisory observations and are ordered so older events cannot overwrite newer observations. Transport failures preserve the last-known-good canonical value and expose freshness degradation rather than silently fabricating current state.
+
+The backend already exposes websocket routes including `/ws`, `/ws/multichain`, `/ws/summary`, and `/ws/narrative`. The mobile layer must consume these through a narrow typed adapter; it must not create a parallel state model or allow websocket data to become execution/governance truth.
 
 ## Repository layout
 
@@ -139,54 +182,4 @@ The app's WalletConnect bootstrap is mounted globally, and the EIP-1193 provider
 
 ## Staging safety
 
-Staging is for **read-only verification and controlled non-live behavior** only.
-
-Required staging checks:
-
-- `/health`
-- deployment identity / commit SHA
-- runtime state
-- safety controls / public deployment mode
-- confirm live broadcast and auto-trading authority are unavailable
-
-Do not treat a green health check as proof of production authority. Deployment identity and safety state must be checked explicitly.
-
-## CI and release discipline
-
-The release sequence is:
-
-```text
-change
- -> CI
- -> full 8-way Linux pytest
- -> backend quality
- -> mobile
- -> contracts
- -> exact verified commit SHA
- -> staging aligned to that SHA
- -> read-only staging smoke
- -> review
- -> merge to main
-```
-
-If pytest fails, repair only the actual failure with the smallest targeted change and rerun the complete gate.
-
-## Current integration status
-
-The current controlled integration is intentionally **not considered production-ready until CI is green**. Do not infer readiness from historical PRs, old generated status documents, or previous deployment attempts.
-
-Historical PR chains that were superseded by the controlled integration are frozen/closed. Useful contracts were extracted into the current architecture; duplicate identity generation, stacked monkey patches, and source-mutating CI repair mechanisms are not part of the intended design.
-
-## Architecture references
-
-- `docs/architecture/omar-keep-revert-delete-merge-map.svg` — OMAR integration disposition map.
-- `docs/END_TO_END_WIRING_MATRIX.md` — authoritative responsibility and synchronization matrix.
-- `docs/SECURITY_MODEL.md` — security and withdrawal model.
-- `docs/API_CONTRACT.md` — backend/mobile API contract.
-- `docs/SENTRY_SETUP.md` — Sentry setup and verification.
-- `docs/SMOOTH_RUN_REVIEW.md` — operational checklist.
-- `docs/WORKSPACE_CHECKPOINT.md` — durable engineering checkpoint.
-
-## License
-
-See `LICENSE`.
+Staging remains non-live. Any future live-authority activation must pass the explicit Issue #89 review, including executor/wallet configuration, protected submission lane, `dry_run`/`auto_trading` state, and a deliberately capped transaction test. No cognitive layer, agent, realtime feed, or operator UI may bypass that gate.
