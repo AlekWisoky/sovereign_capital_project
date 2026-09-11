@@ -1,7 +1,7 @@
 import pytest
 
 from victor_ai_bot.capital_demand import CapitalDemandError, Money, project_strategy_budget, require_same_treasury_denomination, selector_scalar
-from test_capital_demand_contract import NOW, demand
+from tests.test_capital_demand_contract import NOW, demand
 
 
 def test_projection_is_only_strategy_budget_consumption():
