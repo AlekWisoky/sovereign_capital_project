@@ -68,7 +68,7 @@ jobs:
           path: /tmp/optional-family-status
 
   refresh-generated-truth-g:
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 99 && github.head_ref == 'mobile/stale-realtime-reconciliation'
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 100 && github.head_ref == 'mobile/stale-realtime-reconciliation'
     runs-on: ubuntu-latest
     permissions:
       contents: write
