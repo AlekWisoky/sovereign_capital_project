@@ -9,7 +9,9 @@ import { ConfirmDialog } from "../../components/v2/ConfirmDialog";
 import { ReceiptDrawer } from "../../components/v2/ReceiptDrawer";
 import { ConfirmReasonDialog } from "../../components/cc/ConfirmReasonDialog";
 import { useStore } from "../../state/store";
-import { withdrawConfig, withdrawPrepare, withdrawExecute, convertWithdrawQuote, convertWithdrawPrepare, convertWithdrawExecute, withdrawAllState, withdrawAllConfig, withdrawAllPreview, withdrawAllExecute } from "../../api/client";
+import { withdrawConfig, withdrawPrepare, convertWithdrawQuote, convertWithdrawPrepare, withdrawAllState, withdrawAllConfig, withdrawAllPreview } from "../../api/client";
+import { guardedWithdrawExecute, guardedConvertWithdrawExecute, guardedWithdrawAllExecute } from "../../api/guardedMutations";
+import type { MutationGuardContext } from "../../api/mutationGuard";
 import { describeWithdrawAllRefresh, describeWithdrawAllRefreshWarning, nextWithdrawAllRefreshDelayMs, shouldAutoRefreshWithdrawAllState, summarizeWithdrawExecution, summarizeWithdrawAllExecution, summarizeWithdrawAllState } from "../../utils/offRampStatus";
 import type { JsonValue } from "../../utils/types";
 
@@ -37,6 +39,16 @@ export function OffRampScreen() {
   const { state, session, set } = useStore();
 
   const operator = state.role === "operator" && !session.locked;
+  const [backendReachable, setBackendReachable] = useState(false);
+
+  const mutationContext = (): MutationGuardContext => ({
+    role: state.role === "operator" ? "operator" : "read_only",
+    locked: session.locked,
+    adminKeyPresent: Boolean(state.adminKey?.trim()),
+    backendReachable,
+    backendLiveAuthority: false,
+    explicitConfirmation: true,
+  });
 
   const [tab, setTab] = useState<"Convert" | "Withdraw">("Convert");
 
@@ -83,6 +95,7 @@ export function OffRampScreen() {
       try {
         const c = await withdrawConfig(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
         setCfg(c as Record<string, unknown>);
+        setBackendReachable(true);
 
         const t = asRecord(c)?.["tokens"];
         if (Array.isArray(t) && t.length) {
@@ -101,6 +114,7 @@ export function OffRampScreen() {
         const candidate = typeof approved === "string" && approved ? approved : typeof pending === "string" ? pending : "";
         if (candidate) setWipeDestination(candidate);
       } catch (e: unknown) {
+        setBackendReachable(false);
         setStatus(e instanceof Error ? e.message : String(e));
       }
     })();
@@ -189,7 +203,7 @@ export function OffRampScreen() {
     }
     setStatus("Executing…");
     try {
-      const res = await convertWithdrawExecute(
+      const res = await guardedConvertWithdrawExecute(
         state.baseUrl,
         {
           token_in: tokenIn,
@@ -201,6 +215,7 @@ export function OffRampScreen() {
           reason,
         },
         state.adminKey,
+        mutationContext(),
       );
       setDrawer({ open: true, title: "Convert+Withdraw Execute Result", payload: res as unknown as JsonValue });
       const summary = summarizeWithdrawExecution(res, "Convert+withdraw");
@@ -245,7 +260,7 @@ export function OffRampScreen() {
     }
     setStatus("Executing…");
     try {
-      const res = await withdrawExecute(state.baseUrl, { token: wToken, to: dest, amount: wAmount, reason }, state.adminKey);
+      const res = await guardedWithdrawExecute(state.baseUrl, { token: wToken, to: dest, amount: wAmount, reason }, state.adminKey, mutationContext());
       setDrawer({ open: true, title: "Withdraw Execute Result", payload: res as unknown as JsonValue });
       const summary = summarizeWithdrawExecution(res, "Withdraw");
       if (summary.ok && saveRecipientOnConfirm) rememberRecipient(dest);
@@ -349,10 +364,11 @@ export function OffRampScreen() {
       return;
     }
     try {
-      const res = await withdrawAllExecute(
+      const res = await guardedWithdrawAllExecute(
         state.baseUrl,
         { preview_id: previewId, confirm_text: wipeConfirmationText, dry_run: withdrawMode !== "backend" },
         state.adminKey,
+        mutationContext(),
       );
       setDrawer({ open: true, title: "Withdraw Everything Result", payload: res as unknown as JsonValue });
       const summary = summarizeWithdrawAllExecution(res);

@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Alert } from "react-native";
 import type { CommandCenterSnapshot, ControlPatch, ExplainResponse } from "./types";
 import { createBackendCommandCenterProvider, createMockCommandCenterProvider } from "./provider";
 import { useStore } from "../state/store";
+import { guardMutation, mutationKindForSettingsPatch } from "../api/mutationGuard";
 
 export type DataSource = "backend" | "mock";
 
@@ -19,8 +21,28 @@ type CommandCenterValue = {
 
 const CommandCenterContext = createContext<CommandCenterValue | null>(null);
 
+function confirmMutation(title: string, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => finish(false) },
+        { text: "Confirm", style: "destructive", onPress: () => finish(true) },
+      ],
+      { cancelable: true, onDismiss: () => finish(false) },
+    );
+  });
+}
+
 function useCommandCenterController(): CommandCenterValue {
-  const { state } = useStore();
+  const { state, session } = useStore();
   const [source, setSource] = useState<DataSource>(state.ccDataSource ?? "backend");
   const [snapshot, setSnapshot] = useState<CommandCenterSnapshot | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -57,6 +79,29 @@ function useCommandCenterController(): CommandCenterValue {
   }, [provider]);
 
   async function setControls(patch: ControlPatch, reason: string) {
+    const context = {
+      role: state.role === "operator" ? "operator" as const : "read_only" as const,
+      locked: Boolean(session.locked),
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable: source === "backend" && snapshot !== null && !error,
+      // Live authority remains closed until the explicit Issue #89 activation review.
+      backendLiveAuthority: false,
+      explicitConfirmation: false,
+    };
+    const kind = mutationKindForSettingsPatch(patch as Record<string, unknown>);
+    const preflight = guardMutation(kind, context);
+    if (!preflight.allowed && preflight.reasonCode !== "explicit_confirmation_required") {
+      return { ok: false, error: `mutation_denied:${preflight.reasonCode}` };
+    }
+
+    const confirmed = await confirmMutation(
+      "Confirm operator change",
+      `${reason}\n\nThis changes backend operator state. Confirm only if this action is intentional.`,
+    );
+    if (!confirmed) return { ok: false, error: "mutation_cancelled" };
+
+    const allowed = guardMutation(kind, { ...context, explicitConfirmation: true });
+    if (!allowed.allowed) return { ok: false, error: `mutation_denied:${allowed.reasonCode}` };
     return await provider.setControls(patch, reason);
   }
 

@@ -1,6 +1,6 @@
 {
   "backend": {"pytest_command": "cd backend && pytest -q", "test_file_count": 332},
-  "mobile": {"ci_script": "npm run typecheck:ci && npm run test:unit", "test_file_count": 11, "verification_status": "inventory_and_ci_script"},
+  "mobile": {"ci_script": "npm run typecheck:ci && npm run test:unit", "test_file_count": 12, "verification_status": "inventory_and_ci_script"},
   "contracts": {"test_file_count": 6, "verification_status": "inventory_and_ci_command"},
   "runtime_surface": {"api_legacy_lines": 83, "backend_broad_except_count": 1, "route_count": 162, "runtime_legacy_lines": 181, "websocket_route_count": 4},
   "critical_hardening": {"counts": {"capital_and_fund_truth": 44, "execution_hardening": 23, "runtime_compatibility": 73}},

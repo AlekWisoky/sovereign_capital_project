@@ -9,7 +9,9 @@ import { ReceiptDrawer } from "../../components/v2/ReceiptDrawer";
 import { useStore } from "../../state/store";
 import { useTickets } from "../../state/ticketsContext";
 import { loadAddressBook, saveAddressBook, type AddressBookEntry } from "../../state/addressBook";
-import { withdrawConfig, withdrawPrepare, withdrawExecute } from "../../api/client";
+import { withdrawConfig, withdrawPrepare } from "../../api/client";
+import { guardedWithdrawExecute } from "../../api/guardedMutations";
+import type { MutationGuardContext } from "../../api/mutationGuard";
 import { summarizeWithdrawExecution } from "../../utils/offRampStatus";
 import type { JsonValue } from "../../utils/types";
 import { fmtShortHash } from "../../utils/format";
@@ -36,6 +38,7 @@ export function WalletScreen() {
   const [status, setStatus] = useState<string>("");
   const [confirmExec, setConfirmExec] = useState(false);
   const [drawer, setDrawer] = useState<{ open: boolean; title: string; payload?: JsonValue }>({ open: false, title: "" });
+  const [backendReachable, setBackendReachable] = useState(false);
 
   const [book, setBook] = useState<AddressBookEntry[]>([]);
   const [newName, setNewName] = useState("");
@@ -55,11 +58,13 @@ export function WalletScreen() {
       try {
         const c = await withdrawConfig(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
         setCfg(c as Record<string, unknown>);
+        setBackendReachable(true);
         const tokens = asRecord(c)?.["tokens"];
         if (Array.isArray(tokens) && tokens.length && !token) setToken(String(tokens[0]));
         const profitTo = asRecord(c)?.["profit_to"];
         if (typeof profitTo === "string" && !to) setTo(profitTo);
       } catch {
+        setBackendReachable(false);
         // ignore
       }
     })();
@@ -139,7 +144,20 @@ export function WalletScreen() {
     setConfirmExec(false);
     setStatus("Executing…");
     try {
-      const res = await withdrawExecute(state.baseUrl, { token, to, amount }, state.adminKey);
+      const context: MutationGuardContext = {
+        role: state.role,
+        locked: session.locked,
+        adminKeyPresent: Boolean(state.adminKey),
+        backendReachable,
+        backendLiveAuthority: false,
+        explicitConfirmation: true,
+      };
+      const res = await guardedWithdrawExecute(
+        state.baseUrl,
+        { token, to, amount },
+        state.adminKey,
+        context,
+      );
       setDrawer({ open: true, title: "Withdraw Execute Result", payload: res as unknown as JsonValue });
       const summary = summarizeWithdrawExecution(res, "Withdraw");
       setStatus(summary.detail);
