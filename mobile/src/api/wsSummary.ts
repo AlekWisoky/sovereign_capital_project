@@ -175,7 +175,7 @@ export class VictorSummaryWS {
       messageTimeoutMs: Math.max(1_000, options?.messageTimeoutMs ?? this.options.messageTimeoutMs),
     };
     this.backoff = this.options.reconnectBaseMs;
-    this.open();
+    this.openSocket();
   }
 
   /** Backward-compatible alias for existing screens. */
@@ -217,7 +217,7 @@ export class VictorSummaryWS {
     this.backoff = Math.min(this.options.reconnectMaxMs, this.backoff * 1.6);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      this.open();
+      this.openSocket();
     }, wait);
   }
 
@@ -239,7 +239,7 @@ export class VictorSummaryWS {
     }, this.options.messageTimeoutMs);
   }
 
-  private open(): void {
+  private openSocket(): void {
     if (!this.alive) return;
     const mode = this.options.mode;
     const fullEvery = this.options.fullEvery;
