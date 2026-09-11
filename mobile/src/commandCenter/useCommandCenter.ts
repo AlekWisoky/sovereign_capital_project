@@ -8,12 +8,15 @@ import {
   Reconciler,
   type ReconciliationState,
 } from "../api/reconciliation";
+import { VictorSummaryWS, type SummaryData } from "../api/wsSummary";
 
 export type DataSource = "backend" | "mock";
 
 type CommandCenterValue = {
   snapshot: CommandCenterSnapshot | null;
   reconciliation: ReconciliationState<CommandCenterSnapshot>;
+  /** Advisory realtime summary only; canonical command-center truth remains polling. */
+  realtimeSummary: ReconciliationState<SummaryData>;
   loading: boolean;
   error: string;
   refresh: () => Promise<void>;
@@ -53,10 +56,15 @@ function useCommandCenterController(): CommandCenterValue {
   const [reconciliation, setReconciliation] = useState<ReconciliationState<CommandCenterSnapshot>>(
     () => new Reconciler<CommandCenterSnapshot>().snapshot(),
   );
+  const [realtimeSummary, setRealtimeSummary] = useState<ReconciliationState<SummaryData>>(
+    () => new Reconciler<SummaryData>().snapshot(),
+  );
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconcilerRef = useRef<Reconciler<CommandCenterSnapshot> | null>(null);
+  const realtimeReconcilerRef = useRef<Reconciler<SummaryData> | null>(null);
+  const summaryWsRef = useRef<VictorSummaryWS | null>(null);
 
   const provider = useMemo(() => {
     if (source === "backend") return createBackendCommandCenterProvider(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
@@ -107,6 +115,43 @@ function useCommandCenterController(): CommandCenterValue {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
+  useEffect(() => {
+    // Realtime is advisory transport only. The websocket never writes the
+    // canonical CommandCenterSnapshot and never participates in mutations.
+    realtimeReconcilerRef.current = new Reconciler<SummaryData>();
+    setRealtimeSummary(realtimeReconcilerRef.current.snapshot());
+
+    if (source !== "backend") {
+      summaryWsRef.current?.disconnect();
+      summaryWsRef.current = null;
+      return;
+    }
+
+    const ws = new VictorSummaryWS();
+    summaryWsRef.current = ws;
+    const reconciler = realtimeReconcilerRef.current;
+    const removeObservation = ws.onObservation((message, receivedAtMs) => {
+      reconciler.acceptRealtime(message.data, receivedAtMs, receivedAtMs);
+      setRealtimeSummary(reconciler.snapshot());
+    });
+    const removeError = ws.onError((message) => {
+      reconciler.recordError(message);
+      setRealtimeSummary(reconciler.snapshot());
+    });
+
+    // Request complete summaries. Delta mode would require a client-side merge
+    // buffer, which would create a second state arbiter; reconciliation owns the
+    // only realtime state instead.
+    ws.connect(state.baseUrl, { mode: "summary" });
+
+    return () => {
+      removeObservation();
+      removeError();
+      ws.disconnect();
+      if (summaryWsRef.current === ws) summaryWsRef.current = null;
+    };
+  }, [source, state.baseUrl]);
+
   async function setControls(patch: ControlPatch, reason: string) {
     const context = {
       role: state.role === "operator" ? "operator" as const : "read_only" as const,
@@ -145,6 +190,7 @@ function useCommandCenterController(): CommandCenterValue {
   return {
     snapshot,
     reconciliation,
+    realtimeSummary,
     loading,
     error,
     refresh,
