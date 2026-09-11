@@ -20,7 +20,10 @@ export type ReconciliationMeta = {
 };
 
 export type ReconciliationState<T> = {
+  /** Canonical value. Only authoritative observations may replace this. */
   value?: T;
+  /** Latest accepted realtime observation, intentionally advisory. */
+  advisoryValue?: T;
   meta: ReconciliationMeta;
   freshness: ReconciliationFreshness;
 };
@@ -40,11 +43,11 @@ function observedTimestamp(raw: unknown, fallback: number): number {
 
 export function classifyReconciliationFreshness(
   nowMs: number,
-  meta: Pick<ReconciliationMeta, 'lastSuccessAtMs'>,
+  meta: Pick<ReconciliationMeta, 'lastAuthoritativeAtMs'>,
   thresholds: ReconciliationThresholds = DEFAULT_RECONCILIATION_THRESHOLDS,
 ): ReconciliationFreshness {
-  if (!finite(meta.lastSuccessAtMs)) return 'unavailable';
-  const ageMs = Math.max(0, nowMs - meta.lastSuccessAtMs);
+  if (!finite(meta.lastAuthoritativeAtMs)) return 'unavailable';
+  const ageMs = Math.max(0, nowMs - meta.lastAuthoritativeAtMs);
   if (ageMs <= thresholds.freshMs) return 'fresh';
   if (ageMs <= thresholds.staleMs) return 'degraded';
   return 'stale';
@@ -68,12 +71,13 @@ export class Reconciler<T> {
       },
       freshness: initial === undefined ? 'unavailable' : 'fresh',
     };
-    if (initial !== undefined) this.state.meta.lastSuccessAtMs = nowMs;
+    if (initial !== undefined) this.state.meta.lastAuthoritativeAtMs = nowMs;
   }
 
   snapshot(nowMs: number = Date.now()): ReconciliationState<T> {
     return {
       value: this.state.value,
+      advisoryValue: this.state.advisoryValue,
       meta: { ...this.state.meta },
       freshness: classifyReconciliationFreshness(nowMs, this.state.meta, this.thresholds),
     };
@@ -108,22 +112,20 @@ export class Reconciler<T> {
     receivedAtMs: number = Date.now(),
   ): boolean {
     const observed = observedTimestamp(observedTsMs, receivedAtMs);
-    const authoritativeObserved = this.state.meta.authoritativeObservedTsMs;
     const currentRealtimeObserved = this.state.meta.realtimeObservedTsMs;
-    if (finite(authoritativeObserved) && observed < authoritativeObserved) return false;
     if (finite(currentRealtimeObserved) && observed < currentRealtimeObserved) return false;
 
-    this.state.value = value;
+    this.state.advisoryValue = value;
     this.state.meta = {
       ...this.state.meta,
       lastRealtimeAtMs: receivedAtMs,
-      lastSuccessAtMs: receivedAtMs,
       realtimeObservedTsMs: observed,
       realtimeVersion: this.state.meta.realtimeVersion + 1,
       lastSource: 'realtime',
       lastError: undefined,
     };
-    this.state.freshness = 'fresh';
+    // Realtime never becomes canonical and never refreshes canonical freshness.
+    this.state.freshness = classifyReconciliationFreshness(receivedAtMs, this.state.meta, this.thresholds);
     return true;
   }
 
