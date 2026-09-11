@@ -7,7 +7,7 @@ from victor_ai_bot.runtime_services.runtime_constructor_facade import RuntimeCon
 
 
 EXTRACTED_METHODS = {
-    '_initialize_runtime_constructor_core',
+    "_initialize_runtime_constructor_core",
 }
 
 
@@ -54,7 +54,7 @@ class _FakeDiscovery:
 class _FakeCircuitBreaker:
     @classmethod
     def from_env(cls):
-        return 'cb'
+        return "cb"
 
 
 class _FakeAnomaly:
@@ -71,74 +71,74 @@ def test_runtime_bundle_inherits_constructor_facade():
 
 def test_initialize_runtime_constructor_core_sets_expected_base_state(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.RpcManager',
-        lambda **kwargs: ('rpc-manager', kwargs),
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.RpcManager",
+        lambda **kwargs: ("rpc-manager", kwargs),
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.PerBlockCache',
-        lambda: 'cache',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.PerBlockCache",
+        lambda: "cache",
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.Metrics',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.Metrics",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.LatencyProfiler',
-        lambda **kwargs: ('lat', kwargs),
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.LatencyProfiler",
+        lambda **kwargs: ("lat", kwargs),
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.CircuitBreaker',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.CircuitBreaker",
         _FakeCircuitBreaker,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.AnomalyBreaker',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.AnomalyBreaker",
         _FakeAnomaly,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.PersistenceDB',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.PersistenceDB",
         _FakeDb,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.SecurityAuditStore',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.SecurityAuditStore",
         _FakeSecurityAudit,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.DecisionEngine',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.DecisionEngine",
         _FakeDecision,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.DiscoveryManager',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.DiscoveryManager",
         _FakeDiscovery,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.canonical_data_dir',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.canonical_data_dir",
         lambda _: str(tmp_path),
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.asyncio.Event',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.asyncio.Event",
         _FakeEvent,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.asyncio.Lock',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.asyncio.Lock",
         _FakeLock,
     )
     monkeypatch.setattr(
-        'victor_ai_bot.runtime_services.runtime_constructor_facade.asyncio.Queue',
+        "victor_ai_bot.runtime_services.runtime_constructor_facade.asyncio.Queue",
         _FakeQueue,
     )
 
     cfg = SimpleNamespace(
         chain=SimpleNamespace(
-            name='ethereum',
-            rpc_read='https://read.example',
-            rpc_send='https://send.example',
-            rpc_private=['https://private.example'],
+            name="ethereum",
+            rpc_read="https://read.example",
+            rpc_send="https://send.example",
+            rpc_private=["https://private.example"],
         ),
         execution=SimpleNamespace(
-            gas_mode='aggressive',
-            send_mode='private',
+            gas_mode="aggressive",
+            send_mode="private",
             auto_trading=True,
-            brain_mode='shadow',
+            brain_mode="shadow",
         ),
     )
 
@@ -146,22 +146,84 @@ def test_initialize_runtime_constructor_core_sets_expected_base_state(monkeypatc
     runtime._initialize_runtime_constructor_core(cfg)
 
     assert runtime.cfg is cfg
-    assert runtime.rpc_manager[0] == 'rpc-manager'
-    assert runtime.cache == 'cache'
-    assert runtime.metrics.gas_mode == 'aggressive'
-    assert runtime.metrics.send_mode == 'private'
-    assert runtime._cb == 'cb'
+    assert runtime.rpc_manager[0] == "rpc-manager"
+    assert runtime.cache == "cache"
+    assert runtime.metrics.gas_mode == "aggressive"
+    assert runtime.metrics.send_mode == "private"
+    assert runtime._cb == "cb"
     assert runtime._anomaly.window == 60
     assert runtime._auto_trading is True
     assert runtime.data_dir == str(tmp_path)
-    assert runtime._db.path.endswith('state/xdv_runtime_state.sqlite3')
+    assert runtime._db.path.endswith("state/xdv_runtime_state.sqlite3")
     assert runtime._security_audit.db is runtime._db
-    assert runtime._decision.chain_name == 'ethereum'
+    assert runtime._decision.chain_name == "ethereum"
     assert runtime._decision.data_dir == str(tmp_path)
-    assert runtime._decision.brain_mode == 'shadow'
-    assert runtime._discovery.chain_name == 'ethereum'
+    assert runtime._decision.brain_mode == "shadow"
+    assert runtime._discovery.chain_name == "ethereum"
     assert runtime._discovery.data_dir == str(tmp_path)
     assert runtime._receipt_q.maxsize == 20
     assert runtime._auto_queue == []
     assert runtime._auto_queue_block == 0
     assert runtime._last_submitted_block == 0
+
+
+def test_runtime_bundle_constructor_installs_production_stacks_in_order(monkeypatch):
+    """Exercise the real RuntimeBundle.__init__ orchestration seam.
+
+    The constructor itself is production code under test. Only its expensive
+    subsystem constructors are replaced so this remains deterministic and does
+    not open RPC, wallet, execution, or capital side effects.
+    """
+    calls = []
+
+    def fake_core(self, cfg):
+        calls.append(("core", cfg))
+        self.cfg = cfg
+        self.data_dir = "/tmp/test-runtime-data"
+
+    def fake_stack(name):
+        def _initialize(self, *, cfg, data_dir):
+            calls.append((name, cfg, data_dir))
+
+        return _initialize
+
+    monkeypatch.setattr(
+        RuntimeConstructorFacade,
+        "_initialize_runtime_constructor_core",
+        fake_core,
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_legacy.initialize_execution_capture_stack",
+        fake_stack("execution_capture"),
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_legacy.initialize_runtime_institutional_stack",
+        fake_stack("institutional"),
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_legacy.initialize_optional_overlay_runtimes",
+        fake_stack("optional_overlay"),
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_legacy.initialize_execution_support_stack",
+        fake_stack("execution_support"),
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_legacy.initialize_optional_family_runtimes",
+        fake_stack("optional_families"),
+    )
+
+    cfg = SimpleNamespace(name="constructor-test")
+    runtime = RuntimeBundle(cfg)
+
+    assert runtime.cfg is cfg
+    assert [entry[0] for entry in calls] == [
+        "core",
+        "execution_capture",
+        "institutional",
+        "optional_overlay",
+        "execution_support",
+        "optional_families",
+    ]
+    assert all(entry[1] is cfg for entry in calls[1:])
+    assert all(entry[2] == "/tmp/test-runtime-data" for entry in calls[1:])
