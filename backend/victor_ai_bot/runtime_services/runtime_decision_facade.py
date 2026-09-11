@@ -279,12 +279,16 @@ class RuntimeDecisionFacade:
             return False
         if self._exec_task is not None and not self._exec_task.done():
             return False
-        brain_mode = str(getattr(self.cfg.execution, "brain_mode", "off") or "off")
-        chosen = self._simple_auto_trade_candidate() if brain_mode == "off" else (self._decision_auto_trade_candidate(decision) if decision is not None and getattr(decision, "action", "skip") == "trade" else None)
+        # Every automatic execution must originate from the canonical decision engine.
+        # "brain_mode=off" means OMAR is not consulted; it does not disable the
+        # canonical decision requirement or authorize a best-candidate fallback.
+        if decision is None or getattr(decision, "action", "skip") != "trade":
+            return False
+        chosen = self._decision_auto_trade_candidate(decision)
         if chosen is None:
             return False
-        chosen, decision = self._apply_omar_to_candidate(chosen, decision if brain_mode != "off" else None, current_block=int(current_block))
-        if chosen is None:
+        chosen, decision = self._apply_omar_to_candidate(chosen, decision, current_block=int(current_block))
+        if chosen is None or decision is None or getattr(decision, "action", "skip") != "trade":
             return False
         self._exec_task = asyncio.create_task(self._execute_auto(chosen, int(current_block), decision=decision))
         return True
