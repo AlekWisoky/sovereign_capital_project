@@ -668,12 +668,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-10T23:55:26.807000Z",
-  "generatedAtIso": "2026-09-10T23:55:26.807000Z",
-  "generatedAtMs": 1789084526807,
-  "generated_at": "2026-09-10T23:55:26.807000Z",
-  "generated_at_iso": "2026-09-10T23:55:26.807000Z",
-  "generated_at_ms": 1789084526807,
+  "generatedAt": "2026-09-11T09:15:32.163000Z",
+  "generatedAtIso": "2026-09-11T09:15:32.163000Z",
+  "generatedAtMs": 1789118132163,
+  "generated_at": "2026-09-11T09:15:32.163000Z",
+  "generated_at_iso": "2026-09-11T09:15:32.163000Z",
+  "generated_at_ms": 1789118132163,
   "health_states": [
     "live",
     "degraded",
@@ -698,7 +698,7 @@
   "legacy_data_roots": [
     "data"
   ],
-  "mobile_test_file_count": 12,
+  "mobile_test_file_count": 13,
   "mobile_test_files": [
     "amounts.test.ts",
     "capital-truth-health.test.ts",
@@ -711,6 +711,7 @@
     "mutation-guard.test.ts",
     "offramp-status.test.ts",
     "projection-compatibility.test.ts",
+    "reconciliation.test.ts",
     "wealth-goal-summary.test.ts"
   ],
   "route_count": 162,
@@ -2406,7 +2407,7 @@
       "test_withdraw_ledger_coordination_maintenance.py",
       "test_withdraw_route_failure_semantics_maintenance.py"
     ],
-    "mobile_test_files": 12,
+    "mobile_test_files": 13,
     "mobile_test_names": [
       "amounts.test.ts",
       "capital-truth-health.test.ts",
@@ -2419,6 +2420,7 @@
       "mutation-guard.test.ts",
       "offramp-status.test.ts",
       "projection-compatibility.test.ts",
+      "reconciliation.test.ts",
       "wealth-goal-summary.test.ts"
     ]
   },
