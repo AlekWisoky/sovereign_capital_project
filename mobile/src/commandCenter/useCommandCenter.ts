@@ -4,11 +4,16 @@ import type { CommandCenterSnapshot, ControlPatch, ExplainResponse } from "./typ
 import { createBackendCommandCenterProvider, createMockCommandCenterProvider } from "./provider";
 import { useStore } from "../state/store";
 import { guardMutation, mutationKindForSettingsPatch } from "../api/mutationGuard";
+import {
+  Reconciler,
+  type ReconciliationState,
+} from "../api/reconciliation";
 
 export type DataSource = "backend" | "mock";
 
 type CommandCenterValue = {
   snapshot: CommandCenterSnapshot | null;
+  reconciliation: ReconciliationState<CommandCenterSnapshot>;
   loading: boolean;
   error: string;
   refresh: () => Promise<void>;
@@ -45,22 +50,41 @@ function useCommandCenterController(): CommandCenterValue {
   const { state, session } = useStore();
   const [source, setSource] = useState<DataSource>(state.ccDataSource ?? "backend");
   const [snapshot, setSnapshot] = useState<CommandCenterSnapshot | null>(null);
+  const [reconciliation, setReconciliation] = useState<ReconciliationState<CommandCenterSnapshot>>(
+    () => new Reconciler<CommandCenterSnapshot>().snapshot(),
+  );
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconcilerRef = useRef<Reconciler<CommandCenterSnapshot> | null>(null);
 
   const provider = useMemo(() => {
     if (source === "backend") return createBackendCommandCenterProvider(state.baseUrl, state.role === "operator" ? state.adminKey : undefined);
     return createMockCommandCenterProvider();
   }, [source, state.baseUrl, state.adminKey, state.role]);
 
+  function getReconciler(): Reconciler<CommandCenterSnapshot> {
+    if (!reconcilerRef.current) reconcilerRef.current = new Reconciler<CommandCenterSnapshot>();
+    return reconcilerRef.current;
+  }
+
   async function refresh() {
     setLoading(true);
+    const reconciler = getReconciler();
     try {
       const snap = await provider.snapshot();
-      setSnapshot(snap);
+      // Polling/provider reads are authoritative. The portfolio timestamp is the
+      // canonical observation timestamp when the backend supplies one.
+      reconciler.acceptAuthoritative(snap, snap.portfolio.updatedAtMs, Date.now());
+      const next = reconciler.snapshot();
+      setSnapshot(next.value ?? null);
+      setReconciliation(next);
       setError("");
     } catch (e: unknown) {
+      reconciler.recordError(e);
+      const next = reconciler.snapshot();
+      setReconciliation(next);
+      setSnapshot(next.value ?? null);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -68,6 +92,11 @@ function useCommandCenterController(): CommandCenterValue {
   }
 
   useEffect(() => {
+    // A source/base-url change starts a new reconciliation epoch; observations
+    // from the previous provider must not become truth for the new provider.
+    reconcilerRef.current = new Reconciler<CommandCenterSnapshot>();
+    setReconciliation(reconcilerRef.current.snapshot());
+    setSnapshot(null);
     void refresh();
     if (timer.current) clearInterval(timer.current);
     const ms = Number(state.ccRefreshMs ?? 4500);
@@ -115,6 +144,7 @@ function useCommandCenterController(): CommandCenterValue {
 
   return {
     snapshot,
+    reconciliation,
     loading,
     error,
     refresh,
