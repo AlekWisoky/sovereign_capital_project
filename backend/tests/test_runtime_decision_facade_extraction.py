@@ -222,16 +222,28 @@ def test_decision_auto_trade_candidate_prefers_route_ready_portfolio_head_and_re
 
 
 @__import__("pytest").mark.asyncio
-async def test_maybe_dispatch_auto_trade_schedules_simple_mode_candidate():
+async def test_maybe_dispatch_auto_trade_rejects_simple_mode_fallback_without_canonical_decision():
     runtime = _AutoTradeRuntime(brain_mode="off")
     runtime._opps = [_opp("chosen")]
 
     dispatched = runtime._maybe_dispatch_auto_trade(current_block=123)
 
+    assert dispatched is False
+    assert runtime._exec_task is None
+    assert runtime._scheduled == []
+
+
+@__import__("pytest").mark.asyncio
+async def test_maybe_dispatch_auto_trade_schedules_canonical_decision_when_omar_is_off():
+    runtime = _AutoTradeRuntime(brain_mode="off")
+    runtime._opps = [_opp("opp-1"), _opp("opp-2")]
+
+    decision = SimpleNamespace(action="trade", portfolio=["opp-2"], opp_id="opp-1")
+    dispatched = runtime._maybe_dispatch_auto_trade(current_block=234, decision=decision)
+
     assert dispatched is True
-    assert runtime._exec_task is not None
     await runtime._exec_task
-    assert runtime._scheduled == [(runtime._opps[0], 123, None)]
+    assert runtime._scheduled == [(runtime._opps[1], 234, decision)]
 
 
 @__import__("pytest").mark.asyncio
