@@ -46,7 +46,7 @@ class ExecutionSizingContext:
 @dataclass(frozen=True)
 class EconomicsSizingContext:
     expected_gross_profit_usd: float = 0.0
-    expected_net_profit_usd: float = 0.0
+    expected_net_profit_usd: float | None = None
     gas_cost_usd: float = 0.0
     borrow_cost_usd: float = 0.0
     slippage_cost_usd: float = 0.0
@@ -54,8 +54,8 @@ class EconomicsSizingContext:
     failure_cost_usd: float = 0.0
     min_profit_usd: float = 0.0
     min_profit_bps: float = 0.0
-    success_probability: float = 0.0
-    margin_ratio: float = 0.0
+    success_probability: float | None = None
+    margin_ratio: float | None = None
 
 
 @dataclass(frozen=True)
@@ -180,9 +180,15 @@ class InstitutionalSizingContract:
         if self.governance.sandbox_only and self.governance.live_authority:
             errors.append("sandbox_live_authority_conflict")
 
-        if self.economics.success_probability < 0 or self.economics.success_probability > 1:
+        if self.economics.expected_net_profit_usd is None or not math.isfinite(self.economics.expected_net_profit_usd):
+            errors.append("expected_net_profit_missing")
+        if self.economics.success_probability is None or not math.isfinite(self.economics.success_probability):
+            errors.append("success_probability_missing")
+        elif self.economics.success_probability < 0 or self.economics.success_probability > 1:
             errors.append("success_probability_invalid")
-        if self.economics.margin_ratio < 0:
+        if self.economics.margin_ratio is None or not math.isfinite(self.economics.margin_ratio):
+            errors.append("margin_ratio_missing")
+        elif self.economics.margin_ratio < 0:
             errors.append("margin_ratio_invalid")
         if self.wealth_goal.aggressiveness_cap <= 0 or not math.isfinite(self.wealth_goal.aggressiveness_cap):
             errors.append("aggressiveness_cap_invalid")
@@ -217,6 +223,14 @@ def _finite_float(value: Any, default: float | None = None) -> float | None:
 
 def _dict(value: Any) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, Mapping) else {}
+
+
+def _present(mapping: Mapping[str, Any], primary: str, fallback: str | None = None) -> Any:
+    if primary in mapping:
+        return mapping[primary]
+    if fallback is not None and fallback in mapping:
+        return mapping[fallback]
+    return None
 
 
 def build_institutional_sizing_contract(
@@ -278,7 +292,7 @@ def build_institutional_sizing_contract(
         ),
         economics=EconomicsSizingContext(
             expected_gross_profit_usd=float(_finite_float(econ.get("expected_gross_profit_usd"), 0.0) or 0.0),
-            expected_net_profit_usd=float(_finite_float(econ.get("expected_net_profit_usd") or econ.get("expected_realized_pnl"), 0.0) or 0.0),
+            expected_net_profit_usd=_finite_float(_present(econ, "expected_net_profit_usd", "expected_realized_pnl")),
             gas_cost_usd=float(_finite_float(econ.get("gas_cost_usd"), 0.0) or 0.0),
             borrow_cost_usd=float(_finite_float(econ.get("borrow_cost_usd"), 0.0) or 0.0),
             slippage_cost_usd=float(_finite_float(econ.get("slippage_cost_usd"), 0.0) or 0.0),
@@ -286,8 +300,8 @@ def build_institutional_sizing_contract(
             failure_cost_usd=float(_finite_float(econ.get("failure_cost_usd"), 0.0) or 0.0),
             min_profit_usd=float(_finite_float(econ.get("min_profit_usd"), 0.0) or 0.0),
             min_profit_bps=float(_finite_float(econ.get("min_profit_bps"), 0.0) or 0.0),
-            success_probability=float(_finite_float(econ.get("success_probability") or econ.get("p_success"), 0.0) or 0.0),
-            margin_ratio=float(_finite_float(econ.get("margin_ratio"), 0.0) or 0.0),
+            success_probability=_finite_float(_present(econ, "success_probability", "p_success")),
+            margin_ratio=_finite_float(econ.get("margin_ratio")),
         ),
         capital=CapitalAuthoritySizingContext(
             source="capital_engine_state",
