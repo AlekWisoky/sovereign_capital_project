@@ -54,7 +54,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 333,
+  "backend_test_file_count": 335,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -76,6 +76,8 @@
     "test_auto_trade_admission_sequence_contract.py",
     "test_auto_trade_recovery_gate_fallback.py",
     "test_auxiliary_summary_contract_surfaces.py",
+    "test_b4_execution_binding_runtime.py",
+    "test_b4_final_quote.py",
     "test_backtest_replay_maintenance.py",
     "test_bankroll.py",
     "test_bankroll_native_timestamp_persistence.py",
@@ -669,12 +671,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-12T09:26:31.005000Z",
-  "generatedAtIso": "2026-09-12T09:26:31.005000Z",
-  "generatedAtMs": 1789205191005,
-  "generated_at": "2026-09-12T09:26:31.005000Z",
-  "generated_at_iso": "2026-09-12T09:26:31.005000Z",
-  "generated_at_ms": 1789205191005,
+  "generatedAt": "2026-09-12T21:54:15.768000Z",
+  "generatedAtIso": "2026-09-12T21:54:15.768000Z",
+  "generatedAtMs": 1789250055768,
+  "generated_at": "2026-09-12T21:54:15.768000Z",
+  "generated_at_iso": "2026-09-12T21:54:15.768000Z",
+  "generated_at_ms": 1789250055768,
   "health_states": [
     "live",
     "degraded",
@@ -2076,7 +2078,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 333,
+    "backend_test_files": 335,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2098,6 +2100,8 @@
       "test_auto_trade_admission_sequence_contract.py",
       "test_auto_trade_recovery_gate_fallback.py",
       "test_auxiliary_summary_contract_surfaces.py",
+      "test_b4_execution_binding_runtime.py",
+      "test_b4_final_quote.py",
       "test_backtest_replay_maintenance.py",
       "test_bankroll.py",
       "test_bankroll_native_timestamp_persistence.py",

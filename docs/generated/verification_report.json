@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 333,
+    "test_file_count": 335,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -23,6 +23,8 @@
       "backend/tests/test_auto_trade_admission_sequence_contract.py",
       "backend/tests/test_auto_trade_recovery_gate_fallback.py",
       "backend/tests/test_auxiliary_summary_contract_surfaces.py",
+      "backend/tests/test_b4_execution_binding_runtime.py",
+      "backend/tests/test_b4_final_quote.py",
       "backend/tests/test_backtest_replay_maintenance.py",
       "backend/tests/test_bankroll.py",
       "backend/tests/test_bankroll_native_timestamp_persistence.py",
@@ -354,7 +356,7 @@
   "critical_hardening": {
     "counts": {
       "capital_and_fund_truth": 44,
-      "execution_hardening": 23,
+      "execution_hardening": 24,
       "runtime_compatibility": 74
     },
     "files": {
@@ -405,6 +407,7 @@
         "backend/tests/test_withdraw_ledger_coordination_maintenance.py"
       ],
       "execution_hardening": [
+        "backend/tests/test_b4_execution_binding_runtime.py",
         "backend/tests/test_execution_capital_portfolio_upgrades.py",
         "backend/tests/test_execution_capture.py",
         "backend/tests/test_execution_capture_calibration.py",
@@ -507,9 +510,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-12T09:26:31.290000Z",
-  "generated_at_iso": "2026-09-12T09:26:31.290000Z",
-  "generated_at_ms": 1789205191290,
+  "generated_at": "2026-09-12T21:54:16Z",
+  "generated_at_iso": "2026-09-12T21:54:16Z",
+  "generated_at_ms": 1789250056000,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
