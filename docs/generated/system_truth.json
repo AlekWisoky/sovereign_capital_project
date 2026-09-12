@@ -54,7 +54,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 332,
+  "backend_test_file_count": 333,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -158,6 +158,7 @@
     "test_governance_read_surface_auto_trade_sync.py",
     "test_imports.py",
     "test_income_helper.py",
+    "test_institutional_sizing_runtime_wiring.py",
     "test_intelligence_routes_maintenance.py",
     "test_internal_prime_capital_write_coordinator.py",
     "test_internal_prime_closed_loop_reconciliation.py",
@@ -668,12 +669,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-11T14:47:16.129000Z",
-  "generatedAtIso": "2026-09-11T14:47:16.129000Z",
-  "generatedAtMs": 1789138036129,
-  "generated_at": "2026-09-11T14:47:16.129000Z",
-  "generated_at_iso": "2026-09-11T14:47:16.129000Z",
-  "generated_at_ms": 1789138036129,
+  "generatedAt": "2026-09-12T09:26:31.005000Z",
+  "generatedAtIso": "2026-09-12T09:26:31.005000Z",
+  "generatedAtMs": 1789205191005,
+  "generated_at": "2026-09-12T09:26:31.005000Z",
+  "generated_at_iso": "2026-09-12T09:26:31.005000Z",
+  "generated_at_ms": 1789205191005,
   "health_states": [
     "live",
     "degraded",
@@ -1828,8 +1829,8 @@
   "runtime_bundle_definition_count": 1,
   "runtime_legacy_broad_except_count": 0,
   "runtime_legacy_lines": 181,
-  "runtime_service_count": 102,
-  "runtime_service_module_count": 102,
+  "runtime_service_count": 103,
+  "runtime_service_module_count": 103,
   "runtime_services": [
     "admission_service",
     "agent_service",
@@ -1865,6 +1866,7 @@
     "execution_service",
     "family_hardening_service",
     "fund_service",
+    "institutional_sizing_runtime",
     "launch_service",
     "lifecycle_service",
     "omar_receipt_facade",
@@ -1965,8 +1967,8 @@
       "withdraw_all_routes",
       "withdraw_routes"
     ],
-    "runtime_service_count": 102,
-    "runtime_service_module_count": 102,
+    "runtime_service_count": 103,
+    "runtime_service_module_count": 103,
     "runtime_services": [
       "admission_service",
       "agent_service",
@@ -2002,6 +2004,7 @@
       "execution_service",
       "family_hardening_service",
       "fund_service",
+      "institutional_sizing_runtime",
       "launch_service",
       "lifecycle_service",
       "omar_receipt_facade",
@@ -2073,7 +2076,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 332,
+    "backend_test_files": 333,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2177,6 +2180,7 @@
       "test_governance_read_surface_auto_trade_sync.py",
       "test_imports.py",
       "test_income_helper.py",
+      "test_institutional_sizing_runtime_wiring.py",
       "test_intelligence_routes_maintenance.py",
       "test_internal_prime_capital_write_coordinator.py",
       "test_internal_prime_closed_loop_reconciliation.py",

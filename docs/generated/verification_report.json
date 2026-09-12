@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 332,
+    "test_file_count": 333,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -105,6 +105,7 @@
       "backend/tests/test_governance_read_surface_auto_trade_sync.py",
       "backend/tests/test_imports.py",
       "backend/tests/test_income_helper.py",
+      "backend/tests/test_institutional_sizing_runtime_wiring.py",
       "backend/tests/test_intelligence_routes_maintenance.py",
       "backend/tests/test_internal_prime_capital_write_coordinator.py",
       "backend/tests/test_internal_prime_closed_loop_reconciliation.py",
@@ -354,7 +355,7 @@
     "counts": {
       "capital_and_fund_truth": 44,
       "execution_hardening": 23,
-      "runtime_compatibility": 73
+      "runtime_compatibility": 74
     },
     "files": {
       "capital_and_fund_truth": [
@@ -436,6 +437,7 @@
         "backend/tests/test_capital_truth_runtime_state_adapter_kernel_maintenance.py",
         "backend/tests/test_execution_service_auto_trade_hold.py",
         "backend/tests/test_fioa_runtime_maintenance.py",
+        "backend/tests/test_institutional_sizing_runtime_wiring.py",
         "backend/tests/test_llm_inl_runtime_maintenance.py",
         "backend/tests/test_mev_runtime_hardening.py",
         "backend/tests/test_multiruntime_snapshot_all.py",
@@ -505,9 +507,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-11T14:47:16.383000Z",
-  "generated_at_iso": "2026-09-11T14:47:16.383000Z",
-  "generated_at_ms": 1789138036383,
+  "generated_at": "2026-09-12T09:26:31.290000Z",
+  "generated_at_iso": "2026-09-12T09:26:31.290000Z",
+  "generated_at_ms": 1789205191290,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
