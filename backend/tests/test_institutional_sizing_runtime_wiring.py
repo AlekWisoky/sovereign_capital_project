@@ -119,3 +119,34 @@ def test_runtime_adapter_does_not_replace_existing_admission_result(monkeypatch)
     assert result.strategy_family == expected.strategy_family
     assert result.capital_source == expected.capital_source
     assert result.requested_notional_usd == expected.requested_notional_usd
+
+
+def test_runtime_adapter_propagates_kernel_sizing_identity(monkeypatch):
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.institutional_sizing_runtime.CapitalAdmissionService.evaluate",
+        lambda self, runtime, opp, decision=None: _admitted_result(),
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.institutional_sizing_runtime.build_institutional_sizing_contract",
+        lambda **_: SimpleNamespace(validate=lambda: (True, ()), to_dict=lambda: {}),
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.institutional_sizing_runtime.calculate_institutional_size",
+        lambda contract: SimpleNamespace(
+            sizing_id="size-kernel-1",
+            approved_notional_usd=200_000.0,
+            approved_borrow_amount_raw=None,
+            constraints_applied=["family_cap"],
+            downsize_reasons=["family_cap"],
+            capital_utilization=0.10,
+        ),
+    )
+
+    opp = _opp()
+    decision = SimpleNamespace(metadata={})
+    result = InstitutionalSizingAdmissionService().evaluate(_runtime(), opp, decision=decision)
+
+    assert result.details["institutionalSizing"]["sizing"]["sizing_id"] == "size-kernel-1"
+    assert opp.meta["sizing_id"] == "size-kernel-1"
+    assert opp.meta["canonical_lineage"]["sizing_id"] == "size-kernel-1"
+    assert decision.metadata["sizing_id"] == "size-kernel-1"
