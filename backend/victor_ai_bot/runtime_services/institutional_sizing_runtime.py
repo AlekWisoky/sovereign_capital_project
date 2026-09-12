@@ -45,17 +45,36 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
             except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
                 wealth_goal_state = {}
 
-        meta = dict(getattr(opp, "meta", {}) or {}) if isinstance(getattr(opp, "meta", None), dict) else {}
+        meta = (
+            dict(getattr(opp, "meta", {}) or {})
+            if isinstance(getattr(opp, "meta", None), dict)
+            else {}
+        )
         capture = dict(meta.get("capture") or {}) if isinstance(meta.get("capture"), dict) else {}
-        capture_metadata = dict(capture.get("metadata") or {}) if isinstance(capture.get("metadata"), dict) else {}
-        endpoint = dict(capture_metadata.get("endpoint_selection") or {}) if isinstance(capture_metadata.get("endpoint_selection"), dict) else {}
+        capture_metadata = (
+            dict(capture.get("metadata") or {})
+            if isinstance(capture.get("metadata"), dict)
+            else {}
+        )
+        endpoint = (
+            dict(capture_metadata.get("endpoint_selection") or {})
+            if isinstance(capture_metadata.get("endpoint_selection"), dict)
+            else {}
+        )
         economics = dict(meta.get("profitability") or {}) if isinstance(meta.get("profitability"), dict) else {}
         if not economics:
             try:
                 from ..profitability_state import profitability_state_view
+
                 economics = dict(profitability_state_view(opp) or {})
             except (AttributeError, KeyError, TypeError, ValueError):
                 economics = {}
+        economics.setdefault("expected_net_profit_usd", float(result.projected_realized_edge_usd or 0.0))
+        economics.setdefault("success_probability", float(result.confidence or 0.0))
+        economics.setdefault(
+            "margin_ratio",
+            float(meta.get("margin_ratio") or 0.0),
+        )
 
         governance = {
             "admitted": bool(result.allowed),
@@ -63,7 +82,11 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
             "strategy_family": str(result.strategy_family or ""),
             "capital_source": str(result.capital_source or ""),
             "live_authority": bool(
-                getattr(getattr(getattr(runtime, "cfg", None), "execution", None), "live_authority", False)
+                getattr(
+                    getattr(getattr(runtime, "cfg", None), "execution", None),
+                    "live_authority",
+                    False,
+                )
             ),
             "execution_allowed": bool(result.allowed),
         }
