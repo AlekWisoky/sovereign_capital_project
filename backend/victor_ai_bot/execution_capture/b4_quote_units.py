@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
+import math
 from typing import Any, Mapping
 
 
@@ -107,7 +108,7 @@ def _quote_price_error(price: Any) -> str | None:
         number = float(price)
     except (TypeError, ValueError):
         return "asset_price_usd_invalid"
-    if number <= 0 or not __import__("math").isfinite(number):
+    if number <= 0 or not math.isfinite(number):
         return "asset_price_usd_invalid"
     return None
 
