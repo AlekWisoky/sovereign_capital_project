@@ -68,7 +68,6 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
 
     caps: list[tuple[str, float]] = [("requested_notional", requested)]
 
-    # Wealth-goal posture is a bounded sizing modifier, never admission.
     goal = contract.wealth_goal
     commitment_factor = max(0.70, float(goal.capital_commitment_pct) / 30.0)
     wealth_cap = requested * max(0.0, float(goal.aggressiveness_cap)) * commitment_factor
@@ -81,7 +80,12 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
             "capital_engine_deployable_pct",
             float(capital.deployable_usd) * max(0.0, float(contract.governance.max_deployable_pct)),
         )
-    _add_cap(caps, "drawdown_buffer", capital.drawdown_buffer_usd)
+    if capital.drawdown_buffer_usd is not None and capital.deployable_usd is not None:
+        _add_cap(
+            caps,
+            "capital_after_drawdown_buffer",
+            max(0.0, float(capital.deployable_usd) - float(capital.drawdown_buffer_usd)),
+        )
 
     if capital.prime_capacity_usd is not None:
         remaining_prime = (
@@ -104,9 +108,23 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
             max(0.0, float(capital.family_cap_usd) - float(capital.prime_family_exposure_usd)),
         )
 
-    # A missing execution-evidence score is conservatively non-sizeable; no
-    # new numeric threshold is invented here. Existing admission remains the
-    # permission authority and this kernel only answers how much.
+    economics = contract.economics
+    economic_viability = True
+    if economics.expected_net_profit_usd is None:
+        economic_viability = False
+    else:
+        if float(economics.expected_net_profit_usd) < float(economics.min_profit_usd):
+            economic_viability = False
+        if float(economics.min_profit_bps) > 0.0:
+            expected_bps = float(economics.expected_net_profit_usd) / requested * 10_000.0
+            if expected_bps < float(economics.min_profit_bps):
+                economic_viability = False
+    if not economic_viability:
+        caps.append(("expected_economics_viability", 0.0))
+
+    # p_success and margin thresholds remain owned by canonical admission.
+    constraints_without_cap = ("p_success_validated", "margin_validated")
+
     execution = contract.execution
     if execution.latency_pressure >= 1.0 or execution.freshness_score <= 0.0:
         caps.append(("execution_realism", 0.0))
@@ -114,7 +132,7 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
         caps.append(("execution_evidence", 0.0))
 
     approved = max(0.0, min(value for _, value in caps))
-    constraints = tuple(label for label, _ in caps)
+    constraints = tuple(label for label, _ in caps) + constraints_without_cap
     downsize_reasons = tuple(label for label, value in caps if value < requested - 1e-9)
 
     utilization = 0.0
