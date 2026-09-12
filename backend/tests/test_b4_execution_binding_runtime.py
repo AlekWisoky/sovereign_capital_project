@@ -55,10 +55,6 @@ async def test_b42_binding_proves_quote_to_raw_amount_before_production_execute(
         size_mult=1.5,
         borrow_mult=1.25,
     )
-    cfg = SimpleNamespace(
-        safety=SimpleNamespace(max_borrow_amount=0, slippage_bps=50),
-        execution=SimpleNamespace(),
-    )
     quote = FinalQuote(
         quote_id="quote-b42",
         quoted_at_ms=1234567890,
@@ -115,7 +111,11 @@ async def test_b42_binding_proves_quote_to_raw_amount_before_production_execute(
     runtime.cache = object()
     runtime._last_submitted_block = -1
     runtime._execution_service = None
-    runtime._record_exec = lambda *args, **kwargs: None
+
+    async def _record_exec(*args, **kwargs):
+        return None
+
+    runtime._record_exec = _record_exec
 
     prep = AutoExecutionDispatchContext(
         opportunity=opp,
@@ -134,8 +134,10 @@ async def test_b42_binding_proves_quote_to_raw_amount_before_production_execute(
     )
 
     assert captured["amount_borrow"] == 100_000_000_000_000_000_000
-    assert captured["decision_size_mult"] == 1.5
-    assert captured["decision_borrow_mult"] == 1.25
+    assert captured["decision_size_mult"] == 1.0
+    assert captured["decision_borrow_mult"] == 1.0
+    assert decision.size_mult == 1.5
+    assert decision.borrow_mult == 1.25
     assert opp.meta["b4_execution_quote"]["quote_id"] == "quote-b42"
     assert opp.meta["canonical_lineage"]["sizing_id"] == "sizing-b42"
     assert opp.meta["canonical_lineage"]["quote_id"] == "quote-b42"
