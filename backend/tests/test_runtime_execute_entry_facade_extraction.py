@@ -320,9 +320,11 @@ async def test_execute_auto_governance_rejection_stops_all_downstream_authority(
         observe_outcome=lambda **kwargs: runtime.learning_updates.append(kwargs),
     )
     recorded = []
-    runtime._record_exec = lambda result, opp, latency_ms, mode: recorded.append(
-        (result, opp, latency_ms, mode)
-    )
+
+    async def record_exec(result, opp, latency_ms, mode):
+        recorded.append((result, opp, latency_ms, mode))
+
+    runtime._record_exec = record_exec
     wrapper_calls = []
 
     async def fail_if_execution_reached(*args, **kwargs):
