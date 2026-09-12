@@ -17,6 +17,7 @@ from victor_ai_bot.runtime_services.capital_admission_service import (
 from victor_ai_bot.runtime_services.institutional_sizing_runtime import (
     InstitutionalSizingAdmissionService,
 )
+from victor_ai_bot.omar.learning_integrity import validate_learning_transition
 
 
 def _contract():
@@ -145,3 +146,50 @@ def test_phase_b3_calculates_and_attaches_sizing_identity(monkeypatch):
     assert opp.meta["canonical_lineage"]["sizing_id"] == sizing_id
     assert decision.metadata["sizing_id"] == sizing_id
     assert record["sizing"]["approved_notional_usd"] <= 1_000_000.0
+
+
+def _learning_pending(sizing_id="size-1"):
+    return {
+        "decision_id": "decision-1",
+        "correlation_id": "corr-1",
+        "opportunity_id": "opp-1",
+        "route_id": "route-1",
+        "action": "EXECUTE",
+        "state_key": "state-1",
+        "expected_net_usd": 100.0,
+        "context": {
+            "capital_authority_source": "capital_engine_state",
+            "capital_authority_status": "ok",
+            "capital_authority_freshness": "fresh",
+        },
+        "canonical_lineage": {"decision_id": "decision-1", "correlation_id": "corr-1", "sizing_id": sizing_id},
+        "sizing_id": sizing_id,
+    }
+
+
+def _learning_outcome(sizing_id="size-1"):
+    return {
+        "status": "settled",
+        "source": "phase2_canonical_outcome_ledger",
+        "decision_id": "decision-1",
+        "correlation_id": "corr-1",
+        "opportunity_id": "opp-1",
+        "route_id": "route-1",
+        "action": "EXECUTE",
+        "execution_id": "execution-1",
+        "outcome_id": "outcome-1",
+        "sizing_id": sizing_id,
+        "settlement_verified": True,
+        "expected_net_usd": 100.0,
+        "realized_net_usd": 120.0,
+        "expectation_error": 20.0,
+        "canonical_lineage": {"decision_id": "decision-1", "correlation_id": "corr-1", "sizing_id": sizing_id},
+    }
+
+
+def test_phase_b3_learning_rejects_sizing_lineage_mismatch():
+    result = validate_learning_transition(
+        _learning_pending("size-1"), _learning_outcome("size-2"), decision_id="decision-1"
+    )
+    assert result.allowed is False
+    assert result.reason == "sizing_lineage_mismatch"
