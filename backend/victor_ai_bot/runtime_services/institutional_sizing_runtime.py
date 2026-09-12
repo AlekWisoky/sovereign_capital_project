@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from .capital_admission_service import CapitalAdmissionService
+from ..decision_identity import attach_sizing_identity
 from ..execution_capture.institutional_sizing import build_institutional_sizing_contract
+from ..execution_capture.institutional_sizing_kernel import calculate_institutional_size
 
 
 class InstitutionalSizingAdmissionService(CapitalAdmissionService):
@@ -12,7 +14,7 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
     The existing CapitalAdmissionService remains authoritative for admission.
     This adapter only normalizes its already-computed inputs into the typed
     institutional contract; it does not re-run capital, family, wealth-goal,
-    drawdown, or governance policy and it does not calculate a new size.
+    drawdown, or governance policy and it does not calculate a new admission.
     """
 
     @staticmethod
@@ -119,7 +121,7 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
         }
 
     def _institutional_record(
-        self, runtime: Any, opp: Any, result: Any
+        self, runtime: Any, opp: Any, result: Any, decision: Any | None = None
     ) -> dict[str, Any]:
         meta, capture_metadata, endpoint = self._capture_context(opp)
         capital_state = self._capital_state(runtime)
@@ -138,12 +140,40 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
             settlement={},
         )
         valid, errors = contract.validate()
-        return {
+        record: dict[str, Any] = {
             "contract": contract.to_dict(),
             "valid": bool(valid),
             "errors": list(errors),
             "behavior_change": "none",
         }
+        if valid:
+            try:
+                sizing = calculate_institutional_size(contract)
+                record["sizing"] = {
+                    "sizing_id": sizing.sizing_id,
+                    "approved_notional_usd": sizing.approved_notional_usd,
+                    "approved_borrow_amount_raw": sizing.approved_borrow_amount_raw,
+                    "constraints_applied": list(sizing.constraints_applied),
+                    "downsize_reasons": list(sizing.downsize_reasons),
+                    "capital_utilization": sizing.capital_utilization,
+                }
+                attach_sizing_identity(
+                    opp,
+                    decision,
+                    sizing_id=sizing.sizing_id,
+                    approved_notional_usd=sizing.approved_notional_usd,
+                )
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                record["sizing"] = {
+                    "sizing_id": "",
+                    "approved_notional_usd": 0.0,
+                    "approved_borrow_amount_raw": None,
+                    "constraints_applied": [],
+                    "downsize_reasons": ["sizing_calculation_failed"],
+                    "capital_utilization": 0.0,
+                    "error": str(exc),
+                }
+        return record
 
     @staticmethod
     def _decorate_result(result: Any, record: dict[str, Any]) -> Any:
@@ -163,5 +193,5 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
     def evaluate(self, runtime: Any, opp: Any, *, decision: Any | None = None):
         result = super().evaluate(runtime, opp, decision=decision)
         return self._decorate_result(
-            result, self._institutional_record(runtime, opp, result)
+            result, self._institutional_record(runtime, opp, result, decision)
         )
