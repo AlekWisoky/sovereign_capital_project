@@ -1,3 +1,4 @@
+import pytest
 from types import SimpleNamespace
 
 from victor_ai_bot.runtime_services import runtime_institutional_init as mod
