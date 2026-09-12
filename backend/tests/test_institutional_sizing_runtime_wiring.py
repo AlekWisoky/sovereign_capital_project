@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from victor_ai_bot.runtime_services.capital_admission_service import PreTradeCapitalAdmission
 from victor_ai_bot.runtime_services.institutional_sizing_runtime import (
     InstitutionalSizingAdmissionService,
 )
@@ -36,6 +37,7 @@ def _runtime():
                 "goalStatus": "active",
             }
         ),
+        cfg=SimpleNamespace(execution=SimpleNamespace(live_authority=False)),
     )
 
 
@@ -46,7 +48,7 @@ def _opp():
         meta={
             "strategy_family": "flash_arb",
             "entry_notional_usd": 250_000.0,
-            "asset_price_usd": 1.0,
+            "margin_ratio": 0.04,
             "capture": {
                 "metadata": {
                     "depth_usd": 600_000.0,
@@ -55,51 +57,66 @@ def _opp():
                     "freshness_score": 0.95,
                     "venue_reliability_score": 0.90,
                     "endpoint_selection": {
-                        "measured_latency_ms": 250.0,
+                        "pipeline_latency_ms": 250.0,
                         "pressure": 0.15,
                         "endpoint_quality": 0.90,
                     },
                 }
             },
-            "unit_econ": {
-                "entry_notional_usd": 250_000.0,
-            },
+            "unit_econ": {"entry_notional_usd": 250_000.0},
         },
         confidence=0.92,
         expected_profit_usd=120.0,
     )
 
 
-def test_runtime_adapter_attaches_institutional_contract_without_replacing_admission_authority():
-    service = InstitutionalSizingAdmissionService()
-    runtime = _runtime()
-    opp = _opp()
+def _admitted_result():
+    return PreTradeCapitalAdmission(
+        allowed=True,
+        reason_code="ok",
+        strategy_family="flash_arb",
+        capital_source="flashloan",
+        requested_notional_usd=250_000.0,
+        projected_realized_edge_usd=120.0,
+        confidence=0.92,
+        details={},
+    )
 
-    # Use the existing admission implementation as the authority. The adapter
-    # only materializes the typed Phase-B contract after admission evaluation.
-    result = service.evaluate(runtime, opp, decision=SimpleNamespace(size_mult=1.0, borrow_mult=1.0))
 
-    contract_record = result.details["institutionalSizing"]
-    assert contract_record["valid"] is True
-    contract = contract_record["contract"]
+def test_runtime_adapter_materializes_authoritative_capital_and_prime_context(monkeypatch):
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.institutional_sizing_runtime.CapitalAdmissionService.evaluate",
+        lambda self, runtime, opp, decision=None: _admitted_result(),
+    )
+
+    result = InstitutionalSizingAdmissionService().evaluate(
+        _runtime(), _opp(), decision=SimpleNamespace(size_mult=1.0, borrow_mult=1.0)
+    )
+
+    record = result.details["institutionalSizing"]
+    assert record["valid"] is True
+    contract = record["contract"]
     assert contract["capital"]["source"] == "capital_engine_state"
     assert contract["capital"]["authority_id"] == "cap-auth-runtime"
     assert contract["capital"]["prime_available"] is True
     assert contract["capital"]["prime_capacity_usd"] == 10_000_000.0
-    assert contract["requested_notional_usd"] == result.requested_notional_usd
-    assert contract_record["behavior_change"] == "none"
+    assert contract["requested_notional_usd"] == 250_000.0
+    assert record["behavior_change"] == "none"
 
 
-def test_runtime_adapter_preserves_existing_admission_result():
-    service = InstitutionalSizingAdmissionService()
-    runtime = _runtime()
-    opp = _opp()
-    decision = SimpleNamespace(size_mult=1.0, borrow_mult=1.0)
+def test_runtime_adapter_does_not_replace_existing_admission_result(monkeypatch):
+    expected = _admitted_result()
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.institutional_sizing_runtime.CapitalAdmissionService.evaluate",
+        lambda self, runtime, opp, decision=None: expected,
+    )
 
-    result = service.evaluate(runtime, opp, decision=decision)
+    result = InstitutionalSizingAdmissionService().evaluate(_runtime(), _opp())
 
-    assert result.strategy_family == "flash_arb"
-    assert result.capital_source == "flashloan"
-    assert result.requested_notional_usd == 250_000.0
-    assert result.projected_realized_edge_usd >= 0.0
-    assert result.details["institutionalSizing"]["behavior_change"] == "none"
+    assert result.allowed is expected.allowed
+    assert result.reason_code == expected.reason_code
+    assert result.strategy_family == expected.strategy_family
+    assert result.capital_source == expected.capital_source
+    assert result.requested_notional_usd == expected.requested_notional_usd
+    assert result.projected_realized_edge_usd == expected.projected_realized_edge_usd
+    assert result.confidence == expected.confidence
