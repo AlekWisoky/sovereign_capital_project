@@ -94,11 +94,16 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
                 economics = dict(profitability_state_view(opp) or {})
             except (AttributeError, KeyError, TypeError, ValueError):
                 economics = {}
-        economics.setdefault(
-            "expected_net_profit_usd", float(result.projected_realized_edge_usd or 0.0)
-        )
-        economics.setdefault("success_probability", float(result.confidence or 0.0))
-        economics.setdefault("margin_ratio", float(meta.get("margin_ratio") or 0.0))
+
+        projected_edge = getattr(result, "projected_realized_edge_usd", None)
+        confidence = getattr(result, "confidence", None)
+        margin_ratio = meta.get("margin_ratio")
+        if "expected_net_profit_usd" not in economics and projected_edge is not None:
+            economics["expected_net_profit_usd"] = projected_edge
+        if "success_probability" not in economics and confidence is not None:
+            economics["success_probability"] = confidence
+        if "margin_ratio" not in economics and margin_ratio is not None:
+            economics["margin_ratio"] = margin_ratio
         return economics
 
     @staticmethod
