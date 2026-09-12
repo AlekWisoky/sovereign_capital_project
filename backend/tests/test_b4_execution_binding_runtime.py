@@ -10,6 +10,11 @@ from victor_ai_bot.execution_capture.final_quote import FinalQuote
 from victor_ai_bot.runtime_services import runtime_execute_wrapper_facade as wrapper_module
 from victor_ai_bot.runtime_services.runtime_execute_dispatch_facade import AutoExecutionDispatchContext
 
+ASSET = "0x1111111111111111111111111111111111111111"
+USDC = "0x2222222222222222222222222222222222222222"
+VENUE = "0x3333333333333333333333333333333333333333"
+PROFIT_TO = "0x0000000000000000000000000000000000000001"
+
 
 class _RpcContext:
     def __init__(self, *args, **kwargs):
@@ -30,10 +35,10 @@ async def test_b42_binding_proves_quote_to_raw_amount_at_calldata_boundary(monke
             legs=[
                 SimpleNamespace(
                     amount_in=1,
-                    token_in="0xasset",
+                    token_in=ASSET,
                     dex="univ3",
-                    venue="univ3",
-                    token_out="0xusdc",
+                    venue=VENUE,
+                    token_out=USDC,
                     min_out="250000000",
                     data="0x",
                 )
@@ -67,7 +72,7 @@ async def test_b42_binding_proves_quote_to_raw_amount_at_calldata_boundary(monke
         quote_id="quote-b42",
         quoted_at_ms=1234567890,
         block_number=900,
-        token="0xasset",
+        token=ASSET,
         raw_amount=10**18,
         asset_decimals=18,
         asset_price_usd=2500.0,
@@ -75,7 +80,7 @@ async def test_b42_binding_proves_quote_to_raw_amount_at_calldata_boundary(monke
         route_id="route-b42",
         decision_id="decision-b42",
         correlation_id="correlation-b42",
-        stable_token="0xusdc",
+        stable_token=USDC,
         stable_decimals=6,
         stable_amount_out_raw=250_000_000,
         fee=3000,
@@ -107,7 +112,7 @@ async def test_b42_binding_proves_quote_to_raw_amount_at_calldata_boundary(monke
             borrow_token=leg.token_in,
             amount_borrow=int(leg.amount_in),
             min_profit=1,
-            profit_to="0x0000000000000000000000000000000000000001",
+            profit_to=PROFIT_TO,
             deadline=901,
             legs=[
                 {
@@ -178,7 +183,7 @@ async def test_b42_binding_proves_quote_to_raw_amount_at_calldata_boundary(monke
 async def test_b42_binding_rejects_missing_sizing_lineage_before_requote(monkeypatch):
     opp = SimpleNamespace(
         route_id="route-b42",
-        route=SimpleNamespace(legs=[SimpleNamespace(amount_in=1, token_in="0xasset")]),
+        route=SimpleNamespace(legs=[SimpleNamespace(amount_in=1, token_in=ASSET)]),
         meta={
             "canonical_lineage": {
                 "decision_id": "decision-b42",
