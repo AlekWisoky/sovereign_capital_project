@@ -1,0 +1,40 @@
+name: One-time generated truth refresh
+
+on:
+  push:
+    branches:
+      - codex/phase-b-institutional-sizing-runtime-wiring
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/phase-b-institutional-sizing-runtime-wiring
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Regenerate canonical truth artifacts
+        run: |
+          python scripts/render_system_truth.py
+          python scripts/render_verification_report.py
+      - name: Commit generated artifacts and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/_one_time_refresh_truth.yml
+          git add docs/generated/system_truth.json docs/generated/verification_report.json
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: refresh generated truth artifacts"
+          git push origin HEAD:codex/phase-b-institutional-sizing-runtime-wiring
