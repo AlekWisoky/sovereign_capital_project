@@ -5,7 +5,7 @@ from typing import Any
 
 from ..arb_engine import requote_opportunity
 from .b4_quote_units import usd_notional_to_raw_units
-from .final_quote import FinalQuote, produce_final_quote
+from .final_quote import FinalQuote, FinalQuoteRequest, produce_final_quote
 
 
 class ExecutionQuoteBindingError(ValueError):
@@ -168,11 +168,13 @@ async def bind_final_quote_to_execution(
         raise ExecutionQuoteBindingError("quote_requote_cache_required")
 
     quote = await produce_final_quote(
-        rpc_read,
-        cfg,
-        opp,
-        decision=decision,
-        block_number=int(block_number),
+        FinalQuoteRequest(
+            rpc=rpc_read,
+            cfg=cfg,
+            opp=opp,
+            decision=decision,
+            block_number=int(block_number),
+        )
     )
     if quote.decision_id != decision_id or quote.correlation_id != correlation_id:
         raise ExecutionQuoteBindingError("quote_lineage_conflict")
