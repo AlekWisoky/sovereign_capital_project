@@ -4,14 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from victor_ai_bot.execution_capture.b4_execution_binding import (
-    bind_final_quote_to_execution,
-)
+from victor_ai_bot.calldata_builder import build_execute_calldata
+from victor_ai_bot.execution_capture.b4_execution_binding import bind_final_quote_to_execution
 from victor_ai_bot.execution_capture.final_quote import FinalQuote
 from victor_ai_bot.runtime_services import runtime_execute_wrapper_facade as wrapper_module
-from victor_ai_bot.runtime_services.runtime_execute_dispatch_facade import (
-    AutoExecutionDispatchContext,
-)
+from victor_ai_bot.runtime_services.runtime_execute_dispatch_facade import AutoExecutionDispatchContext
 
 
 class _RpcContext:
@@ -26,12 +23,23 @@ class _RpcContext:
 
 
 @pytest.mark.asyncio
-async def test_b42_binding_proves_quote_to_raw_amount_before_production_execute(monkeypatch):
+async def test_b42_binding_proves_quote_to_raw_amount_at_calldata_boundary(monkeypatch):
     opp = SimpleNamespace(
         route_id="route-b42",
         route=SimpleNamespace(
-            legs=[SimpleNamespace(amount_in=1, token_in="0xasset")]
+            legs=[
+                SimpleNamespace(
+                    amount_in=1,
+                    token_in="0xasset",
+                    dex="univ3",
+                    venue="univ3",
+                    token_out="0xusdc",
+                    min_out="250000000",
+                    data="0x",
+                )
+            ]
         ),
+        min_outs=["250000000"],
         meta={
             "brain": {
                 "canonical_decision_id": "decision-b42",
@@ -92,7 +100,28 @@ async def test_b42_binding_proves_quote_to_raw_amount_before_production_execute(
     captured = {}
 
     async def fake_execute(*args, **kwargs):
-        captured["amount_borrow"] = args[3].route.legs[0].amount_in
+        bound_opp = args[3]
+        leg = bound_opp.route.legs[0]
+        calldata, _ = build_execute_calldata(
+            provider="aave",
+            borrow_token=leg.token_in,
+            amount_borrow=int(leg.amount_in),
+            min_profit=1,
+            profit_to="0x0000000000000000000000000000000000000001",
+            deadline=901,
+            legs=[
+                {
+                    "dex": leg.dex,
+                    "venue": leg.venue,
+                    "token_in": leg.token_in,
+                    "token_out": leg.token_out,
+                    "min_out": int(leg.min_out),
+                    "aux": leg.data or "0x",
+                }
+            ],
+        )
+        captured["calldata"] = calldata
+        captured["amount_borrow"] = int(leg.amount_in)
         captured["decision_size_mult"] = getattr(kwargs["decision"], "size_mult")
         captured["decision_borrow_mult"] = getattr(kwargs["decision"], "borrow_mult")
         return SimpleNamespace(ok=True, dry_run=True, submitted=False, plan={})
@@ -134,8 +163,10 @@ async def test_b42_binding_proves_quote_to_raw_amount_before_production_execute(
     )
 
     assert captured["amount_borrow"] == 100_000_000_000_000_000_000
+    assert captured["amount_borrow"] != 1
     assert captured["decision_size_mult"] == 1.0
     assert captured["decision_borrow_mult"] == 1.0
+    assert captured["calldata"].startswith("0x")
     assert decision.size_mult == 1.5
     assert decision.borrow_mult == 1.25
     assert opp.meta["b4_execution_quote"]["quote_id"] == "quote-b42"
