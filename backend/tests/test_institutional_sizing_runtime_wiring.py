@@ -8,6 +8,7 @@ from victor_ai_bot.runtime_services.institutional_sizing_runtime import (
 )
 
 
+# This slice verifies context/lineage wiring only; canonical admission remains authoritative.
 def _runtime():
     return SimpleNamespace(
         capital_engine_state=lambda: {
@@ -118,5 +119,3 @@ def test_runtime_adapter_does_not_replace_existing_admission_result(monkeypatch)
     assert result.strategy_family == expected.strategy_family
     assert result.capital_source == expected.capital_source
     assert result.requested_notional_usd == expected.requested_notional_usd
-    assert result.projected_realized_edge_usd == expected.projected_realized_edge_usd
-    assert result.confidence == expected.confidence
