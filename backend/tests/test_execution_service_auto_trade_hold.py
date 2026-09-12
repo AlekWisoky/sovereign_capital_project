@@ -1805,10 +1805,25 @@ async def test_runtime_auto_execute_routes_core_through_extracted_fioa_handler(m
         id="opp-fioa-runtime",
         route_id="route-fioa-runtime",
         route=SimpleNamespace(legs=[]),
-        meta={},
+        meta={
+            "brain": {
+                "canonical_decision_id": "decision-test",
+                "correlation_id": "correlation-test",
+            },
+            "canonical_lineage": {
+                "decision_id": "decision-test",
+                "correlation_id": "correlation-test",
+            },
+        },
+    )
+    decision = SimpleNamespace(
+        metadata={
+            "canonical_decision_id": "decision-test",
+            "correlation_id": "correlation-test",
+        }
     )
 
-    await RuntimeBundle._execute_auto(harness, opp, 111, None)
+    await RuntimeBundle._execute_auto(harness, opp, 111, decision)
 
     assert len(fioa.wrapper_calls) == 1
     assert len(harness.recorded) == 1
@@ -1847,10 +1862,25 @@ async def test_runtime_auto_execute_routes_post_execute_bookkeeping_through_extr
         id="opp-post-runtime",
         route_id="route-post-runtime",
         route=SimpleNamespace(legs=[]),
-        meta={},
+        meta={
+            "brain": {
+                "canonical_decision_id": "decision-test",
+                "correlation_id": "correlation-test",
+            },
+            "canonical_lineage": {
+                "decision_id": "decision-test",
+                "correlation_id": "correlation-test",
+            },
+        },
+    )
+    decision = SimpleNamespace(
+        metadata={
+            "canonical_decision_id": "decision-test",
+            "correlation_id": "correlation-test",
+        }
     )
 
-    await RuntimeBundle._execute_auto(harness, opp, 222, None)
+    await RuntimeBundle._execute_auto(harness, opp, 222, decision)
 
     assert len(harness._execution_service.calls) == 1
     call = harness._execution_service.calls[0]

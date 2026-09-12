@@ -36,6 +36,7 @@ def _transactions(runtime: Any) -> list[dict[str, Any]]:
 def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     metadata = _dict(row.get("metadata"))
     lineage = _dict(metadata.get("canonical_lineage"))
+    execution_lineage = _dict(metadata.get("execution_lineage"))
 
     def first(*keys: str, default: Any = None) -> Any:
         for key in keys:
@@ -48,13 +49,14 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "source": "phase2_canonical_outcome_ledger",
         "transaction_id": _text(row.get("transaction_id")),
         "tx_hash": _text(row.get("receipt_id") or metadata.get("tx_hash") or metadata.get("txHash")),
-        "decision_id": _text(first("canonical_decision_id", "decision_id", default=lineage.get("decision_id"))),
-        "correlation_id": _text(first("correlation_id", default=lineage.get("correlation_id"))),
-        "execution_id": _text(first("execution_id", default=lineage.get("execution_id"))),
+        "receipt_id": _text(metadata.get("receipt_id") or row.get("receipt_id")),
+        "decision_id": _text(first("canonical_decision_id", "decision_id", default=lineage.get("decision_id") or execution_lineage.get("decision_id"))),
+        "correlation_id": _text(first("correlation_id", default=lineage.get("correlation_id") or execution_lineage.get("correlation_id"))),
+        "execution_id": _text(first("execution_id", default=lineage.get("execution_id") or execution_lineage.get("execution_id"))),
         "outcome_id": _text(first("outcome_id", default=lineage.get("outcome_id"))),
-        "sizing_id": _text(first("sizing_id", default=lineage.get("sizing_id"))),
-        "opportunity_id": _text(first("opportunity_id", "opportunityId")),
-        "route_id": _text(first("route_id", "routeId")),
+        "sizing_id": _text(first("sizing_id", default=lineage.get("sizing_id") or execution_lineage.get("sizing_id"))),
+        "opportunity_id": _text(first("opportunity_id", "opportunityId", default=lineage.get("opportunity_id"))),
+        "route_id": _text(first("route_id", "routeId", default=lineage.get("route_id"))),
         "action": _text(first("action", "aqe_action", default=lineage.get("action"))),
         "strategy_family": _text(first("strategy_family", "strategyFamily", "family")),
         "ok": bool(first("ok", default=True)),
@@ -62,10 +64,27 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "realized_net_usd": first("realized_net_usd", "realizedNetUsd"),
         "amount_in_wei": first("amount_in_wei", "amountInWei"),
         "gas_cost_usd": first("gas_cost_usd", "gasCostUsd"),
+        "gas_cost_wei": first("gas_cost_wei", "gasCostWei"),
         "slippage_bps": first("slippage_bps", "slippageBps"),
         "latency_ms": first("latency_ms", "latencyMs"),
+        "borrow_cost_usd": first("borrow_cost_usd", "borrowCostUsd"),
+        "prime_economics": _dict(metadata.get("prime_economics") or metadata.get("borrowing_economics")),
+        "capital_demand": _dict(metadata.get("capital_demand") or metadata.get("capitalDemand")),
+        "capital_authority": _dict(metadata.get("capital_authority") or metadata.get("capitalAuthority")),
+        "internal_prime_authority": _dict(metadata.get("internal_prime_authority") or metadata.get("internalPrimeAuthority")),
         "truth_verified": bool(first("truth_verified", "outcome_truth_verified", "verified", default=False)),
         "settlement_verified": bool(first("settlement_verified", "truth_verified", "outcome_truth_verified", "verified", default=False)),
+        "canonical_lineage": {
+            "decision_id": _text(lineage.get("decision_id") or execution_lineage.get("decision_id") or metadata.get("canonical_decision_id") or metadata.get("decision_id")),
+            "correlation_id": _text(lineage.get("correlation_id") or execution_lineage.get("correlation_id") or metadata.get("correlation_id")),
+            "sizing_id": _text(lineage.get("sizing_id") or execution_lineage.get("sizing_id") or metadata.get("sizing_id")),
+            "execution_id": _text(lineage.get("execution_id") or execution_lineage.get("execution_id") or metadata.get("execution_id")),
+            "receipt_id": _text(lineage.get("receipt_id") or metadata.get("receipt_id") or row.get("receipt_id")),
+            "outcome_id": _text(lineage.get("outcome_id") or metadata.get("outcome_id")),
+            "opportunity_id": _text(lineage.get("opportunity_id") or metadata.get("opportunity_id") or metadata.get("opportunityId")),
+            "route_id": _text(lineage.get("route_id") or metadata.get("route_id") or metadata.get("routeId")),
+            "action": _text(lineage.get("action") or metadata.get("action") or metadata.get("aqe_action")),
+        },
         "metadata": metadata,
         "ledger_transaction": dict(row),
     }
@@ -78,6 +97,7 @@ def canonical_settled_outcome(
     decision_id: str = "",
     correlation_id: str = "",
     opportunity_id: str = "",
+    execution_id: str = "",
 ) -> dict[str, Any] | None:
     """Read one exact canonical settled outcome from the physical ledger."""
     rows = [row for row in _transactions(runtime) if _text(row.get("tx_type")) == _SETTLEMENT_TX_TYPE]
@@ -91,6 +111,10 @@ def canonical_settled_outcome(
         if correlation_id and normalized["correlation_id"] != _text(correlation_id):
             continue
         if opportunity_id and normalized["opportunity_id"] != _text(opportunity_id):
+            continue
+        # When supplied, execution_id is an exact constraint. A transaction hash
+        # cannot override a mismatched execution attempt/replacement.
+        if execution_id and normalized["execution_id"] != _text(execution_id):
             continue
         matches.append(normalized)
     if not matches:

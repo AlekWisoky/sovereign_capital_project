@@ -55,7 +55,18 @@ def test_canonical_writer_passes_settled_economics_to_bankroll(monkeypatch):
         captured["state"] = runtime._bankroll.project_trade_state(**kwargs)
         return {"ok": True}
     monkeypatch.setattr(canonical_writer_module.CapitalWriteService, "commit_receipt_settlement", fake_commit)
-    runtime = SimpleNamespace(_bankroll=BankrollManager(BankrollConfig(base_borrow_amount_wei=1000)))
+    runtime = SimpleNamespace(
+        _bankroll=BankrollManager(BankrollConfig(base_borrow_amount_wei=1000)),
+        _canonical_settlement_lineage={
+            "decision_id": "decision-test",
+            "correlation_id": "correlation-test",
+            "sizing_id": "sizing-test",
+            "execution_id": "execution-test",
+            "opportunity_id": "opportunity-test",
+            "route_id": "route",
+            "action": "flash_arb",
+        },
+    )
     tx = _tx("loss", 0, -0.35)
     out = CanonicalCapitalWriteService().commit_receipt_settlement(
         runtime, tx_payload=tx, tx_lines=[], receipt_id="loss", status=0, amount_in=1000,
