@@ -19,6 +19,16 @@ def _decimal(value: Any) -> Decimal:
     return number
 
 
+def _decimals(value: Any) -> int:
+    try:
+        decimals = int(value)
+    except (TypeError, ValueError) as exc:
+        raise QuoteUnitSizingError("asset_decimals_invalid") from exc
+    if decimals < 0 or decimals > 255:
+        raise QuoteUnitSizingError("asset_decimals_invalid")
+    return decimals
+
+
 def usd_notional_to_raw_units(
     usd_notional: float | int | str,
     *,
@@ -31,13 +41,7 @@ def usd_notional_to_raw_units(
     execution authority. Flooring ensures the raw amount cannot exceed the
     approved economic notional at the supplied quote.
     """
-    try:
-        decimals = int(asset_decimals)
-    except (TypeError, ValueError) as exc:
-        raise QuoteUnitSizingError("asset_decimals_invalid") from exc
-    if decimals < 0 or decimals > 255:
-        raise QuoteUnitSizingError("asset_decimals_invalid")
-
+    decimals = _decimals(asset_decimals)
     notional = _decimal(usd_notional)
     price = _decimal(asset_price_usd)
     if notional < 0:
@@ -55,6 +59,29 @@ def usd_notional_to_raw_units(
         return int(units)
     except (OverflowError, ValueError) as exc:
         raise QuoteUnitSizingError("raw_units_invalid") from exc
+
+
+def raw_units_to_usd_notional(
+    raw_units: int,
+    *,
+    asset_price_usd: float | int | str,
+    asset_decimals: int,
+) -> float:
+    """Convert final raw units back to quoted USD economic value."""
+    decimals = _decimals(asset_decimals)
+    try:
+        units = int(raw_units)
+    except (TypeError, ValueError) as exc:
+        raise QuoteUnitSizingError("raw_units_invalid") from exc
+    if units < 0:
+        raise QuoteUnitSizingError("raw_units_negative")
+    price = _decimal(asset_price_usd)
+    if price <= 0:
+        raise QuoteUnitSizingError("asset_price_usd_invalid")
+    value = (Decimal(units) * price) / (Decimal(10) ** decimals)
+    if not value.is_finite() or value < 0:
+        raise QuoteUnitSizingError("quoted_usd_value_invalid")
+    return float(value)
 
 
 def quote_context_from_mapping(quote: Mapping[str, Any] | None) -> dict[str, Any]:
