@@ -4,8 +4,15 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
-from typing import Any
+from typing import Any, Mapping
 
+from .b4_quote_units import (
+    QuoteUnitSizingError,
+    quote_context_from_mapping,
+    raw_units_to_usd_notional,
+    usd_notional_to_raw_units,
+    validate_quote_context,
+)
 from .institutional_sizing import InstitutionalSizingContract
 
 
@@ -32,23 +39,38 @@ def _add_cap(caps: list[tuple[str, float]], label: str, value: float | None) -> 
         caps.append((label, number))
 
 
-def _fingerprint(contract: InstitutionalSizingContract, approved: float, constraints: tuple[str, ...]) -> str:
+def _fingerprint(
+    contract: InstitutionalSizingContract,
+    approved: float,
+    constraints: tuple[str, ...],
+    raw_units: int | None = None,
+    quote: Mapping[str, Any] | None = None,
+) -> str:
     payload: dict[str, Any] = {
         "contract": contract.to_dict(),
         "approved_notional_usd": round(approved, 8),
         "constraints_applied": constraints,
+        "approved_borrow_amount_raw": raw_units,
+        "quote": quote_context_from_mapping(quote),
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     return "size-" + hashlib.sha256(encoded).hexdigest()[:24]
 
 
-def calculate_institutional_size(contract: InstitutionalSizingContract) -> SizingDecision:
-    """Calculate approved USD notional from already-authoritative inputs.
+def calculate_institutional_size(
+    contract: InstitutionalSizingContract,
+    *,
+    final_quote: Mapping[str, Any] | None = None,
+) -> SizingDecision:
+    """Calculate approved notional and, when quoted, the final raw-unit amount.
 
-    This pure boundary never calls execution, governance, settlement, Treasury,
-    or Internal Prime mutation methods and does not alter V1 flashloan sizing.
-    Raw-unit conversion is deferred until final quote/requote because price and
-    token-decimal data are not part of the institutional contract.
+    The USD constraint calculation remains deterministic and authority-free.
+    Raw-unit conversion is permitted only with an explicit final quote carrying
+    positive asset price and token decimals. The conversion floors raw units,
+    then re-values those units at the same quote so a raw-unit hard cap cannot
+    silently exceed the approved economic notional.
     """
     valid, errors = contract.validate()
     if not valid:
@@ -58,7 +80,7 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
     if requested <= 0.0:
         constraints = ("requested_notional",)
         return SizingDecision(
-            sizing_id=_fingerprint(contract, 0.0, constraints),
+            sizing_id=_fingerprint(contract, 0.0, constraints, quote=final_quote),
             approved_notional_usd=0.0,
             approved_borrow_amount_raw=None,
             constraints_applied=constraints,
@@ -70,7 +92,9 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
 
     goal = contract.wealth_goal
     commitment_factor = max(0.70, float(goal.capital_commitment_pct) / 30.0)
-    wealth_cap = requested * max(0.0, float(goal.aggressiveness_cap)) * commitment_factor
+    wealth_cap = (
+        requested * max(0.0, float(goal.aggressiveness_cap)) * commitment_factor
+    )
     _add_cap(caps, "wealth_goal_aggressiveness", wealth_cap)
 
     capital = contract.capital
@@ -78,7 +102,8 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
         _add_cap(
             caps,
             "capital_engine_deployable_pct",
-            float(capital.deployable_usd) * max(0.0, float(contract.governance.max_deployable_pct)),
+            float(capital.deployable_usd)
+            * max(0.0, float(contract.governance.max_deployable_pct)),
         )
     if capital.drawdown_buffer_usd is not None and capital.deployable_usd is not None:
         _add_cap(
@@ -89,7 +114,8 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
 
     if capital.prime_capacity_usd is not None:
         remaining_prime = (
-            float(capital.prime_capacity_usd) * max(0.0, 1.0 - float(capital.prime_utilization))
+            float(capital.prime_capacity_usd)
+            * max(0.0, 1.0 - float(capital.prime_utilization))
             - float(capital.prime_reserved_usd)
         )
         _add_cap(caps, "internal_prime_remaining_capacity", remaining_prime)
@@ -105,7 +131,11 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
         _add_cap(
             caps,
             "family_cap",
-            max(0.0, float(capital.family_cap_usd) - float(capital.prime_family_exposure_usd)),
+            max(
+                0.0,
+                float(capital.family_cap_usd)
+                - float(capital.prime_family_exposure_usd),
+            ),
         )
 
     economics = contract.economics
@@ -133,16 +163,49 @@ def calculate_institutional_size(contract: InstitutionalSizingContract) -> Sizin
 
     approved = max(0.0, min(value for _, value in caps))
     constraints = tuple(label for label, _ in caps) + constraints_without_cap
-    downsize_reasons = tuple(label for label, value in caps if value < requested - 1e-9)
+    downsize_reasons = tuple(
+        label for label, value in caps if value < requested - 1e-9
+    )
+
+    raw_units: int | None = None
+    if final_quote is not None:
+        quote = quote_context_from_mapping(final_quote)
+        quote_valid, quote_errors = validate_quote_context(quote)
+        if not quote_valid:
+            raise ValueError("final_quote_invalid:" + ",".join(quote_errors))
+        try:
+            raw_units = usd_notional_to_raw_units(
+                approved,
+                asset_price_usd=quote["asset_price_usd"],
+                asset_decimals=int(quote["asset_decimals"]),
+            )
+            max_raw = int(contract.max_borrow_amount_wei or 0)
+            if max_raw > 0 and raw_units > max_raw:
+                raw_units = max_raw
+                constraints = constraints + ("max_borrow_amount_raw",)
+                downsize_reasons = downsize_reasons + ("max_borrow_amount_raw",)
+                approved = raw_units_to_usd_notional(
+                    raw_units,
+                    asset_price_usd=quote["asset_price_usd"],
+                    asset_decimals=int(quote["asset_decimals"]),
+                )
+        except QuoteUnitSizingError as exc:
+            raise ValueError(f"final_quote_invalid:{exc}") from exc
 
     utilization = 0.0
     if capital.deployable_usd is not None and float(capital.deployable_usd) > 0.0:
         utilization = approved / float(capital.deployable_usd)
 
     return SizingDecision(
-        sizing_id=_fingerprint(contract, approved, constraints),
+        sizing_id=_fingerprint(
+            contract,
+            approved,
+            constraints,
+            raw_units=raw_units,
+            quote=final_quote,
+        ),
         approved_notional_usd=round(approved, 8),
-        approved_borrow_amount_raw=None,
+        approved_borrow_amount_raw=raw_units,
         constraints_applied=constraints,
         downsize_reasons=downsize_reasons,
         capital_utilization=round(utilization, 8),
