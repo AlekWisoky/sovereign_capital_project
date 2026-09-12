@@ -117,12 +117,13 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
         self, runtime: Any, opp: Any, result: Any
     ) -> dict[str, Any]:
         meta, capture_metadata, endpoint = self._capture_context(opp)
+        capital_state = self._capital_state(runtime)
         contract = build_institutional_sizing_contract(
             requested_notional_usd=float(result.requested_notional_usd or 0.0),
             strategy_family=str(result.strategy_family or ""),
             capital_source=str(result.capital_source or ""),
-            capital_engine_state=self._capital_state(runtime),
-            treasury_state=self._capital_state(runtime),
+            capital_engine_state=capital_state,
+            treasury_state=capital_state,
             internal_prime_state=self._prime_state(runtime),
             wealth_goal_state=self._wealth_goal_state(runtime),
             execution_capture=capture_metadata,
