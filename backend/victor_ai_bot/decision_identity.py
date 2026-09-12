@@ -108,6 +108,66 @@ def ensure_decision_identity(
     return DecisionExecutionIdentity(decision_id=decision_id, correlation_id=correlation_id)
 
 
+def attach_sizing_identity(
+    opp: Any,
+    decision: Any | None,
+    *,
+    sizing_id: str,
+    approved_notional_usd: float | None = None,
+) -> str:
+    """Attach an already-computed sizing identity to canonical lineage.
+
+    The sizing kernel owns creation of ``sizing_id``. This helper only propagates
+    that identity through the existing decision/opp metadata boundary. It never
+    creates a second sizing authority and refuses to overwrite a conflicting
+    identity for the same decision.
+    """
+    sid = _text(sizing_id)
+    if not sid:
+        raise ValueError("sizing_id_missing")
+
+    meta = getattr(opp, "meta", None)
+    if not isinstance(meta, dict):
+        meta = {}
+        try:
+            opp.meta = meta
+        except (AttributeError, TypeError):
+            raise ValueError("opportunity_metadata_unavailable")
+
+    brain = _dict(meta.get("brain"))
+    lineage = _dict(meta.get("canonical_lineage"))
+    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
+    existing = _text(
+        brain.get("sizing_id")
+        or lineage.get("sizing_id")
+        or decision_meta.get("sizing_id")
+    )
+    if existing and existing != sid:
+        raise ValueError("sizing_id_lineage_conflict")
+
+    lineage["sizing_id"] = sid
+    brain["sizing_id"] = sid
+    meta["canonical_lineage"] = lineage
+    meta["brain"] = brain
+    meta["sizing_id"] = sid
+    if approved_notional_usd is not None:
+        try:
+            lineage["approved_notional_usd"] = float(approved_notional_usd)
+        except (TypeError, ValueError):
+            pass
+
+    if decision is not None:
+        decision_meta["sizing_id"] = sid
+        decision_lineage = _dict(decision_meta.get("decision_lineage"))
+        decision_lineage["sizing_id"] = sid
+        decision_meta["decision_lineage"] = decision_lineage
+        try:
+            decision.metadata = decision_meta
+        except (AttributeError, TypeError):
+            pass
+    return sid
+
+
 def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     meta = _dict(getattr(opp, "meta", None))
     brain = _dict(meta.get("brain"))
@@ -115,4 +175,5 @@ def lineage_from_opportunity(opp: Any) -> dict[str, str]:
     return {
         "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
         "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
+        "sizing_id": _text(brain.get("sizing_id") or lineage.get("sizing_id") or meta.get("sizing_id")),
     }
