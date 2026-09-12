@@ -28,29 +28,57 @@ def _observe_settled_outcome(
     omar = getattr(runtime, "_omar", None)
     if omar is None or not bool(getattr(omar, "enabled", False)):
         return {"ok": False, "reason_code": "omar_disabled"}
-    lineage = _dict(p.get("canonical_lineage"))
-    decision_id = _text(p.get("canonical_decision_id") or lineage.get("decision_id"))
-    correlation_id = _text(p.get("correlation_id") or lineage.get("correlation_id"))
+
+    pending_lineage = _dict(p.get("canonical_lineage"))
+    outcome_lineage = _dict(row.get("canonical_lineage"))
+    decision_id = _text(p.get("canonical_decision_id") or pending_lineage.get("decision_id"))
+    correlation_id = _text(p.get("correlation_id") or pending_lineage.get("correlation_id"))
+    execution_id = _text(p.get("execution_id") or pending_lineage.get("execution_id"))
+    sizing_id = _text(p.get("sizing_id") or pending_lineage.get("sizing_id"))
+    opportunity_id = _text(p.get("opportunity_id") or pending_lineage.get("opportunity_id"))
+    route_id = _text(p.get("route_id") or pending_lineage.get("route_id"))
+    action = _text(p.get("action") or pending_lineage.get("action"))
+    outcome_id = _text(row.get("outcome_id") or outcome_lineage.get("outcome_id"))
+    receipt_id = _text(row.get("receipt_id") or outcome_lineage.get("receipt_id") or row.get("tx_hash"))
+
     if not decision_id or not correlation_id:
         return {"ok": False, "reason_code": "canonical_lineage_missing"}
-    row_decision_id = _text(row.get("decision_id"))
-    row_correlation_id = _text(row.get("correlation_id"))
-    if row_decision_id and row_decision_id != decision_id:
-        return {"ok": False, "reason_code": "canonical_lineage_mismatch"}
-    if row_correlation_id and row_correlation_id != correlation_id:
-        return {"ok": False, "reason_code": "canonical_lineage_mismatch"}
-    row.setdefault("decision_id", decision_id)
-    row.setdefault("correlation_id", correlation_id)
+    for name, expected, actual in (
+        ("decision", decision_id, _text(row.get("decision_id") or outcome_lineage.get("decision_id"))),
+        ("correlation", correlation_id, _text(row.get("correlation_id") or outcome_lineage.get("correlation_id"))),
+        ("execution", execution_id, _text(row.get("execution_id") or outcome_lineage.get("execution_id"))),
+        ("sizing", sizing_id, _text(row.get("sizing_id") or outcome_lineage.get("sizing_id"))),
+        ("opportunity", opportunity_id, _text(row.get("opportunity_id") or outcome_lineage.get("opportunity_id"))),
+        ("route", route_id, _text(row.get("route_id") or outcome_lineage.get("route_id"))),
+        ("action", action, _text(row.get("action") or outcome_lineage.get("action"))),
+    ):
+        if expected and actual != expected:
+            return {"ok": False, "reason_code": f"{name}_lineage_mismatch"}
+    if not execution_id or not sizing_id or not opportunity_id or not route_id or not action or not outcome_id or not receipt_id:
+        return {"ok": False, "reason_code": "canonical_lineage_incomplete"}
 
-    operator_intent = _dict(lineage.get("operator_intent") or p.get("operator_intent"))
+    operator_intent = _dict(pending_lineage.get("operator_intent") or p.get("operator_intent"))
     metadata = {
-        "canonical_lineage": {"decision_id": decision_id, "correlation_id": correlation_id},
+        "canonical_lineage": {
+            "decision_id": decision_id,
+            "correlation_id": correlation_id,
+            "execution_id": execution_id,
+            "sizing_id": sizing_id,
+            "receipt_id": receipt_id,
+            "outcome_id": outcome_id,
+            "opportunity_id": opportunity_id,
+            "route_id": route_id,
+            "action": action,
+        },
         "source": "phase2_canonical_outcome_ledger",
         "settlement": copy.deepcopy(row),
+        "capital_demand": copy.deepcopy(row.get("capital_demand") or p.get("capital_demand") or {}),
+        "capital_authority": copy.deepcopy(row.get("capital_authority") or p.get("capital_authority") or {}),
+        "internal_prime_authority": copy.deepcopy(row.get("internal_prime_authority") or p.get("internal_prime_authority") or {}),
     }
     if operator_intent:
         metadata["operator_intent"] = copy.deepcopy(operator_intent)
-    intent_fingerprint = _text(lineage.get("intent_fingerprint") or p.get("intent_fingerprint"))
+    intent_fingerprint = _text(pending_lineage.get("intent_fingerprint") or p.get("intent_fingerprint"))
     if intent_fingerprint:
         metadata["intent_fingerprint"] = intent_fingerprint
 
@@ -64,8 +92,8 @@ def _observe_settled_outcome(
             gas_cost_usd=row.get("gas_cost_usd"),
             slippage_bps=row.get("slippage_bps"),
             latency_ms=row.get("latency_ms"),
-            route_id=_text(row.get("route_id")),
-            tx_hash=_text(row.get("tx_hash")),
+            route_id=route_id,
+            tx_hash=_text(row.get("tx_hash") or receipt_id),
             outcome_truth_verified=bool(row.get("truth_verified", False)),
             metadata=metadata,
         )
