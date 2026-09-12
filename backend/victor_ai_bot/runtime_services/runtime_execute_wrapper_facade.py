@@ -4,6 +4,7 @@ import importlib
 import time
 from typing import Any, Awaitable, Callable, Tuple
 
+from ..decision_identity import attach_execution_identity, create_execution_identity
 from ..execution import try_execute_opportunity
 from ..latency_profiler import LatencySpan
 from ..rpc import JsonRpcClient
@@ -18,26 +19,17 @@ _DEFAULT_TRY_EXECUTE = try_execute_opportunity
 
 
 def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryExecute]:
-    """Return the canonical execution-wrapper patch seam.
-
-    Legacy/runtime harnesses historically monkeypatched `victor_ai_bot.runtime_legacy`
-    to replace `JsonRpcClient` and `try_execute_opportunity`. The refactor moved the
-    hot wrapper into this facade, which broke that compatibility seam.
-
-    We intentionally preserve both seam locations now:
-    - patching this facade module continues to work for local extraction tests
-    - patching `runtime_legacy` continues to work for compatibility/runtime tests
-    """
+    """Return the canonical execution-wrapper patch seam."""
 
     rpc_cls = JsonRpcClient
     execute_fn = try_execute_opportunity
     try:
-        runtime_legacy = importlib.import_module('victor_ai_bot.runtime_legacy')
+        runtime_legacy = importlib.import_module("victor_ai_bot.runtime_legacy")
     except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
         return rpc_cls, execute_fn
 
-    legacy_rpc = getattr(runtime_legacy, 'JsonRpcClient', _DEFAULT_JSON_RPC_CLIENT)
-    legacy_exec = getattr(runtime_legacy, 'try_execute_opportunity', _DEFAULT_TRY_EXECUTE)
+    legacy_rpc = getattr(runtime_legacy, "JsonRpcClient", _DEFAULT_JSON_RPC_CLIENT)
+    legacy_exec = getattr(runtime_legacy, "try_execute_opportunity", _DEFAULT_TRY_EXECUTE)
     if legacy_rpc is not _DEFAULT_JSON_RPC_CLIENT:
         rpc_cls = legacy_rpc
     if legacy_exec is not _DEFAULT_TRY_EXECUTE:
@@ -46,12 +38,7 @@ def _compat_execution_wrapper_symbols() -> Tuple[_DefaultRpcClient, _DefaultTryE
 
 
 class RuntimeExecuteWrapperFacade:
-    """Compatibility facade for prepared auto-execution wrapper flow.
-
-    This isolates the prepared RPC execution wrapper and post-execution
-    bookkeeping from RuntimeBundle._execute_auto while preserving the
-    current execution semantics.
-    """
+    """Compatibility facade for prepared auto-execution wrapper flow."""
 
     async def _run_prepared_auto_execution(
         self,
@@ -73,6 +60,16 @@ class RuntimeExecuteWrapperFacade:
                 rpc_client_cls(read_url, timeout_s=10.0, max_concurrency=20, max_batch=50) as rpc_r,
                 rpc_client_cls(send_url, timeout_s=10.0, max_concurrency=10, max_batch=20) as rpc_s,
             ):
+                # The execution boundary is the first point at which a concrete
+                # attempt exists. This identity is distinct from decision_id and
+                # remains stable across the execution/receipt/settlement chain.
+                execution_identity = create_execution_identity(decision, opp)
+                attach_execution_identity(
+                    execution_identity,
+                    decision=decision,
+                    opp=opp,
+                )
+
                 t1 = time.perf_counter()
                 span = LatencySpan()
 
@@ -106,6 +103,15 @@ class RuntimeExecuteWrapperFacade:
                         )
                 else:
                     res = await _core()
+
+                # The physical execution adapter may add tx_hash/receipt facts;
+                # preserve the same execution identity beside those facts.
+                attach_execution_identity(
+                    execution_identity,
+                    decision=decision,
+                    opp=opp,
+                    result=res,
+                )
 
                 latency_ms = int((time.perf_counter() - t1) * 1000.0)
                 if execution_service is not None:
