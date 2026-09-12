@@ -18,7 +18,11 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
     @staticmethod
     def _capital_state(runtime: Any) -> dict[str, Any]:
         try:
-            return dict(runtime.capital_engine_state() or {}) if hasattr(runtime, "capital_engine_state") else {}
+            return (
+                dict(runtime.capital_engine_state() or {})
+                if hasattr(runtime, "capital_engine_state")
+                else {}
+            )
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             return {}
 
@@ -51,9 +55,19 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
         return {}
 
     @staticmethod
-    def _capture_context(opp: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        meta = dict(getattr(opp, "meta", {}) or {}) if isinstance(getattr(opp, "meta", None), dict) else {}
-        capture = dict(meta.get("capture") or {}) if isinstance(meta.get("capture"), dict) else {}
+    def _capture_context(
+        opp: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        meta = (
+            dict(getattr(opp, "meta", {}) or {})
+            if isinstance(getattr(opp, "meta", None), dict)
+            else {}
+        )
+        capture = (
+            dict(meta.get("capture") or {})
+            if isinstance(meta.get("capture"), dict)
+            else {}
+        )
         capture_metadata = (
             dict(capture.get("metadata") or {})
             if isinstance(capture.get("metadata"), dict)
@@ -68,7 +82,11 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
 
     @staticmethod
     def _economics(opp: Any, result: Any, meta: dict[str, Any]) -> dict[str, Any]:
-        economics = dict(meta.get("profitability") or {}) if isinstance(meta.get("profitability"), dict) else {}
+        economics = (
+            dict(meta.get("profitability") or {})
+            if isinstance(meta.get("profitability"), dict)
+            else {}
+        )
         if not economics:
             try:
                 from ..profitability_state import profitability_state_view
@@ -76,7 +94,9 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
                 economics = dict(profitability_state_view(opp) or {})
             except (AttributeError, KeyError, TypeError, ValueError):
                 economics = {}
-        economics.setdefault("expected_net_profit_usd", float(result.projected_realized_edge_usd or 0.0))
+        economics.setdefault(
+            "expected_net_profit_usd", float(result.projected_realized_edge_usd or 0.0)
+        )
         economics.setdefault("success_probability", float(result.confidence or 0.0))
         economics.setdefault("margin_ratio", float(meta.get("margin_ratio") or 0.0))
         return economics
@@ -93,35 +113,36 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
             "execution_allowed": bool(result.allowed),
         }
 
-    def evaluate(self, runtime: Any, opp: Any, *, decision: Any | None = None):
-        result = super().evaluate(runtime, opp, decision=decision)
-        details = dict(result.details or {})
-        capital_state = self._capital_state(runtime)
-        prime_state = self._prime_state(runtime)
-        wealth_goal_state = self._wealth_goal_state(runtime)
+    def _institutional_record(
+        self, runtime: Any, opp: Any, result: Any
+    ) -> dict[str, Any]:
         meta, capture_metadata, endpoint = self._capture_context(opp)
-        economics = self._economics(opp, result, meta)
         contract = build_institutional_sizing_contract(
             requested_notional_usd=float(result.requested_notional_usd or 0.0),
             strategy_family=str(result.strategy_family or ""),
             capital_source=str(result.capital_source or ""),
-            capital_engine_state=capital_state,
-            treasury_state=capital_state,
-            internal_prime_state=prime_state,
-            wealth_goal_state=wealth_goal_state,
+            capital_engine_state=self._capital_state(runtime),
+            treasury_state=self._capital_state(runtime),
+            internal_prime_state=self._prime_state(runtime),
+            wealth_goal_state=self._wealth_goal_state(runtime),
             execution_capture=capture_metadata,
             latency_state=endpoint,
-            economics=economics,
+            economics=self._economics(opp, result, meta),
             governance=self._governance(runtime, result),
             settlement={},
         )
         valid, errors = contract.validate()
-        details["institutionalSizing"] = {
+        return {
             "contract": contract.to_dict(),
             "valid": bool(valid),
             "errors": list(errors),
             "behavior_change": "none",
         }
+
+    def evaluate(self, runtime: Any, opp: Any, *, decision: Any | None = None):
+        result = super().evaluate(runtime, opp, decision=decision)
+        details = dict(result.details or {})
+        details["institutionalSizing"] = self._institutional_record(runtime, opp, result)
         return type(result)(
             allowed=result.allowed,
             reason_code=result.reason_code,
