@@ -68,19 +68,36 @@ class CanonicalCapitalWriteService(CapitalWriteService):
         opportunity_id = _text(context.get("opportunity_id") or lineage.get("opportunity_id"))
         resolved_route_id = _text(context.get("route_id") or route_id or lineage.get("route_id"))
         action = _text(context.get("action") or lineage.get("action"))
-        outcome_id = _outcome_id(
-            {
+        outcome_id = _text(context.get("outcome_id"))
+        if not outcome_id and bool(outcome_truth_verified):
+            outcome_id = _outcome_id(
+                {
+                    "decision_id": decision_id,
+                    "correlation_id": correlation_id,
+                    "sizing_id": sizing_id,
+                    "execution_id": execution_id,
+                    "opportunity_id": opportunity_id,
+                    "route_id": resolved_route_id,
+                    "action": action,
+                },
+                receipt_id,
+            )
+        if bool(outcome_truth_verified):
+            required = {
                 "decision_id": decision_id,
                 "correlation_id": correlation_id,
                 "sizing_id": sizing_id,
                 "execution_id": execution_id,
+                "receipt_id": _text(receipt_id),
+                "outcome_id": outcome_id,
                 "opportunity_id": opportunity_id,
                 "route_id": resolved_route_id,
                 "action": action,
-                "outcome_id": context.get("outcome_id"),
-            },
-            receipt_id,
-        )
+            }
+            missing = [key for key, value in required.items() if not _text(value)]
+            if missing:
+                raise ValueError(f"canonical_settlement_lineage_incomplete:{','.join(missing)}")
+
         canonical_lineage = {
             "decision_id": decision_id,
             "correlation_id": correlation_id,
