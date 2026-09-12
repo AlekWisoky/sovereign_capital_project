@@ -59,8 +59,15 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
         "canonical_lineage": {
             "decision_id": identity.decision_id,
             "correlation_id": identity.correlation_id,
+            "sizing_id": "sizing-1",
+            "execution_id": "execution-1",
+            "receipt_id": "receipt-1",
+            "outcome_id": "outcome-1",
             "operator_intent": intent,
             "intent_fingerprint": "intent-fp-1",
+            "opportunity_id": opp.id,
+            "route_id": opp.route_id,
+            "action": "flash_arb",
         },
     }
     outcome = {
@@ -75,6 +82,14 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
         "route_id": opp.route_id,
         "tx_hash": "0xabc",
         "truth_verified": True,
+        "decision_id": identity.decision_id,
+        "correlation_id": identity.correlation_id,
+        "sizing_id": "sizing-1",
+        "execution_id": "execution-1",
+        "receipt_id": "receipt-1",
+        "outcome_id": "outcome-1",
+        "opportunity_id": opp.id,
+        "action": "flash_arb",
     }
 
     result = _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
