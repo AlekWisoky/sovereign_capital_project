@@ -35,7 +35,7 @@ class BoundExecutionQuote:
         }
 
 
-def _lineage(opp: Any, decision: Any | None) -> tuple[str, str, float]:
+def _lineage(opp: Any, decision: Any | None) -> tuple[str, str, str, float]:
     meta = getattr(opp, "meta", None)
     meta = meta if isinstance(meta, dict) else {}
     lineage = meta.get("canonical_lineage") if isinstance(meta.get("canonical_lineage"), dict) else {}
@@ -77,7 +77,7 @@ def _lineage(opp: Any, decision: Any | None) -> tuple[str, str, float]:
         raise ExecutionQuoteBindingError("canonical_decision_lineage_required")
     if approved_usd <= 0:
         raise ExecutionQuoteBindingError("approved_notional_usd_invalid")
-    return sizing_id, decision_id, approved_usd
+    return sizing_id, decision_id, correlation_id, approved_usd
 
 
 async def bind_final_quote_to_execution(
@@ -101,17 +101,14 @@ async def bind_final_quote_to_execution(
     non-institutional paths retain their existing behavior. Once sizing lineage
     is present, missing quote/cache/requote truth fails closed.
     """
-    sizing_id, decision_id, approved_usd = _lineage(opp, decision)
+    sizing_id, decision_id, correlation_id, approved_usd = _lineage(opp, decision)
     if decision is not None:
         decision_meta = getattr(decision, "metadata", None)
         if isinstance(decision_meta, dict):
             if str(decision_meta.get("canonical_decision_id") or decision_id) != decision_id:
                 raise ExecutionQuoteBindingError("decision_lineage_conflict")
-            if str(decision_meta.get("correlation_id") or "") and str(
-                decision_meta.get("correlation_id")
-            ) != str(
-                (getattr(opp, "meta", {}) or {}).get("canonical_lineage", {}).get("correlation_id", "")
-            ):
+            decision_correlation = str(decision_meta.get("correlation_id") or "")
+            if decision_correlation and decision_correlation != correlation_id:
                 raise ExecutionQuoteBindingError("correlation_lineage_conflict")
 
     if cache is None:
@@ -124,9 +121,7 @@ async def bind_final_quote_to_execution(
         decision=decision,
         block_number=int(block_number),
     )
-    if quote.decision_id != decision_id or quote.correlation_id != str(
-        (getattr(opp, "meta", {}) or {}).get("canonical_lineage", {}).get("correlation_id", "")
-    ):
+    if quote.decision_id != decision_id or quote.correlation_id != correlation_id:
         raise ExecutionQuoteBindingError("quote_lineage_conflict")
 
     raw_amount = usd_notional_to_raw_units(
@@ -158,24 +153,45 @@ async def bind_final_quote_to_execution(
     if actual_raw != raw_amount:
         raise ExecutionQuoteBindingError("quote_bound_raw_amount_not_applied")
 
-    meta = getattr(opp, "meta", None)
-    if isinstance(meta, dict):
-        binding = BoundExecutionQuote(
-            quote=quote,
-            sizing_id=sizing_id,
-            approved_notional_usd=approved_usd,
-            raw_amount=raw_amount,
-        )
-        meta["b4_execution_quote"] = binding.to_dict()
-        lineage = meta.get("canonical_lineage")
-        if isinstance(lineage, dict):
-            lineage["quote_id"] = quote.quote_id
-            lineage["sizing_id"] = sizing_id
-            lineage["decision_id"] = decision_id
-            lineage["correlation_id"] = quote.correlation_id
-    return BoundExecutionQuote(
+    binding = BoundExecutionQuote(
         quote=quote,
         sizing_id=sizing_id,
         approved_notional_usd=approved_usd,
         raw_amount=raw_amount,
     )
+    binding_payload = binding.to_dict()
+
+    meta = getattr(opp, "meta", None)
+    if isinstance(meta, dict):
+        meta["b4_execution_quote"] = binding_payload
+        lineage = meta.get("canonical_lineage")
+        if isinstance(lineage, dict):
+            lineage["quote_id"] = quote.quote_id
+            lineage["raw_amount"] = raw_amount
+            lineage["sizing_id"] = sizing_id
+            lineage["decision_id"] = decision_id
+            lineage["correlation_id"] = correlation_id
+
+    if decision is not None:
+        decision_meta = getattr(decision, "metadata", None)
+        if isinstance(decision_meta, dict):
+            execution_lineage = decision_meta.get("execution_lineage")
+            if not isinstance(execution_lineage, dict):
+                execution_lineage = {}
+            execution_lineage.update(
+                {
+                    "decision_id": decision_id,
+                    "correlation_id": correlation_id,
+                    "sizing_id": sizing_id,
+                    "quote_id": quote.quote_id,
+                    "raw_amount": raw_amount,
+                }
+            )
+            decision_meta["execution_lineage"] = execution_lineage
+            decision_meta["quote_id"] = quote.quote_id
+            try:
+                decision.metadata = decision_meta
+            except (AttributeError, TypeError) as exc:
+                raise ExecutionQuoteBindingError("decision_metadata_not_mutable") from exc
+
+    return binding
