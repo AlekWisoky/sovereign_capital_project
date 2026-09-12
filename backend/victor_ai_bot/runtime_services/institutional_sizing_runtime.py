@@ -140,10 +140,10 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
             "behavior_change": "none",
         }
 
-    def evaluate(self, runtime: Any, opp: Any, *, decision: Any | None = None):
-        result = super().evaluate(runtime, opp, decision=decision)
+    @staticmethod
+    def _decorate_result(result: Any, record: dict[str, Any]) -> Any:
         details = dict(result.details or {})
-        details["institutionalSizing"] = self._institutional_record(runtime, opp, result)
+        details["institutionalSizing"] = record
         return type(result)(
             allowed=result.allowed,
             reason_code=result.reason_code,
@@ -153,4 +153,10 @@ class InstitutionalSizingAdmissionService(CapitalAdmissionService):
             projected_realized_edge_usd=result.projected_realized_edge_usd,
             confidence=result.confidence,
             details=details,
+        )
+
+    def evaluate(self, runtime: Any, opp: Any, *, decision: Any | None = None):
+        result = super().evaluate(runtime, opp, decision=decision)
+        return self._decorate_result(
+            result, self._institutional_record(runtime, opp, result)
         )
