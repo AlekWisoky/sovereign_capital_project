@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
-import math
 from typing import Any, Mapping
 
 
@@ -9,24 +8,44 @@ class QuoteUnitSizingError(ValueError):
     """Raised when a final quote cannot safely produce raw asset units."""
 
 
-def _decimal(value: Any) -> Decimal:
+def _decimal(value: Any, error: str = "quote_value_invalid") -> Decimal:
     try:
         number = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
-        raise QuoteUnitSizingError("quote_value_invalid") from exc
+        raise QuoteUnitSizingError(error) from exc
     if not number.is_finite():
         raise QuoteUnitSizingError("quote_value_non_finite")
     return number
 
 
 def _decimals(value: Any) -> int:
-    try:
-        decimals = int(value)
-    except (TypeError, ValueError) as exc:
-        raise QuoteUnitSizingError("asset_decimals_invalid") from exc
-    if decimals < 0 or decimals > 255:
+    decimals = _decimal(value, "asset_decimals_invalid")
+    if decimals != decimals.to_integral_value() or not 0 <= decimals <= 255:
         raise QuoteUnitSizingError("asset_decimals_invalid")
-    return decimals
+    return int(decimals)
+
+
+def _positive_decimal(value: Any, error: str) -> Decimal:
+    number = _decimal(value)
+    if number <= 0:
+        raise QuoteUnitSizingError(error)
+    return number
+
+
+def _nonnegative_decimal(value: Any, error: str) -> Decimal:
+    number = _decimal(value)
+    if number < 0:
+        raise QuoteUnitSizingError(error)
+    return number
+
+
+def _raw_units(notional: Decimal, price: Decimal, decimals: int) -> int:
+    units = ((notional / price) * (Decimal(10) ** decimals)).to_integral_value(
+        rounding=ROUND_FLOOR
+    )
+    if units < 0:
+        raise QuoteUnitSizingError("raw_units_negative")
+    return int(units)
 
 
 def usd_notional_to_raw_units(
@@ -42,23 +61,9 @@ def usd_notional_to_raw_units(
     approved economic notional at the supplied quote.
     """
     decimals = _decimals(asset_decimals)
-    notional = _decimal(usd_notional)
-    price = _decimal(asset_price_usd)
-    if notional < 0:
-        raise QuoteUnitSizingError("usd_notional_negative")
-    if price <= 0:
-        raise QuoteUnitSizingError("asset_price_usd_invalid")
-    if notional == 0:
-        return 0
-
-    raw = (notional / price) * (Decimal(10) ** decimals)
-    units = raw.to_integral_value(rounding=ROUND_FLOOR)
-    if units < 0:
-        raise QuoteUnitSizingError("raw_units_negative")
-    try:
-        return int(units)
-    except (OverflowError, ValueError) as exc:
-        raise QuoteUnitSizingError("raw_units_invalid") from exc
+    notional = _nonnegative_decimal(usd_notional, "usd_notional_negative")
+    price = _positive_decimal(asset_price_usd, "asset_price_usd_invalid")
+    return _raw_units(notional, price, decimals)
 
 
 def raw_units_to_usd_notional(
@@ -75,11 +80,9 @@ def raw_units_to_usd_notional(
         raise QuoteUnitSizingError("raw_units_invalid") from exc
     if units < 0:
         raise QuoteUnitSizingError("raw_units_negative")
-    price = _decimal(asset_price_usd)
-    if price <= 0:
-        raise QuoteUnitSizingError("asset_price_usd_invalid")
+    price = _positive_decimal(asset_price_usd, "asset_price_usd_invalid")
     value = (Decimal(units) * price) / (Decimal(10) ** decimals)
-    if not value.is_finite() or value < 0:
+    if value < 0:
         raise QuoteUnitSizingError("quoted_usd_value_invalid")
     return float(value)
 
@@ -97,28 +100,37 @@ def quote_context_from_mapping(quote: Mapping[str, Any] | None) -> dict[str, Any
     }
 
 
+def _quote_price_error(price: Any) -> str | None:
+    if price is None:
+        return "asset_price_usd_missing"
+    try:
+        number = float(price)
+    except (TypeError, ValueError):
+        return "asset_price_usd_invalid"
+    if number <= 0 or not __import__("math").isfinite(number):
+        return "asset_price_usd_invalid"
+    return None
+
+
+def _quote_decimals_error(decimals: Any) -> str | None:
+    if decimals is None:
+        return "asset_decimals_missing"
+    try:
+        value = int(decimals)
+    except (TypeError, ValueError):
+        return "asset_decimals_invalid"
+    return None if 0 <= value <= 255 else "asset_decimals_invalid"
+
+
 def validate_quote_context(quote: Mapping[str, Any] | None) -> tuple[bool, tuple[str, ...]]:
     """Validate the minimum quote contract required for raw-unit conversion."""
     normalized = quote_context_from_mapping(quote)
-    errors: list[str] = []
-    price = normalized.get("asset_price_usd")
-    decimals = normalized.get("asset_decimals")
-    if price is None:
-        errors.append("asset_price_usd_missing")
-    else:
-        try:
-            value = float(price)
-            if not math.isfinite(value) or value <= 0:
-                errors.append("asset_price_usd_invalid")
-        except (TypeError, ValueError):
-            errors.append("asset_price_usd_invalid")
-    if decimals is None:
-        errors.append("asset_decimals_missing")
-    else:
-        try:
-            value = int(decimals)
-            if value < 0 or value > 255:
-                errors.append("asset_decimals_invalid")
-        except (TypeError, ValueError):
-            errors.append("asset_decimals_invalid")
-    return (not errors, tuple(errors))
+    errors = tuple(
+        error
+        for error in (
+            _quote_price_error(normalized.get("asset_price_usd")),
+            _quote_decimals_error(normalized.get("asset_decimals")),
+        )
+        if error is not None
+    )
+    return (not errors, errors)
