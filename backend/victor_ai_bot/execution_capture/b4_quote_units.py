@@ -55,12 +55,7 @@ def usd_notional_to_raw_units(
     asset_price_usd: float | int | str,
     asset_decimals: int,
 ) -> int:
-    """Convert a final quoted USD notional to conservative raw asset units.
-
-    This is a pure quote-bound conversion. It neither fetches prices nor grants
-    execution authority. Flooring ensures the raw amount cannot exceed the
-    approved economic notional at the supplied quote.
-    """
+    """Convert a final quoted USD notional to conservative raw asset units."""
     decimals = _decimals(asset_decimals)
     notional = _nonnegative_decimal(usd_notional, "usd_notional_negative")
     price = _positive_decimal(asset_price_usd, "asset_price_usd_invalid")
@@ -123,15 +118,19 @@ def _quote_decimals_error(decimals: Any) -> str | None:
     return None if 0 <= value <= 255 else "asset_decimals_invalid"
 
 
+def _quote_validation_errors(quote: Mapping[str, Any] | None) -> tuple[str, ...]:
+    normalized = quote_context_from_mapping(quote)
+    errors = []
+    price_error = _quote_price_error(normalized.get("asset_price_usd"))
+    if price_error is not None:
+        errors.append(price_error)
+    decimals_error = _quote_decimals_error(normalized.get("asset_decimals"))
+    if decimals_error is not None:
+        errors.append(decimals_error)
+    return tuple(errors)
+
+
 def validate_quote_context(quote: Mapping[str, Any] | None) -> tuple[bool, tuple[str, ...]]:
     """Validate the minimum quote contract required for raw-unit conversion."""
-    normalized = quote_context_from_mapping(quote)
-    errors = tuple(
-        error
-        for error in (
-            _quote_price_error(normalized.get("asset_price_usd")),
-            _quote_decimals_error(normalized.get("asset_decimals")),
-        )
-        if error is not None
-    )
+    errors = _quote_validation_errors(quote)
     return (not errors, errors)
