@@ -4,12 +4,22 @@ import hashlib
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
 class DecisionExecutionIdentity:
     """One canonical identity carried from decision through settlement."""
 
+    decision_id: str
+    correlation_id: str
+
+
+@dataclass(frozen=True)
+class ExecutionIdentity:
+    """One identity for a concrete execution attempt."""
+
+    execution_id: str
     decision_id: str
     correlation_id: str
 
@@ -143,15 +153,54 @@ def attach_sizing_identity(
     return sid
 
 
-def lineage_from_opportunity(opp: Any) -> dict[str, str]:
+def create_execution_identity(decision: Any, opp: Any) -> ExecutionIdentity:
+    """Mint one execution-attempt ID from existing canonical decision lineage."""
+    decision_meta = _dict(getattr(decision, "metadata", None))
     meta = _dict(getattr(opp, "meta", None))
-    brain = _dict(meta.get("brain"))
-    lineage = _dict(meta.get("canonical_lineage"))
-    result = {
-        "decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")),
-        "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id")),
-    }
+    brain = _dict(meta.get("brain")); lineage = _dict(meta.get("canonical_lineage"))
+    decision_id = _text(decision_meta.get("canonical_decision_id") or decision_meta.get("decision_id") or brain.get("canonical_decision_id") or lineage.get("decision_id"))
+    correlation_id = _text(decision_meta.get("correlation_id") or brain.get("correlation_id") or lineage.get("correlation_id"))
+    if not decision_id or not correlation_id:
+        raise ValueError("canonical_decision_lineage_required_for_execution_identity")
+    return ExecutionIdentity(execution_id=f"execution_{uuid4().hex}", decision_id=decision_id, correlation_id=correlation_id)
+
+
+def attach_execution_identity(identity: ExecutionIdentity, *, decision: Any, opp: Any, result: Any | None = None) -> None:
+    """Propagate one execution identity without replacing canonical decision identity."""
+    decision_meta = _dict(getattr(decision, "metadata", None))
+    decision_meta.update({"execution_id": identity.execution_id, "canonical_decision_id": identity.decision_id, "correlation_id": identity.correlation_id})
+    execution_lineage = _dict(decision_meta.get("execution_lineage")); execution_lineage.update({"decision_id": identity.decision_id, "correlation_id": identity.correlation_id, "execution_id": identity.execution_id})
+    sizing_id = _text(decision_meta.get("sizing_id"))
+    if sizing_id: execution_lineage["sizing_id"] = sizing_id
+    decision_meta["execution_lineage"] = execution_lineage
+    try: decision.metadata = decision_meta
+    except (AttributeError, TypeError): pass
+
+    meta = _dict(getattr(opp, "meta", None)); brain = _dict(meta.get("brain")); brain.update({"execution_id": identity.execution_id, "canonical_decision_id": identity.decision_id, "correlation_id": identity.correlation_id})
+    opp_lineage = _dict(meta.get("canonical_lineage")); opp_lineage.update({"decision_id": identity.decision_id, "correlation_id": identity.correlation_id, "execution_id": identity.execution_id})
+    sizing_id = _text(brain.get("sizing_id") or opp_lineage.get("sizing_id") or meta.get("sizing_id"))
+    if sizing_id: opp_lineage["sizing_id"] = sizing_id
+    meta["brain"] = brain; meta["canonical_lineage"] = opp_lineage
+    pending_context = _dict(meta.get("pending_context")); pending_lineage = {"decision_id": identity.decision_id, "correlation_id": identity.correlation_id, "execution_id": identity.execution_id}
+    if sizing_id: pending_lineage["sizing_id"] = sizing_id
+    pending_context["execution_lineage"] = pending_lineage; meta["pending_context"] = pending_context
+    try: opp.meta = meta
+    except (AttributeError, TypeError): pass
+
+    if result is not None:
+        plan = _dict(getattr(result, "plan", None)); plan.update({"execution_id": identity.execution_id, "canonical_decision_id": identity.decision_id, "correlation_id": identity.correlation_id})
+        plan_lineage = _dict(plan.get("execution_lineage")); plan_lineage.update({"decision_id": identity.decision_id, "correlation_id": identity.correlation_id, "execution_id": identity.execution_id})
+        if sizing_id: plan_lineage["sizing_id"] = sizing_id
+        plan["execution_lineage"] = plan_lineage
+        try: result.plan = plan
+        except (AttributeError, TypeError): pass
+
+
+def lineage_from_opportunity(opp: Any) -> dict[str, str]:
+    meta = _dict(getattr(opp, "meta", None)); brain = _dict(meta.get("brain")); lineage = _dict(meta.get("canonical_lineage"))
+    result = {"decision_id": _text(brain.get("canonical_decision_id") or lineage.get("decision_id")), "correlation_id": _text(brain.get("correlation_id") or lineage.get("correlation_id"))}
     sizing_id = _text(brain.get("sizing_id") or lineage.get("sizing_id") or meta.get("sizing_id"))
-    if sizing_id:
-        result["sizing_id"] = sizing_id
+    if sizing_id: result["sizing_id"] = sizing_id
+    execution_id = _text(brain.get("execution_id") or lineage.get("execution_id"))
+    if execution_id: result["execution_id"] = execution_id
     return result
