@@ -50,6 +50,7 @@ from .state_summary_service import StateSummaryService
 from .treasury_service import TreasuryService
 from .wealth_goal_service import WealthGoalService
 from .capital_admission_service import CapitalAdmissionService
+from .institutional_sizing_runtime import InstitutionalSizingAdmissionService
 from .withdraw_all_service import WithdrawAllService
 
 # Compatibility alias retained for constructor tests and older integrations.
@@ -97,6 +98,10 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._replay_service = ReplayService()
     runtime._state_summary_service = StateSummaryService()
     runtime._auxiliary_state_service = AuxiliaryStateService()
+    runtime._capital_admission_service = InstitutionalSizingAdmissionService(
+        auxiliary_state=runtime._auxiliary_state_service,
+        treasury_service=runtime._treasury_service,
+    )
     runtime._operator_summary_service = OperatorSummaryService(
         state_summary=runtime._state_summary_service
     )
