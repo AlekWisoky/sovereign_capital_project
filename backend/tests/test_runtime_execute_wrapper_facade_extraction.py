@@ -57,6 +57,18 @@ class _ExecutionService:
         runtime.metrics.send_mode = old_send_mode
 
 
+def _opportunity(route_id: str):
+    return SimpleNamespace(
+        route_id=route_id,
+        meta={
+            "brain": {
+                "canonical_decision_id": "decision-test",
+                "correlation_id": "correlation-test",
+            }
+        },
+    )
+
+
 class _Runtime(RuntimeExecuteWrapperFacade):
     def __init__(self):
         self.cfg = SimpleNamespace(execution=SimpleNamespace(gas_mode='fast', send_mode='private'))
@@ -86,8 +98,8 @@ def test_runtime_bundle_inherits_execute_wrapper_facade():
 @pytest.mark.asyncio
 async def test_run_prepared_auto_execution_preserves_wrapper_and_bookkeeping(monkeypatch):
     runtime = _Runtime()
-    opp = SimpleNamespace(route_id='r1')
-    decision = SimpleNamespace()
+    opp = _opportunity('r1')
+    decision = SimpleNamespace(metadata={'decision_id': 'decision-test', 'correlation_id': 'correlation-test'})
     prep = AutoExecutionDispatchContext(
         opportunity=opp,
         force_dry=False,
@@ -138,7 +150,7 @@ async def test_run_prepared_auto_execution_preserves_wrapper_and_bookkeeping(mon
 async def test_run_prepared_auto_execution_without_service_records_exec_and_updates_submitted_block(monkeypatch):
     runtime = _Runtime()
     runtime._execution_service = None
-    opp = SimpleNamespace(route_id='r2')
+    opp = _opportunity('r2')
     prep = AutoExecutionDispatchContext(
         opportunity=opp,
         force_dry=True,
@@ -171,7 +183,7 @@ async def test_run_prepared_auto_execution_without_service_records_exec_and_upda
 async def test_run_prepared_auto_execution_respects_runtime_legacy_compat_patch_seam(monkeypatch):
     runtime = _Runtime()
     runtime._execution_service = None
-    opp = SimpleNamespace(route_id='compat')
+    opp = _opportunity('compat')
     prep = AutoExecutionDispatchContext(
         opportunity=opp,
         force_dry=False,
