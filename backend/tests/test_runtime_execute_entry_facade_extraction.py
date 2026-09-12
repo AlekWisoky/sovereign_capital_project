@@ -8,6 +8,7 @@ from victor_ai_bot.execution import ExecResult
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services.execution_service import (
     AutoTradeAdmissionResult,
+    ExecutionService,
     GovernancePreExecuteResult,
     SuperstructurePreExecuteResult,
 )
@@ -253,11 +254,21 @@ async def test_execute_auto_does_not_swallow_unexpected_execution_exception(monk
         )
 
 
-class _GovernanceDeniedExecutionService:
-    """Allow every preflight stage until the real dispatch governance seam blocks."""
+class _GovernanceStub:
+    def generate_intent(self, **kwargs):
+        del kwargs
+        return SimpleNamespace(intent_id='intent-governance-denied')
 
-    def handle_auto_trade_admission(self, runtime, opp, decision, *, force_dry_run):
-        del runtime, decision, force_dry_run
+    def governance_check(self, **kwargs):
+        del kwargs
+        return {'ok': False, 'reason': 'test_denied', 'outcome': 'blocked'}
+
+
+class _GovernanceDeniedExecutionService(ExecutionService):
+    """Allow admission/superstructure, then use the real governance handler to reject."""
+
+    def auto_trade_admission_gate(self, runtime, opp, decision=None):
+        del runtime, decision
         return AutoTradeAdmissionResult(True, 'ok', 'ok', opp, {}, {})
 
     def handle_superstructure_pre_execute(self, runtime, opp, decision, *, force_dry_run):
@@ -268,19 +279,6 @@ class _GovernanceDeniedExecutionService:
             super_enabled=False,
             old_gas_mode='standard',
             old_send_mode='public',
-        )
-
-    def handle_governance_pre_execute(self, runtime, opp, bn, decision, *, force_dry_run):
-        del runtime, bn, decision
-        return GovernancePreExecuteResult(
-            opportunity=opp,
-            blocked_result=ExecResult(
-                False,
-                bool(force_dry_run),
-                'governance_rejected:test_denied',
-                attempted=False,
-                submitted=False,
-            ),
         )
 
 
@@ -298,10 +296,15 @@ async def test_execute_auto_governance_rejection_stops_all_downstream_authority(
             dry_run=False,
             gas_mode='standard',
             send_mode='public',
-        )
+            governance=SimpleNamespace(enforce_on_auto=True),
+            consensus=SimpleNamespace(enforce_on_auto=True),
+            daily_gas_budget_wei='0',
+        ),
+        safety=SimpleNamespace(slippage_bps=50),
     )
     runtime.metrics = SimpleNamespace(gas_mode='standard', send_mode='public')
     runtime._execution_service = _GovernanceDeniedExecutionService()
+    runtime._gov = _GovernanceStub()
     runtime.rpc_manager = SimpleNamespace(
         best_send=lambda: 'send-url',
         best_read=lambda: 'read-url',
@@ -337,12 +340,16 @@ async def test_execute_auto_governance_rejection_stops_all_downstream_authority(
         fail_if_execution_reached,
     )
 
-    opportunity = SimpleNamespace(id='opp-governance-denied', route_id='route-1')
+    opportunity = SimpleNamespace(id='opp-governance-denied', route_id='route-1', meta={})
     decision = SimpleNamespace(
         decision_id='decision-governance-denied',
         correlation_id='corr-governance-denied',
         action='trade',
         capital_authority='internal_prime',
+        size_mult=1.0,
+        borrow_mult=1.0,
+        gas_mode='standard',
+        portfolio=['opp-governance-denied'],
     )
 
     await RuntimeBundle._execute_auto(runtime, opportunity, 123, decision)
@@ -355,7 +362,7 @@ async def test_execute_auto_governance_rejection_stops_all_downstream_authority(
     assert result.ok is False
     assert result.attempted is False
     assert result.submitted is False
-    assert result.reason == 'governance_rejected:test_denied'
+    assert result.reason == 'governance_rejected:test_denied:blocked'
 
     assert wrapper_calls == []
     assert runtime.execution_id is None
