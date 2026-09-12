@@ -9,7 +9,6 @@ from typing import Any, Mapping
 from .b4_quote_units import (
     QuoteUnitSizingError,
     quote_context_from_mapping,
-    raw_units_to_usd_notional,
     usd_notional_to_raw_units,
     validate_quote_context,
 )
@@ -43,15 +42,12 @@ def _fingerprint(
     contract: InstitutionalSizingContract,
     approved: float,
     constraints: tuple[str, ...],
-    raw_units: int | None = None,
-    quote: Mapping[str, Any] | None = None,
 ) -> str:
+    """Fingerprint the canonical USD sizing decision, not execution-time quote units."""
     payload: dict[str, Any] = {
         "contract": contract.to_dict(),
         "approved_notional_usd": round(approved, 8),
         "constraints_applied": constraints,
-        "approved_borrow_amount_raw": raw_units,
-        "quote": quote_context_from_mapping(quote),
     }
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), default=str
@@ -64,13 +60,13 @@ def calculate_institutional_size(
     *,
     final_quote: Mapping[str, Any] | None = None,
 ) -> SizingDecision:
-    """Calculate approved notional and, when quoted, the final raw-unit amount.
+    """Calculate USD sizing and optionally bind it to a final execution quote.
 
-    The USD constraint calculation remains deterministic and authority-free.
-    Raw-unit conversion is permitted only with an explicit final quote carrying
-    positive asset price and token decimals. The conversion floors raw units,
-    then re-values those units at the same quote so a raw-unit hard cap cannot
-    silently exceed the approved economic notional.
+    The canonical ``sizing_id`` identifies the already-authoritative USD sizing
+    decision. Execution-time quote data is deliberately excluded from that
+    identity so a requote cannot manufacture a second sizing identity after the
+    canonical decision boundary. The quote only resolves the exact raw-unit
+    amount used by execution.
     """
     valid, errors = contract.validate()
     if not valid:
@@ -80,7 +76,7 @@ def calculate_institutional_size(
     if requested <= 0.0:
         constraints = ("requested_notional",)
         return SizingDecision(
-            sizing_id=_fingerprint(contract, 0.0, constraints, quote=final_quote),
+            sizing_id=_fingerprint(contract, 0.0, constraints),
             approved_notional_usd=0.0,
             approved_borrow_amount_raw=None,
             constraints_applied=constraints,
@@ -161,7 +157,8 @@ def calculate_institutional_size(
         caps.append(("execution_evidence", 0.0))
 
     approved = max(0.0, min(value for _, value in caps))
-    constraints = tuple(label for label, _ in caps) + constraints_without_cap
+    canonical_constraints = tuple(label for label, _ in caps) + constraints_without_cap
+    constraints = canonical_constraints
     downsize_reasons = tuple(
         label for label, value in caps if value < requested - 1e-9
     )
@@ -183,11 +180,6 @@ def calculate_institutional_size(
                 raw_units = max_raw
                 constraints = constraints + ("max_borrow_amount_raw",)
                 downsize_reasons = downsize_reasons + ("max_borrow_amount_raw",)
-                approved = raw_units_to_usd_notional(
-                    raw_units,
-                    asset_price_usd=quote["asset_price_usd"],
-                    asset_decimals=int(quote["asset_decimals"]),
-                )
         except QuoteUnitSizingError as exc:
             raise ValueError(f"final_quote_invalid:{exc}") from exc
 
@@ -196,13 +188,7 @@ def calculate_institutional_size(
         utilization = approved / float(capital.deployable_usd)
 
     return SizingDecision(
-        sizing_id=_fingerprint(
-            contract,
-            approved,
-            constraints,
-            raw_units=raw_units,
-            quote=final_quote,
-        ),
+        sizing_id=_fingerprint(contract, approved, canonical_constraints),
         approved_notional_usd=round(approved, 8),
         approved_borrow_amount_raw=raw_units,
         constraints_applied=constraints,
