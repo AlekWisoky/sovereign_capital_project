@@ -118,6 +118,39 @@ def ensure_decision_identity(
     return DecisionExecutionIdentity(decision_id=decision_id, correlation_id=correlation_id)
 
 
+def _require_sizing_metadata(opp: Any) -> dict[str, Any]:
+    meta = getattr(opp, "meta", None)
+    if isinstance(meta, dict):
+        return meta
+    meta = {}
+    try:
+        opp.meta = meta
+    except (AttributeError, TypeError) as exc:
+        raise ValueError("opportunity_metadata_unavailable") from exc
+    return meta
+
+
+def _sizing_lineage_parts(meta: dict[str, Any], decision: Any | None) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
+    brain = _dict(meta.get("brain"))
+    lineage = _dict(meta.get("canonical_lineage"))
+    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
+    existing = _text(
+        brain.get("sizing_id") or lineage.get("sizing_id") or decision_meta.get("sizing_id")
+    )
+    return brain, lineage, decision_meta, existing
+
+
+def _attach_decision_sizing(decision: Any, decision_meta: dict[str, Any], sizing_id: str) -> None:
+    decision_meta["sizing_id"] = sizing_id
+    decision_lineage = _dict(decision_meta.get("decision_lineage"))
+    decision_lineage["sizing_id"] = sizing_id
+    decision_meta["decision_lineage"] = decision_lineage
+    try:
+        decision.metadata = decision_meta
+    except (AttributeError, TypeError):
+        pass
+
+
 def attach_sizing_identity(
     opp: Any,
     decision: Any | None,
@@ -129,27 +162,24 @@ def attach_sizing_identity(
     sid = _text(sizing_id)
     if not sid:
         raise ValueError("sizing_id_missing")
-    meta = getattr(opp, "meta", None)
-    if not isinstance(meta, dict):
-        meta = {}
-        try:
-            opp.meta = meta
-        except (AttributeError, TypeError):
-            raise ValueError("opportunity_metadata_unavailable")
-    brain = _dict(meta.get("brain")); lineage = _dict(meta.get("canonical_lineage"))
-    decision_meta = _dict(getattr(decision, "metadata", None)) if decision is not None else {}
-    existing = _text(brain.get("sizing_id") or lineage.get("sizing_id") or decision_meta.get("sizing_id"))
+
+    meta = _require_sizing_metadata(opp)
+    brain, lineage, decision_meta, existing = _sizing_lineage_parts(meta, decision)
     if existing and existing != sid:
         raise ValueError("sizing_id_lineage_conflict")
-    lineage["sizing_id"] = sid; brain["sizing_id"] = sid; meta["canonical_lineage"] = lineage; meta["brain"] = brain; meta["sizing_id"] = sid
+
+    lineage["sizing_id"] = sid
+    brain["sizing_id"] = sid
+    meta["canonical_lineage"] = lineage
+    meta["brain"] = brain
+    meta["sizing_id"] = sid
     if approved_notional_usd is not None:
-        try: lineage["approved_notional_usd"] = float(approved_notional_usd)
-        except (TypeError, ValueError): pass
+        try:
+            lineage["approved_notional_usd"] = float(approved_notional_usd)
+        except (TypeError, ValueError):
+            pass
     if decision is not None:
-        decision_meta["sizing_id"] = sid
-        decision_lineage = _dict(decision_meta.get("decision_lineage")); decision_lineage["sizing_id"] = sid; decision_meta["decision_lineage"] = decision_lineage
-        try: decision.metadata = decision_meta
-        except (AttributeError, TypeError): pass
+        _attach_decision_sizing(decision, decision_meta, sid)
     return sid
 
 
