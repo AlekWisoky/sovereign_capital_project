@@ -291,7 +291,7 @@ def test_institutional_sizing_kernel_uses_internal_prime_remaining_capacity():
                 freshness="fresh",
                 authority_id="cap-auth-2",
                 deployable_usd=8_000_000.0,
-                drawdown_buffer_usd=8_000_000.0,
+                drawdown_buffer_usd=0.0,
                 prime_available=True,
                 prime_capacity_usd=1_000_000.0,
                 prime_utilization=0.20,
