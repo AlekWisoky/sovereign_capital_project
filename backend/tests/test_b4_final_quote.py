@@ -101,7 +101,11 @@ async def test_final_quote_resolves_decimals_and_direct_v3_usd_reference(monkeyp
 @pytest.mark.asyncio
 async def test_final_quote_rejects_cross_trade_lineage(monkeypatch):
     rpc = FakeRpc({"0xasset": 18, "0xusdc": 6})
-    monkeypatch.setattr(final_quote, "_resolve_v3_pool", lambda *a, **k: None)
+
+    async def pool(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
 
     opp = _opp()
     decision = _decision()
@@ -114,7 +118,11 @@ async def test_final_quote_rejects_cross_trade_lineage(monkeypatch):
 @pytest.mark.asyncio
 async def test_final_quote_fails_closed_without_v3_usd_reference(monkeypatch):
     rpc = FakeRpc({"0xasset": 18, "0xusdc": 6})
-    monkeypatch.setattr(final_quote, "_resolve_v3_pool", lambda *a, **k: None)
+
+    async def pool(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
 
     with pytest.raises(FinalQuoteError, match="v3_usd_reference_pool_unavailable"):
         await produce_final_quote(rpc, _cfg(), _opp(), decision=_decision(), block_number=2)
