@@ -89,31 +89,41 @@ async def test_final_quote_resolves_decimals_and_direct_v3_usd_reference(monkeyp
     async def pool(request):
         return "0xpool" if request.fee == 3000 else None
 
-    async def usd_reference(*args, **kwargs):
-        return 2500.0
+    async def quote(*args, **kwargs):
+        return SimpleNamespace(amount_out=2_500_000_000, gas_estimate=100_000)
 
-    monkeypatch.setattr(final_quote, "_find_v3_pool", pool)
-    monkeypatch.setattr(final_quote, "_quote_v3", lambda *args, **kwargs: 1)
-    monkeypatch.setattr(final_quote, "_resolve_usd_reference", usd_reference)
+    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
+    monkeypatch.setattr(final_quote, "quote_exact_input_single", quote)
 
-    result = await produce_final_quote(
-        _quote_request(rpc, _cfg(), _opp(), _decision(), 123),
-    )
+    result = await produce_final_quote(_quote_request(rpc, _cfg(), _opp(), _decision(), 123456))
 
     assert result.asset_decimals == 18
+    assert result.stable_decimals == 6
     assert result.asset_price_usd == pytest.approx(2500.0)
-    assert result.usd_reference_source == "v3_direct"
-    assert result.quote_id
+    assert result.raw_amount == 10**18
+    assert result.stable_amount_out_raw == 2_500_000_000
+    assert result.block_number == 123456
+    assert result.decision_id == "decision-final-1"
+    assert result.correlation_id == "corr-final-1"
+    assert result.route_id == "route-final-1"
+    assert result.quote_id.startswith("quote-")
 
 
 @pytest.mark.asyncio
 async def test_final_quote_rejects_cross_trade_lineage(monkeypatch):
     rpc = FakeRpc({"0xasset": 18, "0xusdc": 6})
-    opp = _opp()
-    opp.meta["canonical_lineage"]["decision_id"] = "decision-other"
 
-    with pytest.raises(FinalQuoteError, match="canonical_decision_id"):
-        await produce_final_quote(_quote_request(rpc, _cfg(), opp, _decision(), 123))
+    async def pool(request):
+        return None
+
+    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
+
+    opp = _opp()
+    decision = _decision()
+    decision.metadata["canonical_decision_id"] = "different-decision"
+
+    with pytest.raises(FinalQuoteError, match="decision_lineage_conflict"):
+        await produce_final_quote(_quote_request(rpc, _cfg(), opp, decision, 1))
 
 
 @pytest.mark.asyncio
@@ -123,9 +133,10 @@ async def test_final_quote_fails_closed_without_v3_usd_reference(monkeypatch):
     async def pool(request):
         return None
 
-    monkeypatch.setattr(final_quote, "_find_v3_pool", pool)
-    with pytest.raises(FinalQuoteError, match="usd_reference"):
-        await produce_final_quote(_quote_request(rpc, _cfg(), _opp(), _decision(), 123))
+    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
+
+    with pytest.raises(FinalQuoteError, match="v3_usd_reference_pool_unavailable"):
+        await produce_final_quote(_quote_request(rpc, _cfg(), _opp(), _decision(), 2))
 
 
 def _contract(max_raw: int = 0):
