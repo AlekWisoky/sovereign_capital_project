@@ -44,9 +44,15 @@ def _materialized_capital_state(runtime: Any) -> Dict[str, Any]:
     if isinstance(state, dict) and state:
         return dict(state)
 
+    # Some runtime bundles retain the same persisted materialized payload under
+    # _capital_state. It is a state store, not a RuntimeStateFacade projection.
+    state = getattr(runtime, "_capital_state", None)
+    if isinstance(state, dict) and state:
+        return dict(state)
+
     # The persisted treasury state repository is the materialized fallback when the
-    # runtime bundle has not populated its convenience capital-engine cache. Never fall
-    # back to the RuntimeStateFacade: that projection can re-enter canonical capital truth.
+    # runtime bundle has not populated either convenience state cache. Never fall back
+    # to the RuntimeStateFacade: that projection can re-enter canonical capital truth.
     treasury_state = _materialized_treasury_state(runtime)
     capital_engine = treasury_state.get("capital_engine")
     if isinstance(capital_engine, dict) and capital_engine:
