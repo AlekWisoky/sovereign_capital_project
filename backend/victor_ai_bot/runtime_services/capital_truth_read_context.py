@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-import threading
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -47,61 +46,14 @@ class CapitalTruthReadContext:
         return dict(self.capital_surface.get("capital") or {})
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _settlement_marker(runtime: Any) -> str:
-    payload = getattr(runtime, "_last_settlement_sync", {}) or {}
-    if isinstance(payload, dict):
-        return str(
-            payload.get("transactionId")
-            or payload.get("receiptId")
-            or payload.get("txHash")
-            or ""
-        )
-    return ""
-
-
-def _scope_key(runtime: Any) -> tuple[Any, ...]:
-    thread_id = threading.get_ident()
-    try:
-        task = asyncio.current_task()
-    except RuntimeError:
-        task = None
-    task_id = id(task) if task is not None else 0
-    metrics = getattr(runtime, "metrics", None)
-    bankroll = getattr(runtime, "_bankroll", None)
-    bankroll_state = getattr(bankroll, "state", None)
-    return (
-        thread_id,
-        task_id,
-        _safe_int(getattr(metrics, "last_block", 0)),
-        _safe_int(getattr(bankroll_state, "updated_ts_ms", 0)),
-        _safe_int(getattr(bankroll_state, "profit_updated_ts_ms", 0)),
-        _safe_int(getattr(bankroll_state, "sizing_updated_ts_ms", 0)),
-        _settlement_marker(runtime),
-    )
-
-
-def _base_cache_bucket(runtime: Any) -> Dict[str, Any]:
-    attr = "_capital_truth_read_context_cache"
-    current = getattr(runtime, attr, None)
-    scope = _scope_key(runtime)
-    if not isinstance(current, dict) or current.get("scope") != scope:
-        current = {"scope": scope, "base": None, "contexts": {}}
-        setattr(runtime, attr, current)
-    return current
+_BUILDING_BASE_CONTEXT: ContextVar[bool] = ContextVar(
+    "capital_truth_read_context_building", default=False
+)
 
 
 def _reentrant_base_context() -> CapitalTruthReadBaseContext:
-    # A read context can be requested by canonical capital-truth assembly through
-    # treasury_state. Never recurse into the canonical snapshot again; return an
-    # explicitly degraded dependency value so the outer canonical assembly can
-    # finish from its low-level runtime inputs.
+    # Canonical capital-truth assembly may request treasury state, which may in
+    # turn request this read context. Do not recurse into the canonical snapshot.
     from .auxiliary_state_service import CapitalTruthSnapshot
 
     capital_truth = CapitalTruthSnapshot(
@@ -120,31 +72,21 @@ def _build_base_context(
     auxiliary_state: Any,
     state_summary: Any,
 ) -> CapitalTruthReadBaseContext:
-    cache = _base_cache_bucket(runtime)
-    cached = cache.get("base")
-    if isinstance(cached, CapitalTruthReadBaseContext):
-        return cached
-    if cache.get("building_base"):
+    del state_summary
+    if _BUILDING_BASE_CONTEXT.get():
         return _reentrant_base_context()
 
-    # This context is a dependency of canonical capital-truth assembly. Calling
-    # state_summary.capital_truth_state(runtime) here re-enters the canonical
-    # capital-truth service and creates the cycle:
-    # capital_truth -> runtime_state_adapters -> treasury_state -> read_context.
-    # Do not create a second authority; guard only the re-entrant dependency read.
-    del state_summary
-    cache["building_base"] = True
+    token = _BUILDING_BASE_CONTEXT.set(True)
     try:
         capital_truth = auxiliary_state.capital_truth(runtime)
-        capital_truth_state = dict(capital_truth.capital_summary or {})
-        base = CapitalTruthReadBaseContext(
+        return CapitalTruthReadBaseContext(
             capital_truth=capital_truth,
-            capital_truth_state=capital_truth_state,
+            # The canonical snapshot already owns this projection. Do not route
+            # through the higher-level state-summary facade from this dependency.
+            capital_truth_state=dict(capital_truth.capital_summary or {}),
         )
-        cache["base"] = base
-        return base
     finally:
-        cache["building_base"] = False
+        _BUILDING_BASE_CONTEXT.reset(token)
 
 
 def _capital_truth_payload_for_health(base: CapitalTruthReadBaseContext) -> Dict[str, Any]:
@@ -175,14 +117,8 @@ def build_capital_truth_read_context(
         state = StateSummaryService()
     else:
         state = state_summary
+
     base = _build_base_context(runtime, auxiliary_state=auxiliary, state_summary=state)
-    cache = _base_cache_bucket(runtime)
-    cache_key = None
-    if fund_summary is None:
-        cache_key = ("default", bool(include_operator_projection))
-        cached_context = cache.get("contexts", {}).get(cache_key)
-        if isinstance(cached_context, CapitalTruthReadContext):
-            return cached_context
     health = runtime_capital_truth_health(
         runtime,
         capital_truth=_capital_truth_payload_for_health(base),
@@ -196,12 +132,9 @@ def build_capital_truth_read_context(
         capital_truth_state=base.capital_truth_state,
         include_operator_projection=include_operator_projection,
     )
-    context = CapitalTruthReadContext(
+    return CapitalTruthReadContext(
         capital_truth=base.capital_truth,
         capital_truth_state=base.capital_truth_state,
         capital_truth_health=dict(health or {}),
         capital_surface=dict(capital_surface or {}),
     )
-    if cache_key is not None:
-        cache.setdefault("contexts", {})[cache_key] = context
-    return context
