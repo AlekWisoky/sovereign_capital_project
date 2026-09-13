@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   refresh:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore: refresh generated system truth') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
