@@ -25,10 +25,15 @@ def engine_capital_limits(
     capital_engine = dict(treasury_state.get("capital_engine") or {})
     fam = family_for_engine(engine_type)
     family_limit = resolve_family_capital_limit(capital_engine=capital_engine, family=fam)
+    resolved_allocation_key = str(family_limit.get("resolved_allocation_key") or fam)
 
     deployable_usd = _explicit_usd(capital_engine.get("deployable_usd"))
     family_allocations_usd = dict(capital_engine.get("family_allocations_usd") or {})
-    family_capital_usd = _explicit_usd(family_allocations_usd.get(fam))
+    family_capital_usd = _explicit_usd(
+        family_allocations_usd.get(resolved_allocation_key)
+        if resolved_allocation_key in family_allocations_usd
+        else family_allocations_usd.get(fam)
+    )
 
     return {
         "engine_type": str(engine_type),
@@ -48,5 +53,5 @@ def engine_capital_limits(
         "target_known": bool(family_limit.get("target_known", False)),
         "family_target": float(family_limit.get("family_target") or 0.0),
         "resolved_target_key": str(family_limit.get("resolved_target_key") or ""),
-        "resolved_allocation_key": str(family_limit.get("resolved_allocation_key") or ""),
+        "resolved_allocation_key": resolved_allocation_key,
     }
