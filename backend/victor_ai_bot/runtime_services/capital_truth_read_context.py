@@ -107,8 +107,17 @@ def _build_base_context(
     cached = cache.get("base")
     if isinstance(cached, CapitalTruthReadBaseContext):
         return cached
+
+    # This context is a dependency of canonical capital-truth assembly. Calling
+    # state_summary.capital_truth_state(runtime) here re-enters the canonical
+    # capital-truth service and creates the cycle:
+    # capital_truth -> runtime_state_adapters -> treasury_state -> read_context.
+    # The canonical AuxiliaryStateService snapshot already contains the material
+    # capital summary needed for the read model, so do not call back through the
+    # higher-level state-summary facade from this dependency layer.
+    del state_summary
     capital_truth = auxiliary_state.capital_truth(runtime)
-    capital_truth_state = dict(state_summary.capital_truth_state(runtime) or {})
+    capital_truth_state = dict(capital_truth.capital_summary or {})
     base = CapitalTruthReadBaseContext(
         capital_truth=capital_truth,
         capital_truth_state=capital_truth_state,
