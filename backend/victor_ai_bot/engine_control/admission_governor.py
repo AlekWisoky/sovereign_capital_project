@@ -1,10 +1,30 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict
 
 from .capability_registry import EngineCapabilityRegistry
 from .degradation_policy import degradation_mode_for
 from .models import EngineAdmissionDecision, EngineOpportunity
+
+
+def _explicit_deployable_usd(treasury_state: Dict[str, Any]) -> float | None:
+    """Return only an authoritative USD economic-value field.
+
+    `deployable_bankroll_wei` is a raw asset-unit field. It is not USD and must
+    never be converted with a fixed 1e18 divisor at this boundary.
+    """
+    capital_engine = dict(treasury_state.get("capital_engine") or {})
+    candidate = capital_engine.get("deployable_usd")
+    if candidate in (None, ""):
+        candidate = treasury_state.get("deployable_capital_usd")
+    try:
+        value = float(candidate)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value < 0.0:
+        return None
+    return value
 
 
 class EngineAdmissionGovernor:
@@ -62,10 +82,19 @@ class EngineAdmissionGovernor:
                 cap.maturity,
             )
         treasury_state = dict(treasury_state or {})
-        capital_engine = dict(treasury_state.get("capital_engine") or {})
-        deployable_usd = float(capital_engine.get("deployable_bankroll_wei") or 0.0) / 1e18
-        if deployable_usd <= 0.0:
-            deployable_usd = float(treasury_state.get("estimated_capital_usd") or 0.0)
+        deployable_usd = _explicit_deployable_usd(treasury_state)
+        if deployable_usd is None:
+            return EngineAdmissionDecision(
+                False,
+                "disabled",
+                "capital_economic_value_unavailable",
+                0.0,
+                0.0,
+                telemetry_points >= cap.required_telemetry_points,
+                calibration_points >= 10,
+                cap.maturity,
+                {"economic_value_source": "unavailable"},
+            )
         max_capital = max(0.0, deployable_usd * float(cap.max_capital_pct))
         mode = opportunity.policy_eligibility or degradation
         if degradation == "disabled":
@@ -115,5 +144,9 @@ class EngineAdmissionGovernor:
             telemetry_points >= cap.required_telemetry_points,
             calibration_points >= 10,
             cap.maturity,
-            {"degradation": degradation, "execution_permission": cap.execution_permission},
+            {
+                "degradation": degradation,
+                "execution_permission": cap.execution_permission,
+                "economic_value_source": "capital_engine.deployable_usd",
+            },
         )

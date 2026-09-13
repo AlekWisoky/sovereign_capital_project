@@ -88,7 +88,6 @@ class _CaptureDecision:
         return {"size_mult": 1.0}
 
 
-
 def test_treasury_service_returns_family_cap_unknown_for_missing_family_target_under_available_truth():
     decision = TreasuryService().check_family_admission(
         capital_state={"capital_engine": {"family_targets": {"flashloan_atomic": 0.46}}},
@@ -102,13 +101,14 @@ def test_treasury_service_returns_family_cap_unknown_for_missing_family_target_u
     assert decision.limits["requested_family"] == "funding_arb"
 
 
-
 def test_treasury_service_and_engine_limits_resolve_flash_arb_alias_to_flashloan_atomic():
     capital_state = {
         "capital_engine": {
             "family_targets": {"flashloan_atomic": 0.46},
             "family_allocations_wei": {"flash_arb": int(4e18)},
+            "family_allocations_usd": {"flash_arb": 4.0},
             "deployable_bankroll_wei": int(10e18),
+            "deployable_usd": 10.0,
         }
     }
 
@@ -128,7 +128,6 @@ def test_treasury_service_and_engine_limits_resolve_flash_arb_alias_to_flashloan
     assert limits["family_capital_usd"] == 4.0
 
 
-
 def test_admission_service_family_budget_resolves_flash_arb_alias_before_scaling():
     runtime = _AdmissionRuntime({"flashloan_atomic": 0.5})
     opp = _Opportunity("flash_arb")
@@ -143,7 +142,6 @@ def test_admission_service_family_budget_resolves_flash_arb_alias_before_scaling
     assert early_result is None
     assert runtime.scaled == [0.9]
     assert scaled_opp.meta["scaled_by"] == 0.9
-
 
 
 def test_auxiliary_capital_summary_merges_target_and_allocation_aliases_into_one_family_plan_row():
