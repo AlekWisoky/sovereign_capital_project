@@ -283,3 +283,147 @@ def test_institutional_stress_matrix_explains_250k_to_2m_downsizing(target_usd, 
                 "route_capacity",
             )
         )
+
+
+@pytest.mark.parametrize(
+    "target_usd",
+    [
+        5_000_000.0,
+        50_000_000.0,
+        100_000_000.0,
+        200_000_000.0,
+    ],
+)
+def test_institutional_stress_matrix_extends_to_200m_without_second_sizing_identity(target_usd):
+    contract = replace(
+        _contract(),
+        requested_notional_usd=target_usd,
+        target_notional_usd=target_usd,
+        liquidity=LiquiditySizingContext(
+            available_usd=500_000_000.0,
+            depth_usd=500_000_000.0,
+            pool_depth_cap_usd=500_000_000.0,
+            provider_capacity_usd=500_000_000.0,
+            route_capacity_usd=500_000_000.0,
+        ),
+        capital=CapitalAuthoritySizingContext(
+            status="ok",
+            freshness="fresh",
+            authority_id="cap-auth-issue94-scale",
+            deployable_usd=1_000_000_000.0,
+            drawdown_buffer_usd=0.0,
+            prime_available=True,
+            prime_capacity_usd=500_000_000.0,
+            prime_utilization=0.0,
+            prime_reserved_usd=0.0,
+        ),
+    )
+    base = calculate_institutional_size(contract)
+    quoted = calculate_institutional_size(
+        contract,
+        final_quote={
+            "quote_id": f"quote-scale-{int(target_usd)}",
+            "asset_price_usd": 2500.0,
+            "asset_decimals": 18,
+            "block_number": int(target_usd),
+        },
+    )
+
+    assert base.sizing_id == quoted.sizing_id
+    assert quoted.approved_notional_usd == pytest.approx(target_usd)
+    assert quoted.execution_notional_usd == pytest.approx(target_usd)
+    assert quoted.quote_id == f"quote-scale-{int(target_usd)}"
+    assert quoted.approved_borrow_amount_raw is not None
+    assert quoted.downsize_reasons == ()
+
+
+def test_institutional_stress_matrix_uses_explicit_prime_capacity_not_ten_million_default():
+    target_usd = 500_000_000.0
+    contract = replace(
+        _contract(),
+        requested_notional_usd=target_usd,
+        target_notional_usd=target_usd,
+        liquidity=LiquiditySizingContext(
+            available_usd=500_000_000.0,
+            depth_usd=500_000_000.0,
+            pool_depth_cap_usd=500_000_000.0,
+            provider_capacity_usd=500_000_000.0,
+            route_capacity_usd=500_000_000.0,
+        ),
+        capital=CapitalAuthoritySizingContext(
+            status="ok",
+            freshness="fresh",
+            authority_id="cap-auth-500m",
+            deployable_usd=1_000_000_000.0,
+            drawdown_buffer_usd=0.0,
+            prime_available=True,
+            prime_capacity_usd=500_000_000.0,
+            prime_utilization=0.0,
+            prime_reserved_usd=0.0,
+        ),
+    )
+    result = calculate_institutional_size(
+        contract,
+        final_quote={
+            "quote_id": "quote-scale-500m",
+            "asset_price_usd": 2500.0,
+            "asset_decimals": 18,
+            "block_number": 500_000_000,
+        },
+    )
+
+    assert result.approved_notional_usd == pytest.approx(500_000_000.0)
+    assert result.execution_notional_usd == pytest.approx(500_000_000.0)
+    assert result.sizing_id
+    assert result.quote_id == "quote-scale-500m"
+
+
+def test_institutional_stress_matrix_downsizes_above_explicit_capacity():
+    target_usd = 1_000_000_000.0
+    contract = replace(
+        _contract(),
+        requested_notional_usd=target_usd,
+        target_notional_usd=target_usd,
+        liquidity=LiquiditySizingContext(
+            available_usd=500_000_000.0,
+            depth_usd=500_000_000.0,
+            pool_depth_cap_usd=500_000_000.0,
+            provider_capacity_usd=500_000_000.0,
+            route_capacity_usd=500_000_000.0,
+        ),
+        capital=CapitalAuthoritySizingContext(
+            status="ok",
+            freshness="fresh",
+            authority_id="cap-auth-500m",
+            deployable_usd=1_000_000_000.0,
+            drawdown_buffer_usd=0.0,
+            prime_available=True,
+            prime_capacity_usd=500_000_000.0,
+            prime_utilization=0.0,
+            prime_reserved_usd=0.0,
+        ),
+    )
+    result = calculate_institutional_size(
+        contract,
+        final_quote={
+            "quote_id": "quote-scale-1b",
+            "asset_price_usd": 2500.0,
+            "asset_decimals": 18,
+            "block_number": 1_000_000_000,
+        },
+    )
+
+    assert result.approved_notional_usd == pytest.approx(500_000_000.0)
+    assert result.execution_notional_usd == pytest.approx(500_000_000.0)
+    assert result.downsize_reasons
+    assert any(
+        reason in result.downsize_reasons
+        for reason in (
+            "liquidity_available",
+            "pool_depth",
+            "pool_depth_cap",
+            "provider_capacity",
+            "route_capacity",
+            "internal_prime_remaining_capacity",
+        )
+    )
