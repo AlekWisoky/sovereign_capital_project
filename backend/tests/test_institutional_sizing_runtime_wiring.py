@@ -140,6 +140,8 @@ def test_runtime_adapter_propagates_kernel_sizing_identity(monkeypatch):
             sizing_id="size-kernel-1",
             approved_notional_usd=200_000.0,
             approved_borrow_amount_raw=None,
+            execution_notional_usd=None,
+            quote_id=None,
             constraints_applied=["family_cap"],
             downsize_reasons=["family_cap"],
             capital_utilization=0.10,
@@ -154,6 +156,8 @@ def test_runtime_adapter_propagates_kernel_sizing_identity(monkeypatch):
     assert opp.meta["sizing_id"] == "size-kernel-1"
     assert opp.meta["canonical_lineage"]["sizing_id"] == "size-kernel-1"
     assert decision.metadata["sizing_id"] == "size-kernel-1"
+    assert result.details["institutionalSizing"]["sizing"]["execution_notional_usd"] is None
+    assert result.details["institutionalSizing"]["sizing"]["quote_id"] is None
 
 
 def _unit_boundary_opportunity() -> EngineOpportunity:
