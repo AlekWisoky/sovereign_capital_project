@@ -9,7 +9,6 @@ from ..decision_engine import TradeDecision
 from ..features import build_features
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
-from ..rpc import JsonRpcClient
 from ..decision_identity import ensure_decision_identity
 from ..operator_intent import intent_fingerprint, resolve_operator_intent
 from .profitability_truth import inspect_profit_after_costs_truth, opportunity_profit_sort_key
@@ -56,13 +55,7 @@ class RuntimeDecisionFacade:
     _engine_last: dict[str, Any]
     _state_lock: Any
 
-    def capital_engine_state(self) -> dict[str, Any]:
-        raise NotImplementedError
-
     async def _execute_auto(self, opp: Opportunity, bn: int, decision: Any = None) -> Any:
-        raise NotImplementedError
-
-    async def _annotate_can_execute(self, rpc: JsonRpcClient, opps: List[Opportunity]) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -139,7 +132,7 @@ class RuntimeDecisionFacade:
             self._errors.append(f"decision_engine_failed:{e}")
             return None
 
-    async def _safe_annotate_can_execute(self, rpc: JsonRpcClient, opps: List[Opportunity]) -> None:
+    async def _safe_annotate_can_execute(self, rpc, opps: List[Opportunity]) -> None:
         try:
             await self._annotate_can_execute(rpc, opps)
         except _SAFE_DECISION_EXCEPTIONS as e:
