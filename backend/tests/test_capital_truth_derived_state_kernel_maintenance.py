@@ -201,21 +201,22 @@ class _Runtime:
     _treasury_state_repo = _TreasuryStateRepo()
     _internal_prime_state_repo = _PrimeStateRepo()
     _capital_event_repo = _CapitalEventRepo()
+    _capital_engine_state = {
+        "capital_engine": {
+            "deployable_bankroll_wei": 25 * 10**18,
+            "drawdown_buffer_wei": 5 * 10**18,
+            "estimated_capital_wei": 30 * 10**18,
+            "family_targets": {"flash_arb": 0.6},
+            "family_allocations_wei": {"flashloan_atomic": 12 * 10**18},
+            "updated_ts_ms": 1_699_999_998_500,
+        },
+        "capital_efficiency_metrics": {"deployedCapitalWei": 25 * 10**18, "updated_ts_ms": 1_699_999_998_250},
+        "reinvestment_policy": {"reinvestPct": 40.0, "updated_ts_ms": 1_699_999_998_750},
+        "updated_ts_ms": 1_699_999_998_000,
+    }
 
     def capital_engine_state(self):
-        return {
-            "capital_engine": {
-                "deployable_bankroll_wei": 25 * 10**18,
-                "drawdown_buffer_wei": 5 * 10**18,
-                "estimated_capital_wei": 30 * 10**18,
-                "family_targets": {"flash_arb": 0.6},
-                "family_allocations_wei": {"flashloan_atomic": 12 * 10**18},
-                "updated_ts_ms": 1_699_999_998_500,
-            },
-            "capital_efficiency_metrics": {"deployedCapitalWei": 25 * 10**18, "updated_ts_ms": 1_699_999_998_250},
-            "reinvestment_policy": {"reinvestPct": 40.0, "updated_ts_ms": 1_699_999_998_750},
-            "updated_ts_ms": 1_699_999_998_000,
-        }
+        return dict(self._capital_engine_state)
 
     def treasury_state(self):
         return {"enabled": True, "drawdown_buffer_wei": 5 * 10**18}
