@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -238,3 +239,47 @@ def test_quote_bound_raw_cap_does_not_create_second_sizing_identity():
     assert quoted.execution_notional_usd == pytest.approx(125_000.0)
     assert quoted.quote_id == "quote-cap"
     assert "max_borrow_amount_raw" in quoted.constraints_applied
+
+
+@pytest.mark.parametrize(
+    ("target_usd", "expected_approved_usd"),
+    [
+        (250_000.0, 250_000.0),
+        (500_000.0, 500_000.0),
+        (1_000_000.0, 500_000.0),
+        (2_000_000.0, 500_000.0),
+    ],
+)
+def test_institutional_stress_matrix_explains_250k_to_2m_downsizing(target_usd, expected_approved_usd):
+    contract = replace(
+        _contract(),
+        requested_notional_usd=target_usd,
+        target_notional_usd=target_usd,
+    )
+    result = calculate_institutional_size(
+        contract,
+        final_quote={
+            "quote_id": f"quote-stress-{int(target_usd)}",
+            "asset_price_usd": 2500.0,
+            "asset_decimals": 18,
+            "block_number": int(target_usd),
+        },
+    )
+
+    assert result.approved_notional_usd == pytest.approx(expected_approved_usd)
+    assert result.execution_notional_usd == pytest.approx(expected_approved_usd)
+    assert result.approved_borrow_amount_raw is not None
+    assert result.quote_id == f"quote-stress-{int(target_usd)}"
+    assert result.capital_utilization == pytest.approx(expected_approved_usd / 2_000_000.0)
+    if target_usd > expected_approved_usd:
+        assert result.downsize_reasons
+        assert any(
+            reason in result.downsize_reasons
+            for reason in (
+                "liquidity_available",
+                "pool_depth",
+                "pool_depth_cap",
+                "provider_capacity",
+                "route_capacity",
+            )
+        )
