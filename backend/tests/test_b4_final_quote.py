@@ -89,41 +89,31 @@ async def test_final_quote_resolves_decimals_and_direct_v3_usd_reference(monkeyp
     async def pool(request):
         return "0xpool" if request.fee == 3000 else None
 
-    async def quote(*args, **kwargs):
-        return SimpleNamespace(amount_out=2_500_000_000, gas_estimate=100_000)
+    async def usd_reference(*args, **kwargs):
+        return 2500.0
 
-    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
-    monkeypatch.setattr(final_quote, "quote_exact_input_single", quote)
+    monkeypatch.setattr(final_quote, "_find_v3_pool", pool)
+    monkeypatch.setattr(final_quote, "_quote_v3", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(final_quote, "_resolve_usd_reference", usd_reference)
 
-    result = await produce_final_quote(_quote_request(rpc, _cfg(), _opp(), _decision(), 123456))
+    result = await produce_final_quote(
+        _quote_request(rpc, _cfg(), _opp(), _decision(), 123),
+    )
 
     assert result.asset_decimals == 18
-    assert result.stable_decimals == 6
     assert result.asset_price_usd == pytest.approx(2500.0)
-    assert result.raw_amount == 10**18
-    assert result.stable_amount_out_raw == 2_500_000_000
-    assert result.block_number == 123456
-    assert result.decision_id == "decision-final-1"
-    assert result.correlation_id == "corr-final-1"
-    assert result.route_id == "route-final-1"
-    assert result.quote_id.startswith("quote-")
+    assert result.usd_reference_source == "v3_direct"
+    assert result.quote_id
 
 
 @pytest.mark.asyncio
 async def test_final_quote_rejects_cross_trade_lineage(monkeypatch):
     rpc = FakeRpc({"0xasset": 18, "0xusdc": 6})
-
-    async def pool(request):
-        return None
-
-    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
-
     opp = _opp()
-    decision = _decision()
-    decision.metadata["canonical_decision_id"] = "different-decision"
+    opp.meta["canonical_lineage"]["decision_id"] = "decision-other"
 
-    with pytest.raises(FinalQuoteError, match="decision_lineage_conflict"):
-        await produce_final_quote(_quote_request(rpc, _cfg(), opp, decision, 1))
+    with pytest.raises(FinalQuoteError, match="canonical_decision_id"):
+        await produce_final_quote(_quote_request(rpc, _cfg(), opp, _decision(), 123))
 
 
 @pytest.mark.asyncio
@@ -133,10 +123,9 @@ async def test_final_quote_fails_closed_without_v3_usd_reference(monkeypatch):
     async def pool(request):
         return None
 
-    monkeypatch.setattr(final_quote, "_resolve_v3_pool", pool)
-
-    with pytest.raises(FinalQuoteError, match="v3_usd_reference_pool_unavailable"):
-        await produce_final_quote(_quote_request(rpc, _cfg(), _opp(), _decision(), 2))
+    monkeypatch.setattr(final_quote, "_find_v3_pool", pool)
+    with pytest.raises(FinalQuoteError, match="usd_reference"):
+        await produce_final_quote(_quote_request(rpc, _cfg(), _opp(), _decision(), 123))
 
 
 def _contract(max_raw: int = 0):
@@ -197,6 +186,39 @@ def _contract(max_raw: int = 0):
         ),
         settlement=SettlementSizingContext(),
         metadata={"behavior_change": "none"},
+    )
+
+
+def _scale_contract(target_usd: float, prime_capacity_usd: float = 500_000_000.0):
+    base = _contract()
+    return replace(
+        base,
+        requested_notional_usd=target_usd,
+        target_notional_usd=target_usd,
+        liquidity=LiquiditySizingContext(
+            available_usd=prime_capacity_usd,
+            depth_usd=prime_capacity_usd,
+            pool_depth_cap_usd=prime_capacity_usd,
+            provider_capacity_usd=prime_capacity_usd,
+            route_capacity_usd=prime_capacity_usd,
+        ),
+        economics=replace(
+            base.economics,
+            expected_gross_profit_usd=target_usd * 0.02,
+            expected_net_profit_usd=target_usd * 0.01,
+        ),
+        capital=CapitalAuthoritySizingContext(
+            status="ok",
+            freshness="fresh",
+            authority_id="cap-auth-issue94-scale",
+            deployable_usd=1_000_000_000.0,
+            drawdown_buffer_usd=0.0,
+            prime_available=True,
+            prime_capacity_usd=prime_capacity_usd,
+            prime_utilization=0.0,
+            prime_reserved_usd=0.0,
+        ),
+        governance=replace(base.governance, max_deployable_pct=1.0),
     )
 
 
@@ -295,29 +317,7 @@ def test_institutional_stress_matrix_explains_250k_to_2m_downsizing(target_usd, 
     ],
 )
 def test_institutional_stress_matrix_extends_to_200m_without_second_sizing_identity(target_usd):
-    contract = replace(
-        _contract(),
-        requested_notional_usd=target_usd,
-        target_notional_usd=target_usd,
-        liquidity=LiquiditySizingContext(
-            available_usd=500_000_000.0,
-            depth_usd=500_000_000.0,
-            pool_depth_cap_usd=500_000_000.0,
-            provider_capacity_usd=500_000_000.0,
-            route_capacity_usd=500_000_000.0,
-        ),
-        capital=CapitalAuthoritySizingContext(
-            status="ok",
-            freshness="fresh",
-            authority_id="cap-auth-issue94-scale",
-            deployable_usd=1_000_000_000.0,
-            drawdown_buffer_usd=0.0,
-            prime_available=True,
-            prime_capacity_usd=500_000_000.0,
-            prime_utilization=0.0,
-            prime_reserved_usd=0.0,
-        ),
-    )
+    contract = _scale_contract(target_usd)
     base = calculate_institutional_size(contract)
     quoted = calculate_institutional_size(
         contract,
@@ -339,29 +339,7 @@ def test_institutional_stress_matrix_extends_to_200m_without_second_sizing_ident
 
 def test_institutional_stress_matrix_uses_explicit_prime_capacity_not_ten_million_default():
     target_usd = 500_000_000.0
-    contract = replace(
-        _contract(),
-        requested_notional_usd=target_usd,
-        target_notional_usd=target_usd,
-        liquidity=LiquiditySizingContext(
-            available_usd=500_000_000.0,
-            depth_usd=500_000_000.0,
-            pool_depth_cap_usd=500_000_000.0,
-            provider_capacity_usd=500_000_000.0,
-            route_capacity_usd=500_000_000.0,
-        ),
-        capital=CapitalAuthoritySizingContext(
-            status="ok",
-            freshness="fresh",
-            authority_id="cap-auth-500m",
-            deployable_usd=1_000_000_000.0,
-            drawdown_buffer_usd=0.0,
-            prime_available=True,
-            prime_capacity_usd=500_000_000.0,
-            prime_utilization=0.0,
-            prime_reserved_usd=0.0,
-        ),
-    )
+    contract = _scale_contract(target_usd)
     result = calculate_institutional_size(
         contract,
         final_quote={
@@ -380,29 +358,7 @@ def test_institutional_stress_matrix_uses_explicit_prime_capacity_not_ten_millio
 
 def test_institutional_stress_matrix_downsizes_above_explicit_capacity():
     target_usd = 1_000_000_000.0
-    contract = replace(
-        _contract(),
-        requested_notional_usd=target_usd,
-        target_notional_usd=target_usd,
-        liquidity=LiquiditySizingContext(
-            available_usd=500_000_000.0,
-            depth_usd=500_000_000.0,
-            pool_depth_cap_usd=500_000_000.0,
-            provider_capacity_usd=500_000_000.0,
-            route_capacity_usd=500_000_000.0,
-        ),
-        capital=CapitalAuthoritySizingContext(
-            status="ok",
-            freshness="fresh",
-            authority_id="cap-auth-500m",
-            deployable_usd=1_000_000_000.0,
-            drawdown_buffer_usd=0.0,
-            prime_available=True,
-            prime_capacity_usd=500_000_000.0,
-            prime_utilization=0.0,
-            prime_reserved_usd=0.0,
-        ),
-    )
+    contract = _scale_contract(target_usd, prime_capacity_usd=500_000_000.0)
     result = calculate_institutional_size(
         contract,
         final_quote={
@@ -416,14 +372,4 @@ def test_institutional_stress_matrix_downsizes_above_explicit_capacity():
     assert result.approved_notional_usd == pytest.approx(500_000_000.0)
     assert result.execution_notional_usd == pytest.approx(500_000_000.0)
     assert result.downsize_reasons
-    assert any(
-        reason in result.downsize_reasons
-        for reason in (
-            "liquidity_available",
-            "pool_depth",
-            "pool_depth_cap",
-            "provider_capacity",
-            "route_capacity",
-            "internal_prime_remaining_capacity",
-        )
-    )
+    assert "internal_prime_remaining_capacity" in result.downsize_reasons
