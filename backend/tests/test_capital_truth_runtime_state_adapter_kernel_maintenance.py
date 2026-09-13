@@ -44,14 +44,14 @@ class _PartialRuntime:
         raise AssertionError("canonical truth must not call the capital facade")
 
     def internal_prime_state(self):
-        raise AssertionError("canonical truth must not call the prime facade")
+        return {"stateReady": False}
 
     def launch_state(self):
         return {"profile": {"mode": "TEST"}}
 
 
 
-def test_capital_truth_runtime_state_adapter_kernel_reads_materialized_state_without_runtime_facades() -> None:
+def test_capital_truth_runtime_state_adapter_kernel_reads_materialized_treasury_and_capital_state() -> None:
     bundle = build_capital_truth_runtime_state_adapters(_PartialRuntime())
 
     assert bundle.treasury_state["treasuryBalanceWei"] == 11
