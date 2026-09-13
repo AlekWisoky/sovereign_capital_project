@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -46,9 +45,7 @@ class CapitalTruthReadContext:
         return dict(self.capital_surface.get("capital") or {})
 
 
-_BUILDING_BASE_CONTEXT: ContextVar[bool] = ContextVar(
-    "capital_truth_read_context_building", default=False
-)
+_REENTRY_GUARD = "_capital_truth_read_context_building"
 
 
 def _reentrant_base_context() -> CapitalTruthReadBaseContext:
@@ -73,11 +70,11 @@ def _build_base_context(
     state_summary: Any,
 ) -> CapitalTruthReadBaseContext:
     del state_summary
-    if _BUILDING_BASE_CONTEXT.get():
+    if bool(getattr(runtime, _REENTRY_GUARD, False)):
         return _reentrant_base_context()
 
-    token = _BUILDING_BASE_CONTEXT.set(True)
     try:
+        setattr(runtime, _REENTRY_GUARD, True)
         capital_truth = auxiliary_state.capital_truth(runtime)
         return CapitalTruthReadBaseContext(
             capital_truth=capital_truth,
@@ -86,7 +83,10 @@ def _build_base_context(
             capital_truth_state=dict(capital_truth.capital_summary or {}),
         )
     finally:
-        _BUILDING_BASE_CONTEXT.reset(token)
+        try:
+            setattr(runtime, _REENTRY_GUARD, False)
+        except (AttributeError, TypeError, RuntimeError):
+            pass
 
 
 def _capital_truth_payload_for_health(base: CapitalTruthReadBaseContext) -> Dict[str, Any]:
