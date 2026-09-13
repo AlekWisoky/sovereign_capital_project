@@ -85,8 +85,7 @@ def build_capital_truth_derived_state(
 ) -> CapitalTruthDerivedStateBundle:
     realized_profit_wei = _int_like(getattr(bankroll_state, "realized_profit_wei", 0))
     deployed_capital_wei = _int_like(
-        capital_engine.get("deployable_bankroll_wei")
-        or efficiency.get("deployedCapitalWei")
+        efficiency.get("deployedCapitalWei")
         or getattr(bankroll_state, "last_amount_in_wei", 0)
     )
     reserved_capital_wei = _int_like(
