@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from 'react';
-import { fetchChains, selectChain } from '../api/client';
+import { fetchChains } from '../api/client';
+import { guardedSelectChain } from '../api/guardedMutations';
+import { guardMutation, type MutationGuardContext } from '../api/mutationGuard';
 import { ENV } from '../config/env';
 import { deleteSecureString, getSecureString, setSecureString } from '../utils/secureStore';
 import type { ThemeName } from '../utils/theme';
@@ -106,7 +108,7 @@ const Ctx = createContext<{
   lockOperator: () => Promise<void>;
   multichain: MultiChainInfo;
   refreshMultichain: () => Promise<void>;
-  selectActiveChain: (chain: string) => Promise<void>;
+  selectActiveChain: (chain: string, explicitConfirmation?: boolean) => Promise<void>;
   hydrated: boolean;
 } | null>(null);
 
@@ -162,23 +164,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function selectActiveChain(chain: string) {
-    const c = String(chain || '');
-    if (!c) return;
-    if (!state.baseUrl || state.role !== 'operator' || session.locked) {
-      dispatch({ type: 'set', patch: { activeChain: c, chain: c } });
-      setMultichain({ ok: false, active: c, chains: multichain.chains.length ? multichain.chains : [c], last_refresh_ms: Date.now() });
-      return;
-    }
+  async function selectActiveChain(chain: string, explicitConfirmation = false) {
+    const c = String(chain || '').trim();
+    if (!c || !state.baseUrl || state.role !== 'operator' || session.locked) return;
+
+    const context: MutationGuardContext = {
+      role: 'operator',
+      locked: session.locked,
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable: Boolean(multichain.ok),
+      backendLiveAuthority: false,
+      explicitConfirmation,
+    };
+    const preflight = guardMutation('chain_control', context);
+    if (!preflight.allowed) return;
+
     try {
-      const r = await selectChain(state.baseUrl, c, state.adminKey);
+      const r = await guardedSelectChain(state.baseUrl, c, state.adminKey, context);
       const active = String(r?.active ?? c);
       const chains = (r?.chains ?? multichain.chains ?? []).map((x: unknown) => String(x));
       setMultichain({ ok: !!r?.ok, active, chains, last_refresh_ms: Date.now() });
       dispatch({ type: 'set', patch: { activeChain: active, chain: active } });
     } catch {
-      setMultichain({ ok: false, active: c, chains: multichain.chains.length ? multichain.chains : [c], last_refresh_ms: Date.now() });
-      dispatch({ type: 'set', patch: { activeChain: c, chain: c } });
+      // Preserve last-known-good canonical chain state on mutation failure.
+      setMultichain((current) => ({ ...current, ok: false, last_refresh_ms: Date.now() }));
     }
   }
 
