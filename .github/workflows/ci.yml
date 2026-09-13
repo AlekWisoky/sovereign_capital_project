@@ -150,14 +150,19 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import textwrap
           workflow = Path('.github/workflows/prime-repair-20260913-v2.yml').read_text()
           workflow = workflow.replace(
               '          a = r1(a, "self._capacity_usd = 10_000_000.0", "self._capacity_usd: float | None = None", "initial capacity")',
               '          a = a.replace("self._capacity_usd = 10_000_000.0", "self._capacity_usd: float | None = None", 1)',
               1,
           )
-          start = workflow.index("          python - <<'PY'" + chr(10)) + len("          python - <<'PY'" + chr(10))
+          workflow = workflow.replace(
+              '          a = r1(a, \'            "capacityUsd": round(self._capacity_usd, 8),\',',
+              '          a = a.replace(\'            "capacityUsd": round(self._capacity_usd, 8),\', \'            "capacityUsd": (\\n                round(self._capacity_usd, 8) if self._capacity_usd is not None else None\\n            ),\', 1)',
+              1,
+          )
+          marker = "          python - <<'PY'" + chr(10)
+          start = workflow.index(marker) + len(marker)
           end = workflow.index(chr(10) + "          PY", start)
           Path('/tmp/prime_repair.py').write_text(chr(10).join(line[10:] if line.startswith('          ') else line for line in workflow[start:end].splitlines()) + chr(10))
           PY
