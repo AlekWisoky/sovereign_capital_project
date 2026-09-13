@@ -1,185 +1,821 @@
-# Sovereign Capital
+# Sovereign Capital — Institutional Capital Operating System
 
-Sovereign Capital is a safety-first capital operating system: market observation, strategy signals, agent research/views, portfolio aggregation, one canonical decision, OMAR recommendation/learning, governance, adaptive risk-budget sizing, deterministic simulation, execution, receipt verification, physical settlement, and outcome learning. The Expo mobile app is the operator surface.
+Sovereign Capital is a governed capital operating system designed to discover market opportunities, evaluate them deterministically, admit only eligible opportunities to capital, size risk under hard constraints, execute through a controlled private path, reconcile actual economics through canonical settlement, learn only from verified outcomes, attribute performance exactly, and promote or retire strategies from evidence.
 
-> **Current engineering rule:** CI is authoritative. No PR is ready for merge or staging deployment until the complete Linux test gate and all companion gates are green.
+This repository is the canonical engineering source for the backend runtime, capital/economic controls, execution lifecycle, OMAR learning boundary, mobile operator console, smart-contract test surface, CI verification gate, and staging deployment contract.
 
-## Canonical production lifecycle
+> **Engineering posture:** evidence before authority. A feature existing in source code does not mean it is production-authorized. A passing unit test does not authorize live capital. A merged branch does not clear a phase gate until its explicit verification and runtime evidence are complete.
+
+## 1. Current verified repository posture
+
+The current mainline reviewed for this document is:
+
+`6cdfd2398ed8f54cf42201cd1000d81f3d6237d1`
+
+That is the Phase B.4 mainline produced by merged PR #119. Render staging is configured to track `integration/canonical-omar-controlled` and is currently deployed at that same mainline SHA.
+
+The next blocking engineering gate is PR #120, which is **not merged**. Its current head is:
+
+`82234260f00757643f0f2345621df226c52fd08d`
+
+CI run `34738126186` is queued for that exact SHA. Therefore PR #120 is currently **NO GO** for merge. Render must remain on the verified mainline until that exact head completes the Linux gate and the staging/runtime gate is explicitly cleared.
+
+### Current phase map
+
+| Area | Current state | Authority / evidence |
+|---|---|---|
+| B2 institutional sizing kernel | Merged | PR #115 |
+| B3 sizing identity + downstream lineage | Merged | PR #117 |
+| B4 final quote / execution binding | Merged | PR #119 |
+| B4.5 runtime facade/MRO repair | In verification | PR #120 |
+| Mobile canonical backend integration | Incorporated into mainline | PR #93 work carried forward through later merged mobile work |
+| Guarded mobile mutations | Merged | PR #99 |
+| Realtime reconciliation | Merged | PR #100 |
+| F4/I integrated mobile security-contract-lifecycle gate | Remaining | Must follow PR #120/B4.5 runtime clearance |
+| Institutional capital-scale residuals | Remaining | Issue #94; reconcile existing B2-B4 work before adding anything |
+| Progressive OMAR context + attribution | Remaining | Issue #97 |
+| Alpha Marketplace | Remaining | Issue #95 |
+| Deterministic MEV/blockspace v2 | Remaining | Issue #96 |
+| Live-authority activation | Explicitly blocked | Issue #89 |
+| Real-capital flash-arb | Not authorized | Requires #89 and all preceding gates |
+
+---
+
+## 2. System mission
+
+The system is not a collection of independent trading features. It is one governed lifecycle with one authoritative economic path.
+
+Its operating objective is **governed capital compounding**:
+
+- preserve capital as a hard constraint;
+- identify repeatable positive expected-value opportunities;
+- incorporate gas, slippage, fees, latency, liquidity and failure probability into economics;
+- make capital admission deterministic and auditable;
+- size downstream of admission rather than letting sizing grant permission;
+- reconcile actual capital movement through canonical settlement;
+- compare decision-time expectation with verified realized economics;
+- learn from expectation error only after settlement verification;
+- attribute results to the exact decision, execution, strategy and agent lineage;
+- promote capability only when evidence supports it;
+- reduce, quarantine or retire deteriorating strategies.
+
+The system must become more capable without becoming less constrained.
+
+---
+
+## 3. Canonical end-to-end blueprint
 
 ```text
-REAL MARKET
-  -> AQE / SIGNAL + BLOCKSPACE INTELLIGENCE
-  -> OPPORTUNITY ENGINE
-  -> EXECUTION CAPTURE
-       liquidity / route / latency
-  -> AGENT RESEARCH / VIEWS
-       valuation / sentiment / fundamentals / technicals
-       Graham / Ackman / Wood / Munger / Fisher / Druckenmiller / Buffett
-  -> PORTFOLIO MANAGER
-       aggregation only
-  -> OMAR CONTEXT
-       recommendation / learning context
-  -> CANONICAL DECISION
-       decision_id
-       correlation_id
-       operator-intent snapshot
-       wealth-goal context
-       capital_engine_state()
-  -> HUMAN COGNITIVE CONTROL / DECISION HYGIENE
-       clarity / counterfactuals / uncertainty / decision discipline
-       advisory only; never execution authority
-  -> GOVERNANCE / ADMISSION
-  -> INTERNAL PRIME + RISK CONTROL
-  -> ADAPTIVE RISK-BUDGET SIZING
-       sizing_id
-  -> DETERMINISTIC SIMULATION
-  -> PRIVATE EXECUTION
-       execution_id
-  -> RECEIPT
-  -> PHYSICAL CANONICAL SETTLEMENT LEDGER
-       decision_id / correlation_id / execution_id / outcome_id
-       sizing_id / opportunity_id / route_id / action
-  -> SETTLED OUTCOME
-       realized P&L / net profit after costs / gas / slippage / latency / truth verification
-  -> OMAR LEARNING GATE
-  -> EXACT AGENT / STRATEGY ATTRIBUTION
-  -> POLICY UPDATE
-  -> OOS EVIDENCE
-  -> PERFORMANCE PROMOTION / RETIREMENT
+                           REAL WORLD
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+             MARKET DATA              BLOCKSPACE
+                 │                     INTELLIGENCE
+                 └────────────┬────────────┘
+                              ▼
+                       AQE / SIGNAL LAYER
+                              │
+                              ▼
+                     OPPORTUNITY ENGINE
+                              │
+                              ▼
+                   EXECUTION CAPTURE
+             liquidity / route / latency / gas
+                              │
+                              ▼
+                    RESEARCH / AGENT VIEWS
+       valuation / fundamentals / sentiment / technicals
+        Graham / Ackman / Wood / Munger / Fisher /
+              Druckenmiller / Buffett / others
+                              │
+                              ▼
+                    PORTFOLIO MANAGER
+                         aggregation only
+                              │
+                              ▼
+                         OMAR CONTEXT
+                    recommendation / learning
+                              │
+                              ▼
+                  CANONICAL DECISION ENGINE
+       decision_id + correlation_id + intent snapshot
+       expected economics + risk envelope + constraints
+       opportunity + route + action + agent contributions
+                              │
+             ┌────────────────┴────────────────┐
+             │                                 │
+             ▼                                 ▼
+     COGNITIVE / HUMAN                 SECURITY / THREAT
+       DECISION HYGIENE                     MONITOR
+             │                                 │
+             └────────────────┬────────────────┘
+                              ▼
+                    GOVERNANCE / ADMISSION
+                 Internal Prime + Risk Control
+                              │
+                              ▼
+                       ADAPTIVE SIZING
+                           sizing_id
+                              │
+                              ▼
+                  DETERMINISTIC SIMULATION
+                              │
+                              ▼
+                      PRIVATE EXECUTION
+                          execution_id
+                              │
+                              ▼
+                           RECEIPT
+                              │
+                              ▼
+                 CANONICAL SETTLEMENT
+             Treasury + Money Loop + Prime
+                              │
+                              ▼
+                    REALIZED ECONOMICS
+             net profit / costs / gas / slippage
+                              │
+                              ▼
+                     EXPECTATION ERROR
+                realized_net - expected_net
+                              │
+                              ▼
+                       OMAR LEARNING
+                              │
+                              ▼
+                 AGENT / STRATEGY ATTRIBUTION
+                              │
+                              ▼
+                   PROMOTION / RETIREMENT
+                              │
+                              ▼
+                        OOS EVIDENCE
+                              │
+                              └──────────► next decision
 ```
 
-### Non-negotiable semantics
+There must be no competing execution workflow hidden beside this lifecycle.
 
-1. **One decision identity.** `decision_id` is created before OMAR and is never regenerated by OMAR.
-2. **Decision-time authority is immutable.** `capital_engine_state()` belongs to the decision snapshot.
-3. **Sizing is downstream of admission.** OMAR recommends; governance admits; adaptive risk budgeting creates `sizing_id`.
-4. **Settlement is physical truth.** OMAR learns only from a verified canonical settled outcome.
-5. **Attribution is exact.** Learning must preserve decision, correlation, execution, outcome, sizing, opportunity, route, and action lineage, plus the contributing agent/strategy view where available.
-6. **Realtime is advisory, not canonical.** Polling/read-model reconciliation remains authoritative. Realtime observations may improve latency of operator awareness but must never overwrite canonical truth or advance canonical freshness without authoritative confirmation.
-7. **Human cognitive controls are non-authoritative.** Cognitive support may improve decision clarity, consistency, memory, counterfactual analysis, and postmortems, but it must not alter execution commands, silently change risk, infer psychological state as fact, or bypass governance.
-8. **CI validates; CI never rewrites source.** No workflow may edit, commit, or push repository code.
-9. **Public/staging posture is non-live.** Live broadcast/auto-trading authority must not be enabled in staging.
+---
 
-## Operator cognitive layer
+## 4. Identity model
 
-The system may provide a bounded **Cognitive Operating System** for the human operator. This is an interface and decision-quality layer, not a second trading brain.
+Identity is deliberately split by lifecycle responsibility.
 
-It should:
+| Identity | Responsibility | Rule |
+|---|---|---|
+| `decision_id` | Authoritative decision lifecycle identity | Created by the canonical decision boundary and preserved end-to-end |
+| `correlation_id` | Trace/cross-service correlation | Never replaces `decision_id` |
+| `opportunity_id` | Opportunity identity | Identifies the candidate being evaluated |
+| `route_id` | Route/execution path identity | Attribution only; not authority |
+| `sizing_id` | Sizing decision identity | Created by the sizing layer after admission |
+| `execution_id` | Execution-attempt identity | Created from existing canonical decision lineage |
+| `receipt_id` | Receipt identity | Identifies the execution receipt |
+| `outcome_id` | Settled outcome identity | Identifies canonical outcome evidence |
+| `strategy_id` | Strategy identity | Stable strategy/genealogy identity; never replaces `decision_id` |
+| `agent_id` | Agent contribution identity | Attribution/context only |
 
-- expose the current decision context and material assumptions;
-- force explicit uncertainty and confidence where useful;
-- surface counterfactuals and disconfirming evidence;
-- detect repeated operator workflow patterns such as impulsive overrides or skipped review steps without diagnosing the operator;
-- preserve decision journals and postmortems so lessons are recoverable;
-- measure decision latency and process adherence as operational telemetry;
-- encourage pause/escalation when the operator is about to violate a safety boundary.
+No subsystem may introduce a second authoritative transaction or learning identity.
 
-It must not:
+---
 
-- manufacture confidence or emotional states;
-- use hidden psychological profiling to steer capital decisions;
-- replace governance, risk controls, or canonical decision authority;
-- mutate capital state without the existing guarded mutation path;
-- turn a conversational prompt into execution permission.
+## 5. Authority boundaries
 
-## Realtime reconciliation boundary
+### Canonical decision authority
 
-The mobile read path uses a single reconciliation kernel. Authoritative polling establishes canonical read truth and canonical freshness. Realtime events, when connected through an approved transport, are retained as advisory observations and are ordered so older events cannot overwrite newer observations. Transport failures preserve the last-known-good canonical value and expose freshness degradation rather than silently fabricating current state.
+The Decision Engine owns the decision boundary. It freezes material decision-time context, including expected economics, intent, constraints and capital authority context.
 
-The backend already exposes websocket routes including `/ws`, `/ws/multichain`, `/ws/summary`, and `/ws/narrative`. The mobile layer must consume these through a narrow typed adapter; it must not create a parallel state model or allow websocket data to become execution/governance truth.
+OMAR can recommend and provide learning context. It cannot manufacture execution permission.
 
-## Repository layout
+### Governance / admission authority
 
-- `backend/` — FastAPI runtime, capital/decision/governance/execution/settlement/learning services and API routes.
-- `backend/victor_ai_bot/omar/` — bounded OMAR runtime, learning gate, learner, and settlement-learning adapter.
-- `contracts/` — Foundry Solidity contracts and tests.
-- `mobile/` — Expo React Native operator console, settings, telemetry, controls, off-ramp, and WalletConnect integration.
-- `docs/` — architecture, security, API contracts, deployment, Sentry, and engineering decisions.
-- `.github/workflows/ci.yml` — validation-only CI: backend quality, 8-way Linux pytest, mobile, and contracts.
+Admission answers:
 
-## OMAR integration boundary
+> **May this opportunity use capital?**
 
-OMAR is an advisory/learning subsystem, not an identity authority and not a settlement authority.
+The existing `CapitalAdmissionService` remains the admission authority. Governance, hard stops, Internal Prime, risk controls and capital policy constrain this decision.
 
-- OMAR may recommend actions, preferred sizing, gas posture, and policy updates.
-- OMAR must not mint `decision_id` or `correlation_id`.
-- OMAR must not learn from optimistic execution logs.
-- OMAR learning is accepted only after canonical settlement truth and exact lineage validation.
-- OMAR remains explicitly enabled/configured; staging must keep live execution authority disabled.
+### Sizing authority
 
-The controlled integration branch is:
+Sizing answers:
+
+> **How much capital may the already-admitted opportunity use?**
+
+Sizing is downstream of admission. It must never become a hidden permission path.
+
+B2-B4 now provide an institutional sizing contract/kernel, sizing identity, and final quote-to-execution binding. Remaining institutional-scale work must extend this architecture rather than replace it.
+
+### Execution authority
+
+V1 real-capital authority is restricted to `flash_arb`. Future strategy families remain observe-only, paper or shadow until explicit promotion.
+
+### Settlement authority
+
+Execution estimates are not economic truth. Canonical settlement is the source of realized economics and capital movement evidence.
+
+### Learning authority
+
+OMAR learning is downstream of verified canonical settlement. A pending execution, optimistic receipt, heuristic profit estimate, or unverified source cannot train the learner.
+
+---
+
+## 6. Economic truth and learning loop
+
+At decision time the system records:
+
+`expected_net_profit`
+
+After canonical settlement it records:
+
+`realized_net_profit`
+
+Then:
+
+`expectation_error = realized_net_profit - expected_net_profit`
+
+Learning requires, at minimum:
+
+- exact `decision_id` lineage;
+- matching correlation/action/route attribution;
+- valid expected and realized economics;
+- finite numeric values;
+- verified canonical settlement;
+- canonical settlement source;
+- physical execution/outcome/sizing/opportunity identities where required;
+- no duplicate authoritative learning identity.
+
+The existing learning-integrity boundary explicitly rejects lineage mismatches and unverified/noncanonical settlement sources. fileciteturn326file2
+
+State-local warm-up remains part of the learner contract: insufficient observations use the bounded baseline rather than pretending that a cold learner has evidence.
+
+---
+
+## 7. Capital architecture
+
+Capital is represented through existing canonical services rather than a second portfolio database.
+
+### Treasury
+
+Treasury represents capital movement, balances, liabilities/equity, encumbrance and economic reconciliation.
+
+### Internal Prime
+
+Internal Prime is a capacity/reservation constraint. It is not an additive bankroll and cannot grant execution permission by itself.
+
+### Risk Control
+
+Risk controls constrain execution through hard stops, drawdown controls, family exposure and execution-quality constraints.
+
+### Institutional sizing
+
+The institutional sizing ladder is economic-value aware. Candidate targets such as `$250k`, `$500k`, `$1m+` are policy targets/requests, not unconditional trade amounts.
+
+Final size must remain bounded by the minimum safe result across:
+
+- approved/admitted notional;
+- route/provider liquidity;
+- pool depth and slippage curve;
+- current executable quote;
+- expected net economics;
+- minimum profit and margin requirements;
+- Internal Prime capacity/utilization;
+- Treasury deployable capital and buffers;
+- family/concentration/drawdown limits;
+- execution realism and freshness;
+- hard kill switches.
+
+Final raw-unit conversion belongs after final quote/requote, not at an earlier speculative layer.
+
+---
+
+## 8. B2-B4 execution economics currently in main
+
+The merged B2-B4 sequence is important because later work must not redo it.
+
+### B2 — deterministic institutional sizing kernel
+
+PR #115 established the typed sizing kernel while preserving `CapitalAdmissionService` as admission authority and `capital_engine_state()` as capital-authority source.
+
+### B3 — sizing identity and downstream lineage
+
+PR #117 connected the existing sizing kernel to institutional admission and carried its kernel-owned `sizing_id` into the canonical lineage. It also completed the production-shaped execution → receipt → canonical-settlement → learning lineage propagation.
+
+### B4 — final quote binding
+
+PR #119 wired final/requote quote information into production execution. The quote-bound amount is validated before calldata construction/execution and preserves canonical sizing identity.
+
+These phases are merged into main at `6cdfd2398ed8f54cf42201cd1000d81f3d6237d1`. Do not recreate B2/B3/B4 under Issue #94.
+
+---
+
+## 9. OMAR architecture
+
+OMAR is a bounded contextual learning/recommendation subsystem.
+
+It may:
+
+- provide contextual recommendations;
+- consume verified settled outcomes;
+- update bounded learner state;
+- maintain attribution and learning evidence;
+- participate in policy/OOS promotion workflows when the relevant gate is satisfied.
+
+It may not:
+
+- create the canonical decision identity;
+- authorize capital;
+- bypass governance/admission;
+- bypass sizing hard caps;
+- treat execution estimates as settlement truth;
+- learn from pending/unverified outcomes;
+- turn conversational input into execution permission.
+
+Issue #97 remains open because the next-decision context still needs a compact, canonical summary of prior settled expectation error, strategy performance, execution realism and blockspace/relay outcomes. The work should enrich the existing state-local learner rather than create a second learning engine.
+
+---
+
+## 10. Agent and research architecture
+
+Research agents provide independent views. They do not execute.
+
+The intended separation is:
+
+```text
+Agent views
+    ↓
+Portfolio Manager
+    ↓
+OMAR context/recommendation
+    ↓
+Canonical Decision Engine
+    ↓
+Governance / Admission
+```
+
+Agent consensus, confidence, labels and LLM output are contextual evidence. None is an independent capital authority.
+
+The future Agent Intelligence v2 phase should upgrade the existing AgentHub, contracts, Portfolio Manager, Risk Manager, calibration and attribution surfaces. It must not introduce a parallel agent framework.
+
+---
+
+## 11. Mobile operator architecture
+
+The mobile application is an operator/read surface, not a competing system of record.
+
+Canonical operator surfaces:
+
+```text
+HOME
+CAPITAL
+OPPORTUNITIES
+OMAR
+RISK
+ACTIVITY
+```
+
+Mobile responsibilities:
+
+- render canonical backend state;
+- expose lineage and economic explanation;
+- show freshness/degraded state;
+- expose guarded operator controls;
+- surface settlement and learning evidence;
+- provide decision detail and activity history.
+
+Mobile does not own:
+
+- canonical capital truth;
+- canonical decision identity;
+- governance/admission;
+- sizing permission;
+- execution authority;
+- canonical settlement;
+- OMAR learning authority.
+
+### Guarded mutations
+
+The centralized mutation guard requires the applicable combination of:
+
+- operator role;
+- unlocked session;
+- admin-key presence;
+- backend reachability;
+- explicit confirmation;
+- backend-reported live authority for live-enable/execution/withdrawal classes.
+
+`auto_trading=true` and `dry_run=false` are treated as activation-shaped mutations.
+
+The backend remains authoritative; mobile is defense in depth.
+
+---
+
+## 12. Realtime architecture
+
+Realtime is an observation accelerator, not a truth authority.
+
+The current boundary is:
+
+```text
+Authoritative polling
+        │
+        ▼
+Canonical CommandCenterSnapshot
+        │
+        ▼
+Reconciliation kernel
+        ▲
+        │
+Advisory realtime observations
+        ▲
+        │
+/ws/summary typed transport adapter
+```
+
+Rules:
+
+- polling establishes canonical snapshot truth;
+- realtime cannot freshen stale canonical polling data;
+- transport errors preserve last-known-good canonical state;
+- malformed messages are rejected;
+- stale/older observations cannot overwrite canonical state;
+- the reconciliation path requests complete `summary` frames;
+- the adapter does not maintain a second delta-merge state authority;
+- no realtime observation can invoke governance, admission, capital, execution or live-authority mutation.
+
+The backend `/ws/summary` producer emits typed `summary`/`delta` envelopes, while mobile consumes the summary path through a narrow adapter. Final semantic signoff still requires paired producer/consumer verification during F4/I.
+
+---
+
+## 13. Bounded cognitive operating system
+
+The cognitive layer is a human decision-hygiene sidecar.
+
+It may expose:
+
+- material decision assumptions;
+- uncertainty/confidence;
+- disconfirming evidence;
+- counterfactuals;
+- repeated workflow patterns;
+- decision journals;
+- postmortems;
+- decision latency;
+- process adherence.
+
+It must not diagnose hidden psychological states or silently steer capital based on inferred emotions.
+
+The correct telemetry style is observable process evidence, for example:
+
+> `Operator bypassed the normal review sequence 4 times in the last 12 decisions.`
+
+not a speculative psychological diagnosis.
+
+---
+
+## 14. MEV and blockspace safety boundary
+
+The repository already contains MEV/mempool/runtime/search/simulation/private-routing components. Current heuristic MEV economics are deliberately non-authoritative and the current safety floor is observe-only.
+
+Issue #96 is the next serious MEV engineering phase. It must add evidence-backed deterministic fork simulation, perturbation testing, private/protected routing telemetry and relay/builder reliability without creating a second execution workflow.
+
+No public sandwich/front-run execution is part of the approved architecture.
+
+---
+
+## 15. Alpha Marketplace boundary
+
+Issue #95 will turn the existing alpha marketplace into an internal evidence and promotion layer.
+
+The intended flow is:
+
+```text
+AQE / existing strategy factory
+        ↓
+StrategyCandidate
+        ↓
+Sandbox / paper / shadow evidence
+        ↓
+Alpha Marketplace
+        ↓
+Governance + engine-control promotion
+        ↓
+Capital sleeve proposal
+        ↓
+Internal Prime / Treasury reservation
+        ↓
+Canonical Decision
+        ↓
+Existing execution lifecycle
+        ↓
+Canonical settlement
+        ↓
+Strategy + agent attribution
+        ↓
+OMAR learning
+```
+
+`strategy_id` is a stable strategy identity. It never replaces `decision_id`.
+
+---
+
+## 16. Current phase gates
+
+### Gate 1 — PR #120 / B4.5 runtime repair
+
+**Current status: NO GO.**
+
+The runtime facade MRO repair removes concrete-authority shadowing that caused `/api/commandcenter/snapshot` to fail. A subsequent CI failure exposed a deeper capital-truth re-entry path. The current repair uses a context-local re-entry guard rather than a runtime-owned cache, minimizing dependency surface.
+
+The exact head is:
+
+`82234260f00757643f0f2345621df226c52fd08d`
+
+CI:
+
+`34738126186`
+
+The gate is not cleared until all pytest shards, backend quality, mobile, contracts and artifact checks are green on that exact SHA.
+
+### Gate 2 — Render staging identity
+
+After PR #120 is green and merged:
+
+1. record the exact merge SHA;
+2. verify `integration/canonical-omar-controlled` points to that SHA;
+3. let Render auto-deploy;
+4. verify Render's deployment commit identity;
+5. perform read-only runtime smoke only.
+
+Required smoke surfaces:
+
+```text
+/health
+/api/deploy/info
+/api/state
+/api/commandcenter/snapshot
+/api/engines/state
+/api/brain/state
+```
+
+Then verify staging remains non-live: no live broadcast authority, no automatic trading authority, no withdrawal/signing activation.
+
+### Gate 3 — F4/I
+
+Complete the integrated security, backend-contract and lifecycle review:
+
+- every mutation has one guarded path;
+- locked/read-only/missing-key/unreachable cases fail closed;
+- explicit confirmations cover activation-shaped controls;
+- emergency-stop lifecycle is reviewed;
+- session/reconnect timers are cleaned up;
+- backend contracts match actual producer schemas;
+- realtime cannot become authorization;
+- secrets do not enter telemetry;
+- malformed/stale/duplicate observations cannot corrupt canonical state.
+
+### Gate 4 — residual Issue #94
+
+Only after Phase A/F4/I is green, reconcile Issue #94 against already-merged B2-B4 before implementing anything. The likely remaining scope is capital-scale policy, promotion criteria, stress evidence, hard-cap behavior and institutional capacity reporting—not a new sizing kernel.
+
+### Later gates
+
+```text
+#94 residual institutional scale
+        ↓
+#97 progressive OMAR context + attribution
+        ↓
+Agent Intelligence v2
+        ↓
+#95 Alpha Marketplace
+        ↓
+#96 deterministic MEV / blockspace
+        ↓
+Research / Evolution
+        ↓
+visual/operator production pass
+        ↓
+integrated mobile/backend validation
+        ↓
+#89 live-authority review
+        ↓
+capped real flash-arb validation
+        ↓
+institutional scaling
+```
+
+---
+
+## 17. Issue #89 — explicit live-authority gate
+
+Issue #89 remains an independent operational authorization gate.
+
+Before any real capital:
+
+1. review `dry_run` / `auto_trading` changes under controlled approval;
+2. verify private/protected submission lane configuration;
+3. verify wallet/executor/chain/signer/destination configuration;
+4. verify runtime/admin/operator authorization;
+5. prove `flash_arb` / `flashloan_atomic` remains the only V1 live family;
+6. rerun health/startup/runtime safety gates after activation changes;
+7. execute one deliberately capped transaction only after all preceding evidence is green;
+8. verify receipt and canonical settlement;
+9. verify realized economics and exact expectation error;
+10. verify OMAR learning is attributed to the exact settled decision lineage;
+11. record rollback/kill-switch evidence.
+
+No amount of UI completeness or CI success substitutes for this gate.
+
+---
+
+## 18. Deployment and verification model
+
+### GitHub Actions — canonical verification
+
+Linux GitHub Actions is the authoritative test environment because the local Termux environment is intentionally not treated as capable of running the full project suite.
+
+The CI contract includes:
+
+- backend quality checks;
+- Python compile validation;
+- configured mypy targets;
+- Ruff;
+- 8-way pytest sharding;
+- mobile typecheck/unit tests/build;
+- Foundry contract tests;
+- deterministic verification/system-truth artifact generation.
+
+The pytest matrix preserves the complete test inventory. Sharding is a verification-performance mechanism, not a test exclusion mechanism.
+
+### Render — staging/runtime verification
+
+Render is the staging/runtime layer. It is used only after a specific commit has passed the GitHub gate.
+
+The canonical staging service is:
+
+`sovereign-capital`
+
+Branch:
 
 `integration/canonical-omar-controlled`
 
-The single integration PR is #88 against `main`.
+Health path:
 
-## Withdrawals and WalletConnect
+`/health`
 
-The default withdrawal posture is **external signing**.
+Staging is non-authoritative and must remain non-live.
 
-1. Backend validates destination, amount, executor, capital truth, and produces deterministic transaction calldata through `/api/withdraw/prepare` or `/api/withdraw/convert/prepare`.
-2. Mobile's WalletConnect/EIP-1193 session provides the external wallet provider.
-3. **Current gap:** the OffRamp screen still stops at preparation; the final action that verifies the prepared sender/chain/transaction fields, invokes `eth_sendTransaction`, records the returned hash as submitted/pending, and reconciles it against backend/read-RPC truth is not yet wired.
-4. Backend hot-signing (`withdraw_mode=backend`) is a separate privileged mode and is disabled in public/staging deployments.
+### Termux
 
-Until step 3 is complete and tested, external-wallet withdrawal is **not** considered end-to-end complete. Do not replace this gap with client-side calldata construction or automatic broadcast.
+Termux is inspection/minimum-repair only. It is not the project verification authority.
 
-Withdrawal controls remain fail-closed on invalid input, missing dependencies, destination policy violations, degraded capital truth, and public-mode execution restrictions.
+### Observability
 
-## Sentry
+Sentry is observability only. It must never become a dependency of capital authorization, signing, execution, settlement or learning.
 
-Sentry is observability only. It must never become a dependency of decision, governance, signing, execution, settlement, or OMAR learning.
+Code quality signals such as CodeScene comments are advisory engineering evidence. They must not override repository tests or architectural authority contracts.
 
-Runtime dependency: `sentry-sdk==2.68.1`.
+---
 
-Configure through environment variables:
+## 19. Generated truth and reproducibility
 
-```text
-SENTRY_DSN=
-SENTRY_ENVIRONMENT=staging
-SENTRY_RELEASE=<verified commit SHA>
-SENTRY_TRACES_SAMPLE_RATE=0.05
-SENTRY_PROFILES_SAMPLE_RATE=0
-SENTRY_ENABLE_LOGS=false
-```
+Generated system truth is deterministic repository evidence.
 
-No wallet private keys, balances, raw transaction payloads, or other secrets are attached to Sentry context. Lifecycle identifiers are used for correlation.
-
-See `docs/SENTRY_SETUP.md`.
-
-## Local backend
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -c constraints.txt -r requirements-dev.txt
-export VICTOR_CONFIG=./config/ethereum.yaml
-uvicorn victor_ai_bot.server:app --reload
-```
-
-The runtime contract is pinned in:
-
-- `backend/requirements.txt`
-- `backend/requirements-dev.txt`
-- `backend/constraints.txt`
-
-## Mobile
-
-```bash
-cd mobile
-npm install
-npm run start
-```
-
-WalletConnect configuration:
+Important generators include:
 
 ```text
-EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID=<project id>
+scripts/render_system_truth.py
+scripts/render_verification_report.py
 ```
 
-The app's WalletConnect bootstrap is mounted globally, and the EIP-1193 provider session is exposed through `mobile/src/walletConnect/session.ts`.
+When source inventory changes, regenerate the artifacts using the repository generators. Do not manually edit generated truth to make a verification result look current.
 
-## Staging safety
+CI must validate generated truth; it must not permanently mutate the PR branch.
 
-Staging remains non-live. Any future live-authority activation must pass the explicit Issue #89 review, including executor/wallet configuration, protected submission lane, `dry_run`/`auto_trading` state, and a deliberately capped transaction test. No cognitive layer, agent, realtime feed, or operator UI may bypass that gate.
+---
+
+## 20. Repository layout
+
+```text
+backend/
+  victor_ai_bot/
+    api_routes/                 HTTP/WebSocket boundaries
+    decision/                   canonical decision logic
+    execution/                  execution boundary
+    execution_capture/          execution/economic observation and sizing
+    governance/                 hard safety and admission controls
+    omar/                       bounded learning/recommendation subsystem
+    aqe/                        opportunity / signal / MEV intelligence
+    runtime_services/           canonical runtime service boundaries
+    persistence/                durable repositories / ledgers
+    treasury/                   treasury economics and capital accounting
+    superstructure/             operator/governance projections
+
+backend/tests/                  authoritative backend regression inventory
+contracts/                      Foundry contracts and contract tests
+mobile/
+  src/api/                      canonical backend adapters
+  src/                          operator UI, guards, reconciliation, wallet lifecycle
+  tests/                        mobile unit/contract tests
+docs/                           architecture, contracts, deployment and gate documentation
+scripts/                        deterministic generated-truth tooling
+.github/workflows/ci.yml        Linux verification pipeline
+Dockerfile                      staging/runtime container contract
+```
+
+---
+
+## 21. Engineering rules for future contributors
+
+Before changing code:
+
+1. identify the existing authority;
+2. inspect the relevant service and its tests;
+3. inspect its callers and downstream lineage;
+4. determine whether the change is a projection, dependency read, authority decision, or mutation;
+5. preserve the canonical identity and economic source of truth;
+6. add the smallest regression proving the concrete defect;
+7. run the authoritative Linux gate;
+8. inspect actual failures rather than weakening tests;
+9. verify generated truth through its generator;
+10. only then move the change into Render staging.
+
+Never:
+
+- create a second capital ledger;
+- create a second decision engine;
+- create a second learning identity;
+- let OMAR execute;
+- let realtime overwrite canonical polling truth;
+- let a risk label grant permission;
+- let human approval bypass hard controls;
+- let heuristic economics authorize execution;
+- promote a future strategy family merely because its code exists;
+- enable live trading because staging or CI is green;
+- merge a phase because the branch merely exists.
+
+---
+
+## 22. Known open gaps
+
+The system is not yet an end-to-end live institutional trading OS. The current explicit gaps include:
+
+- PR #120/B4.5 Linux and runtime verification is not yet green;
+- F4/I mobile security-contract-lifecycle gate remains to be completed;
+- the exact producer/consumer semantic verification of `/ws/summary` must be finalized;
+- Issue #94 still needs residual institutional capital-scale policy and stress/promotion evidence after reconciliation with B2-B4;
+- Issue #97 needs richer settlement-derived prior-outcome context and attribution;
+- Issue #95 remains a future evidence/promotion layer;
+- Issue #96 remains a future deterministic MEV/blockspace layer;
+- external-wallet withdrawal still requires the final guarded submission/reconciliation lifecycle to be verified end-to-end;
+- Issue #89 live-authority activation review remains mandatory;
+- no real-capital execution is authorized by this README or by code presence alone.
+
+These are explicit engineering gates, not invitations to create parallel implementations.
+
+---
+
+## 23. Definition of done
+
+Sovereign Capital is considered a coherent institutional operating system only when this complete loop is joined and verified:
+
+```text
+market
+ → signal
+ → opportunity
+ → research
+ → portfolio aggregation
+ → OMAR context
+ → canonical decision
+ → governance/admission
+ → Internal Prime / Risk
+ → adaptive sizing
+ → deterministic simulation
+ → execution
+ → receipt
+ → canonical settlement
+ → realized economics
+ → expectation error
+ → OMAR learning
+ → exact strategy/agent attribution
+ → promotion/retirement
+ → OOS evidence
+ → next governed decision
+```
+
+And when all of the following remain true:
+
+- capital mutations are fail-closed;
+- settlement is economic truth;
+- decision identity is singular;
+- realtime is advisory;
+- mobile is not a competing authority;
+- future strategy families are blocked until promoted;
+- institutional size is evidence-backed and hard-capped;
+- live authority is explicitly reviewed;
+- deployment identity is reproducible;
+- GitHub Linux is green for the exact verified SHA;
+- Render staging has been read-only verified against that SHA;
+- the capped live flash-arb gate has independently passed before institutional scaling.
+
+**Current operational command:** verify PR #120 exact head → merge only after green → align Render → read-only smoke → close B4.5 → execute F4/I → reconcile #94 residuals → continue the remaining evidence gates.
