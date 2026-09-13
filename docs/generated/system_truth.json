@@ -54,7 +54,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 335,
+  "backend_test_file_count": 336,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -259,6 +259,7 @@
     "test_runtime_execute_wrapper_facade_extraction.py",
     "test_runtime_execution_capture_init.py",
     "test_runtime_execution_support_init.py",
+    "test_runtime_facade_mro_authority.py",
     "test_runtime_feature_bus_facade_extraction.py",
     "test_runtime_hotpath_routes.py",
     "test_runtime_institutional_init.py",
@@ -671,12 +672,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-12T21:54:15.768000Z",
-  "generatedAtIso": "2026-09-12T21:54:15.768000Z",
-  "generatedAtMs": 1789250055768,
-  "generated_at": "2026-09-12T21:54:15.768000Z",
-  "generated_at_iso": "2026-09-12T21:54:15.768000Z",
-  "generated_at_ms": 1789250055768,
+  "generatedAt": "2026-09-13T00:51:20Z",
+  "generatedAtIso": "2026-09-13T00:51:20Z",
+  "generatedAtMs": 1789260680000,
+  "generated_at": "2026-09-13T00:51:20Z",
+  "generated_at_iso": "2026-09-13T00:51:20Z",
+  "generated_at_ms": 1789260680000,
   "health_states": [
     "live",
     "degraded",
@@ -2078,7 +2079,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 335,
+    "backend_test_files": 336,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2283,6 +2284,7 @@
       "test_runtime_execute_wrapper_facade_extraction.py",
       "test_runtime_execution_capture_init.py",
       "test_runtime_execution_support_init.py",
+      "test_runtime_facade_mro_authority.py",
       "test_runtime_feature_bus_facade_extraction.py",
       "test_runtime_hotpath_routes.py",
       "test_runtime_institutional_init.py",

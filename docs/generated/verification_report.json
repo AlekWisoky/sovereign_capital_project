@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 335,
+    "test_file_count": 336,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -206,6 +206,7 @@
       "backend/tests/test_runtime_execute_wrapper_facade_extraction.py",
       "backend/tests/test_runtime_execution_capture_init.py",
       "backend/tests/test_runtime_execution_support_init.py",
+      "backend/tests/test_runtime_facade_mro_authority.py",
       "backend/tests/test_runtime_feature_bus_facade_extraction.py",
       "backend/tests/test_runtime_hotpath_routes.py",
       "backend/tests/test_runtime_institutional_init.py",
@@ -357,7 +358,7 @@
     "counts": {
       "capital_and_fund_truth": 44,
       "execution_hardening": 24,
-      "runtime_compatibility": 74
+      "runtime_compatibility": 75
     },
     "files": {
       "capital_and_fund_truth": [
@@ -466,6 +467,7 @@
         "backend/tests/test_runtime_execute_wrapper_facade_extraction.py",
         "backend/tests/test_runtime_execution_capture_init.py",
         "backend/tests/test_runtime_execution_support_init.py",
+        "backend/tests/test_runtime_facade_mro_authority.py",
         "backend/tests/test_runtime_feature_bus_facade_extraction.py",
         "backend/tests/test_runtime_hotpath_routes.py",
         "backend/tests/test_runtime_institutional_init.py",
@@ -510,9 +512,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-12T21:54:16Z",
-  "generated_at_iso": "2026-09-12T21:54:16Z",
-  "generated_at_ms": 1789250056000,
+  "generated_at": "2026-09-13T00:50:55.146000Z",
+  "generated_at_iso": "2026-09-13T00:50:55.146000Z",
+  "generated_at_ms": 1789260655146,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",

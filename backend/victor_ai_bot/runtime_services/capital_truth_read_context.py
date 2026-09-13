@@ -97,24 +97,52 @@ def _base_cache_bucket(runtime: Any) -> Dict[str, Any]:
     return current
 
 
+_REENTRY_GUARD = "_capital_truth_read_context_building"
+
+
+def _reentrant_base_context() -> CapitalTruthReadBaseContext:
+    from .auxiliary_state_service import CapitalTruthSnapshot
+
+    capital_truth = CapitalTruthSnapshot(
+        capital_summary={},
+        capital_contract={},
+        capital_policy={},
+        capital_economic_model={},
+        authority={"ok": False, "reason_code": "capital_truth_reentrant_read"},
+    )
+    return CapitalTruthReadBaseContext(capital_truth=capital_truth, capital_truth_state={})
+
+
 def _build_base_context(
     runtime: Any,
     *,
     auxiliary_state: Any,
     state_summary: Any,
 ) -> CapitalTruthReadBaseContext:
+    del state_summary
     cache = _base_cache_bucket(runtime)
     cached = cache.get("base")
     if isinstance(cached, CapitalTruthReadBaseContext):
         return cached
-    capital_truth = auxiliary_state.capital_truth(runtime)
-    capital_truth_state = dict(state_summary.capital_truth_state(runtime) or {})
-    base = CapitalTruthReadBaseContext(
-        capital_truth=capital_truth,
-        capital_truth_state=capital_truth_state,
-    )
-    cache["base"] = base
-    return base
+    if bool(getattr(runtime, _REENTRY_GUARD, False)):
+        return _reentrant_base_context()
+
+    try:
+        setattr(runtime, _REENTRY_GUARD, True)
+        capital_truth = auxiliary_state.capital_truth(runtime)
+        # Canonical capital truth owns this projection. The state-summary facade is a
+        # reporting surface and must not be called from this dependency direction.
+        base = CapitalTruthReadBaseContext(
+            capital_truth=capital_truth,
+            capital_truth_state=dict(capital_truth.capital_summary or {}),
+        )
+        cache["base"] = base
+        return base
+    finally:
+        try:
+            setattr(runtime, _REENTRY_GUARD, False)
+        except (AttributeError, TypeError, RuntimeError):
+            pass
 
 
 def _capital_truth_payload_for_health(base: CapitalTruthReadBaseContext) -> Dict[str, Any]:

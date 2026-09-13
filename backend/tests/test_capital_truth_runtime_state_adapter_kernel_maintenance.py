@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from victor_ai_bot.runtime_services.capital_truth_runtime_state_adapters import (
     build_capital_truth_runtime_state_adapters,
 )
@@ -18,14 +20,28 @@ class _PartialBankroll:
     state = _PartialBankrollState()
 
 
+class _PartialTreasuryRepo:
+    def latest(self, *, state_type: str):
+        assert state_type == "capital_snapshot"
+        return {"payload": {"treasuryBalanceWei": 11}}
+
+
+class _PartialPrime:
+    def snapshot(self):
+        return {"stateReady": False}
+
+
 class _PartialRuntime:
     _bankroll = _PartialBankroll()
+    _treasury = SimpleNamespace(_state_repo=_PartialTreasuryRepo())
+    _internal_prime = _PartialPrime()
+    _capital_engine_state = {"capital_engine": {"deployable_bankroll_wei": 22}}
 
     def treasury_state(self):
-        return {"treasuryBalanceWei": 1}
+        raise AssertionError("canonical truth must not call the treasury facade")
 
     def capital_engine_state(self):
-        return {"capital_engine": {"deployable_bankroll_wei": 2}}
+        raise AssertionError("canonical truth must not call the capital facade")
 
     def internal_prime_state(self):
         return {"stateReady": False}
@@ -35,11 +51,11 @@ class _PartialRuntime:
 
 
 
-def test_capital_truth_runtime_state_adapter_kernel_reads_remaining_runtime_state_bridge() -> None:
+def test_capital_truth_runtime_state_adapter_kernel_reads_materialized_treasury_and_capital_state() -> None:
     bundle = build_capital_truth_runtime_state_adapters(_PartialRuntime())
 
-    assert bundle.treasury_state["treasuryBalanceWei"] == 1
-    assert bundle.capital_state["capital_engine"]["deployable_bankroll_wei"] == 2
+    assert bundle.treasury_state["treasuryBalanceWei"] == 11
+    assert bundle.capital_state["capital_engine"]["deployable_bankroll_wei"] == 22
     assert bundle.internal_prime_state["stateReady"] is False
     assert bundle.launch_state["profile"]["mode"] == "TEST"
     assert bundle.bankroll is _PartialRuntime._bankroll

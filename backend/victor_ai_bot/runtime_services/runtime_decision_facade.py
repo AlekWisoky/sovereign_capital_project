@@ -56,13 +56,7 @@ class RuntimeDecisionFacade:
     _engine_last: dict[str, Any]
     _state_lock: Any
 
-    def capital_engine_state(self) -> dict[str, Any]:
-        raise NotImplementedError
-
     async def _execute_auto(self, opp: Opportunity, bn: int, decision: Any = None) -> Any:
-        raise NotImplementedError
-
-    async def _annotate_can_execute(self, rpc: JsonRpcClient, opps: List[Opportunity]) -> None:
         raise NotImplementedError
 
     @staticmethod

@@ -16,9 +16,57 @@ class CapitalTruthRuntimeStateAdapterBundle:
     bankroll_state: Any
 
 
+def _materialized_treasury_state(runtime: Any) -> Dict[str, Any]:
+    treasury = getattr(runtime, "_treasury", None)
+    repo = getattr(treasury, "_state_repo", None)
+    if repo is None:
+        repo = getattr(runtime, "_treasury_state_repo", None)
+    if repo is not None and hasattr(repo, "latest"):
+        try:
+            latest = repo.latest(state_type="capital_snapshot")
+            payload = latest.get("payload") if isinstance(latest, dict) else {}
+            if isinstance(payload, dict):
+                return dict(payload)
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            pass
+    if treasury is not None and hasattr(treasury, "snapshot"):
+        try:
+            snapshot = treasury.snapshot()
+            if isinstance(snapshot, dict):
+                return dict(snapshot)
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            pass
+    return {}
+
+
+def _materialized_capital_state(runtime: Any) -> Dict[str, Any]:
+    state = getattr(runtime, "_capital_engine_state", None)
+    if isinstance(state, dict) and state:
+        return dict(state)
+
+    # Some runtime bundles retain the same persisted materialized payload under
+    # _capital_state. It is a state store, not a RuntimeStateFacade projection.
+    state = getattr(runtime, "_capital_state", None)
+    if isinstance(state, dict) and state:
+        return dict(state)
+
+    # The persisted treasury state repository is the materialized fallback when the
+    # runtime bundle has not populated either convenience state cache. Never fall back
+    # to the RuntimeStateFacade: that projection can re-enter canonical capital truth.
+    treasury_state = _materialized_treasury_state(runtime)
+    capital_engine = treasury_state.get("capital_engine")
+    if isinstance(capital_engine, dict) and capital_engine:
+        return {"capital_engine": dict(capital_engine)}
+    return {}
+
+
 def build_capital_truth_runtime_state_adapters(runtime: Any) -> CapitalTruthRuntimeStateAdapterBundle:
-    treasury_state = safe_call(runtime, "treasury_state", default={})
-    capital_state = safe_call(runtime, "capital_engine_state", default={})
+    # Canonical truth assembly must read materialized treasury/capital state rather than
+    # their RuntimeStateFacade projections. Those projections can depend on capital truth.
+    treasury_state = _materialized_treasury_state(runtime)
+    capital_state = _materialized_capital_state(runtime)
+    # Internal Prime's facade is an established normalization boundary for its persisted
+    # loan state; retain it here because its snapshot does not re-enter capital truth.
     internal_prime_state = safe_call(runtime, "internal_prime_state", default={})
     launch_state = safe_call(runtime, "launch_state", default={})
     bankroll = getattr(runtime, "_bankroll", None)
