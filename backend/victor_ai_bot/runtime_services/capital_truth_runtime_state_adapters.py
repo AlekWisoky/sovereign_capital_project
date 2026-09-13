@@ -42,24 +42,14 @@ def _materialized_capital_state(runtime: Any) -> Dict[str, Any]:
     return dict(state) if isinstance(state, dict) else {}
 
 
-def _materialized_internal_prime_state(runtime: Any) -> Dict[str, Any]:
-    allocator = getattr(runtime, "_internal_prime", None)
-    if allocator is None or not hasattr(allocator, "snapshot"):
-        return {}
-    try:
-        state = allocator.snapshot()
-        return dict(state) if isinstance(state, dict) else {}
-    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
-        return {}
-
-
 def build_capital_truth_runtime_state_adapters(runtime: Any) -> CapitalTruthRuntimeStateAdapterBundle:
-    # Canonical truth assembly must read materialized state, not RuntimeStateFacade
-    # projections. Those projections are reporting surfaces and may themselves depend
-    # on capital truth, creating projection -> canonical -> projection cycles.
+    # Canonical truth assembly must read materialized treasury/capital state rather than
+    # their RuntimeStateFacade projections. Those projections can depend on capital truth.
     treasury_state = _materialized_treasury_state(runtime)
     capital_state = _materialized_capital_state(runtime)
-    internal_prime_state = _materialized_internal_prime_state(runtime)
+    # Internal Prime's facade is an established normalization boundary for its persisted
+    # loan state; retain it here because its snapshot does not re-enter capital truth.
+    internal_prime_state = safe_call(runtime, "internal_prime_state", default={})
     launch_state = safe_call(runtime, "launch_state", default={})
     bankroll = getattr(runtime, "_bankroll", None)
     bankroll_state = getattr(bankroll, "state", None)
