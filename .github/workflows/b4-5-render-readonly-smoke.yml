@@ -1,0 +1,45 @@
+name: B4.5 Render Read-Only Smoke
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  render-readonly-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Capture B4.5 GET responses
+        env:
+          BASE_URL: https://sovereign-capital-rsxs.onrender.com
+        run: |
+          set -euo pipefail
+          endpoints=(
+            /health
+            /api/deploy/info
+            /api/state
+            /api/commandcenter/snapshot
+            /api/engines/state
+            /api/brain/state
+          )
+          for path in "${endpoints[@]}"; do
+            echo "===== GET ${path} ====="
+            tmp=$(mktemp)
+            status=$(curl --silent --show-error --location --max-time 30 \
+              --request GET \
+              --output "$tmp" \
+              --write-out '%{http_code}' \
+              "${BASE_URL}${path}")
+            echo "HTTP_STATUS=${status}"
+            echo "RESPONSE_BODY_BEGIN"
+            cat "$tmp"
+            echo
+            echo "RESPONSE_BODY_END"
+            rm -f "$tmp"
+            case "$status" in
+              2??) ;;
+              *) echo "B4.5 endpoint failed: ${path} returned ${status}"; exit 1 ;;
+            esac
+          done
