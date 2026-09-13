@@ -25,6 +25,8 @@ class SizingDecision:
     constraints_applied: tuple[str, ...]
     downsize_reasons: tuple[str, ...]
     capital_utilization: float
+    execution_notional_usd: float | None = None
+    quote_id: str | None = None
 
 
 def _add_cap(caps: list[tuple[str, float]], label: str, value: float | None) -> None:
@@ -60,13 +62,13 @@ def calculate_institutional_size(
     *,
     final_quote: Mapping[str, Any] | None = None,
 ) -> SizingDecision:
-    """Calculate USD sizing and optionally bind it to a final execution quote.
+    """Calculate canonical USD sizing and optionally bind it to a final quote.
 
-    The canonical ``sizing_id`` identifies the already-authoritative USD sizing
-    decision. Execution-time quote data is deliberately excluded from that
-    identity so a requote cannot manufacture a second sizing identity after the
-    canonical decision boundary. The quote only resolves the exact raw-unit
-    amount used by execution.
+    ``approved_notional_usd`` is the canonical sizing ceiling and therefore
+    remains stable across requotes. ``execution_notional_usd`` is the exact
+    quote-bound USD equivalent of the raw amount actually passed to execution;
+    it may be lower when a raw-unit hard cap binds. ``quote_id`` is tracing
+    lineage only and never becomes a second sizing identity.
     """
     valid, errors = contract.validate()
     if not valid:
@@ -164,11 +166,14 @@ def calculate_institutional_size(
     )
 
     raw_units: int | None = None
+    execution_notional_usd: float | None = None
+    quote_id: str | None = None
     if final_quote is not None:
         quote = quote_context_from_mapping(final_quote)
         quote_valid, quote_errors = validate_quote_context(quote)
         if not quote_valid:
             raise ValueError("final_quote_invalid:" + ",".join(quote_errors))
+        quote_id = str(final_quote.get("quote_id") or "") or None
         try:
             raw_units = usd_notional_to_raw_units(
                 approved,
@@ -180,6 +185,11 @@ def calculate_institutional_size(
                 raw_units = max_raw
                 constraints = constraints + ("max_borrow_amount_raw",)
                 downsize_reasons = downsize_reasons + ("max_borrow_amount_raw",)
+            execution_notional_usd = (
+                float(raw_units)
+                / float(10 ** int(quote["asset_decimals"]))
+                * float(quote["asset_price_usd"])
+            )
         except QuoteUnitSizingError as exc:
             raise ValueError(f"final_quote_invalid:{exc}") from exc
 
@@ -194,4 +204,10 @@ def calculate_institutional_size(
         constraints_applied=constraints,
         downsize_reasons=downsize_reasons,
         capital_utilization=round(utilization, 8),
+        execution_notional_usd=(
+            round(execution_notional_usd, 8)
+            if execution_notional_usd is not None
+            else None
+        ),
+        quote_id=quote_id,
     )
