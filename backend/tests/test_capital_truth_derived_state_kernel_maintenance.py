@@ -61,6 +61,22 @@ def test_capital_truth_derived_state_kernel_computes_totals_exposure_and_family_
     assert bundle.family_capital_plan[0]["id"] == "flash_arb"
 
 
+def test_capital_truth_does_not_treat_historical_last_amount_as_deployed_capital() -> None:
+    bundle = build_capital_truth_derived_state(
+        capital_engine={},
+        efficiency={},
+        reinvestment={},
+        treasury_state={},
+        internal_prime_state={},
+        bankroll=_Bankroll(),
+        bankroll_state=_BankrollState(),
+    )
+
+    assert bundle.deployed_capital_wei == 0
+    assert bundle.treasury_balance_wei == 0
+    assert bundle.categories["deployable_capital_wei"] == "0"
+
+
 class _HistoryRepo:
     def latest_event(self):
         return {

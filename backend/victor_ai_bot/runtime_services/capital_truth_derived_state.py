@@ -87,7 +87,6 @@ def build_capital_truth_derived_state(
     deployed_capital_wei = _int_like(
         capital_engine.get("deployable_bankroll_wei")
         or efficiency.get("deployedCapitalWei")
-        or getattr(bankroll_state, "last_amount_in_wei", 0)
     )
     reserved_capital_wei = _int_like(
         capital_engine.get("drawdown_buffer_wei") or treasury_state.get("drawdown_buffer_wei") or 0
