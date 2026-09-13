@@ -61,6 +61,37 @@ def test_capital_truth_derived_state_kernel_computes_totals_exposure_and_family_
     assert bundle.family_capital_plan[0]["id"] == "flash_arb"
 
 
+def test_deployed_capital_does_not_use_allocation_budget_as_actual_exposure() -> None:
+    class _IdleBankrollState:
+        realized_profit_wei = 0
+        last_amount_in_wei = 0
+
+    bundle = build_capital_truth_derived_state(
+        capital_engine={
+            "deployable_bankroll_wei": 10 * 10**18,
+            "estimated_capital_wei": 10 * 10**18,
+            "family_targets": {"flash_arb": 1.0},
+        },
+        efficiency={"deployedCapitalWei": 0},
+        reinvestment={},
+        treasury_state={},
+        internal_prime_state={
+            "stateReady": True,
+            "borrowedUsd": 0,
+            "loanCount": 0,
+        },
+        bankroll=type(
+            "B",
+            (),
+            {"cfg": type("C", (), {"auto_reinvest_enabled": False, "reinvest_rate_pct": 0})()},
+        )(),
+        bankroll_state=_IdleBankrollState(),
+    )
+
+    assert bundle.deployed_capital_wei == 0
+    assert bundle.categories["deployable_capital_wei"] == "0"
+
+
 class _HistoryRepo:
     def latest_event(self):
         return {
