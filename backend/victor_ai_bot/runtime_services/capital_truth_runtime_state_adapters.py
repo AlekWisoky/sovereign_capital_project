@@ -38,8 +38,19 @@ def _materialized_treasury_state(runtime: Any) -> Dict[str, Any]:
 
 
 def _materialized_capital_state(runtime: Any) -> Dict[str, Any]:
-    state = getattr(runtime, "_capital_engine_state", {})
-    return dict(state) if isinstance(state, dict) else {}
+    state = getattr(runtime, "_capital_engine_state", None)
+    if isinstance(state, dict) and state:
+        return dict(state)
+
+    # The treasury capital snapshot is the persisted materialized fallback when the
+    # runtime bundle has not yet populated its convenience capital-engine cache.
+    # Never fall back to the RuntimeStateFacade: that projection can re-enter canonical
+    # capital truth and recreate the dependency cycle this adapter is designed to break.
+    treasury_state = _materialized_treasury_state(runtime)
+    capital_engine = treasury_state.get("capital_engine")
+    if isinstance(capital_engine, dict) and capital_engine:
+        return {"capital_engine": dict(capital_engine)}
+    return {}
 
 
 def build_capital_truth_runtime_state_adapters(runtime: Any) -> CapitalTruthRuntimeStateAdapterBundle:
