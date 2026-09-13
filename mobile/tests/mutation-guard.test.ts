@@ -129,6 +129,14 @@ test('guarded mutation boundary is present for every migrated operator screen', 
   }
 });
 
+test('store chain mutation uses the guarded boundary and never calls raw selectChain', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/state/store.tsx'), 'utf8');
+  assert.doesNotMatch(source, /import[^\n]*\bselectChain\b[^\n]*api\/client/);
+  assert.match(source, /guardedSelectChain\(/);
+  assert.match(source, /guardMutation\('chain_control'/);
+  assert.match(source, /explicitConfirmation/);
+});
+
 test('Setup preserves backend URL wiring and premium RPC preference fields', () => {
   const source = readOperatorScreen('v2/SetupScreen.tsx');
   assert.match(source, /Backend base URL/);
