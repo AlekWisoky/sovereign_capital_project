@@ -97,6 +97,23 @@ def _base_cache_bucket(runtime: Any) -> Dict[str, Any]:
     return current
 
 
+def _reentrant_base_context() -> CapitalTruthReadBaseContext:
+    # A read context can be requested by canonical capital-truth assembly through
+    # treasury_state. Never recurse into the canonical snapshot again; return an
+    # explicitly degraded dependency value so the outer canonical assembly can
+    # finish from its low-level runtime inputs.
+    from .auxiliary_state_service import CapitalTruthSnapshot
+
+    capital_truth = CapitalTruthSnapshot(
+        capital_summary={},
+        capital_contract={},
+        capital_policy={},
+        capital_economic_model={},
+        authority={"ok": False, "reason_code": "capital_truth_reentrant_read"},
+    )
+    return CapitalTruthReadBaseContext(capital_truth=capital_truth, capital_truth_state={})
+
+
 def _build_base_context(
     runtime: Any,
     *,
@@ -107,23 +124,27 @@ def _build_base_context(
     cached = cache.get("base")
     if isinstance(cached, CapitalTruthReadBaseContext):
         return cached
+    if cache.get("building_base"):
+        return _reentrant_base_context()
 
     # This context is a dependency of canonical capital-truth assembly. Calling
     # state_summary.capital_truth_state(runtime) here re-enters the canonical
     # capital-truth service and creates the cycle:
     # capital_truth -> runtime_state_adapters -> treasury_state -> read_context.
-    # The canonical AuxiliaryStateService snapshot already contains the material
-    # capital summary needed for the read model, so do not call back through the
-    # higher-level state-summary facade from this dependency layer.
+    # Do not create a second authority; guard only the re-entrant dependency read.
     del state_summary
-    capital_truth = auxiliary_state.capital_truth(runtime)
-    capital_truth_state = dict(capital_truth.capital_summary or {})
-    base = CapitalTruthReadBaseContext(
-        capital_truth=capital_truth,
-        capital_truth_state=capital_truth_state,
-    )
-    cache["base"] = base
-    return base
+    cache["building_base"] = True
+    try:
+        capital_truth = auxiliary_state.capital_truth(runtime)
+        capital_truth_state = dict(capital_truth.capital_summary or {})
+        base = CapitalTruthReadBaseContext(
+            capital_truth=capital_truth,
+            capital_truth_state=capital_truth_state,
+        )
+        cache["base"] = base
+        return base
+    finally:
+        cache["building_base"] = False
 
 
 def _capital_truth_payload_for_health(base: CapitalTruthReadBaseContext) -> Dict[str, Any]:
