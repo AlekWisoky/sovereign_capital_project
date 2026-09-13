@@ -19,6 +19,8 @@ class CapitalTruthRuntimeStateAdapterBundle:
 def _materialized_treasury_state(runtime: Any) -> Dict[str, Any]:
     treasury = getattr(runtime, "_treasury", None)
     repo = getattr(treasury, "_state_repo", None)
+    if repo is None:
+        repo = getattr(runtime, "_treasury_state_repo", None)
     if repo is not None and hasattr(repo, "latest"):
         try:
             latest = repo.latest(state_type="capital_snapshot")
@@ -42,10 +44,9 @@ def _materialized_capital_state(runtime: Any) -> Dict[str, Any]:
     if isinstance(state, dict) and state:
         return dict(state)
 
-    # The treasury capital snapshot is the persisted materialized fallback when the
-    # runtime bundle has not yet populated its convenience capital-engine cache.
-    # Never fall back to the RuntimeStateFacade: that projection can re-enter canonical
-    # capital truth and recreate the dependency cycle this adapter is designed to break.
+    # The persisted treasury state repository is the materialized fallback when the
+    # runtime bundle has not populated its convenience capital-engine cache. Never fall
+    # back to the RuntimeStateFacade: that projection can re-enter canonical capital truth.
     treasury_state = _materialized_treasury_state(runtime)
     capital_engine = treasury_state.get("capital_engine")
     if isinstance(capital_engine, dict) and capital_engine:
