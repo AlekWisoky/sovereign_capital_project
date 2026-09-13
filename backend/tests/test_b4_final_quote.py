@@ -215,6 +215,8 @@ def test_quote_bound_raw_conversion_preserves_canonical_sizing_id():
     assert quoted.sizing_id == base.sizing_id
     assert quoted.approved_notional_usd == pytest.approx(base.approved_notional_usd)
     assert quoted.approved_borrow_amount_raw == 100_000_000_000_000_000_000
+    assert quoted.execution_notional_usd == pytest.approx(250_000.0)
+    assert quoted.quote_id == "quote-1"
 
 
 def test_quote_bound_raw_cap_does_not_create_second_sizing_identity():
@@ -233,4 +235,6 @@ def test_quote_bound_raw_cap_does_not_create_second_sizing_identity():
     assert quoted.sizing_id == base.sizing_id
     assert quoted.approved_notional_usd == pytest.approx(base.approved_notional_usd)
     assert quoted.approved_borrow_amount_raw == 50_000_000_000_000_000_000
+    assert quoted.execution_notional_usd == pytest.approx(125_000.0)
+    assert quoted.quote_id == "quote-cap"
     assert "max_borrow_amount_raw" in quoted.constraints_applied
