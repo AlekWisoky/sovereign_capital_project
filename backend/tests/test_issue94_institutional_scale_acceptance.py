@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from victor_ai_bot.execution_capture.institutional_sizing import (
@@ -14,7 +12,9 @@ from victor_ai_bot.execution_capture.institutional_sizing import (
     SettlementSizingContext,
     WealthGoalSizingContext,
 )
-from victor_ai_bot.execution_capture.institutional_sizing_kernel import calculate_institutional_size
+from victor_ai_bot.execution_capture.institutional_sizing_kernel import (
+    calculate_institutional_size,
+)
 
 
 def _institutional_contract(target_usd: float) -> InstitutionalSizingContract:
@@ -82,9 +82,20 @@ def _institutional_contract(target_usd: float) -> InstitutionalSizingContract:
 
 @pytest.mark.parametrize(
     "target_usd",
-    [250_000.0, 500_000.0, 1_000_000.0, 2_500_000.0, 5_000_000.0, 50_000_000.0, 100_000_000.0, 200_000_000.0],
+    [
+        250_000.0,
+        500_000.0,
+        1_000_000.0,
+        2_500_000.0,
+        5_000_000.0,
+        50_000_000.0,
+        100_000_000.0,
+        200_000_000.0,
+    ],
 )
-def test_institutional_scale_matrix_preserves_canonical_sizing_and_quote_lineage(target_usd: float):
+def test_institutional_scale_matrix_preserves_canonical_sizing_and_quote_lineage(
+    target_usd: float,
+):
     contract = _institutional_contract(target_usd)
     base = calculate_institutional_size(contract)
     quoted = calculate_institutional_size(
@@ -102,7 +113,6 @@ def test_institutional_scale_matrix_preserves_canonical_sizing_and_quote_lineage
     assert quoted.execution_notional_usd == pytest.approx(target_usd)
     assert quoted.quote_id == f"quote-scale-{int(target_usd)}"
     assert quoted.approved_borrow_amount_raw is not None
-    assert "sizing_id" not in quoted.quote_id
     assert quoted.downsize_reasons == ()
 
 
@@ -140,4 +150,14 @@ def test_institutional_scale_matrix_still_downsizes_above_explicit_capacity():
     assert result.approved_notional_usd == pytest.approx(500_000_000.0)
     assert result.execution_notional_usd == pytest.approx(500_000_000.0)
     assert result.downsize_reasons
-    assert any(reason in result.downsize_reasons for reason in ("liquidity_available", "pool_depth", "pool_depth_cap", "provider_capacity", "route_capacity", "internal_prime_remaining_capacity"))
+    assert any(
+        reason in result.downsize_reasons
+        for reason in (
+            "liquidity_available",
+            "pool_depth",
+            "pool_depth_cap",
+            "provider_capacity",
+            "route_capacity",
+            "internal_prime_remaining_capacity",
+        )
+    )
