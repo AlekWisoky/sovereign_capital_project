@@ -132,3 +132,48 @@ jobs:
       - run: |
           cd contracts
           forge test -q
+
+  issue94-prime-repair-verify:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'tmp-issue94-prime-repair-20260913'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Apply the deterministic repair script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+          workflow = Path('.github/workflows/prime-repair-20260913-v2.yml').read_text()
+          start = workflow.index("          python - <<'PY'" + chr(10)) + len("          python - <<'PY'" + chr(10))
+          end = workflow.index(chr(10) + "          PY", start)
+          Path('/tmp/prime_repair.py').write_text(textwrap.dedent(workflow[start:end]))
+          PY
+          python /tmp/prime_repair.py
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Focused Prime regression suite
+        working-directory: backend
+        run: |
+          ruff check victor_ai_bot/internal_prime/allocator.py tests/test_internal_prime_system.py
+          python -m compileall -q victor_ai_bot/internal_prime/allocator.py tests/test_internal_prime_system.py
+          pytest -q tests/test_internal_prime_system.py
+      - name: Commit verified repair
+        run: |
+          test "$GITHUB_HEAD_REF" = "tmp-issue94-prime-repair-20260913"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/internal_prime/allocator.py backend/tests/test_internal_prime_system.py
+          test "$(git diff --cached --name-only | wc -l)" -eq 2
+          git diff --cached --check
+          git commit -m "fix(issue94): require explicit Internal Prime capacity"
+          git push origin HEAD:tmp-issue94-prime-repair-20260913
