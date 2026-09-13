@@ -154,7 +154,7 @@ jobs:
           workflow = Path('.github/workflows/prime-repair-20260913-v2.yml').read_text()
           start = workflow.index("          python - <<'PY'" + chr(10)) + len("          python - <<'PY'" + chr(10))
           end = workflow.index(chr(10) + "          PY", start)
-          Path('/tmp/prime_repair.py').write_text(textwrap.dedent(workflow[start:end]).lstrip())
+          Path('/tmp/prime_repair.py').write_text(chr(10).join(line[10:] if line.startswith('          ') else line for line in workflow[start:end].splitlines()) + chr(10))
           PY
           python /tmp/prime_repair.py
       - name: Install backend dependencies
