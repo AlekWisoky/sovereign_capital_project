@@ -1,0 +1,318 @@
+name: Issue 94 Prime capacity repair
+
+on:
+  push:
+    branches:
+      - tmp-issue94-prime-repair-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Apply surgical Prime capacity repair
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import ast
+
+          allocator = Path("backend/victor_ai_bot/internal_prime/allocator.py")
+          tests = Path("backend/tests/test_internal_prime_system.py")
+          a = allocator.read_text()
+          t = tests.read_text()
+
+          def r1(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          a = r1(a, "import json\\n", "import json\\nimport math\\n", "math import")
+          a = r1(a, "self._capacity_usd = 10_000_000.0", "self._capacity_usd: float | None = None", "initial capacity")
+          a = r1(a, '            self._capacity_usd = max(1.0, float(payload.get("capacityUsd") or 10_000_000.0))', '            self._capacity_usd = self._parse_capacity_usd(payload.get("capacityUsd"))', "persisted capacity")
+          a = r1(a, "            self._capacity_usd = 10_000_000.0", "            self._capacity_usd = None", "corrupt reset")
+          a = r1(a, '            "capacityUsd": round(self._capacity_usd, 8),', '''            "capacityUsd": (
+                round(self._capacity_usd, 8) if self._capacity_usd is not None else None
+            ),''', "raw state capacity")
+          a = r1(a, '            "capacityUsd": round(float(raw.get("capacityUsd") or 10_000_000.0), 2),', '            "capacityUsd": round(capacity_usd, 2) if capacity_usd is not None else None,', "snapshot capacity")
+          a = r1(a, '''        collateralization_ratio = round(
+            (
+                reserved_collateral_usd / max(1.0, float(raw.get("borrowedUsd") or 0.0))
+                if float(raw.get("borrowedUsd") or 0.0) > 0.0
+                else 0.0
+            ),
+            8,
+        )
+        return {
+''', '''        collateralization_ratio = round(
+            (
+                reserved_collateral_usd / max(1.0, float(raw.get("borrowedUsd") or 0.0))
+                if float(raw.get("borrowedUsd") or 0.0) > 0.0
+                else 0.0
+            ),
+            8,
+        )
+        capacity_usd = self._parse_capacity_usd(raw.get("capacityUsd"))
+        return {
+''', "snapshot capacity parse")
+          a = r1(a, '        self._capacity_usd = max(1.0, float(state_payload.get("capacityUsd") or 10_000_000.0))', '        self._capacity_usd = self._parse_capacity_usd(state_payload.get("capacityUsd"))', "adopt capacity")
+          old = '''    def _capacity_limit(self, stage_policy: Dict[str, Any] | None = None) -> float:
+        if stage_policy is None:
+            return max(1.0, float(self._capacity_usd or 10_000_000.0))
+        return max(
+            1.0,
+            float(
+                stage_policy.get("prime_capacity_usd", self._capacity_usd)
+                or self._capacity_usd
+                or 10_000_000.0
+            ),
+        )
+'''
+          new = '''    @staticmethod
+    def _parse_capacity_usd(value: Any) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            capacity_usd = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(capacity_usd) or capacity_usd <= 0.0:
+            return None
+        return capacity_usd
+
+    def _capacity_limit(self, stage_policy: Dict[str, Any] | None = None) -> float:
+        value = (
+            self._capacity_usd
+            if stage_policy is None or "prime_capacity_usd" not in stage_policy
+            else stage_policy.get("prime_capacity_usd")
+        )
+        capacity_usd = self._parse_capacity_usd(value)
+        return float(capacity_usd) if capacity_usd is not None else 0.0
+'''
+          a = r1(a, old, new, "capacity limit")
+          old = '''        cap = float(context.get("familyCapUsd") or 0.0)
+        projected_family = float(context.get("projectedFamilyExposureUsd") or 0.0)
+        if projected_family > cap:
+            raise BorrowLimitError("family cap exceeded", reason_code="family_cap_exceeded")
+        capacity_usd = float(context.get("primeCapacityUsd") or 0.0)
+'''
+          new = '''        capacity_usd = float(context.get("primeCapacityUsd") or 0.0)
+        if capacity_usd <= 0.0:
+            raise CapitalAllocationError(
+                "prime capacity unavailable", reason_code="prime_capacity_unavailable"
+            )
+        cap = float(context.get("familyCapUsd") or 0.0)
+        projected_family = float(context.get("projectedFamilyExposureUsd") or 0.0)
+        if projected_family > cap:
+            raise BorrowLimitError("family cap exceeded", reason_code="family_cap_exceeded")
+'''
+          a = r1(a, old, new, "approve capacity")
+          old = '        effective_loan_id = str(loan_id or req.request_id or f"loan_{uuid.uuid4().hex[:16]}")\\n'
+          new = '''        capacity_usd = self._capacity_limit(stage_policy)
+        if capacity_usd <= 0.0:
+            return {
+                "ok": False,
+                "reason_code": "prime_capacity_unavailable",
+                "loan": {},
+                "journal_tx": {},
+                "state_snapshot": {},
+                "event_type": "prime_state",
+            }
+
+        effective_loan_id = str(loan_id or req.request_id or f"loan_{uuid.uuid4().hex[:16]}")
+'''
+          a = r1(a, old, new, "open transition capacity")
+          a = r1(a, '        capacity_usd = self._capacity_limit(stage_policy)\\n        utilization = min(1.0, max(0.0, borrowed_usd / max(1.0, float(capacity_usd))))', '        utilization = min(1.0, max(0.0, borrowed_usd / max(1.0, float(capacity_usd))))', "open transition duplicate")
+          guard = '''        previous_borrowed = float(self._borrowed_usd)
+        previous_capacity = float(self._capacity_usd)
+'''
+          guard_new = '''        capacity_usd = self._capacity_limit()
+        if capacity_usd <= 0.0:
+            return _rejected_payload(reason_code="prime_capacity_unavailable", loan_payload=loan)
+
+        previous_borrowed = float(self._borrowed_usd)
+        previous_capacity = float(self._capacity_usd)
+'''
+          prefix, rest = a.split("    def settle(", 1)
+          a = prefix + "    def settle(" + r1(rest, guard, guard_new, "settle capacity guard")
+          anchor = '''        family = str(loan.get("family") or "")
+        notional = float(loan.get("notional_usd") or 0.0)
+'''
+          guard = '''        capacity_usd = self._capacity_limit()
+        if capacity_usd <= 0.0:
+            return {
+                "ok": False,
+                "reason_code": "prime_capacity_unavailable",
+                "journal_tx": self._build_prime_settlement_rejection_transaction(
+                    loan_id=str(loan_id),
+                    loan=loan,
+                    reason_code="prime_capacity_unavailable",
+                    realized_pnl_usd=realized_pnl_usd,
+                    receipt_id=str(receipt_id or ""),
+                ),
+                "state_snapshot": None,
+            }
+
+        family = str(loan.get("family") or "")
+        notional = float(loan.get("notional_usd") or 0.0)
+'''
+          prefix, rest = a.split("    def prepare_settlement_transition(", 1)
+          a = prefix + "    def prepare_settlement_transition(" + r1(rest, anchor, guard, "prepare settlement capacity")
+          a = r1(a, '        capacity_usd = float(self._capacity_usd or self._capacity_limit())\\n        utilization = min(1.0, max(0.0, borrowed_usd / max(1.0, capacity_usd)))', '        utilization = min(1.0, max(0.0, borrowed_usd / max(1.0, capacity_usd)))', "settlement capacity reuse")
+          a = r1(a, '            "capacityUsd": round(self._capacity_usd, 2),', '''            "capacityUsd": (
+                round(self._capacity_usd, 2) if self._capacity_usd is not None else None
+            ),''', "snapshot capacity")
+
+          new_tests = '''
+
+
+def test_internal_prime_explicit_capacity_above_ten_million_is_honored(tmp_path):
+    prime = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    prime.inventory.seed("USDC", 25_000_000.0)
+
+    out = prime.allocate(
+        PrimeBorrowRequest(
+            family="flash_arb",
+            capital_source="internal_prime",
+            notional_usd=20_000_000.0,
+            asset="USDC",
+            horizon_minutes=60.0,
+            confidence=0.9,
+        ),
+        stage_policy={
+            "max_deployable_pct": 1.0,
+            "family_cap_pct": 1.0,
+            "prime_capacity_usd": 25_000_000.0,
+        },
+    )
+
+    assert out["allowed"] is True
+    assert out["decision"]["details"]["primeCapacityUsd"] == 25_000_000.0
+    assert prime.snapshot()["capacityUsd"] == 25_000_000.0
+
+
+def test_internal_prime_persisted_capacity_is_honored_and_missing_or_invalid_is_unavailable(tmp_path):
+    state_dir = tmp_path / "internal_prime"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_path = state_dir / "state_eth.json"
+
+    state_path.write_text(
+        json.dumps({"capacityUsd": 25_000_000.0, "borrowedUsd": 0.0}),
+        encoding="utf-8",
+    )
+    persisted = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    assert persisted.snapshot()["capacityUsd"] == 25_000_000.0
+
+    state_path.write_text(
+        json.dumps({"capacityUsd": "invalid", "borrowedUsd": 0.0}),
+        encoding="utf-8",
+    )
+    invalid = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    invalid.inventory.seed("USDC", 20_000_000.0)
+    invalid_out = invalid.allocate(
+        PrimeBorrowRequest(
+            family="flash_arb",
+            capital_source="internal_prime",
+            notional_usd=20_000_000.0,
+            asset="USDC",
+            horizon_minutes=60.0,
+            confidence=0.9,
+        ),
+        stage_policy={"max_deployable_pct": 1.0, "family_cap_pct": 1.0},
+    )
+    assert invalid_out["allowed"] is False
+    assert invalid_out["reason"] == "prime_capacity_unavailable"
+
+    state_path.write_text(
+        json.dumps({"borrowedUsd": 0.0}),
+        encoding="utf-8",
+    )
+    missing = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    missing.inventory.seed("USDC", 20_000_000.0)
+    missing_out = missing.allocate(
+        PrimeBorrowRequest(
+            family="flash_arb",
+            capital_source="internal_prime",
+            notional_usd=20_000_000.0,
+            asset="USDC",
+            horizon_minutes=60.0,
+            confidence=0.9,
+        ),
+        stage_policy={"max_deployable_pct": 1.0, "family_cap_pct": 1.0},
+    )
+    assert missing_out["allowed"] is False
+    assert missing_out["reason"] == "prime_capacity_unavailable"
+
+
+def test_internal_prime_snapshot_and_state_never_manufacture_ten_million_capacity(tmp_path):
+    prime = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+
+    assert prime.snapshot()["capacityUsd"] is None
+    assert prime._raw_state_payload()["capacityUsd"] is None
+    assert (
+        prime._state_snapshot_payload_from_raw(
+            {"capacityUsd": None, "borrowedUsd": 0.0, "utilization": 0.0}
+        )["capacityUsd"]
+        is None
+    )
+
+    prime.adopt_state_payload({"borrowedUsd": 0.0})
+    assert prime.snapshot()["capacityUsd"] is None
+    assert prime._raw_state_payload()["capacityUsd"] is None
+'''
+          t = r1(t, "from victor_ai_bot.internal_prime.allocator import InternalPrimeAllocator\\n",
+                 "import json\\n\\nfrom victor_ai_bot.internal_prime.allocator import InternalPrimeAllocator\\n",
+                 "json import")
+          t = t.rstrip("\\n") + new_tests
+
+          ast.parse(a)
+          ast.parse(t)
+          if "10_000_000.0" in a:
+              raise SystemExit("implicit 10M capacity literal remains in allocator")
+          if sum(1 for line in t.splitlines() if line.startswith("def test_")) != 25:
+              raise SystemExit("test inventory changed by more or fewer than three cases")
+          allocator.write_text(a)
+          tests.write_text(t)
+          PY
+
+      - name: Verify diff is limited to intended source/tests
+        run: |
+          git diff --check
+          git diff -- backend/victor_ai_bot/internal_prime/allocator.py backend/tests/test_internal_prime_system.py
+          test -z "$(git status --porcelain --untracked-files=all | grep -v '^ M backend/victor_ai_bot/internal_prime/allocator.py$' | grep -v '^ M backend/tests/test_internal_prime_system.py$' || true)"
+
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+
+      - name: Ruff and compile checks
+        run: |
+          ruff check backend/victor_ai_bot/internal_prime/allocator.py backend/tests/test_internal_prime_system.py
+          python -m compileall -q backend/victor_ai_bot/internal_prime/allocator.py backend/tests/test_internal_prime_system.py
+
+      - name: Run focused Prime regression suite
+        working-directory: backend
+        run: pytest -q tests/test_internal_prime_system.py
+
+      - name: Commit proven repair on scratch branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/victor_ai_bot/internal_prime/allocator.py backend/tests/test_internal_prime_system.py
+          git diff --cached --check
+          git diff --cached --name-only | grep -Fx 'backend/victor_ai_bot/internal_prime/allocator.py'
+          git diff --cached --name-only | grep -Fx 'backend/tests/test_internal_prime_system.py'
+          git commit -m "fix(issue94): require explicit Internal Prime capacity"
+          git push origin HEAD:tmp-issue94-prime-repair-20260913
