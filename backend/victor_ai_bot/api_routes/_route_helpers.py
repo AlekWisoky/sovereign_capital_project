@@ -12,7 +12,11 @@ from ..runtime_services.state_service import (
     auto_trade_recovery_info,
     current_auto_trade_recovery_info,
 )
-from ..runtime_services.auxiliary_state_service import AuxiliaryStateService
+from ..runtime_services.auxiliary_state_service import (
+    AuxiliaryStateService,
+    CAPITAL_CONTRACT_VERSION,
+    CAPITAL_POLICY_VERSION,
+)
 from ..runtime_services.summary_read_contract import build_summary_read_contract
 from ..runtime_services.capital_truth_read_context import build_capital_truth_read_context
 
@@ -252,7 +256,11 @@ def attach_summary_contract(
     out = dict(payload or {})
     capital_contract: Mapping[str, Any] | None = None
     capital_policy: Mapping[str, Any] | None = None
-    if runtime is not None:
+    normalized_family = str(family or "summary")
+    if runtime is not None and normalized_family == "consensus_state":
+        capital_contract = {"contractVersion": CAPITAL_CONTRACT_VERSION}
+        capital_policy = {"contractVersion": CAPITAL_POLICY_VERSION}
+    elif runtime is not None:
         try:
             context = build_capital_truth_read_context(runtime, auxiliary_state=AuxiliaryStateService())
             capital_contract = dict(context.capital_contract or {})
@@ -261,13 +269,13 @@ def attach_summary_contract(
             capital_contract = None
             capital_policy = None
     out["summaryContract"] = build_summary_read_contract(
-        family=str(family or "summary"),
+        family=normalized_family,
         payload=out,
         capital_contract=capital_contract,
         capital_policy=capital_policy,
         source_contracts=source_contracts,
-        phase=str(f"{family}_summary"),
-        read_model=str(read_model or f"{family}_summary_projection_v1"),
+        phase=str(f"{normalized_family}_summary"),
+        read_model=str(read_model or f"{normalized_family}_summary_projection_v1"),
     )
     return out
 
