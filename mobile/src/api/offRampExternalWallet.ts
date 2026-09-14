@@ -1,4 +1,5 @@
 import { walletConnectState, sendWalletConnectTransaction } from '../walletConnect/session';
+import { normalizeBaseUrl } from './url';
 
 export type ExternalWalletTransaction = {
   from: string;
@@ -61,6 +62,22 @@ function normalizeQuantity(value: unknown): string {
   return '';
 }
 
+function canonicalIntent(tx: ExternalWalletTransaction): string {
+  return JSON.stringify({
+    chainId: tx.chainId,
+    from: tx.from.toLowerCase(),
+    to: tx.to.toLowerCase(),
+    data: tx.data.toLowerCase(),
+    value: tx.value,
+  });
+}
+
+export async function externalWalletIntentId(tx: ExternalWalletTransaction): Promise<string> {
+  const bytes = new TextEncoder().encode(canonicalIntent(tx));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function externalWalletTransactionFromPrepared(
   prepared: PreparedOffRamp,
 ): ExternalWalletTransaction | null {
@@ -106,12 +123,42 @@ export async function validatePreparedExternalWalletTransaction(
 
 export async function submitPreparedExternalWalletTransaction(
   prepared: PreparedOffRamp,
-): Promise<{ txHash: string; status: 'submitted' }> {
+): Promise<{ txHash: string; intentId: string; status: 'submitted' }> {
   const validation = await validatePreparedExternalWalletTransaction(prepared);
   if (!validation.ok || !validation.tx) {
     throw new Error(`external_wallet_${validation.reasonCode ?? 'validation_failed'}`);
   }
 
+  const intentId = await externalWalletIntentId(validation.tx);
   const txHash = await sendWalletConnectTransaction(validation.tx);
-  return { txHash, status: 'submitted' };
+  return { txHash, intentId, status: 'submitted' };
+}
+
+export async function reconcileSubmittedExternalWalletTransaction(
+  baseUrl: string,
+  adminKey: string,
+  prepared: PreparedOffRamp,
+  txHash: string,
+): Promise<Record<string, unknown>> {
+  const validation = await validatePreparedExternalWalletTransaction(prepared);
+  if (!validation.ok || !validation.tx) {
+    throw new Error(`external_wallet_${validation.reasonCode ?? 'validation_failed'}`);
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error('external_wallet_invalid_tx_hash');
+  const intentId = await externalWalletIntentId(validation.tx);
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/withdraw/external/reconcile`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-Admin-Key': adminKey },
+    body: JSON.stringify({
+      intent_id: intentId,
+      tx_hash: txHash,
+      chain_id: validation.tx.chainId,
+      from_address: validation.tx.from,
+      to: validation.tx.to,
+      data: validation.tx.data,
+      value: validation.tx.value,
+    }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as Record<string, unknown>;
 }
