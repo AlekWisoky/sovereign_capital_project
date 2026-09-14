@@ -1,3 +1,5 @@
+import json
+
 from victor_ai_bot.internal_prime.allocator import InternalPrimeAllocator
 from victor_ai_bot.internal_prime.contracts import PrimeBorrowRequest
 from victor_ai_bot.persistence.db import PersistenceDB
@@ -760,3 +762,98 @@ def test_internal_prime_settle_marks_state_unavailable_when_inventory_rereserve_
     assert snap["stateReasonCode"] == "prime_settlement_inventory_rollback_failed"
     assert snap["borrowedUsd"] == 100000.0
     assert snap["loanCount"] == 1
+
+
+def test_internal_prime_explicit_capacity_above_ten_million_is_honored(tmp_path):
+    prime = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    prime.inventory.seed("USDC", 25_000_000.0)
+
+    out = prime.allocate(
+        PrimeBorrowRequest(
+            family="flash_arb",
+            capital_source="internal_prime",
+            notional_usd=20_000_000.0,
+            asset="USDC",
+            horizon_minutes=60.0,
+            confidence=0.9,
+        ),
+        stage_policy={
+            "max_deployable_pct": 1.0,
+            "family_cap_pct": 1.0,
+            "prime_capacity_usd": 25_000_000.0,
+        },
+    )
+
+    assert out["allowed"] is True
+    assert out["decision"]["details"]["primeCapacityUsd"] == 25_000_000.0
+    assert prime.snapshot()["capacityUsd"] == 25_000_000.0
+
+
+def test_internal_prime_persisted_capacity_is_honored_and_missing_or_invalid_is_unavailable(tmp_path):
+    state_dir = tmp_path / "internal_prime"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_path = state_dir / "state_eth.json"
+
+    state_path.write_text(
+        json.dumps({"capacityUsd": 25_000_000.0, "borrowedUsd": 0.0}),
+        encoding="utf-8",
+    )
+    persisted = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    assert persisted.snapshot()["capacityUsd"] == 25_000_000.0
+
+    state_path.write_text(
+        json.dumps({"capacityUsd": "invalid", "borrowedUsd": 0.0}),
+        encoding="utf-8",
+    )
+    invalid = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    invalid.inventory.seed("USDC", 20_000_000.0)
+    invalid_out = invalid.allocate(
+        PrimeBorrowRequest(
+            family="flash_arb",
+            capital_source="internal_prime",
+            notional_usd=20_000_000.0,
+            asset="USDC",
+            horizon_minutes=60.0,
+            confidence=0.9,
+        ),
+        stage_policy={"max_deployable_pct": 1.0, "family_cap_pct": 1.0},
+    )
+    assert invalid_out["allowed"] is False
+    assert invalid_out["reason"] == "prime_capacity_unavailable"
+
+    state_path.write_text(
+        json.dumps({"borrowedUsd": 0.0}),
+        encoding="utf-8",
+    )
+    missing = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+    missing.inventory.seed("USDC", 20_000_000.0)
+    missing_out = missing.allocate(
+        PrimeBorrowRequest(
+            family="flash_arb",
+            capital_source="internal_prime",
+            notional_usd=20_000_000.0,
+            asset="USDC",
+            horizon_minutes=60.0,
+            confidence=0.9,
+        ),
+        stage_policy={"max_deployable_pct": 1.0, "family_cap_pct": 1.0},
+    )
+    assert missing_out["allowed"] is False
+    assert missing_out["reason"] == "prime_capacity_unavailable"
+
+
+def test_internal_prime_snapshot_and_state_never_manufacture_ten_million_capacity(tmp_path):
+    prime = InternalPrimeAllocator(data_dir=str(tmp_path), chain="eth")
+
+    assert prime.snapshot()["capacityUsd"] is None
+    assert prime._raw_state_payload()["capacityUsd"] is None
+    assert (
+        prime._state_snapshot_payload_from_raw(
+            {"capacityUsd": None, "borrowedUsd": 0.0, "utilization": 0.0}
+        )["capacityUsd"]
+        is None
+    )
+
+    prime.adopt_state_payload({"borrowedUsd": 0.0})
+    assert prime.snapshot()["capacityUsd"] is None
+    assert prime._raw_state_payload()["capacityUsd"] is None
