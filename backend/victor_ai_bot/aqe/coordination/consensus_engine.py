@@ -4,8 +4,8 @@ import json
 import os
 import time
 from json import JSONDecodeError
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from victor_ai_bot.determinism import stable_hash_int
 
@@ -116,11 +116,13 @@ class AgentPerformanceTracker:
         p.n = int(p.n) + 1
         if ok:
             p.wins = int(p.wins) + 1
+        # Welford update for mean/variance
         x = float(reward)
         delta = x - float(p.mean_reward)
         p.mean_reward = float(p.mean_reward) + delta / float(p.n)
         delta2 = x - float(p.mean_reward)
         p.var_reward = float(p.var_reward) + delta * delta2
+        # periodic persist
         if p.n % 25 == 0:
             self.save()
 
@@ -138,6 +140,7 @@ class AgentPerformanceTracker:
 class ConsensusConfig:
     enabled: bool = False
     base_threshold: float = 0.55
+    # multiplies threshold in stress (1.0 == no change)
     stress_threshold_mult: float = 1.30
     conflict_penalty: float = 0.25
     weight_lr: float = 0.06
@@ -161,21 +164,29 @@ class AgentWeightOptimizer:
         if not p:
             return
         wr = self.tracker.win_rate(agent)
+        # expected reward proxy
         mu = float(p.mean_reward)
+        # variance proxy
         var = float(p.var_reward) / float(max(1, p.n))
         score = mu * (0.5 + 0.5 * wr) / max(1e-9, (1.0 + var) ** 0.5)
+        # map to [-1,1] using tanh-like clamp
         score = float(_clip(score, -2.0, 2.0)) / 2.0
         lr = float(self.cfg.weight_lr)
+        # update with soft floor/ceiling
         new_w = float(p.weight) * (1.0 - lr) + lr * (1.0 + score)
         p.weight = float(_clip(new_w, 0.25, 2.50))
 
 
 class AgentConsensusEngine:
-    """Deterministic agent consensus calculator.
+    """Consensus engine.
 
-    Runtime callers may supply the canonical AgentWeightingGovernor projection.
-    The legacy tracker remains available for standalone compatibility, but an
-    explicit override is authoritative for that calculation and is never saved.
+    Steps:
+      1) Normalize signals
+      2) Weight signals dynamically by historical accuracy + regime
+      3) Penalize conflicting signals
+      4) Reward convergence
+
+    ConsensusScore = weighted_signal_sum - conflict_penalty
     """
 
     def __init__(self, *, cfg: Optional[ConsensusConfig] = None, tracker: Optional[AgentPerformanceTracker] = None):
@@ -199,9 +210,12 @@ class AgentConsensusEngine:
             self.last = {"ts": int(time.time()), "enabled": False}
             return dict(self.last)
 
+        # normalize signals to [-1,1]
         sig = {k: float(_clip(v, -1.0, 1.0)) for k, v in (signals or {}).items()}
         conf = {k: float(_clip(confidences.get(k, 0.5), 0.0, 1.0)) for k in sig.keys()}
 
+        # Explicit runtime overrides are the canonical learned-weight projection.
+        # Invalid values are ignored per-agent; the existing tracker/static path remains fallback.
         override_map: Dict[str, float] = {}
         if isinstance(weight_overrides, dict):
             for key, value in weight_overrides.items():
@@ -212,6 +226,7 @@ class AgentConsensusEngine:
                 except (TypeError, ValueError, OverflowError):
                     continue
 
+        # base weights
         w: Dict[str, float] = {}
         for k in sig.keys():
             if k in override_map:
@@ -220,24 +235,35 @@ class AgentConsensusEngine:
                 base = 1.0
                 if self.tracker and k in self.tracker.agents:
                     base = float(self.tracker.agents[k].weight)
+            # modest regime adjustment
             if str(regime).lower() in {"mev_stress", "gas_spike"} and "Risk" in k:
                 base *= 1.10
             w[k] = float(base) * float(0.4 + 0.6 * conf.get(k, 0.5))
 
+        # weighted sum
         wsum = sum(w.values())
         if wsum <= 1e-12:
             wsum = 1.0
         weighted = sum(float(w[k]) * float(sig[k]) for k in sig.keys()) / float(wsum)
 
+        # conflict penalty based on dispersion
         vals = list(sig.values())
-        dispersion = float(max(vals) - min(vals)) if vals else 0.0
+        if vals:
+            mx = max(vals)
+            mn = min(vals)
+            dispersion = float(mx - mn)
+        else:
+            dispersion = 0.0
         conflict_pen = float(self.cfg.conflict_penalty) * float(_clip(dispersion, 0.0, 2.0)) / 2.0
         score = float(_clip(weighted - conflict_pen, -1.0, 1.0))
 
+        # dynamic threshold based on stress signals (deterministic)
+        # Optional external stress feed (e.g. gas spikes / mempool stress). Kept optional
+        # and deterministic to preserve backwards compatibility.
         stress = float(_clip(float(((stress_signals or {}) or {}).get("stress", 0.0) or 0.0), 0.0, 1.0))
         mult = 1.0 + (float(self.cfg.stress_threshold_mult) - 1.0) * stress
         thr = float(_clip(float(self.cfg.base_threshold) * float(mult), 0.05, 0.95))
-        allow = score > (thr - 0.5)
+        allow = score > (thr - 0.5)  # map threshold into score space
 
         self.last = {
             "ts": int(time.time()),
@@ -258,9 +284,11 @@ class AgentConsensusEngine:
         return dict(self.last)
 
     def observe_trade_result(self, *, agent_contributions: Dict[str, float], ok: bool, reward: float) -> None:
+        """Update tracker and weights post-trade."""
         if not self.tracker:
             return
         for agent, contrib in (agent_contributions or {}).items():
+            # risk-adjust reward contribution
             r = float(reward) * float(contrib)
             self.tracker.observe(agent=str(agent), ok=bool(ok), reward=float(r))
             if self.optimizer:
