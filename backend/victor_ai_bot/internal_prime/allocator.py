@@ -1074,7 +1074,7 @@ class InternalPrimeAllocator:
         )
         pos = PrimeLoanPosition(**dict(transition.get("loan") or {}))
         previous_borrowed = float(self._borrowed_usd)
-        previous_capacity = float(self._capacity_usd)
+        previous_capacity = self._capacity_usd
         previous_family_exposure = deepcopy(self._family_exposure)
         previous_loans = deepcopy(self._loans)
         previous_utilization = float(self._utilization)
@@ -1225,7 +1225,7 @@ class InternalPrimeAllocator:
             return _rejected_payload(reason_code="prime_capacity_unavailable", loan_payload=loan)
 
         previous_borrowed = float(self._borrowed_usd)
-        previous_capacity = float(self._capacity_usd)
+        previous_capacity = self._capacity_usd
         previous_family_exposure = deepcopy(self._family_exposure)
         previous_loans = deepcopy(self._loans)
         previous_utilization = float(self._utilization)
