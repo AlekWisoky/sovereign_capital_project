@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any, Mapping
+
+from ..runtime_subsystems.reward_trace import reward_function
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 
@@ -12,6 +15,112 @@ def _text(value: Any) -> str:
 
 def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _bounded_calibration_reward(*, realized_net_usd: Any, expected_net_usd: Any) -> float | None:
+    try:
+        realized = float(realized_net_usd)
+        expected = float(expected_net_usd)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(realized) or not math.isfinite(expected):
+        return None
+    denom = max(1.0, abs(expected))
+    trace = reward_function(
+        realized_net_pnl=realized - expected,
+        deployed_notional=denom,
+    )
+    try:
+        return max(-1.0, min(1.0, float(trace.get("reward", 0.0))))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _calibrate_from_attribution(
+    runtime: Any,
+    *,
+    decision_id: str,
+    receipt_id: str,
+    outcome_id: str,
+    opportunity_id: str,
+    route_id: str,
+    realized_net_usd: Any,
+    expected_net_usd: Any,
+) -> dict[str, Any]:
+    store = getattr(runtime, "_agent_attribution", None)
+    hub = getattr(runtime, "_agent_hub", None)
+    agents = list(getattr(hub, "agents", None) or [])
+    if store is None or not hasattr(store, "load") or not agents:
+        return {"ok": False, "reason_code": "calibration_context_unavailable"}
+    reward = _bounded_calibration_reward(
+        realized_net_usd=realized_net_usd,
+        expected_net_usd=expected_net_usd,
+    )
+    if reward is None:
+        return {"ok": False, "reason_code": "calibration_economics_invalid"}
+
+    rows = list(store.load(limit=getattr(store, "max_items", 2000)) or [])
+    match = None
+    for candidate in reversed(rows):
+        if _text(candidate.get("decision_id")) not in {"", str(decision_id)}:
+            continue
+        if receipt_id and _text(candidate.get("receipt_id")) not in {"", str(receipt_id)}:
+            continue
+        if outcome_id and _text(candidate.get("outcome_id")) not in {"", str(outcome_id)}:
+            continue
+        if opportunity_id and _text(candidate.get("opportunity_id")) not in {"", str(opportunity_id)}:
+            continue
+        if route_id and _text(candidate.get("route_id")) not in {"", str(route_id)}:
+            continue
+        match = candidate
+        break
+    if match is None:
+        return {"ok": False, "reason_code": "calibration_attribution_missing"}
+
+    by_name = {
+        _text(getattr(agent, "name", agent.__class__.__name__)): agent
+        for agent in agents
+    }
+    updated = []
+    skipped = []
+    for contributor in list(match.get("contributors") or []):
+        item = _dict(contributor)
+        name = _text(item.get("agent"))
+        features = item.get("features_used")
+        agent = by_name.get(name)
+        if agent is None or not isinstance(features, Mapping) or not features:
+            skipped.append(name or "unknown")
+            continue
+        calibrator = getattr(agent, "cal", None)
+        if calibrator is None or not hasattr(calibrator, "update"):
+            skipped.append(name)
+            continue
+        update_key = ":".join(
+            part for part in (receipt_id, outcome_id, decision_id, name) if str(part)
+        )
+        try:
+            calibrator.update(
+                reward=float(reward),
+                features=dict(features),
+                update_key=update_key,
+            )
+            state = dict(calibrator.state() or {})
+            if state.get("update", {}).get("code") == "calibration_update_duplicate":
+                skipped.append(name)
+            else:
+                updated.append(name)
+        except _SAFE:
+            skipped.append(name)
+
+    return {
+        "ok": True,
+        "reason_code": "calibration_updated" if updated else "calibration_noop",
+        "reward": float(reward),
+        "updated_agents": list(updated),
+        "skipped_agents": list(skipped),
+        "receipt_id": str(receipt_id),
+        "outcome_id": str(outcome_id),
+    }
 
 
 def _observe_settled_outcome(
@@ -82,7 +191,7 @@ def _observe_settled_outcome(
     if intent_fingerprint:
         metadata["intent_fingerprint"] = intent_fingerprint
 
-    return dict(
+    result = dict(
         omar.observe_outcome(
             decision_id=decision_id,
             ok=bool(row.get("ok", True)),
@@ -98,3 +207,15 @@ def _observe_settled_outcome(
             metadata=metadata,
         )
     )
+    calibration = _calibrate_from_attribution(
+        runtime,
+        decision_id=decision_id,
+        receipt_id=receipt_id,
+        outcome_id=outcome_id,
+        opportunity_id=opportunity_id,
+        route_id=route_id,
+        realized_net_usd=row.get("realized_net_usd"),
+        expected_net_usd=row.get("expected_net_usd", p.get("expected_net_usd")),
+    )
+    result["calibration"] = calibration
+    return result

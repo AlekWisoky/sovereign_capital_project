@@ -41,6 +41,15 @@ class AgentAttributionStore:
             out['realized_pnl_impact_usd'] = float(item.get('realized_pnl_impact_usd') or 0.0)
         except (TypeError, ValueError):
             out['realized_pnl_impact_usd'] = 0.0
+        for key in ('signal', 'confidence'):
+            if key in item:
+                try:
+                    out[key] = float(item.get(key))
+                except (TypeError, ValueError):
+                    out[key] = 0.0
+        features = item.get('features_used')
+        if isinstance(features, dict):
+            out['features_used'] = dict(features)
         return out
 
     def _coerce_row(self, item: Any) -> Dict[str, Any] | None:
@@ -51,7 +60,29 @@ class AgentAttributionStore:
             contributors = []
         if not isinstance(contributors, list):
             return None
+
         out: Dict[str, Any] = {'contributors': []}
+        # Preserve the existing attribution record's canonical lineage metadata
+        # in the JSON read history. This is projection-only: decision identity,
+        # settlement truth, and persistence authority remain elsewhere.
+        out.update({
+            key: item.get(key)
+            for key in (
+                'decision_id',
+                'correlation_id',
+                'execution_id',
+                'receipt_id',
+                'outcome_id',
+                'sizing_id',
+                'opportunity_id',
+                'route_id',
+                'strategy_family',
+                'regime',
+                'ts_ms',
+            )
+            if key in item
+        })
+
         for contrib in contributors:
             coerced = self._coerce_contributor(contrib)
             if coerced is not None:
@@ -98,5 +129,4 @@ class AgentAttributionStore:
                 'precision': round(s['precision_hits'] / max(1.0, s['count']), 6),
                 'realizedImpactUsd': round(s['realized_pnl_impact_usd'], 6),
             })
-        out.sort(key=lambda x: (-x['realizedImpactUsd'], x['agent']))
-        return {'agents': out}
+        return {'agents': sorted(out, key=lambda x: (-x['realizedImpactUsd'], x['agent']))}
