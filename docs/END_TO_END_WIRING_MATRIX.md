@@ -1,30 +1,26 @@
 # End-to-end wiring matrix
 
-This document is the authoritative engineering contract for the controlled integration. `wired` means an executable production-path connection exists; `pending merge` means it exists only on the controlled branch; `gap` means the responsibility is not yet executable end to end.
+This document is the authoritative engineering contract for the controlled integration. `wired` means an executable production-path connection exists; `gap` means the responsibility is not yet executable end to end.
 
 ## Canonical lifecycle
 
-| Responsibility | Canonical owner | Downstream consumer | Main / production sync | Status |
-|---|---|---|---|---|
-| Market observation / opportunity discovery | scanner + opportunity services | decision engine | main baseline | **wired** |
-| Canonical `decision_id` | `decision_identity.py` + decision facade | OMAR, governance, execution, settlement | controlled branch only | **wired / pending merge** |
-| Canonical `correlation_id` | decision identity layer | execution, settlement, learning | controlled branch only | **wired / pending merge** |
-| Operator-intent snapshot | `operator_intent.py` | decision + OMAR context | controlled branch only | **wired / pending merge** |
-| Wealth-goal snapshot | wealth-goal service | intent / capital context | controlled branch only | **wired / verify** |
-| `capital_engine_state()` decision snapshot | capital facade + decision facade | OMAR learning integrity / downstream admission | controlled branch only | **wired / pending merge** |
-| OMAR recommendation | `omar/runtime.py` + real learner | governance/admission | controlled branch only | **wired / pending merge** |
-| OMAR identity authority | none | canonical decision layer | n/a | **correctly absent** |
-| Governance/admission | governance + admission services | sizing / execution | controlled branch only | **wired / pending merge** |
-| Adaptive risk-budget sizing | capital/risk sizing services | execution | controlled branch only | **wired / pending merge** |
-| `sizing_id` | sizing/settlement lineage | execution + settlement | controlled branch only | **wired / pending merge** |
-| Execution identity | execution lifecycle | receipt / settlement | controlled branch only | **wired / pending merge** |
-| `execution_id` | execution lifecycle | physical settlement | controlled branch only | **wired / pending merge** |
-| Receipt verification | receipt facade | canonical settlement | controlled branch only | **wired / pending merge** |
-| Physical canonical settlement ledger | canonical settlement/accounting | outcome learning | PR #48 baseline + controlled bridge | **wired / pending merge** |
-| `outcome_id` | canonical settlement | OMAR integrity gate | controlled branch only | **wired / pending merge** |
-| Exact OMAR settlement attribution | `OmarReceiptFacade` + lifecycle adapter + integrity gate | real learner | controlled branch only | **wired / pending merge** |
-| OMAR learning | bounded contextual learner | future OMAR recommendations | controlled branch only | **wired / pending merge** |
-| Policy update / OOS evidence / promotion | existing learning/evolution systems | future admission | **must remain gated by settled evidence** | **wired / verify** |
+| Responsibility | Canonical owner | Downstream consumer | Status |
+|---|---|---|---|
+| Market observation / opportunity discovery | scanner + opportunity services | decision engine | **wired** |
+| Canonical decision / correlation identity | decision identity + decision facade | OMAR, governance, execution, settlement, learning | **wired / verify** |
+| Operator-intent snapshot | operator-intent service | decision + OMAR context | **wired / verify** |
+| Wealth-goal snapshot | wealth-goal service | intent / capital context | **wired / verify** |
+| Capital decision snapshot | capital facade + decision facade | admission / learning integrity | **wired / verify** |
+| OMAR recommendation | OMAR runtime + learner | governance/admission | **wired / verify** |
+| OMAR identity authority | none | canonical decision layer | **correctly absent** |
+| Governance/admission | governance + admission services | sizing / execution | **wired / verify** |
+| Adaptive risk-budget sizing | capital/risk sizing services | execution | **wired / verify** |
+| Execution identity | execution lifecycle | receipt / settlement | **wired / verify** |
+| Receipt verification | receipt facade | canonical settlement | **wired / verify** |
+| Physical canonical settlement ledger | canonical settlement/accounting | outcome learning | **wired / verify** |
+| Exact OMAR settlement attribution | receipt facade + lifecycle adapter + integrity gate | real learner | **wired / verify** |
+| OMAR learning | bounded contextual learner | future recommendations | **wired / verify** |
+| Policy update / OOS evidence / promotion | existing learning/evolution systems | future admission | **must remain gated by settled evidence** |
 
 ## Operator and capital movement surfaces
 
@@ -32,36 +28,45 @@ This document is the authoritative engineering contract for the controlled integ
 |---|---|---|---|
 | Command-center controls | command/control APIs | control center | **wired / verify parity** |
 | Safety controls / pause / allocation freeze | canonical control state | operator controls | **wired** |
-| OMAR state/start/stop API | existing OMAR API | client helper added | **wired / UI gap** |
-| OMAR dedicated operator UI | existing API | no dedicated screen | **GAP — not required for backend authority** |
-| Withdrawal config | withdraw routes | off-ramp | **wired** |
-| Withdrawal prepare | backend-produced tx intent | off-ramp Prepare | **wired** |
-| External-wallet signing | WalletConnect EIP-1193 session bridge exists | OffRamp must invoke it with prepared tx | **GAP — final action wiring** |
-| External-wallet sender proof | backend supports `from_address` taxonomy | client must verify connected address before send | **GAP — final action wiring** |
-| Chain-id / tx-field verification before send | backend produces canonical tx | client helper must verify prepared tx against connected chain/address | **GAP — final action wiring** |
-| Submitted/pending/reconciliation status | backend has tx-status/read-RPC surfaces | OffRamp must display submitted/pending until canonical proof | **GAP — final action wiring** |
+| OMAR state/start/stop API | existing OMAR API | client helper | **wired / UI gap** |
+| Withdrawal config | withdraw routes | OffRamp | **wired** |
+| Withdrawal prepare | backend-produced transaction intent | OffRamp Prepare | **wired** |
+| External-wallet signing | WalletConnect EIP-1193 session bridge exists | OffRamp must invoke it with prepared tx | **GAP — Issue #150** |
+| External-wallet sender proof | backend supports `from_address` taxonomy | client must verify connected address before send | **GAP — Issue #150** |
+| Chain-id / tx-field verification before send | backend produces canonical tx | client must verify prepared tx against connected chain/address | **GAP — Issue #150** |
+| Submitted/pending/reconciliation status | backend has tx-status/read-RPC surfaces | OffRamp must display submitted/pending until canonical proof | **GAP — Issue #150** |
 | Backend hot-wallet withdrawal | privileged backend mode | not used by public/staging UI | **restricted / verify** |
 | Withdraw-all | canonical control + preview + execution lifecycle | operator control surface | **wired / verify** |
 
+## External-wallet canonical flow
+
+The required OffRamp lifecycle is:
+
+`prepare -> verify connected wallet address/chain + exact prepared tx fields -> user signs via WalletConnect eth_sendTransaction -> capture tx hash as submitted/pending -> read backend/RPC status -> accept completion only from canonical receipt/settlement truth`
+
+The mobile WalletConnect bridge exposes `sendWalletConnectTransaction()`, which calls `eth_sendTransaction` and validates the returned transaction hash. The current `OffRampScreen` does not invoke it, so the external-wallet path is not yet end-to-end. A returned transaction hash is submission evidence, not economic settlement.
+
 ## Runtime / deployment synchronization
 
-| Item | Current state |
+| Item | Current verified state |
 |---|---|
-| Single integration PR | **PR #88 against `main`** |
-| Integration branch | `integration/canonical-omar-controlled` |
-| Base | `main` at `eea8a3fd347074deeb9cac97ae20d28343a433b1` |
-| Current branch head | changes continue until final green CI SHA is established |
-| Historical OMAR PR chain | frozen/closed; useful contracts extracted selectively |
-| Source-mutating CI | **deleted from intended architecture** |
-| Runtime monkey-patching | **removed from current constructor/integration path** |
-| Render staging | currently points at stale `architecture-c-contract-tests`; must be aligned only after final green SHA |
-| Staging authority | must remain non-live: no broadcast and no auto-trading authority |
+| Authoritative `main` | `e6ec3306dd0e70ff21d51abdf64662aae07c61b8` |
+| Exact-main economic-unit CI | green |
+| Canonical post-settlement learning-order repair | merged and CI green (#149) |
+| Authoritative staging service | Render `sovereign-capital` (`srv-daej2f1t0dsc73aeg430`) |
+| Staging branch | `integration/canonical-omar-controlled` |
+| Staging URL | `https://sovereign-capital-rsxs.onrender.com` |
+| Last runtime deployment verified | commit `77eacc6e85fe6a1869f8e0cd43799ca0ae6c0783` |
+| Staging safety posture | non-live; public broadcast disabled; executor not enforced in verified runtime |
+| Secondary Render service | `sovereign_capital_project` (`srv-da4k8a3tqb8s73859ft0`) |
+| Secondary service branch | `architecture-c-contract-tests` |
+| Secondary service role | **non-authoritative / stale**; recent deployments fail |
+| Secondary service disposition | **do not delete or disable until owner confirms it is no longer needed** |
+| Environment reconciliation | Issue #146 |
+| External-wallet OffRamp completion | Issue #150 |
+| Live-authority review | Issue #89 remains open and blocking |
 
-## Family policy
-
-A strategy family is retained only when it has a declared mandate, explicit lifecycle state, bounded capital/risk policy, and a path into the same canonical decision → admission → sizing → execution → settlement → outcome model. Families that are merely experimental are **not production authority**; they remain observe/paper/shadow only. They should not be deleted solely because they are disabled. What must be deleted is duplicate execution/identity/accounting logic that creates a second architecture.
-
-Current retained mandate families are `flash_arb`, `funding_arb`, `cex_dex_arb`, `cex_cex_arb`, `liquidation_capture`, `mev_search`, `volatility_market_making`, `stat_arb`, and `treasury_yield`. Their lifecycle state determines whether they can progress toward production; the canonical pipeline remains uniform.
+The two Render services point to the same repository but different branches and environments. The verified staging authority is `sovereign-capital` because it is the service used for controlled staging verification and has the known non-live safety posture. The `sovereign_capital_project` service tracks an older architecture branch and is not a production authority. Its existence alone is not sufficient evidence that it may be deleted, so it remains untouched pending explicit confirmation.
 
 ## Economic invariants
 
@@ -70,20 +75,19 @@ Current retained mandate families are `flash_arb`, `funding_arb`, `cex_dex_arb`,
 - No stale or optimistic profitability projection can authorize execution.
 - A pending/submitted transaction is not a settled outcome.
 - OMAR learns only from a physically persisted, truth-verified canonical settlement.
-- Learning requires `decision_id`, `correlation_id`, `execution_id`, `outcome_id`, `sizing_id`, `opportunity_id`, `route_id`, and `action`.
-- Decision-time `capital_engine_state()` is part of immutable learning context.
+- Learning requires the canonical lineage identifiers and action context.
+- Decision-time capital state is part of immutable learning context.
 - Withdrawal amount must derive from canonical available/settled capital, not optimistic UI state.
 - External wallet signing must sign only backend-produced, policy-validated transaction intent.
 - Staging must not possess live broadcast or automatic-trading authority.
 
 ## Completion order
 
-1. Let the current full Linux pytest matrix finish; use actual failures only.
-2. Repair the smallest real defect and rerun the complete matrix.
-3. Require backend quality, mobile, and contracts green as well.
-4. Record the exact green commit SHA.
-5. Align Render staging to that exact SHA/branch and allow its normal auto-deploy.
-6. Verify deployment identity, health, runtime state, and safety controls read-only.
-7. Confirm live broadcast and auto-trading authority are unavailable.
-8. Finish and test the OffRamp WalletConnect action before treating external-wallet withdrawal as end-to-end complete.
-9. Mark PR #88 ready and merge the single controlled PR into `main`; do not create another archaeology branch.
+1. Economic-unit boundary — **complete** (#148).
+2. Canonical post-settlement learning order — **complete** (#149).
+3. OffRamp external-wallet final action and reconciliation — **open** (#150).
+4. Render environment reconciliation — **open** (#146); authoritative staging is established, stale service remains untouched pending confirmation.
+5. Reconcile remaining engineering-truth documentation against actual GitHub/Render state.
+6. Return to Issue #89 for a fresh live-authority review only after the remaining blockers are resolved.
+
+No step in this document authorizes live signing, broadcast, automatic trading, or capital mutation.
