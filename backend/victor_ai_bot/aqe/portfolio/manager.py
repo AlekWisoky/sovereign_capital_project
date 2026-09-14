@@ -45,19 +45,45 @@ class PortfolioManager:
       - `portfolio_signal` in [-1, +1] (risk-on/risk-off sizing intent)
       - `weights_used` and per-agent contributions
       - optional policy bias for action selection (additive; can be disabled)
+
+    Dynamic weights are an input projection only. They do not grant execution
+    authority and are never persisted by the Portfolio Manager.
     """
+
+    _DYNAMIC_WEIGHT_MIN = 0.25
+    _DYNAMIC_WEIGHT_MAX = 1.75
 
     def __init__(self, cfg: PortfolioManagerConfig | None = None):
         self.cfg = cfg or PortfolioManagerConfig()
 
-    def aggregate(self, agent_outs: List[AgentOutput]) -> Dict[str, Any]:
+    def _weight_for(self, name: str, override: Dict[str, Any] | None) -> float:
+        """Resolve a bounded dynamic weight, falling back to the static weight."""
+        fallback = float((self.cfg.weights or {}).get(name, 1.0))
+        if not isinstance(override, dict) or name not in override:
+            return fallback
+        try:
+            candidate = float(override[name])
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+        if not math.isfinite(candidate):
+            return fallback
+        if not self._DYNAMIC_WEIGHT_MIN <= candidate <= self._DYNAMIC_WEIGHT_MAX:
+            return fallback
+        return candidate
+
+    def aggregate(
+        self,
+        agent_outs: List[AgentOutput],
+        *,
+        weight_override: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         contrib: Dict[str, float] = {}
         weights_used: Dict[str, float] = {}
         s = 0.0
         wsum = 0.0
         for out in agent_outs or []:
             nm = str((out.info or {}).get("name") or "agent")
-            w = float((self.cfg.weights or {}).get(nm, 1.0))
+            w = self._weight_for(nm, weight_override)
             c = float(_clip(float(getattr(out, "confidence", 0.0) or 0.0), self.cfg.min_conf, 1.0))
             sig = float(_clip(float(getattr(out, "signal", 0.0) or 0.0), -1.0, 1.0))
             v = w * c * sig
