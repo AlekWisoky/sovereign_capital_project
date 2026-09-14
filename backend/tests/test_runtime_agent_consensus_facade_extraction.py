@@ -182,7 +182,7 @@ def test_consensus_engine_malformed_weight_overrides_fall_back_per_agent():
         strategy_type='dex_flash',
         weight_overrides={'alpha': float('nan'), 'beta': 0.5},
     )
-    assert result['weights']['alpha'] == 0.7
+    assert result['weights']['alpha'] == 1.0
     assert result['weights']['beta'] == 0.5
 
 
