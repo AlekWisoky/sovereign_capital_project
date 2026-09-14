@@ -54,7 +54,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 337,
+  "backend_test_file_count": 338,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -86,6 +86,7 @@
     "test_canonical_omar_closed_loop.py",
     "test_canonical_omar_decision_context.py",
     "test_canonical_receipt_learning.py",
+    "test_canonical_receipt_usd_economics.py",
     "test_canonical_runtime_wiring.py",
     "test_canonical_settlement_economics.py",
     "test_capital_commit_lineage_sync.py",
@@ -673,12 +674,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-14T03:58:38.289000Z",
-  "generatedAtIso": "2026-09-14T03:58:38.289000Z",
-  "generatedAtMs": 1789358318289,
-  "generated_at": "2026-09-14T03:58:38.289000Z",
-  "generated_at_iso": "2026-09-14T03:58:38.289000Z",
-  "generated_at_ms": 1789358318289,
+  "generatedAt": "2026-09-14T17:15:25.336000Z",
+  "generatedAtIso": "2026-09-14T17:15:25.336000Z",
+  "generatedAtMs": 1789406125336,
+  "generated_at": "2026-09-14T17:15:25.336000Z",
+  "generated_at_iso": "2026-09-14T17:15:25.336000Z",
+  "generated_at_ms": 1789406125336,
   "health_states": [
     "live",
     "degraded",
@@ -2080,7 +2081,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 337,
+    "backend_test_files": 338,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2112,6 +2113,7 @@
       "test_canonical_omar_closed_loop.py",
       "test_canonical_omar_decision_context.py",
       "test_canonical_receipt_learning.py",
+      "test_canonical_receipt_usd_economics.py",
       "test_canonical_runtime_wiring.py",
       "test_canonical_settlement_economics.py",
       "test_capital_commit_lineage_sync.py",

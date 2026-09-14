@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 337,
+    "test_file_count": 338,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -33,6 +33,7 @@
       "backend/tests/test_canonical_omar_closed_loop.py",
       "backend/tests/test_canonical_omar_decision_context.py",
       "backend/tests/test_canonical_receipt_learning.py",
+      "backend/tests/test_canonical_receipt_usd_economics.py",
       "backend/tests/test_canonical_runtime_wiring.py",
       "backend/tests/test_canonical_settlement_economics.py",
       "backend/tests/test_capital_commit_lineage_sync.py",
@@ -513,9 +514,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-14T03:58:41.548000Z",
-  "generated_at_iso": "2026-09-14T03:58:41.548000Z",
-  "generated_at_ms": 1789358321548,
+  "generated_at": "2026-09-14T17:15:25.669000Z",
+  "generated_at_iso": "2026-09-14T17:15:25.669000Z",
+  "generated_at_ms": 1789406125669,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
