@@ -143,6 +143,10 @@ class RuntimeAgentConsensusFacade:
                 self._agent_hub_last = {
                     "signals": dict(hub_out.signals),
                     "confidences": dict(hub_out.confidences),
+                    "features_used": {
+                        str(name): dict((hub_out.outputs.get(name) or {}).get("features_used") or {})
+                        for name in dict(hub_out.signals).keys()
+                    },
                     "outputs": dict(hub_out.outputs),
                     "contracts": dict((hub_out.contracts or {})),
                     "health": dict((getattr(hub_out, "health", None) or {})),
