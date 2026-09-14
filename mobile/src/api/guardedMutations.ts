@@ -3,8 +3,11 @@ import {
   setWealthGoal,
   tradeOpportunity,
   withdrawExecute,
+  withdrawPrepare,
+  withdrawConfig,
   withdrawAllExecute,
   convertWithdrawExecute,
+  convertWithdrawPrepare,
   saveRpcPreferences,
   setLaunchMode,
   enableNextFamily,
@@ -17,6 +20,12 @@ import {
   type OpportunityActionResult,
 } from './client';
 import { guardMutation, mutationKindForSettingsPatch, type MutationGuardContext } from './mutationGuard';
+import {
+  reconcileSubmittedExternalWalletTransaction,
+  submitPreparedExternalWalletTransaction,
+} from './offRampExternalWallet';
+import type { PreparedOffRamp } from './offRampExternalWallet';
+import { walletConnectState } from '../walletConnect/session';
 
 export type GuardedMutationError = Error & { reasonCode?: string };
 
@@ -29,6 +38,81 @@ function denied(reasonCode: string): never {
 function assertAllowed(kind: Parameters<typeof guardMutation>[0], context: MutationGuardContext): void {
   const result = guardMutation(kind, context);
   if (!result.allowed) denied(result.reasonCode);
+}
+
+async function externalWalletWithdraw(
+  baseUrl: string,
+  req: Record<string, unknown>,
+  adminKey: string,
+): Promise<JsonObject> {
+  const session = walletConnectState();
+  if (!session.connected || !session.address) denied('wallet_not_connected');
+
+  const prepared = await withdrawPrepare(
+    baseUrl,
+    {
+      token: req.token,
+      to: req.to,
+      amount: req.amount,
+      from_address: session.address,
+    },
+    adminKey,
+  );
+  const submitted = await submitPreparedExternalWalletTransaction(prepared as PreparedOffRamp);
+  const reconciled = await reconcileSubmittedExternalWalletTransaction(
+    baseUrl,
+    adminKey,
+    prepared as PreparedOffRamp,
+    submitted.txHash,
+  );
+  return {
+    ...reconciled,
+    tx_hash: submitted.txHash,
+    submission_status: submitted.status,
+    intent_id: submitted.intentId,
+  } as JsonObject;
+}
+
+async function externalWalletConvertWithdraw(
+  baseUrl: string,
+  req: Record<string, unknown>,
+  adminKey: string,
+): Promise<JsonObject> {
+  const session = walletConnectState();
+  if (!session.connected || !session.address) denied('wallet_not_connected');
+
+  const prepared = await convertWithdrawPrepare(
+    baseUrl,
+    {
+      token_in: req.token_in,
+      token_out: req.token_out,
+      to: req.to,
+      amount_in: req.amount_in,
+      min_out: req.min_out,
+      fee: req.fee,
+      deadline: req.deadline,
+      from_address: session.address,
+    },
+    adminKey,
+  );
+  const submitted = await submitPreparedExternalWalletTransaction(prepared as PreparedOffRamp);
+  const reconciled = await reconcileSubmittedExternalWalletTransaction(
+    baseUrl,
+    adminKey,
+    prepared as PreparedOffRamp,
+    submitted.txHash,
+  );
+  return {
+    ...reconciled,
+    tx_hash: submitted.txHash,
+    submission_status: submitted.status,
+    intent_id: submitted.intentId,
+  } as JsonObject;
+}
+
+async function externalWalletMode(baseUrl: string, adminKey: string): Promise<boolean> {
+  const config = await withdrawConfig(baseUrl, adminKey);
+  return String(config.withdraw_mode ?? 'txdata') === 'txdata';
 }
 
 export async function guardedSetSettings(baseUrl: string, patch: Record<string, unknown>, adminKey: string, context: MutationGuardContext): Promise<JsonObject> {
@@ -53,6 +137,9 @@ export async function guardedTradeOpportunity(baseUrl: string, id: string, admin
 
 export async function guardedWithdrawExecute(baseUrl: string, req: Record<string, unknown>, adminKey: string, context: MutationGuardContext): Promise<JsonObject> {
   assertAllowed('withdrawal', context);
+  if (await externalWalletMode(baseUrl, adminKey)) {
+    return externalWalletWithdraw(baseUrl, req, adminKey);
+  }
   return withdrawExecute(baseUrl, req, adminKey);
 }
 
@@ -63,6 +150,9 @@ export async function guardedWithdrawAllExecute(baseUrl: string, req: Record<str
 
 export async function guardedConvertWithdrawExecute(baseUrl: string, req: Record<string, unknown>, adminKey: string, context: MutationGuardContext): Promise<JsonObject> {
   assertAllowed('withdrawal', context);
+  if (await externalWalletMode(baseUrl, adminKey)) {
+    return externalWalletConvertWithdraw(baseUrl, req, adminKey);
+  }
   return convertWithdrawExecute(baseUrl, req, adminKey);
 }
 
