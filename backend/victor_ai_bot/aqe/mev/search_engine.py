@@ -4,6 +4,8 @@ from typing import Any, Dict, List
 
 from victor_ai_bot.engine_control.models import EngineOpportunity
 
+from .simulator import validate_deterministic_simulation_evidence
+
 
 class MEVSearchEngine:
     engine_type = 'mev_search'
@@ -20,6 +22,7 @@ class MEVSearchEngine:
             realized = expected * max(0.25, 0.85 - high_risk * 0.35)
             risk_flags = ['private_send']
             conf = max(0.35, min(0.90, 0.58 + (0.15 if 'sandwich_risk' not in tags else -0.10)))
+            simulation = validate_deterministic_simulation_evidence(tx.get('simulation_evidence'))
             out.append(EngineOpportunity(
                 opportunity_id=f"mev:{tx.get('hash')}",
                 engine_type=self.engine_type,
@@ -38,7 +41,12 @@ class MEVSearchEngine:
                 lifecycle_eligibility='observe_only',
                 policy_eligibility='observe_only',
                 venues=['private_relay'],
-                metadata={'tx_hash': tx.get('hash'), 'candidate_type': 'backrun_or_protection', 'economics_status': 'heuristic_non_authoritative'},
+                metadata={
+                    'tx_hash': tx.get('hash'),
+                    'candidate_type': 'backrun_or_protection',
+                    'economics_status': 'heuristic_non_authoritative',
+                    'simulation_gate': simulation,
+                },
             ))
         for base in list(base_opportunities or [])[:4]:
             meta = dict(getattr(base, 'meta', {}) or {}) if isinstance(getattr(base, 'meta', None), dict) else {}
@@ -49,6 +57,7 @@ class MEVSearchEngine:
             if expected > 1000:
                 expected /= 1_000_000.0
             realized = expected * max(0.25, 0.9 - mev_risk * 0.4)
+            simulation = validate_deterministic_simulation_evidence(meta.get('simulation_evidence'))
             out.append(EngineOpportunity(
                 opportunity_id=f"mev-protect:{getattr(base, 'id', '')}",
                 engine_type=self.engine_type,
@@ -67,7 +76,12 @@ class MEVSearchEngine:
                 lifecycle_eligibility='observe_only',
                 policy_eligibility='observe_only',
                 venues=['private_relay'],
-                metadata={'base_opportunity_id': getattr(base, 'id', ''), 'candidate_type': 'route_protection', 'economics_status': 'heuristic_non_authoritative'},
+                metadata={
+                    'base_opportunity_id': getattr(base, 'id', ''),
+                    'candidate_type': 'route_protection',
+                    'economics_status': 'heuristic_non_authoritative',
+                    'simulation_gate': simulation,
+                },
             ))
         out.sort(key=lambda o: (-float(o.expected_realized_profit_usd), str(o.opportunity_id)))
         return out
