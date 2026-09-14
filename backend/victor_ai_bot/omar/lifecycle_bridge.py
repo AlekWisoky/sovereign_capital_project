@@ -42,6 +42,8 @@ def _calibrate_from_attribution(
     decision_id: str,
     receipt_id: str,
     outcome_id: str,
+    opportunity_id: str,
+    route_id: str,
     realized_net_usd: Any,
     expected_net_usd: Any,
 ) -> dict[str, Any]:
@@ -60,11 +62,15 @@ def _calibrate_from_attribution(
     rows = list(store.load(limit=getattr(store, "max_items", 2000)) or [])
     match = None
     for candidate in reversed(rows):
-        if _text(candidate.get("decision_id")) != str(decision_id):
+        if _text(candidate.get("decision_id")) not in {"", str(decision_id)}:
             continue
-        if receipt_id and _text(candidate.get("receipt_id")) != str(receipt_id):
+        if receipt_id and _text(candidate.get("receipt_id")) not in {"", str(receipt_id)}:
             continue
-        if outcome_id and _text(candidate.get("outcome_id")) != str(outcome_id):
+        if outcome_id and _text(candidate.get("outcome_id")) not in {"", str(outcome_id)}:
+            continue
+        if opportunity_id and _text(candidate.get("opportunity_id")) not in {"", str(opportunity_id)}:
+            continue
+        if route_id and _text(candidate.get("route_id")) not in {"", str(route_id)}:
             continue
         match = candidate
         break
@@ -206,6 +212,8 @@ def _observe_settled_outcome(
         decision_id=decision_id,
         receipt_id=receipt_id,
         outcome_id=outcome_id,
+        opportunity_id=opportunity_id,
+        route_id=route_id,
         realized_net_usd=row.get("realized_net_usd"),
         expected_net_usd=row.get("expected_net_usd", p.get("expected_net_usd")),
     )
