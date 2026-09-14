@@ -102,14 +102,33 @@ class AnvilForkExecutor:
                 process.wait(timeout=3)
 
     def _validate_request(self, fork_url: str, fork_block: int, transaction: Mapping[str, Any], scenarios: Iterable[Mapping[str, Any]]) -> None:
+        self._validate_fork_url(fork_url)
+        self._validate_fork_block(fork_block)
+        self._validate_transaction(transaction)
+        self._validate_scenarios(scenarios)
+        self._validate_anvil_binary()
+
+    @staticmethod
+    def _validate_fork_url(fork_url: str) -> None:
         if not isinstance(fork_url, str) or not fork_url:
             raise ForkSimulationUnavailable('fork_url_missing')
+
+    @staticmethod
+    def _validate_fork_block(fork_block: int) -> None:
         if int(fork_block) < 0:
             raise ForkSimulationUnavailable('fork_block_invalid')
+
+    @staticmethod
+    def _validate_transaction(transaction: Mapping[str, Any]) -> None:
         if not isinstance(transaction, Mapping) or not transaction.get('to'):
             raise ForkSimulationUnavailable('transaction_invalid')
+
+    @staticmethod
+    def _validate_scenarios(scenarios: Iterable[Mapping[str, Any]]) -> None:
         if not isinstance(scenarios, Iterable):
             raise ForkSimulationUnavailable('scenarios_missing')
+
+    def _validate_anvil_binary(self) -> None:
         if shutil.which(self.anvil_binary) is None:
             raise ForkSimulationUnavailable('anvil_binary_missing')
 
