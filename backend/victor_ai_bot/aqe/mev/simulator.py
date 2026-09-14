@@ -33,6 +33,24 @@ _REQUIRED_SCENARIO_KEYS = (
 )
 
 
+def _validate_simulation_scenario(scenario: Any, index: int) -> Dict[str, Any] | None:
+    if not isinstance(scenario, Mapping):
+        return {'ok': False, 'reason_code': 'simulation_scenario_invalid', 'index': index}
+    missing = [key for key in _REQUIRED_SCENARIO_KEYS if key not in scenario]
+    if missing:
+        return {'ok': False, 'reason_code': 'simulation_scenario_incomplete', 'index': index, 'missing': missing}
+    if scenario.get('conflict_checked') is not True or scenario.get('reverted') is True:
+        return {'ok': False, 'reason_code': 'simulation_scenario_failed', 'index': index}
+    for key in ('gas_multiplier', 'liquidity_multiplier', 'oracle_multiplier'):
+        try:
+            value = float(scenario[key])
+        except (TypeError, ValueError, OverflowError):
+            return {'ok': False, 'reason_code': 'simulation_scenario_parameter_invalid', 'index': index, 'field': key}
+        if value <= 0.0:
+            return {'ok': False, 'reason_code': 'simulation_scenario_parameter_invalid', 'index': index, 'field': key}
+    return None
+
+
 def validate_deterministic_simulation_evidence(evidence: Any) -> Dict[str, Any]:
     """Validate producer-supplied fork evidence without inventing simulation truth.
 
@@ -40,7 +58,7 @@ def validate_deterministic_simulation_evidence(evidence: Any) -> Dict[str, Any]:
     the minimum deterministic-evidence contract; it does not execute a fork and
     does not turn heuristic estimates into execution authority.
     """
-    if not isinstance(evidence, Mapping):
+    if not isinstance(evidence, Mapping) or not evidence:
         return {'ok': False, 'reason_code': 'simulation_evidence_missing'}
 
     missing = [key for key in _REQUIRED_EVIDENCE_KEYS if evidence.get(key) in (None, '')]
@@ -62,25 +80,9 @@ def validate_deterministic_simulation_evidence(evidence: Any) -> Dict[str, Any]:
     if not isinstance(scenarios, list) or not scenarios:
         return {'ok': False, 'reason_code': 'simulation_scenarios_missing'}
     for index, scenario in enumerate(scenarios):
-        if not isinstance(scenario, Mapping):
-            return {'ok': False, 'reason_code': 'simulation_scenario_invalid', 'index': index}
-        missing_scenario = [key for key in _REQUIRED_SCENARIO_KEYS if key not in scenario]
-        if missing_scenario:
-            return {
-                'ok': False,
-                'reason_code': 'simulation_scenario_incomplete',
-                'index': index,
-                'missing': missing_scenario,
-            }
-        if scenario.get('conflict_checked') is not True or scenario.get('reverted') is True:
-            return {'ok': False, 'reason_code': 'simulation_scenario_failed', 'index': index}
-        for key in ('gas_multiplier', 'liquidity_multiplier', 'oracle_multiplier'):
-            try:
-                value = float(scenario[key])
-            except (TypeError, ValueError, OverflowError):
-                return {'ok': False, 'reason_code': 'simulation_scenario_parameter_invalid', 'index': index, 'field': key}
-            if value <= 0.0:
-                return {'ok': False, 'reason_code': 'simulation_scenario_parameter_invalid', 'index': index, 'field': key}
+        failure = _validate_simulation_scenario(scenario, index)
+        if failure is not None:
+            return failure
 
     return {
         'ok': True,
