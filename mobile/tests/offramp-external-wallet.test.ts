@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setWalletConnectSession } from '../src/walletConnect/session';
 import {
+  externalWalletIntentId,
   externalWalletTransactionFromPrepared,
   validatePreparedExternalWalletTransaction,
 } from '../src/api/offRampExternalWallet';
@@ -72,4 +73,13 @@ test('valid prepared intent passes signer and chain validation without changing 
     value: '0x0',
     chainId: '0x1',
   });
+});
+
+test('intent id is deterministic for the exact normalized transaction', async () => {
+  const tx = externalWalletTransactionFromPrepared(prepared());
+  assert.ok(tx);
+  const first = await externalWalletIntentId(tx);
+  const second = await externalWalletIntentId({ ...tx, chainId: '1' });
+  assert.equal(first, second);
+  assert.match(first, /^[0-9a-f]{64}$/);
 });
