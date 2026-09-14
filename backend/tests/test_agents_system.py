@@ -35,6 +35,7 @@ def test_agent_hub_exposes_full_specialist_roster_and_portfolio_manager(tmp_path
     hub = AgentHub(data_dir=str(tmp_path))
     state = {
         'local': {'margin_ratio': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000},
+        'local.margin_ratio': 0.002,
         'dex': {'mid': 101.0, 'opps_per_block': 5},
         'cex': {'mid': 100.0, 'spread_bps': 8.0, 'depth_usd': 2.0, 'funding_bps': 3.0, 'funding_change_bps': 1.0},
         'mev': {'sandwich_risk': 0.2, 'router_flow': 0.3},
@@ -160,7 +161,7 @@ def test_agent_attribution_preserves_canonical_lifecycle_lineage(tmp_path):
 
 def test_agent_hub_preserves_features_used_for_calibration(tmp_path):
     hub = AgentHub(data_dir=str(tmp_path))
-    out = hub.step(state={'local': {'mr': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000}})
+    out = hub.step(state={'local': {'mr': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000}, 'local.margin_ratio': 0.002})
     agent_name = 'Ben Graham Agent'
     assert out.outputs[agent_name]['features_used']
     assert out.outputs[agent_name]['features_used']['mr'] == 0.002

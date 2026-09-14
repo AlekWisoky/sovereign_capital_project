@@ -4,7 +4,7 @@ import copy
 import math
 from typing import Any, Mapping
 
-from ..rl_training.reward import reward_function
+from ..runtime_subsystems.reward_trace import reward_function
 
 _SAFE = (AttributeError, KeyError, RuntimeError, TypeError, ValueError)
 

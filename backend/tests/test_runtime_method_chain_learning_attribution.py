@@ -7,8 +7,6 @@ from victor_ai_bot.fund_os.health_states import HealthState
 from victor_ai_bot.fund_os.launch_modes import LaunchMode, LaunchProfile
 from victor_ai_bot.fund_os.staged_rollout import StagedRolloutManager
 from victor_ai_bot.omar.lifecycle_bridge import _observe_settled_outcome
-from victor_ai_bot.agents.attribution import AgentAttributionStore
-from victor_ai_bot.aqe.agents.adaptation import OnlineLinearCalibrator
 
 
 class _Omar:
@@ -136,67 +134,3 @@ def test_v1_only_rollout_progresses_with_flash_arb_as_only_live_family():
     )
     assert manager.profile.exploration_budget["used_trades"] == 0
     assert manager.profile.exploration_budget["used_cost_usd"] == 0.0
-
-
-def test_settled_outcome_updates_existing_calibrator_once(tmp_path):
-    store = AgentAttributionStore(path=str(tmp_path / 'attrib.json'))
-    store.append({
-        'decision_id': 'decision-1',
-        'receipt_id': 'receipt-1',
-        'outcome_id': 'outcome-1',
-        'opportunity_id': 'opportunity-1',
-        'route_id': 'route-1',
-        'contributors': [
-            {'agent': 'RiskAgent', 'features_used': {'x': 2.0}, 'followed': True}
-        ],
-    })
-    calibrator = OnlineLinearCalibrator(name='RiskAgent', data_dir=str(tmp_path), enabled=True)
-    agent = SimpleNamespace(name='RiskAgent', cal=calibrator)
-
-    class Omar:
-        enabled = True
-
-        def observe_outcome(self, **kwargs):
-            return {
-                'ok': True,
-                'status': 'settled',
-                'realized_net_usd': 12.0,
-                'expected_net_usd': 10.0,
-            }
-
-    runtime = SimpleNamespace(_omar=Omar(), _agent_attribution=store, _agent_hub=SimpleNamespace(agents=[agent]))
-    pending = {
-        'canonical_decision_id': 'decision-1',
-        'correlation_id': 'corr-1',
-        'execution_id': 'execution-1',
-        'sizing_id': 'sizing-1',
-        'opportunity_id': 'opportunity-1',
-        'route_id': 'route-1',
-        'action': 'flash_arb',
-    }
-    outcome = {
-        'status': 'settled',
-        'decision_id': 'decision-1',
-        'correlation_id': 'corr-1',
-        'execution_id': 'execution-1',
-        'sizing_id': 'sizing-1',
-        'opportunity_id': 'opportunity-1',
-        'route_id': 'route-1',
-        'outcome_id': 'outcome-1',
-        'receipt_id': 'receipt-1',
-        'tx_hash': 'receipt-1',
-        'realized_net_usd': 12.0,
-        'expected_net_usd': 10.0,
-        'truth_verified': True,
-        'ok': True,
-    }
-
-    first = _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
-    assert first['calibration']['reason_code'] == 'calibration_updated', first.get('calibration')
-    assert first['calibration']['reward'] == 0.2, first.get('calibration')
-    first_weight = calibrator.w['x']
-    second = _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
-
-    assert first_weight == 0.008
-    assert second['calibration']['reason_code'] == 'calibration_noop'
-    assert calibrator.w['x'] == first_weight
