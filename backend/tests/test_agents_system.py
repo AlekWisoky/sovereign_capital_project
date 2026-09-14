@@ -132,3 +132,27 @@ def test_agent_attribution_sanitizes_partially_malformed_state(tmp_path):
             ]
         }
     ]
+
+
+def test_agent_attribution_preserves_canonical_lifecycle_lineage(tmp_path):
+    store = AgentAttributionStore(path=str(tmp_path / 'attrib.json'))
+    row = {
+        'decision_id': 'decision-1',
+        'correlation_id': 'corr-1',
+        'execution_id': 'execution-1',
+        'receipt_id': 'receipt-1',
+        'outcome_id': 'outcome-1',
+        'sizing_id': 'sizing-1',
+        'opportunity_id': 'opportunity-1',
+        'route_id': 'route-1',
+        'strategy_family': 'flash_arb',
+        'regime': 'balanced',
+        'ts_ms': 123,
+        'contributors': [
+            {'agent': 'RiskAgent', 'followed': True, 'realized_pnl_impact_usd': 2.5, 'precision_hit': True}
+        ],
+    }
+    store.append(row)
+
+    loaded = store.load()
+    assert loaded == [row]
