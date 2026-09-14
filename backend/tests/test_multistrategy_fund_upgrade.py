@@ -31,7 +31,7 @@ def test_profit_doctrine_and_master_orchestrator():
 
 def test_internal_prime_and_loan_policy(tmp_path):
     prime = InternalPrimeAllocator(data_dir=str(tmp_path), chain="test"); prime.inventory.seed("USDC", 150000.0)
-    res = prime.allocate(PrimeBorrowRequest(family="flash_arb", capital_source="internal_prime", notional_usd=100000.0, asset="USDC", horizon_minutes=60.0, confidence=0.9), stage_policy={"max_deployable_pct": 0.5})
+    res = prime.allocate(PrimeBorrowRequest(family="flash_arb", capital_source="internal_prime", notional_usd=100000.0, asset="USDC", horizon_minutes=60.0, confidence=0.9), stage_policy={"max_deployable_pct": 0.5, "prime_capacity_usd": 1_000_000.0})
     assert res["allowed"] is True; assert res["decision"]["details"]["inventoryTracked"] is True; assert res["decision"]["details"]["requiredCollateralUsd"] == 100000.0
     loan = loan_admission(family="flash_arb", stage="internal_capital", notional_usd=100000.0, projected_realized_edge_usd=500.0, source="flashloan", confidence=0.9)
     assert loan["allowed"] is True

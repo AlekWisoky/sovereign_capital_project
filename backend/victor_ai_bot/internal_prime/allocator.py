@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import uuid
@@ -66,7 +67,7 @@ class InternalPrimeAllocator:
             self._state_repo = None
         self._utilization = 0.0
         self._borrowed_usd = 0.0
-        self._capacity_usd = 10_000_000.0
+        self._capacity_usd: float | None = None
         self._family_exposure: Dict[str, float] = {}
         self._loans: Dict[str, Dict[str, Any]] = {}
         self._state_ready = True
@@ -114,7 +115,7 @@ class InternalPrimeAllocator:
             return
         try:
             self._borrowed_usd = float(payload.get("borrowedUsd") or 0.0)
-            self._capacity_usd = max(1.0, float(payload.get("capacityUsd") or 10_000_000.0))
+            self._capacity_usd = self._parse_capacity_usd(payload.get("capacityUsd"))
             self._family_exposure = {
                 str(k): float(v) for k, v in dict(payload.get("familyExposure") or {}).items()
             }
@@ -132,7 +133,7 @@ class InternalPrimeAllocator:
         except (ValueError, TypeError):
             self._utilization = 0.0
             self._borrowed_usd = 0.0
-            self._capacity_usd = 10_000_000.0
+            self._capacity_usd = None
             self._family_exposure = {}
             self._loans = {}
             self._state_updated_ts_ms = int(time.time() * 1000)
@@ -142,7 +143,9 @@ class InternalPrimeAllocator:
         return {
             "utilization": round(self._utilization, 8),
             "borrowedUsd": round(self._borrowed_usd, 8),
-            "capacityUsd": round(self._capacity_usd, 8),
+            "capacityUsd": (
+                round(self._capacity_usd, 8) if self._capacity_usd is not None else None
+            ),
             "familyExposure": {k: round(v, 8) for k, v in self._family_exposure.items()},
             "loans": deepcopy(self._loans),
             "inventory": self.inventory.snapshot(),
@@ -191,9 +194,10 @@ class InternalPrimeAllocator:
             ),
             8,
         )
+        capacity_usd = self._parse_capacity_usd(raw.get("capacityUsd"))
         return {
             "borrowedUsd": borrowed_usd,
-            "capacityUsd": round(float(raw.get("capacityUsd") or 10_000_000.0), 2),
+            "capacityUsd": round(capacity_usd, 2) if capacity_usd is not None else None,
             "utilization": round(float(raw.get("utilization") or 0.0), 6),
             "updatedTsMs": int(raw.get("updatedTsMs") or raw.get("updated_ts_ms") or 0),
             "inventory": {
@@ -307,7 +311,7 @@ class InternalPrimeAllocator:
     def adopt_state_payload(self, payload: Dict[str, Any], *, persist_mirror: bool = True) -> None:
         state_payload = dict(payload or {})
         self._borrowed_usd = float(state_payload.get("borrowedUsd") or 0.0)
-        self._capacity_usd = max(1.0, float(state_payload.get("capacityUsd") or 10_000_000.0))
+        self._capacity_usd = self._parse_capacity_usd(state_payload.get("capacityUsd"))
         self._family_exposure = {
             str(k): float(v) for k, v in dict(state_payload.get("familyExposure") or {}).items()
         }
@@ -646,23 +650,33 @@ class InternalPrimeAllocator:
         tx = self._build_prime_dispute_transaction(loan=loan, reason_code=reason_code)
         return self._write_ledger_transaction(self._tx_dict_to_transaction(tx))
 
+    @staticmethod
+    def _parse_capacity_usd(value: Any) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            capacity_usd = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(capacity_usd) or capacity_usd <= 0.0:
+            return None
+        return capacity_usd
+
     def _capacity_limit(self, stage_policy: Dict[str, Any] | None = None) -> float:
-        if stage_policy is None:
-            return max(1.0, float(self._capacity_usd or 10_000_000.0))
-        return max(
-            1.0,
-            float(
-                stage_policy.get("prime_capacity_usd", self._capacity_usd)
-                or self._capacity_usd
-                or 10_000_000.0
-            ),
+        value = (
+            self._capacity_usd
+            if stage_policy is None or "prime_capacity_usd" not in stage_policy
+            else stage_policy.get("prime_capacity_usd")
         )
+        capacity_usd = self._parse_capacity_usd(value)
+        return float(capacity_usd) if capacity_usd is not None else 0.0
 
     def _recompute_utilization(self, *, capacity_usd: float | None = None) -> None:
-        denom = max(
-            1.0, float(capacity_usd if capacity_usd is not None else self._capacity_limit())
-        )
-        self._utilization = min(1.0, max(0.0, self._borrowed_usd / denom))
+        capacity_usd = capacity_usd if capacity_usd is not None else self._capacity_limit()
+        if capacity_usd <= 0.0:
+            self._utilization = 0.0
+            return
+        self._utilization = min(1.0, max(0.0, self._borrowed_usd / capacity_usd))
 
     def _family_cap(self, req: PrimeBorrowRequest, stage_policy: Dict[str, Any]) -> float:
         capacity_usd = self._capacity_limit(stage_policy)
@@ -752,11 +766,15 @@ class InternalPrimeAllocator:
                 borrow_cost_bps=0.0,
                 details=context,
             )
+        capacity_usd = float(context.get("primeCapacityUsd") or 0.0)
+        if capacity_usd <= 0.0:
+            raise CapitalAllocationError(
+                "prime capacity unavailable", reason_code="prime_capacity_unavailable"
+            )
         cap = float(context.get("familyCapUsd") or 0.0)
         projected_family = float(context.get("projectedFamilyExposureUsd") or 0.0)
         if projected_family > cap:
             raise BorrowLimitError("family cap exceeded", reason_code="family_cap_exceeded")
-        capacity_usd = float(context.get("primeCapacityUsd") or 0.0)
         if float(self._borrowed_usd) + float(req.notional_usd) > capacity_usd:
             raise CapitalAllocationError(
                 "prime capacity exceeded", reason_code="prime_capacity_exceeded"
@@ -856,6 +874,17 @@ class InternalPrimeAllocator:
                 "event_type": "prime_state",
             }
 
+        capacity_usd = self._capacity_limit(stage_policy)
+        if capacity_usd <= 0.0:
+            return {
+                "ok": False,
+                "reason_code": "prime_capacity_unavailable",
+                "loan": {},
+                "journal_tx": {},
+                "state_snapshot": {},
+                "event_type": "prime_state",
+            }
+
         effective_loan_id = str(loan_id or req.request_id or f"loan_{uuid.uuid4().hex[:16]}")
         collateral_policy = dict((decision.details or {}).get("collateralPolicy") or {})
         collateral_reserved_usd = float(
@@ -900,7 +929,6 @@ class InternalPrimeAllocator:
         mutated_family_exposure[req.family] = float(
             mutated_family_exposure.get(req.family, 0.0)
         ) + float(req.notional_usd)
-        capacity_usd = self._capacity_limit(stage_policy)
         utilization = min(1.0, max(0.0, borrowed_usd / max(1.0, float(capacity_usd))))
         mutated_loans[effective_loan_id] = pos.to_dict()
         state_snapshot = self._state_snapshot_payload_from_raw(
@@ -1046,7 +1074,7 @@ class InternalPrimeAllocator:
         )
         pos = PrimeLoanPosition(**dict(transition.get("loan") or {}))
         previous_borrowed = float(self._borrowed_usd)
-        previous_capacity = float(self._capacity_usd)
+        previous_capacity = self._capacity_usd
         previous_family_exposure = deepcopy(self._family_exposure)
         previous_loans = deepcopy(self._loans)
         previous_utilization = float(self._utilization)
@@ -1192,8 +1220,12 @@ class InternalPrimeAllocator:
                 "ledgerTransaction": journal_tx,
                 "auditRecorded": True,
             }
+        capacity_usd = self._capacity_limit()
+        if capacity_usd <= 0.0:
+            return _rejected_payload(reason_code="prime_capacity_unavailable", loan_payload=loan)
+
         previous_borrowed = float(self._borrowed_usd)
-        previous_capacity = float(self._capacity_usd)
+        previous_capacity = self._capacity_usd
         previous_family_exposure = deepcopy(self._family_exposure)
         previous_loans = deepcopy(self._loans)
         previous_utilization = float(self._utilization)
@@ -1314,6 +1346,21 @@ class InternalPrimeAllocator:
                 "state_snapshot": None,
             }
 
+        capacity_usd = self._capacity_limit()
+        if capacity_usd <= 0.0:
+            return {
+                "ok": False,
+                "reason_code": "prime_capacity_unavailable",
+                "journal_tx": self._build_prime_settlement_rejection_transaction(
+                    loan_id=str(loan_id),
+                    loan=loan,
+                    reason_code="prime_capacity_unavailable",
+                    realized_pnl_usd=realized_pnl_usd,
+                    receipt_id=str(receipt_id or ""),
+                ),
+                "state_snapshot": None,
+            }
+
         family = str(loan.get("family") or "")
         notional = float(loan.get("notional_usd") or 0.0)
         asset = str(loan.get("asset") or "")
@@ -1375,7 +1422,6 @@ class InternalPrimeAllocator:
             mutated_inventory[str(asset)] = round(
                 float(mutated_inventory.get(str(asset), 0.0)) + collateral_reserved_usd, 8
             )
-        capacity_usd = float(self._capacity_usd or self._capacity_limit())
         utilization = min(1.0, max(0.0, borrowed_usd / max(1.0, capacity_usd)))
         state_snapshot = self._state_snapshot_payload_from_raw(
             {
@@ -1441,7 +1487,9 @@ class InternalPrimeAllocator:
         )
         return {
             "borrowedUsd": round(self._borrowed_usd, 2),
-            "capacityUsd": round(self._capacity_usd, 2),
+            "capacityUsd": (
+                round(self._capacity_usd, 2) if self._capacity_usd is not None else None
+            ),
             "utilization": round(self._utilization, 6),
             "updatedTsMs": int(self._state_updated_ts_ms or int(time.time() * 1000)),
             "inventory": self.inventory.snapshot(),
