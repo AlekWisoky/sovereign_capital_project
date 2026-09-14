@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from typing import Any, Dict, List
 
 from ..caq_kds.bus import BUS
@@ -72,6 +73,51 @@ class RuntimeAgentConsensusFacade:
         except _SAFE_AGENT_LOCAL_EXCEPTIONS:
             return {}
 
+    @staticmethod
+    def _agent_evidence_snapshot(hub_state: Dict[str, Any], *, decision_id: str, correlation_id: str) -> Dict[str, Any]:
+        snapshot = copy.deepcopy(dict(hub_state or {}))
+        snapshot["decision_id"] = str(decision_id or "")
+        snapshot["correlation_id"] = str(correlation_id or "")
+        return snapshot
+
+    def freeze_agent_decision_evidence(self, decision: Any) -> Dict[str, Any]:
+        """Freeze the current AgentHub evidence onto the canonical decision once.
+
+        The snapshot is a downstream evidence record only. It never authorizes
+        execution and is write-once for the lifetime of the decision object.
+        """
+        if decision is None:
+            return {}
+        metadata = dict(getattr(decision, "metadata", {}) or {})
+        existing = metadata.get("agent_decision_evidence")
+        if isinstance(existing, dict) and existing.get("decision_id"):
+            return copy.deepcopy(existing)
+        hub_state = dict(getattr(self, "_agent_hub_last", {}) or {})
+        if not hub_state:
+            return {}
+        decision_id = str(
+            metadata.get("canonical_decision_id")
+            or metadata.get("decision_id")
+            or hub_state.get("decision_id")
+            or ""
+        )
+        correlation_id = str(
+            metadata.get("correlation_id")
+            or hub_state.get("correlation_id")
+            or ""
+        )
+        if not decision_id or not correlation_id:
+            return {}
+        snapshot = self._agent_evidence_snapshot(
+            hub_state, decision_id=decision_id, correlation_id=correlation_id
+        )
+        metadata["agent_decision_evidence"] = snapshot
+        try:
+            decision.metadata = metadata
+        except (AttributeError, TypeError):
+            return {}
+        return copy.deepcopy(snapshot)
+
     def _run_agent_consensus_gate(
         self,
         *,
@@ -86,6 +132,7 @@ class RuntimeAgentConsensusFacade:
         try:
             local = self._agent_hub_local_state(list(opps or []))
             hub_out = None
+            dynamic_weights: Dict[str, Any] = {}
             if getattr(self, "_agent_hub", None) is not None:
                 treasury_governance = treasury_governance_view(dict(treasury_state or {}))
                 hub_agents = getattr(self._agent_hub, "agents", None)
@@ -93,7 +140,6 @@ class RuntimeAgentConsensusFacade:
                     str(getattr(agent, "name", agent.__class__.__name__))
                     for agent in list(hub_agents or [])
                 ]
-                dynamic_weights: Dict[str, Any] = {}
                 if agent_names and getattr(self, "_agent_weighting", None) is not None:
                     try:
                         dynamic_weights = dict(
@@ -131,10 +177,22 @@ class RuntimeAgentConsensusFacade:
                         },
                     }
                 )
-                weights = self._agent_hub_weights(regime_label=str(regime_label), hub_out=hub_out)
+                if not agent_names and getattr(self, "_agent_weighting", None) is not None:
+                    dynamic_weights = self._agent_hub_weights(
+                        regime_label=str(regime_label), hub_out=hub_out
+                    )
+                weights = dict(dynamic_weights)
+                if not weights:
+                    weights = self._agent_hub_weights(
+                        regime_label=str(regime_label), hub_out=hub_out
+                    )
                 self._agent_hub_last = {
                     "signals": dict(hub_out.signals),
                     "confidences": dict(hub_out.confidences),
+                    "features_used": {
+                        str(name): dict((hub_out.outputs.get(name) or {}).get("features_used") or {})
+                        for name in dict(hub_out.signals).keys()
+                    },
                     "outputs": dict(hub_out.outputs),
                     "contracts": dict((hub_out.contracts or {})),
                     "health": dict((getattr(hub_out, "health", None) or {})),
@@ -151,6 +209,7 @@ class RuntimeAgentConsensusFacade:
                     regime=str(regime_label),
                     strategy_type="dex_flash",
                     deterministic_key=f"{int(current_block)}:{str(local.get('id', ''))}",
+                    weight_overrides=dict(dynamic_weights),
                 )
                 self._consensus_last = dict(cons)
                 BUS.update("consensus", dict(cons))

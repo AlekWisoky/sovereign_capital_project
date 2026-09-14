@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from victor_ai_bot.aqe.coordination.consensus_engine import AgentPerformanceTracker
+from victor_ai_bot.aqe.coordination.consensus_engine import (
+    AgentConsensusEngine,
+    AgentPerformanceTracker,
+    ConsensusConfig,
+)
 
 
 def test_agent_performance_tracker_recovers_from_corrupt_json(tmp_path):
@@ -61,3 +65,32 @@ def test_agent_performance_tracker_save_does_not_swallow_unexpected_bug(tmp_path
 
     with pytest.raises(RuntimeError, match="boom"):
         tracker.save()
+
+
+def test_consensus_engine_uses_explicit_weight_overrides_without_persisting_them():
+    engine = AgentConsensusEngine(cfg=ConsensusConfig(enabled=True), tracker=None)
+    result = engine.compute(
+        signals={"alpha": 1.0, "beta": -1.0},
+        confidences={"alpha": 1.0, "beta": 1.0},
+        regime="balanced",
+        strategy_type="dex_flash",
+        deterministic_key="block:opp",
+        weight_overrides={"alpha": 0.25, "beta": 1.75},
+    )
+    assert result["weights"]["alpha"] == 0.25
+    assert result["weights"]["beta"] == 1.75
+    assert result["deterministic_key"] == "block:opp"
+    assert engine.tracker is None
+
+
+def test_consensus_engine_malformed_weight_overrides_fall_back_per_agent():
+    engine = AgentConsensusEngine(cfg=ConsensusConfig(enabled=True), tracker=None)
+    result = engine.compute(
+        signals={"alpha": 1.0, "beta": -1.0},
+        confidences={"alpha": 1.0, "beta": 1.0},
+        regime="balanced",
+        strategy_type="dex_flash",
+        weight_overrides={"alpha": float("nan"), "beta": 0.5},
+    )
+    assert result["weights"]["alpha"] == 1.0
+    assert result["weights"]["beta"] == 0.5
