@@ -26,6 +26,10 @@ class _Runtime(RuntimeDecisionFinalizeFacade):
         self.calls.append(('decide', {'opps': opps, **dict(kwargs)}))
         return SimpleNamespace(action='trade', borrow_mult=1.0, portfolio=['a', 'b'])
 
+    def _freeze_agent_evidence_at_decision_boundary(self, **kwargs):
+        self.calls.append(('freeze_evidence', dict(kwargs)))
+        return {'decision_id': 'decision-1', 'correlation_id': 'corr-1'}
+
     def _apply_treasury_borrow_overlay(self, **kwargs):
         self.calls.append(('treasury_overlay', dict(kwargs)))
         decision = kwargs['decision']
@@ -73,6 +77,7 @@ async def test_run_decision_finalize_preserves_call_order_and_arguments():
     assert [name for name, _ in runtime.calls] == [
         'gas_budget',
         'decide',
+        'freeze_evidence',
         'treasury_overlay',
         'auto_queue',
         'postdecision',
@@ -82,11 +87,15 @@ async def test_run_decision_finalize_preserves_call_order_and_arguments():
     assert decide['pending_txs'] == 2
     assert decide['auto_enabled'] is True
     assert decide['gas_budget_remaining_wei'] == 12345
-    overlay = runtime.calls[2][1]
+    freeze = runtime.calls[2][1]
+    assert freeze['decision'] is decision
+    assert freeze['opps'] == opps
+    assert freeze['current_block'] == 77
+    overlay = runtime.calls[3][1]
     assert overlay['treasury_state'] == {'borrow_mult_target_cap': 1.5}
-    auto_queue = runtime.calls[3][1]
+    auto_queue = runtime.calls[4][1]
     assert auto_queue['current_block'] == 77
-    postdecision = runtime.calls[4][1]
+    postdecision = runtime.calls[5][1]
     assert postdecision['rpc'] is rpc
     assert postdecision['regime_label'] == 'balanced'
     assert postdecision['current_block'] == 77
