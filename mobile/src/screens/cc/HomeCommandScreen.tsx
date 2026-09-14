@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, TextInput } from "react-native";
+import { Alert, View, Text, ScrollView, Pressable, TextInput } from "react-native";
 import { useTheme } from "../../utils/useTheme";
 import { launchWhyNotOverflowCount, launchWhyNotPreview } from '../../utils/launch';
 import { fundHealthHoldLine, fundHealthRecoveryFreshnessLine, fundHealthRecoveryHistoryLine, fundHealthRecoveryReliabilityLine } from '../../utils/fund';
@@ -14,8 +14,9 @@ import { ExposureBar } from "../../components/cc/ExposureBar";
 import { LiveModeBanner } from "../../components/cc/LiveModeBanner";
 import { useCommandCenter } from "../../commandCenter/useCommandCenter";
 import type { AggressionMode, ControlMode } from "../../commandCenter/types";
-import { enableNextFamily, pauseLaunchFamily, setLaunchMode } from "../../api/client";
-import { fetchWealthGoal, setWealthGoal } from "../../api/client";
+import { fetchWealthGoal } from "../../api/client";
+import { guardedEnableNextFamily, guardedPauseLaunchFamily, guardedSetLaunchMode, guardedSetWealthGoal } from "../../api/guardedMutations";
+import { guardMutation, type MutationGuardContext } from "../../api/mutationGuard";
 import { useStore } from "../../state/store";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -37,10 +38,30 @@ function safeNum(s: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function confirmMutation(title: string, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => finish(false) },
+        { text: 'Confirm', style: 'destructive', onPress: () => finish(true) },
+      ],
+      { cancelable: true, onDismiss: () => finish(false) },
+    );
+  });
+}
+
 export function HomeCommandScreen() {
   const theme = useTheme();
   const cc = useCommandCenter();
-  const { state } = useStore();
+  const { state, session } = useStore();
   const snap = cc.snapshot;
   const [tab, setTab] = useState("Command");
   const [goalPct, setGoalPct] = useState("8");
@@ -49,6 +70,36 @@ export function HomeCommandScreen() {
   const [status, setStatus] = useState("");
   const nav = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
   const commandExecutionAdvisoryLine = useMemo(() => commandCenterExecutionAdvisoryLine(snap), [snap]);
+  const adminKey = state.role === "operator" ? state.adminKey : "";
+
+  function guardContext(): MutationGuardContext {
+    return {
+      role: state.role === 'operator' ? 'operator' : 'read_only',
+      locked: session.locked,
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable: cc.source === 'backend' && cc.snapshot !== null && !cc.error,
+      backendLiveAuthority: false,
+      explicitConfirmation: false,
+    };
+  }
+
+  async function confirmLaunchAction(action: string): Promise<boolean> {
+    const preflight = guardMutation('launch_control', guardContext());
+    if (!preflight.allowed && preflight.reasonCode !== 'explicit_confirmation_required') {
+      setStatus(`Launch control blocked · ${preflight.reasonCode}`);
+      return false;
+    }
+    return confirmMutation('Confirm launch control', `${action}\n\nThis changes backend launch state. Confirm only if this action is intentional.`);
+  }
+
+  async function confirmWealthGoalAction(): Promise<boolean> {
+    const preflight = guardMutation('settings', guardContext());
+    if (!preflight.allowed && preflight.reasonCode !== 'explicit_confirmation_required') {
+      setStatus(`Wealth goal update blocked · ${preflight.reasonCode}`);
+      return false;
+    }
+    return confirmMutation('Confirm wealth goal', 'This changes the backend wealth-goal settings. Confirm only if this update is intentional.');
+  }
 
   const controlMode = useMemo<ControlMode>(() => {
     return (snap?.controlMode ?? snap?.governance.controlMode ?? (snap?.governance.paused ? "view_only" : "assist")) as ControlMode;
@@ -124,6 +175,36 @@ export function HomeCommandScreen() {
     }
   }
 
+  async function setLaunchModeFromHome(mode: string) {
+    if (!(await confirmLaunchAction(`Set launch mode to ${mode}?`))) return;
+    try {
+      await guardedSetLaunchMode(state.baseUrl, mode, adminKey, { ...guardContext(), explicitConfirmation: true });
+      await cc.refresh();
+    } catch (e: unknown) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function enableNextFamilyFromHome() {
+    if (!(await confirmLaunchAction('Enable the next recommended launch family?'))) return;
+    try {
+      await guardedEnableNextFamily(state.baseUrl, undefined, adminKey, { ...guardContext(), explicitConfirmation: true });
+      await cc.refresh();
+    } catch (e: unknown) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function pauseNextFamilyFromHome(family: string) {
+    if (!(await confirmLaunchAction(`Pause launch family ${family}?`))) return;
+    try {
+      await guardedPauseLaunchFamily(state.baseUrl, family, adminKey, { ...guardContext(), explicitConfirmation: true });
+      await cc.refresh();
+    } catch (e: unknown) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function saveGoal() {
     const target = safeNum(goalPct, 8);
     const days = Math.max(1, Math.round(safeNum(goalDays, 14)));
@@ -133,7 +214,8 @@ export function HomeCommandScreen() {
         setStatus("Goal saved locally in demo mode. Connect backend to persist it.");
         return;
       }
-      const res = await setWealthGoal(
+      if (!(await confirmWealthGoalAction())) return;
+      const res = await guardedSetWealthGoal(
         state.baseUrl,
         {
           target_return_percentage: target,
@@ -141,7 +223,8 @@ export function HomeCommandScreen() {
           risk_tolerance: riskTolerance,
           reason: "Home wealth goal update",
         },
-        state.role === "operator" ? state.adminKey : undefined
+        adminKey,
+        { ...guardContext(), explicitConfirmation: true }
       );
       const ok = Boolean((res as Record<string, unknown>)?.ok);
       if (!ok) {
@@ -235,18 +318,18 @@ export function HomeCommandScreen() {
               {(['V1_ONLY','V1_PLUS_STABLE_ALPHA','STAGED_MULTI_STRATEGY'] as const).map((mode) => {
                 const active = snap.launch?.currentLaunchMode === mode;
                 return (
-                  <Pressable key={mode} onPress={() => void setLaunchMode(state.baseUrl, mode, state.role === 'operator' ? state.adminKey : undefined).then(() => cc.refresh())} style={{ flex: 1, paddingVertical: 10, borderRadius: theme.radii.md, borderWidth: 1, borderColor: active ? theme.colors.violet : theme.colors.border, backgroundColor: active ? theme.colors.surface2 : theme.colors.surface1, alignItems: 'center' }}>
+                  <Pressable key={mode} onPress={() => void setLaunchModeFromHome(mode)} style={{ flex: 1, paddingVertical: 10, borderRadius: theme.radii.md, borderWidth: 1, borderColor: active ? theme.colors.violet : theme.colors.border, backgroundColor: active ? theme.colors.surface2 : theme.colors.surface1, alignItems: 'center' }}>
                     <Text style={{ color: active ? theme.colors.text : theme.colors.textMuted, fontWeight: '900', textAlign: 'center' }}>{mode.replace(/_/g, ' ')}</Text>
                   </Pressable>
                 );
               })}
             </View>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: theme.spacing.md }}>
-              <Pressable onPress={() => void enableNextFamily(state.baseUrl, undefined, state.role === 'operator' ? state.adminKey : undefined).then(() => cc.refresh())} style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.cyan, alignItems: 'center' }}>
+              <Pressable onPress={() => void enableNextFamilyFromHome()} style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, backgroundColor: theme.colors.cyan, alignItems: 'center' }}>
                 <Text style={{ color: theme.colors.bg0, fontWeight: '900' }}>Enable Next Family</Text>
               </Pressable>
               {snap.launch.nextRecommendedFamily ? (
-                <Pressable onPress={() => void pauseLaunchFamily(state.baseUrl, snap.launch!.nextRecommendedFamily, state.role === 'operator' ? state.adminKey : undefined).then(() => cc.refresh())} style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1, alignItems: 'center' }}>
+                <Pressable onPress={() => void pauseNextFamilyFromHome(snap.launch!.nextRecommendedFamily)} style={{ flex: 1, paddingVertical: 12, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1, alignItems: 'center' }}>
                   <Text style={{ color: theme.colors.textMuted, fontWeight: '900' }}>Pause Family</Text>
                 </Pressable>
               ) : null}
@@ -291,12 +374,12 @@ export function HomeCommandScreen() {
         </View>
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: theme.spacing.md }}>
-          {(["view_only", "assist", "auto"] as const).map((mode) => {
+          {["view_only", "assist", "auto"].map((mode) => {
             const active = controlMode === mode;
             return (
               <Pressable
                 key={mode}
-                onPress={() => void setMode(mode)}
+                onPress={() => void setMode(mode as ControlMode)}
                 style={{
                   flex: 1,
                   paddingVertical: 12,
@@ -318,12 +401,12 @@ export function HomeCommandScreen() {
         <View style={{ marginTop: theme.spacing.md }}>
           <Text style={{ color: theme.colors.textFaint, ...theme.typography.mono }}>Trading aggression</Text>
           <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-            {(["conservative", "balanced", "aggressive"] as const).map((mode) => {
+            {["conservative", "balanced", "aggressive"].map((mode) => {
               const active = aggressionMode === mode;
               return (
                 <Pressable
                   key={mode}
-                  onPress={() => void cc.setControls({ aggressionMode: mode }, `Aggression mode → ${mode}`).then(() => cc.refresh())}
+                  onPress={() => void cc.setControls({ aggressionMode: mode as AggressionMode }, `Aggression mode → ${mode}`).then(() => cc.refresh())}
                   style={{
                     flex: 1,
                     paddingVertical: 10,
@@ -427,12 +510,12 @@ export function HomeCommandScreen() {
         <View style={{ marginTop: theme.spacing.md }}>
           <Text style={{ color: theme.colors.textMuted, ...theme.typography.mono }}>Risk tolerance</Text>
           <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-            {(["conservative", "moderate", "aggressive"] as const).map((risk) => {
+            {["conservative", "moderate", "aggressive"].map((risk) => {
               const active = riskTolerance === risk;
               return (
                 <Pressable
                   key={risk}
-                  onPress={() => setRiskTolerance(risk)}
+                  onPress={() => setRiskTolerance(risk as "conservative" | "moderate" | "aggressive")}
                   style={{
                     flex: 1,
                     paddingVertical: 12,
