@@ -33,7 +33,7 @@ This document is the authoritative engineering contract for the controlled integ
 | Withdrawal prepare | backend-produced transaction intent | OffRamp Prepare | **wired** |
 | External-wallet signing | WalletConnect EIP-1193 session bridge exists | OffRamp must invoke it with prepared tx | **GAP — Issue #150** |
 | External-wallet sender proof | backend supports `from_address` taxonomy | client must verify connected address before send | **GAP — Issue #150** |
-| Chain-id / tx-field verification before send | backend produces canonical tx | client must verify prepared tx against connected chain/address | **GAP — Issue #150** |
+| Chain-id / tx-field verification before send | backend produces canonical tx | client helper must verify prepared tx against connected chain/address | **GAP — Issue #150** |
 | Submitted/pending/reconciliation status | backend has tx-status/read-RPC surfaces | OffRamp must display submitted/pending until canonical proof | **GAP — Issue #150** |
 | Backend hot-wallet withdrawal | privileged backend mode | not used by public/staging UI | **restricted / verify** |
 | Withdraw-all | canonical control + preview + execution lifecycle | operator control surface | **wired / verify** |
@@ -50,7 +50,7 @@ The mobile WalletConnect bridge exposes `sendWalletConnectTransaction()`, which 
 
 | Item | Current verified state |
 |---|---|
-| Authoritative `main` | `e6ec3306dd0e70ff21d51abdf64662aae07c61b8` |
+| Authoritative `main` | `9b6e3b8854fb9c9ccd561f2669a907a6a0177891` (CI run `34875706442` green) |
 | Exact-main economic-unit CI | green |
 | Canonical post-settlement learning-order repair | merged and CI green (#149) |
 | Authoritative staging service | Render `sovereign-capital` (`srv-daej2f1t0dsc73aeg430`) |
