@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { launchFamilyDetail, pauseLaunchFamily, quarantineLaunchFamily, revertLaunchFamily, enableNextFamily } from '../api/launchApi';
+import { Alert, ScrollView, Text, View } from 'react-native';
+import { launchFamilyDetail } from '../api/launchApi';
+import { guardedEnableNextFamily, guardedPauseLaunchFamily, guardedQuarantineLaunchFamily, guardedRevertLaunchFamily } from '../api/guardedMutations';
+import { guardMutation, type MutationGuardContext } from '../api/mutationGuard';
 import { useCommandCenter } from '../commandCenter/useCommandCenter';
 import { FamilyReadinessCard } from '../components/FamilyReadinessCard';
 import { useStore } from '../state/store';
@@ -9,40 +11,101 @@ import { pageContentContainerStyle, pageShellStyle } from '../utils/layout';
 import { SurfaceCard } from '../components/v2/SurfaceCard';
 import { HeatMatrixChart } from '../components/v2/charts/HeatMatrixChart';
 
+function confirmMutation(title: string, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => finish(false) },
+        { text: 'Confirm', style: 'destructive', onPress: () => finish(true) },
+      ],
+      { cancelable: true, onDismiss: () => finish(false) },
+    );
+  });
+}
+
 export function FamilyReadinessScreen() {
   const theme = useTheme();
   const cc = useCommandCenter();
-  const { state } = useStore();
-  const adminKey = state.role === 'operator' ? state.adminKey : undefined;
+  const { state, session } = useStore();
+  const adminKey = state.role === 'operator' ? state.adminKey : '';
   const [detail, setDetail] = useState('');
 
   const families = cc.snapshot?.launch?.families ?? [];
   const matrixCells = useMemo(() => families.map((item) => ({ label: item.family.replace(/_/g, ' '), value: item.score, subtitle: `${item.status} · ${item.riskLevel ?? 'n/a'}` })), [families]);
 
+  function guardContext(explicitConfirmation: boolean): MutationGuardContext {
+    return {
+      role: state.role === 'operator' ? 'operator' : 'read_only',
+      locked: Boolean(session.locked),
+      adminKeyPresent: Boolean(state.adminKey?.trim()),
+      backendReachable: cc.source === 'backend' && cc.snapshot !== null && !cc.error,
+      backendLiveAuthority: false,
+      explicitConfirmation,
+    };
+  }
+
+  async function confirmLaunchAction(action: string): Promise<boolean> {
+    const preflight = guardMutation('launch_control', guardContext(false));
+    if (!preflight.allowed && preflight.reasonCode !== 'explicit_confirmation_required') {
+      setDetail(`Launch control blocked · ${preflight.reasonCode}`);
+      return false;
+    }
+    return confirmMutation('Confirm launch control', `${action}\n\nThis changes backend launch state. Confirm only if this action is intentional.`);
+  }
+
   async function inspectFamily(family: string) {
-    const resp = await launchFamilyDetail(state.baseUrl, family, adminKey);
+    const resp = await launchFamilyDetail(state.baseUrl, family, adminKey || undefined);
     const item = (resp as { item?: { blockers?: string[]; reasons?: string[]; suggestedNextAction?: string; degradedState?: string; currentHealthState?: string } }).item;
     setDetail(item ? `${family}: ${(item.blockers ?? item.reasons ?? []).join(', ') || 'no blockers'} · ${item.suggestedNextAction ?? 'hold'} · ${item.currentHealthState ?? item.degradedState ?? 'live'}` : 'No detail available');
   }
 
   async function pauseFamily(family: string) {
-    await pauseLaunchFamily(state.baseUrl, family, adminKey);
-    await cc.refresh();
+    if (!(await confirmLaunchAction(`Pause launch family ${family}?`))) return;
+    try {
+      await guardedPauseLaunchFamily(state.baseUrl, family, adminKey, guardContext(true));
+      await cc.refresh();
+    } catch (error: unknown) {
+      setDetail(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function revertFamily(family: string) {
-    await revertLaunchFamily(state.baseUrl, family, adminKey);
-    await cc.refresh();
+    if (!(await confirmLaunchAction(`Revert launch family ${family} to the safer state?`))) return;
+    try {
+      await guardedRevertLaunchFamily(state.baseUrl, family, adminKey, guardContext(true));
+      await cc.refresh();
+    } catch (error: unknown) {
+      setDetail(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function quarantineFamily(family: string) {
-    await quarantineLaunchFamily(state.baseUrl, family, 'operator_quarantine', adminKey);
-    await cc.refresh();
+    if (!(await confirmLaunchAction(`Quarantine launch family ${family}?`))) return;
+    try {
+      await guardedQuarantineLaunchFamily(state.baseUrl, family, adminKey, guardContext(true), 'operator_quarantine');
+      await cc.refresh();
+    } catch (error: unknown) {
+      setDetail(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function enableFamily(family: string) {
-    await enableNextFamily(state.baseUrl, family, adminKey);
-    await cc.refresh();
+    if (!family) return;
+    if (!(await confirmLaunchAction(`Enable launch family ${family}?`))) return;
+    try {
+      await guardedEnableNextFamily(state.baseUrl, family, adminKey, guardContext(true));
+      await cc.refresh();
+    } catch (error: unknown) {
+      setDetail(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
