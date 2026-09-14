@@ -109,6 +109,7 @@ class AgentHub:
                 "confidence": _status(True, "confidence_idle"),
                 "info": _status(True, "info_idle"),
                 "reasoning": _status(True, "reasoning_idle"),
+                "features_used": _status(True, "features_used_idle"),
             }
             try:
                 t0 = time.perf_counter()
@@ -124,11 +125,15 @@ class AgentHub:
                 reasoning_map, reasoning_status = _coerce_mapping(
                     getattr(o, "reasoning", {}), code="reasoning"
                 )
+                features_used, features_status = _coerce_mapping(
+                    getattr(o, "features_used", {}), code="features_used"
+                )
                 info_map.setdefault("name", name)
                 _merge_status(runtime_parts, "signal", signal_status)
                 _merge_status(runtime_parts, "confidence", confidence_status)
                 _merge_status(runtime_parts, "info", info_status)
                 _merge_status(runtime_parts, "reasoning", reasoning_status)
+                _merge_status(runtime_parts, "features_used", features_status)
                 runtime_state = _runtime_snapshot(runtime_parts)
 
                 sanitized = AgentOutput(
@@ -139,6 +144,7 @@ class AgentHub:
                     confidence=float(confidence),
                     info={"name": name},
                     signal=float(signal),
+                    features_used=dict(features_used),
                     reasoning=dict(reasoning_map),
                 )
                 agent_outputs.append(sanitized)
@@ -151,6 +157,7 @@ class AgentHub:
                 out_obj = {
                     "signal": float(signal),
                     "confidence": float(confidence),
+                    "features_used": dict(features_used),
                     "estimated_value_contribution": round(float(signal) * float(confidence), 6),
                     "info": dict(info_map),
                     "reasoning": dict(reasoning_map),
@@ -182,6 +189,7 @@ class AgentHub:
                         "confidence": _status(False, "confidence_unavailable"),
                         "info": _status(False, "info_unavailable"),
                         "reasoning": _status(False, "reasoning_unavailable"),
+                        "features_used": _status(False, "features_used_unavailable"),
                     }
                 )
                 health[name] = classify_health(
@@ -194,6 +202,7 @@ class AgentHub:
                 outs[name] = {
                     "signal": 0.0,
                     "confidence": 0.0,
+                    "features_used": {},
                     "estimated_value_contribution": 0.0,
                     "info": {"name": name, "runtime": dict(runtime_state)},
                     "reasoning": {"error": str(e), "runtime": dict(runtime_state)},
