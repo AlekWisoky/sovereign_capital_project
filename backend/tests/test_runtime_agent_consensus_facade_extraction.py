@@ -241,3 +241,32 @@ def test_runtime_agent_consensus_facade_skips_unverified_after_fee_candidates(mo
 
     assert state['local'] == {}
     assert runtime._consensus_last['key'] == '9:'
+
+
+def test_agent_decision_evidence_is_write_once_against_later_hub_cycle():
+    runtime = _Runtime()
+    runtime._agent_hub_last = {
+        'signals': {'alpha': 0.8},
+        'confidences': {'alpha': 0.6},
+        'features_used': {'alpha': {'margin_ratio': 0.01}},
+        'regime': 'risk_on',
+    }
+    decision = SimpleNamespace(
+        metadata={'canonical_decision_id': 'decision-1', 'correlation_id': 'corr-1'}
+    )
+
+    first = runtime.freeze_agent_decision_evidence(decision)
+    runtime._agent_hub_last = {
+        'signals': {'alpha': 0.1},
+        'confidences': {'alpha': 0.2},
+        'features_used': {'alpha': {'margin_ratio': 0.99}},
+        'regime': 'risk_off',
+    }
+    second = runtime.freeze_agent_decision_evidence(decision)
+
+    assert first['decision_id'] == 'decision-1'
+    assert first['correlation_id'] == 'corr-1'
+    assert first['signals'] == {'alpha': 0.8}
+    assert first['features_used']['alpha']['margin_ratio'] == 0.01
+    assert second == first
+    assert decision.metadata['agent_decision_evidence'] == first
