@@ -94,7 +94,7 @@ class RuntimeAgentConsensusFacade:
                     for agent in list(hub_agents or [])
                 ]
                 dynamic_weights: Dict[str, Any] = {}
-                if getattr(self, "_agent_weighting", None) is not None:
+                if agent_names and getattr(self, "_agent_weighting", None) is not None:
                     try:
                         dynamic_weights = dict(
                             self._agent_weighting.weights_for(
