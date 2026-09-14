@@ -54,7 +54,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 336,
+  "backend_test_file_count": 337,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -193,6 +193,7 @@
     "test_new_api_routes.py",
     "test_noncore_summary_contract_and_family_status.py",
     "test_omar_operator_intent.py",
+    "test_omar_progressive_decision_context.py",
     "test_omar_runtime.py",
     "test_operator_capital_projection_kernel_maintenance.py",
     "test_operator_command_read_surface_auto_trade_sync.py",
@@ -672,12 +673,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-13T00:51:20Z",
-  "generatedAtIso": "2026-09-13T00:51:20Z",
-  "generatedAtMs": 1789260680000,
-  "generated_at": "2026-09-13T00:51:20Z",
-  "generated_at_iso": "2026-09-13T00:51:20Z",
-  "generated_at_ms": 1789260680000,
+  "generatedAt": "2026-09-14T03:58:38.289000Z",
+  "generatedAtIso": "2026-09-14T03:58:38.289000Z",
+  "generatedAtMs": 1789358318289,
+  "generated_at": "2026-09-14T03:58:38.289000Z",
+  "generated_at_iso": "2026-09-14T03:58:38.289000Z",
+  "generated_at_ms": 1789358318289,
   "health_states": [
     "live",
     "degraded",
@@ -2079,7 +2080,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 336,
+    "backend_test_files": 337,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2218,6 +2219,7 @@
       "test_new_api_routes.py",
       "test_noncore_summary_contract_and_family_status.py",
       "test_omar_operator_intent.py",
+      "test_omar_progressive_decision_context.py",
       "test_omar_runtime.py",
       "test_operator_capital_projection_kernel_maintenance.py",
       "test_operator_command_read_surface_auto_trade_sync.py",

@@ -558,6 +558,7 @@
           "backend/tests/test_canonical_omar_closed_loop.py",
           "backend/tests/test_canonical_omar_decision_context.py",
           "backend/tests/test_omar_operator_intent.py",
+          "backend/tests/test_omar_progressive_decision_context.py",
           "backend/tests/test_omar_runtime.py",
           "backend/tests/test_runtime_method_chain_learning_attribution.py",
           "backend/victor_ai_bot/runtime.py",
@@ -575,23 +576,24 @@
           "backend/tests/test_canonical_omar_closed_loop.py",
           "backend/tests/test_canonical_omar_decision_context.py",
           "backend/tests/test_omar_operator_intent.py",
+          "backend/tests/test_omar_progressive_decision_context.py",
           "backend/tests/test_omar_runtime.py",
           "backend/tests/test_runtime_method_chain_learning_attribution.py"
         ]
       },
       "family": "omar",
       "path": "backend/victor_ai_bot/omar",
-      "primaryEvidenceCount": 14,
+      "primaryEvidenceCount": 15,
       "pythonFileCount": 16,
-      "referenceCount": 19,
+      "referenceCount": 21,
       "status": "staged",
       "statusInputs": {
         "gatingConditions": 2,
-        "importReachability": 9,
+        "importReachability": 10,
         "mountedRoutes": 0,
         "runtimeInitialization": 3
       },
-      "supplementalReferenceCount": 5,
+      "supplementalReferenceCount": 6,
       "why": "Explicit lifecycle policy keeps this family staged until production authority is intentionally promoted."
     },
     {

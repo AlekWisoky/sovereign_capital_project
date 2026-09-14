@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 336,
+    "test_file_count": 337,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -140,6 +140,7 @@
       "backend/tests/test_new_api_routes.py",
       "backend/tests/test_noncore_summary_contract_and_family_status.py",
       "backend/tests/test_omar_operator_intent.py",
+      "backend/tests/test_omar_progressive_decision_context.py",
       "backend/tests/test_omar_runtime.py",
       "backend/tests/test_operator_capital_projection_kernel_maintenance.py",
       "backend/tests/test_operator_command_read_surface_auto_trade_sync.py",
@@ -512,9 +513,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-13T00:50:55.146000Z",
-  "generated_at_iso": "2026-09-13T00:50:55.146000Z",
-  "generated_at_ms": 1789260655146,
+  "generated_at": "2026-09-14T03:58:41.548000Z",
+  "generated_at_iso": "2026-09-14T03:58:41.548000Z",
+  "generated_at_ms": 1789358321548,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
