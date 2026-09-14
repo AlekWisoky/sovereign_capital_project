@@ -23,12 +23,7 @@ _SAFE_AGENT_LOCAL_EXCEPTIONS = _SAFE_AGENT_CONSENSUS_EXCEPTIONS + (
 
 
 class RuntimeAgentConsensusFacade:
-    """Agent-hub and consensus compatibility facade.
-
-    This isolates additive control-state scoring inputs away from RuntimeBundle's
-    orchestration loop while preserving existing side effects on agent/consensus
-    state snapshots and bus updates.
-    """
+    """Agent-hub and consensus compatibility facade."""
 
     @staticmethod
     def _opp_is_consensus_eligible(opp: Opportunity) -> bool:
@@ -88,14 +83,26 @@ class RuntimeAgentConsensusFacade:
             hub_out = None
             if getattr(self, "_agent_hub", None) is not None:
                 treasury_governance = treasury_governance_view(dict(treasury_state or {}))
-                agent_names = [str(getattr(agent, "name", agent.__class__.__name__)) for agent in list(self._agent_hub.agents)]
-                dynamic_weights = self._agent_weighting.weights_for(
-                    regime=str(regime_label), agents=agent_names
-                ) if getattr(self, "_agent_weighting", None) is not None else {}
+                hub_agents = getattr(self._agent_hub, "agents", None)
+                agent_names = [
+                    str(getattr(agent, "name", agent.__class__.__name__))
+                    for agent in list(hub_agents or [])
+                ]
+                dynamic_weights: Dict[str, Any] = {}
+                if getattr(self, "_agent_weighting", None) is not None:
+                    try:
+                        dynamic_weights = dict(
+                            self._agent_weighting.weights_for(
+                                regime=str(regime_label), agents=agent_names
+                            )
+                            or {}
+                        )
+                    except _SAFE_AGENT_LOCAL_EXCEPTIONS:
+                        dynamic_weights = {}
                 hub_out = self._agent_hub.step(
                     state={
                         "regime": str(regime_label),
-                        "agent_weights": dict(dynamic_weights),
+                        "agent_weights": dynamic_weights,
                         "local": dict(local),
                         "mev": dict(mev_snap or {}),
                         "dex": dict(
