@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from typing import Any, Dict, List
 
 from ..caq_kds.bus import BUS
@@ -71,6 +72,51 @@ class RuntimeAgentConsensusFacade:
             )
         except _SAFE_AGENT_LOCAL_EXCEPTIONS:
             return {}
+
+    @staticmethod
+    def _agent_evidence_snapshot(hub_state: Dict[str, Any], *, decision_id: str, correlation_id: str) -> Dict[str, Any]:
+        snapshot = copy.deepcopy(dict(hub_state or {}))
+        snapshot["decision_id"] = str(decision_id or "")
+        snapshot["correlation_id"] = str(correlation_id or "")
+        return snapshot
+
+    def freeze_agent_decision_evidence(self, decision: Any) -> Dict[str, Any]:
+        """Freeze the current AgentHub evidence onto the canonical decision once.
+
+        The snapshot is a downstream evidence record only. It never authorizes
+        execution and is write-once for the lifetime of the decision object.
+        """
+        if decision is None:
+            return {}
+        metadata = dict(getattr(decision, "metadata", {}) or {})
+        existing = metadata.get("agent_decision_evidence")
+        if isinstance(existing, dict) and existing.get("decision_id"):
+            return copy.deepcopy(existing)
+        hub_state = dict(getattr(self, "_agent_hub_last", {}) or {})
+        if not hub_state:
+            return {}
+        decision_id = str(
+            metadata.get("canonical_decision_id")
+            or metadata.get("decision_id")
+            or hub_state.get("decision_id")
+            or ""
+        )
+        correlation_id = str(
+            metadata.get("correlation_id")
+            or hub_state.get("correlation_id")
+            or ""
+        )
+        if not decision_id or not correlation_id:
+            return {}
+        snapshot = self._agent_evidence_snapshot(
+            hub_state, decision_id=decision_id, correlation_id=correlation_id
+        )
+        metadata["agent_decision_evidence"] = snapshot
+        try:
+            decision.metadata = metadata
+        except (AttributeError, TypeError):
+            return {}
+        return copy.deepcopy(snapshot)
 
     def _run_agent_consensus_gate(
         self,
