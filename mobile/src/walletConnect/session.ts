@@ -28,8 +28,8 @@ export function subscribeWalletConnect(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-export function walletConnectState(): { connected: boolean; address: string } {
-  return { connected, address };
+export function walletConnectState(): { connected: boolean; address: string; provider: Eip1193Provider | null } {
+  return { connected, address, provider };
 }
 
 export async function connectWalletConnect(): Promise<void> {
