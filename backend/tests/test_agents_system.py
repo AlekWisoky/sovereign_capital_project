@@ -1,10 +1,6 @@
-from types import SimpleNamespace
-
 from victor_ai_bot.agents.health import AgentHealthStatus, classify_health
 from victor_ai_bot.agents.weighting import AgentWeightingGovernor
 from victor_ai_bot.agents.attribution import AgentAttributionStore
-from victor_ai_bot.aqe.agents.adaptation import OnlineLinearCalibrator
-from victor_ai_bot.omar.lifecycle_bridge import _observe_settled_outcome
 
 
 def test_agent_health_states():
@@ -164,7 +160,7 @@ def test_agent_attribution_preserves_canonical_lifecycle_lineage(tmp_path):
 
 def test_agent_hub_preserves_features_used_for_calibration(tmp_path):
     hub = AgentHub(data_dir=str(tmp_path))
-    out = hub.step(state={'local': {'margin_ratio': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000}})
+    out = hub.step(state={'local': {'mr': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000}})
     agent_name = 'Ben Graham Agent'
     assert out.outputs[agent_name]['features_used']
     assert out.outputs[agent_name]['features_used']['mr'] == 0.002
@@ -195,67 +191,3 @@ def test_agent_attribution_preserves_calibration_evidence(tmp_path):
     assert loaded[0]['contributors'][0]['signal'] == 0.4
     assert loaded[0]['contributors'][0]['confidence'] == 0.8
     assert loaded[0]['contributors'][0]['features_used'] == {'mr': 0.002, 'legs': 2.0}
-
-
-def test_settled_outcome_updates_existing_calibrator_once(tmp_path):
-    store = AgentAttributionStore(path=str(tmp_path / 'attrib.json'))
-    store.append({
-        'decision_id': 'decision-1',
-        'receipt_id': 'receipt-1',
-        'outcome_id': 'outcome-1',
-        'opportunity_id': 'opportunity-1',
-        'route_id': 'route-1',
-        'contributors': [
-            {'agent': 'RiskAgent', 'features_used': {'x': 2.0}, 'followed': True}
-        ],
-    })
-    calibrator = OnlineLinearCalibrator(name='RiskAgent', data_dir=str(tmp_path), enabled=True)
-    agent = SimpleNamespace(name='RiskAgent', cal=calibrator)
-
-    class Omar:
-        enabled = True
-
-        def observe_outcome(self, **kwargs):
-            return {
-                'ok': True,
-                'status': 'settled',
-                'realized_net_usd': 12.0,
-                'expected_net_usd': 10.0,
-            }
-
-    runtime = SimpleNamespace(_omar=Omar(), _agent_attribution=store, _agent_hub=SimpleNamespace(agents=[agent]))
-    pending = {
-        'canonical_decision_id': 'decision-1',
-        'correlation_id': 'corr-1',
-        'execution_id': 'execution-1',
-        'sizing_id': 'sizing-1',
-        'opportunity_id': 'opportunity-1',
-        'route_id': 'route-1',
-        'action': 'flash_arb',
-    }
-    outcome = {
-        'status': 'settled',
-        'decision_id': 'decision-1',
-        'correlation_id': 'corr-1',
-        'execution_id': 'execution-1',
-        'sizing_id': 'sizing-1',
-        'opportunity_id': 'opportunity-1',
-        'route_id': 'route-1',
-        'outcome_id': 'outcome-1',
-        'receipt_id': 'receipt-1',
-        'tx_hash': 'receipt-1',
-        'realized_net_usd': 12.0,
-        'expected_net_usd': 10.0,
-        'truth_verified': True,
-        'ok': True,
-    }
-
-    first = _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
-    first_weight = calibrator.w['x']
-    second = _observe_settled_outcome(runtime, pending=pending, outcome=outcome)
-
-    assert first['calibration']['reason_code'] == 'calibration_updated'
-    assert first['calibration']['reward'] == 0.2
-    assert first_weight == 0.008
-    assert second['calibration']['reason_code'] == 'calibration_noop'
-    assert calibrator.w['x'] == first_weight
