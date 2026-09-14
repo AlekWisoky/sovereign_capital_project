@@ -7,7 +7,6 @@ from typing import Any, Dict, Mapping
 from fastapi import APIRouter, Body, Depends, Request
 
 from ..auth import require_admin
-from ..deploy_mode import is_public_mode
 from ..jsonsafe import to_json_safe as json_safe
 from ..tx_confirmation import assess_submitted_tx
 from ..rpc import JsonRpcClient
@@ -88,10 +87,6 @@ async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] 
     if unexpected:
         return json_safe(_reject("invalid_unknown_request_fields", fields=unexpected))
 
-    if is_public_mode() and not bool(getattr(request.app.state.runtime.cfg.execution, "public_allow_broadcast", False)):
-        # Reconciliation is read-only; public/staging must remain allowed to observe external-wallet submissions.
-        pass
-
     tx_hash = str(payload.get("tx_hash", "") or "").strip()
     from_address = str(payload.get("from_address", "") or "").strip()
     to = str(payload.get("to", "") or "").strip()
@@ -130,6 +125,12 @@ async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] 
     configured_chain = _chain_id(getattr(cfg.chain, "chain_id", 0))
     if configured_chain != _chain_id(chain_id):
         return json_safe(_reject("chain_mismatch", expected_chain_id=configured_chain))
+
+    configured_executor = str(getattr(cfg.execution, "executor_address", "") or "").lower()
+    if not _is_evm_address(configured_executor):
+        return json_safe(_reject("invalid_executor_address"))
+    if to.lower() != configured_executor:
+        return json_safe(_reject("submitted_executor_mismatch", expected=configured_executor, actual=to))
 
     read_url = runtime.rpc_manager.best_read()
     if not read_url:
