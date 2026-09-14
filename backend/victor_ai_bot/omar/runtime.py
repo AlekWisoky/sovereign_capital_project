@@ -38,10 +38,46 @@ class OmarRuntime:
         with self._lock:
             return {"enabled": self.enabled, "policy_model": self.cfg.policy_model, "cycle": self._cycle, "real_learning": self._real_learner.summary() if self._real_learner else {"enabled": False}, "last_decision": dict(self.last_decision), "last_outcome": dict(self.last_outcome), "last_social": dict(self.last_social), "last_train": dict(self.last_train)}
 
+    def _prior_canonical_outcome_context(self) -> dict[str, Any]:
+        """Return only the immediately previous verified canonical settlement."""
+        with self._lock:
+            outcome = copy.deepcopy(self.last_outcome or {})
+        if not isinstance(outcome, dict):
+            return {}
+        required = ("decision_id", "expected_net_usd", "realized_net_usd", "expectation_error", "execution_id", "outcome_id", "sizing_id", "opportunity_id", "route_id")
+        if any(outcome.get(key) in (None, "") for key in required):
+            return {}
+        if outcome.get("source") != "phase2_canonical_outcome_ledger" or not bool(outcome.get("settlement_verified")) or not bool(outcome.get("outcome_truth_verified")):
+            return {}
+        try:
+            economics = {key: float(outcome[key]) for key in ("expected_net_usd", "realized_net_usd", "expectation_error")}
+        except (TypeError, ValueError, OverflowError):
+            return {}
+        if not all(math.isfinite(value) for value in economics.values()):
+            return {}
+        return {"prior_canonical_outcome": {
+            "decision_id": str(outcome["decision_id"]),
+            "expected_net_usd": economics["expected_net_usd"],
+            "realized_net_usd": economics["realized_net_usd"],
+            "expectation_error": economics["expectation_error"],
+            "strategy_family": str(outcome.get("strategy_family") or ""),
+            "execution_id": str(outcome["execution_id"]),
+            "outcome_id": str(outcome["outcome_id"]),
+            "sizing_id": str(outcome["sizing_id"]),
+            "opportunity_id": str(outcome["opportunity_id"]),
+            "route_id": str(outcome["route_id"]),
+            "latency_ms": max(0, int(outcome.get("latency_ms") or 0)),
+            "slippage_bps": max(0.0, float(outcome.get("slippage_bps") or 0.0)),
+            "gas_cost_usd": max(0.0, float(outcome.get("gas_cost_usd") or 0.0)),
+            "settled_ts_ms": int(outcome.get("settled_ts_ms") or 0),
+        }}
+
     def recommend(self, context: Mapping[str, Any]) -> OmarRecommendation:
         if not self.enabled or not bool(getattr(self.cfg, "live_influence_enabled", True)) or self._real_learner is None:
             return OmarRecommendation("", "DISABLED", 0.0, False, 1.0, "standard", False, 0, "omar_disabled")
-        rec = self._real_learner.recommend(context)
+        enriched_context = dict(context or {})
+        enriched_context.update(self._prior_canonical_outcome_context())
+        rec = self._real_learner.recommend(enriched_context)
         with self._lock: self.last_decision = rec.to_dict()
         return rec
 
@@ -49,8 +85,9 @@ class OmarRuntime:
         if not self.enabled or not bool(getattr(self.cfg, "real_learning_enabled", True)): return
         metadata_row = copy.deepcopy(dict(metadata or {})); lineage = cast(dict[str, Any], metadata_row.get("canonical_lineage") or {})
         correlation_id = str(lineage.get("correlation_id") or metadata_row.get("correlation_id") or "").strip()
-        expected = expected_net_usd if expected_net_usd is not None else metadata_row.get("expected_net_usd", context.get("expected_net_usd"))
-        row = {"decision_id": str(decision_id), "correlation_id": correlation_id, "opportunity_id": str(opportunity_id), "route_id": str(route_id), "action": str(action), "state_key": str(state_key), "context": copy.deepcopy(dict(context or {})), "metadata": metadata_row, "canonical_lineage": {"decision_id": str(decision_id), "correlation_id": correlation_id}, "ts_ms": int(time.time() * 1000)}
+        enriched_context = dict(context or {}); enriched_context.update(self._prior_canonical_outcome_context())
+        expected = expected_net_usd if expected_net_usd is not None else metadata_row.get("expected_net_usd", enriched_context.get("expected_net_usd"))
+        row = {"decision_id": str(decision_id), "correlation_id": correlation_id, "opportunity_id": str(opportunity_id), "route_id": str(route_id), "action": str(action), "state_key": str(state_key), "context": copy.deepcopy(enriched_context), "metadata": metadata_row, "canonical_lineage": {"decision_id": str(decision_id), "correlation_id": correlation_id}, "ts_ms": int(time.time() * 1000)}
         if expected is not None: row["expected_net_usd"] = expected
         with self._lock:
             self._pending_decisions[str(decision_id)] = row
@@ -82,7 +119,7 @@ class OmarRuntime:
         reward = max(-50.0, min(50.0, reward))
         learner_outcome = {"decision_id": str(decision_id), "correlation_id": str(outcome.get("correlation_id") or ""), "route_id": str(outcome.get("route_id") or ""), "tx_hash": str(tx_hash), "ok": bool(ok), "expected_net_usd": expected, "realized_net_usd": realized, "expectation_error": expectation_error, "settlement_verified": True, "amount_in_wei": int(amount_in_wei), "gas_cost_usd": float(gas_cost_usd or 0.0), "slippage_bps": float(slippage_bps or 0.0), "latency_ms": int(latency_ms or 0), "outcome_truth_verified": True, "metadata": metadata_row}
         result = self._real_learner.observe(state_key=state_key, action=action, reward=reward, outcome=learner_outcome)
-        result = {**dict(result), "learned": True, "decision_id": str(decision_id), "expected_net_usd": expected, "realized_net_usd": realized, "expectation_error": expectation_error, "settlement_verified": True}
+        result = {**dict(result), "learned": True, "decision_id": str(decision_id), "expected_net_usd": expected, "realized_net_usd": realized, "expectation_error": expectation_error, "settlement_verified": True, "source": str(outcome.get("source") or ""), "execution_id": str(outcome.get("execution_id") or ""), "outcome_id": str(outcome.get("outcome_id") or ""), "sizing_id": str(outcome.get("sizing_id") or ""), "opportunity_id": str(outcome.get("opportunity_id") or ""), "route_id": str(outcome.get("route_id") or ""), "strategy_family": str(outcome.get("strategy_family") or pending.get("context", {}).get("strategy_family") or ""), "latency_ms": int(outcome.get("latency_ms") or latency_ms or 0), "slippage_bps": float(outcome.get("slippage_bps") or slippage_bps or 0.0), "gas_cost_usd": float(outcome.get("gas_cost_usd") or gas_cost_usd or 0.0), "outcome_truth_verified": True, "settled_ts_ms": int(time.time() * 1000)}
         with self._lock: self._pending_decisions.pop(str(decision_id), None); self.last_outcome = {**dict(result), "action": action}
         self._log({"event": "omar_real_learning_update", **dict(result), "outcome": learner_outcome, "decision_snapshot": pending}); return result
 
