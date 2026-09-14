@@ -25,6 +25,11 @@ from .treasury_extra import router as treasury_router
 from .wealth import router as wealth_router
 from .withdraw_all_routes import router as withdraw_all_router
 from .withdraw_routes import router as withdraw_router
+from .withdraw_external_routes import router as withdraw_external_router
+
+# Keep the external-wallet reconciliation endpoint inside the canonical withdrawal
+# router namespace; it is observation/reconciliation only and never a signer.
+withdraw_router.include_router(withdraw_external_router)
 
 __all__ = [
     "admin_router",
@@ -54,4 +59,5 @@ __all__ = [
     "wealth_router",
     "withdraw_all_router",
     "withdraw_router",
+    "withdraw_external_router",
 ]
