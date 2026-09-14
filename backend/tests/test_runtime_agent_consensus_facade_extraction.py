@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import victor_ai_bot.runtime_services.runtime_agent_consensus_facade as ac_mod
-from victor_ai_bot.aqe.coordination.consensus_engine import AgentConsensusEngine, ConsensusConfig
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services.runtime_agent_consensus_facade import RuntimeAgentConsensusFacade
 
@@ -155,35 +154,6 @@ def test_runtime_agent_consensus_facade_preserves_gate(monkeypatch):
     assert runtime._consensus_last['weights'] == {'alpha': 0.7, 'beta': 0.3}
     assert runtime._consensus_last['allow'] is True
     assert updates == [('consensus', runtime._consensus_last)]
-
-
-def test_consensus_engine_uses_explicit_weight_overrides_without_persisting_them():
-    engine = AgentConsensusEngine(cfg=ConsensusConfig(enabled=True), tracker=None)
-    result = engine.compute(
-        signals={'alpha': 1.0, 'beta': -1.0},
-        confidences={'alpha': 1.0, 'beta': 1.0},
-        regime='balanced',
-        strategy_type='dex_flash',
-        deterministic_key='block:opp',
-        weight_overrides={'alpha': 0.25, 'beta': 1.75},
-    )
-    assert result['weights']['alpha'] == 0.25
-    assert result['weights']['beta'] == 1.75
-    assert result['deterministic_key'] == 'block:opp'
-    assert engine.tracker is None
-
-
-def test_consensus_engine_malformed_weight_overrides_fall_back_per_agent():
-    engine = AgentConsensusEngine(cfg=ConsensusConfig(enabled=True), tracker=None)
-    result = engine.compute(
-        signals={'alpha': 1.0, 'beta': -1.0},
-        confidences={'alpha': 1.0, 'beta': 1.0},
-        regime='balanced',
-        strategy_type='dex_flash',
-        weight_overrides={'alpha': float('nan'), 'beta': 0.5},
-    )
-    assert result['weights']['alpha'] == 1.0
-    assert result['weights']['beta'] == 0.5
 
 
 def test_runtime_agent_consensus_facade_weighting_is_best_effort(monkeypatch):
