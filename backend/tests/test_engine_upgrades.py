@@ -2,6 +2,7 @@ from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrag
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
 from victor_ai_bot.aqe.funding import FundingArbStrategy, FundingArbConfig
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
+from victor_ai_bot.aqe.mev.simulator import validate_deterministic_simulation_evidence
 from victor_ai_bot.runtime_services.engine_service import EngineService
 
 
@@ -125,3 +126,73 @@ def test_heuristic_mev_candidates_are_observe_only_until_simulation_exists():
     assert all(row.lifecycle_eligibility == "observe_only" for row in rows)
     assert all(row.policy_eligibility == "observe_only" for row in rows)
     assert all(row.metadata.get("economics_status") == "heuristic_non_authoritative" for row in rows)
+
+
+def _valid_simulation_evidence():
+    return {
+        'simulation_id': 'sim-1',
+        'deterministic': True,
+        'fork_block': 100,
+        'pre_state_root': '0xpre',
+        'post_state_root': '0xpost',
+        'scenario_digest': 'sha256:scenario-1',
+        'scenario_results': [
+            {
+                'gas_multiplier': 1.0,
+                'liquidity_multiplier': 1.0,
+                'oracle_multiplier': 1.0,
+                'conflict_checked': True,
+                'reverted': False,
+            },
+            {
+                'gas_multiplier': 1.25,
+                'liquidity_multiplier': 0.90,
+                'oracle_multiplier': 0.99,
+                'conflict_checked': True,
+                'reverted': False,
+            },
+        ],
+        'reverted': False,
+    }
+
+
+def test_deterministic_mev_simulation_evidence_is_fail_closed():
+    valid = validate_deterministic_simulation_evidence(_valid_simulation_evidence())
+    assert valid['ok'] is True
+    assert valid['reason_code'] == 'simulation_evidence_verified'
+    assert valid['scenario_count'] == 2
+
+    missing = validate_deterministic_simulation_evidence({})
+    assert missing['ok'] is False
+    assert missing['reason_code'] == 'simulation_evidence_missing'
+
+    nondeterministic = dict(_valid_simulation_evidence(), deterministic=False)
+    assert validate_deterministic_simulation_evidence(nondeterministic)['reason_code'] == 'simulation_not_deterministic'
+
+    failed = dict(_valid_simulation_evidence(), reverted=True)
+    assert validate_deterministic_simulation_evidence(failed)['reason_code'] == 'simulation_reverted'
+
+
+def test_mev_search_records_simulation_gate_without_promoting_heuristic_economics():
+    evidence = _valid_simulation_evidence()
+    rows = MEVSearchEngine().search(
+        mev_state={
+            'sample_pending': [{
+                'hash': '0x2',
+                'to': '0xrouter',
+                'value_wei': 5 * 10**18,
+                'tags': ['dex_like'],
+                'sel': '0xabcdef12',
+                'simulation_evidence': evidence,
+            }],
+            'high_risk_ratio': 0.2,
+        },
+        base_opportunities=[],
+    )
+    assert rows
+    gate = rows[0].metadata['simulation_gate']
+    assert gate['ok'] is True
+    assert gate['reason_code'] == 'simulation_evidence_verified'
+    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
+    assert rows[0].lifecycle_eligibility == 'observe_only'
+    assert rows[0].policy_eligibility == 'observe_only'
