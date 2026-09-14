@@ -195,6 +195,35 @@ class AgentConsensusEngine:
         self.optimizer = AgentWeightOptimizer(tracker=tracker, cfg=self.cfg) if tracker else None
         self.last: Dict[str, Any] = {}
 
+    @staticmethod
+    def _coerce_override(value: Any) -> Optional[float]:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not parsed == parsed or abs(parsed) == float("inf"):
+            return None
+        return _clip(parsed, 0.25, 1.75)
+
+    @classmethod
+    def _sanitize_weight_overrides(cls, weight_overrides: Optional[Dict[str, float]]) -> Dict[str, float]:
+        if not isinstance(weight_overrides, dict):
+            return {}
+        sanitized: Dict[str, float] = {}
+        for key, value in weight_overrides.items():
+            parsed = cls._coerce_override(value)
+            if parsed is not None:
+                sanitized[str(key)] = parsed
+        return sanitized
+
+    def _weight_for(self, agent: str, confidence: float, overrides: Dict[str, float], regime: str) -> float:
+        base = overrides.get(agent)
+        if base is None:
+            base = float(self.tracker.agents[agent].weight) if self.tracker and agent in self.tracker.agents else 1.0
+        if str(regime).lower() in {"mev_stress", "gas_spike"} and "Risk" in agent:
+            base *= 1.10
+        return float(base) * float(0.4 + 0.6 * confidence)
+
     def compute(
         self,
         *,
@@ -213,32 +242,13 @@ class AgentConsensusEngine:
         # normalize signals to [-1,1]
         sig = {k: float(_clip(v, -1.0, 1.0)) for k, v in (signals or {}).items()}
         conf = {k: float(_clip(confidences.get(k, 0.5), 0.0, 1.0)) for k in sig.keys()}
-
-        # Explicit runtime overrides are the canonical learned-weight projection.
-        # Invalid values are ignored per-agent; the existing tracker/static path remains fallback.
-        override_map: Dict[str, float] = {}
-        if isinstance(weight_overrides, dict):
-            for key, value in weight_overrides.items():
-                try:
-                    parsed = float(value)
-                    if parsed == parsed and abs(parsed) != float("inf"):
-                        override_map[str(key)] = _clip(parsed, 0.25, 1.75)
-                except (TypeError, ValueError, OverflowError):
-                    continue
+        overrides = self._sanitize_weight_overrides(weight_overrides)
 
         # base weights
-        w: Dict[str, float] = {}
-        for k in sig.keys():
-            if k in override_map:
-                base = float(override_map[k])
-            else:
-                base = 1.0
-                if self.tracker and k in self.tracker.agents:
-                    base = float(self.tracker.agents[k].weight)
-            # modest regime adjustment
-            if str(regime).lower() in {"mev_stress", "gas_spike"} and "Risk" in k:
-                base *= 1.10
-            w[k] = float(base) * float(0.4 + 0.6 * conf.get(k, 0.5))
+        w = {
+            k: self._weight_for(k, conf.get(k, 0.5), overrides, str(regime))
+            for k in sig.keys()
+        }
 
         # weighted sum
         wsum = sum(w.values())
