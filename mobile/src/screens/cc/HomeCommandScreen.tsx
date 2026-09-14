@@ -510,7 +510,7 @@ export function HomeCommandScreen() {
         <View style={{ marginTop: theme.spacing.md }}>
           <Text style={{ color: theme.colors.textMuted, ...theme.typography.mono }}>Risk tolerance</Text>
           <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-            (["conservative", "moderate", "aggressive"] as const).map((risk) => {
+            {(["conservative", "moderate", "aggressive"] as const).map((risk) => {
               const active = riskTolerance === risk;
               return (
                 <Pressable
