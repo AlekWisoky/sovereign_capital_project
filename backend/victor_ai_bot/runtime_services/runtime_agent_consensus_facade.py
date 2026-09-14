@@ -86,6 +86,7 @@ class RuntimeAgentConsensusFacade:
         try:
             local = self._agent_hub_local_state(list(opps or []))
             hub_out = None
+            dynamic_weights: Dict[str, Any] = {}
             if getattr(self, "_agent_hub", None) is not None:
                 treasury_governance = treasury_governance_view(dict(treasury_state or {}))
                 hub_agents = getattr(self._agent_hub, "agents", None)
@@ -93,7 +94,6 @@ class RuntimeAgentConsensusFacade:
                     str(getattr(agent, "name", agent.__class__.__name__))
                     for agent in list(hub_agents or [])
                 ]
-                dynamic_weights: Dict[str, Any] = {}
                 if agent_names and getattr(self, "_agent_weighting", None) is not None:
                     try:
                         dynamic_weights = dict(
@@ -151,6 +151,7 @@ class RuntimeAgentConsensusFacade:
                     regime=str(regime_label),
                     strategy_type="dex_flash",
                     deterministic_key=f"{int(current_block)}:{str(local.get('id', ''))}",
+                    weight_overrides=dict(dynamic_weights),
                 )
                 self._consensus_last = dict(cons)
                 BUS.update("consensus", dict(cons))
