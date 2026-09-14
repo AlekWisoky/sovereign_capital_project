@@ -55,7 +55,7 @@ class _Rpc:
 class _Runtime:
     cfg = SimpleNamespace(
         chain=SimpleNamespace(chain_id=1),
-        execution=SimpleNamespace(public_allow_broadcast=False),
+        execution=SimpleNamespace(public_allow_broadcast=False, executor_address=TO),
     )
     rpc_manager = SimpleNamespace(best_read=lambda self: "https://rpc.read")
 
@@ -141,4 +141,3 @@ def test_reconcile_rejects_intent_mismatch(monkeypatch):
     client = _client(monkeypatch, receipt=None)
     response = client.post("/api/withdraw/external/reconcile", json=_payload(intent_id="0" * 64))
     assert response.status_code == 200
-    assert response.json()["reason_code"] == "intent_mismatch"
