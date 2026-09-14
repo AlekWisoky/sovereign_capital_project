@@ -135,7 +135,11 @@ class RuntimeAgentConsensusFacade:
                     dynamic_weights = self._agent_hub_weights(
                         regime_label=str(regime_label), hub_out=hub_out
                     )
-                weights = self._agent_hub_weights(regime_label=str(regime_label), hub_out=hub_out)
+                weights = dict(dynamic_weights)
+                if not weights:
+                    weights = self._agent_hub_weights(
+                        regime_label=str(regime_label), hub_out=hub_out
+                    )
                 self._agent_hub_last = {
                     "signals": dict(hub_out.signals),
                     "confidences": dict(hub_out.confidences),
