@@ -23,7 +23,12 @@ _SAFE_AGENT_LOCAL_EXCEPTIONS = _SAFE_AGENT_CONSENSUS_EXCEPTIONS + (
 
 
 class RuntimeAgentConsensusFacade:
-    """Agent-hub and consensus compatibility facade."""
+    """Agent-hub and consensus compatibility facade.
+
+    This isolates additive control-state scoring inputs away from RuntimeBundle's
+    orchestration loop while preserving existing side effects on agent/consensus
+    state snapshots and bus updates.
+    """
 
     @staticmethod
     def _opp_is_consensus_eligible(opp: Opportunity) -> bool:
