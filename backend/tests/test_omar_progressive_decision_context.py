@@ -4,6 +4,7 @@ from victor_ai_bot.omar.config import OmarConfig
 from victor_ai_bot.omar.runtime import OmarRuntime
 
 
+# Regression coverage is intentionally isolated at the OMAR context boundary.
 def _runtime(tmp_path):
     runtime = OmarRuntime(
         OmarConfig(enabled=True, real_learning_enabled=True, real_learning_min_observations=1),
