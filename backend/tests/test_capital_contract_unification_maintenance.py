@@ -334,7 +334,14 @@ def test_capital_read_context_invalidates_when_tick_scope_changes(monkeypatch):
             read_model="consensus_state_projection_v1",
             runtime=runtime,
         )
+        projected = route_helpers.with_auto_trade_route_projection(
+            consensus,
+            runtime=runtime,
+        )
 
     assert consensus["summaryContract"]["contractVersion"] == "canonical_summary_read_contract_v1"
     assert consensus["summaryContract"]["capitalContractVersion"] == "canonical_capital_summary_v1"
     assert consensus["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"
+    assert projected["auto_trade_recovery"]
+    assert projected["auto_trade_gate"]
+    assert "capitalTruthHealth" not in projected
