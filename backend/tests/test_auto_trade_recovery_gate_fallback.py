@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+import time
 from types import SimpleNamespace
 
 from victor_ai_bot.models import Metrics
+from victor_ai_bot.persistence.db import PersistenceDB
+from victor_ai_bot.persistence.repositories.auto_trade_recovery_repository import AutoTradeRecoveryRepository
 from victor_ai_bot.runtime_services.operator_summary_service import OperatorSummaryService
 from victor_ai_bot.runtime_services.state_service import StateService
 
@@ -296,3 +300,21 @@ def test_operator_summary_fails_closed_when_direct_admission_gate_raises():
     assert out["autoTradeRecovery"]["status"] == "auto_trade_admission_restore_required"
     assert out["autoTradeRecovery"]["reasonCode"] == "admission_gate_failed"
     assert "Autonomous execution is blocked because admission gate failed." in out["pausedReason"]
+
+
+def test_auto_trade_recovery_reads_fail_closed_with_bounded_sqlite_lock_timeout(tmp_path):
+    db = PersistenceDB(str(tmp_path / "state.db"))
+    repo = AutoTradeRecoveryRepository(db, chain="ethereum")
+    locker = sqlite3.connect(str(tmp_path / "state.db"), timeout=0, isolation_level=None)
+    try:
+        locker.execute("BEGIN EXCLUSIVE")
+
+        started = time.monotonic()
+        assert repo.load() == {}
+        assert repo.recent_events() == []
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 1.5
+    finally:
+        locker.rollback()
+        locker.close()
