@@ -13,7 +13,7 @@ class PersistenceDB:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=0.5)
+        conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -28,6 +28,7 @@ class PersistenceDB:
 
     def _init_db(self) -> None:
         with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS telemetry_events (
