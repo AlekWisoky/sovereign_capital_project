@@ -41,3 +41,33 @@ def test_learning_receives_signed_settled_pnl(monkeypatch):
     assert trace["reinvestable_profit_usd"] == 0.0
     assert trace["settled_receipt_id"] == "receipt-1"
     assert trace["settled_transaction_id"] == "tx-1"
+
+
+def test_learning_is_suppressed_until_canonical_settlement_exists(monkeypatch):
+    calls = []
+
+    def fake_update(self, runtime, **kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(receipt_module.ReceiptService, "update_decision_learning", fake_update)
+    runtime = SimpleNamespace(_ledger=SimpleNamespace(transactions_all=lambda: []))
+
+    CanonicalReceiptService().update_decision_learning(
+        runtime,
+        route_id="route-1",
+        rl_state="state-1",
+        rl_action=2,
+        amount_in=1000,
+        expected_after=50,
+        realized_after=6000000,
+        status=1,
+        tx_hash="receipt-not-settled",
+        mode="auto",
+        latency_ms=4,
+        submit_to_receipt_ms=20,
+        aqe_action="EXECUTE",
+        pending={"opportunity_id": "opp-1"},
+        reward_trace={"reward": 0.1},
+    )
+
+    assert calls == []
