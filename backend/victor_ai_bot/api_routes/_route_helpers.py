@@ -225,6 +225,7 @@ def auto_trade_route_projection(
     runtime: Any | None = None,
     *,
     include_recent_events: bool = False,
+    include_capital_truth_health: bool = True,
 ) -> dict[str, Any]:
     recovery = (
         dict(current_auto_trade_recovery_info(runtime))
@@ -237,7 +238,7 @@ def auto_trade_route_projection(
         "auto_trade_recovery": recovery,
         "auto_trade_gate": auto_trade_gate_info_from_recovery(recovery),
     }
-    if runtime is not None:
+    if runtime is not None and include_capital_truth_health:
         try:
             projection["capitalTruthHealth"] = build_capital_truth_read_context(runtime).capital_truth_health
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
@@ -287,10 +288,15 @@ def with_auto_trade_route_projection(
     include_recent_events: bool = False,
 ) -> dict[str, Any]:
     out = dict(payload or {})
+    is_consensus_state = (
+        isinstance(out.get("summaryContract"), Mapping)
+        and str(out["summaryContract"].get("truthFamily") or "") == "consensus_state"
+    )
     out.update(
         auto_trade_route_projection(
             runtime,
             include_recent_events=include_recent_events,
+            include_capital_truth_health=not is_consensus_state,
         )
     )
     return out
