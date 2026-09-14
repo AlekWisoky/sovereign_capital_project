@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import victor_ai_bot.api_routes.withdraw_external_routes as external_routes
+from victor_ai_bot.auth import require_admin
 
 
 FROM = "0x1111111111111111111111111111111111111111"
@@ -62,6 +63,7 @@ class _Runtime:
 def _client(monkeypatch, receipt=None, tx=None):
     app = FastAPI()
     app.state.runtime = _Runtime()
+    app.dependency_overrides[require_admin] = lambda: None
     monkeypatch.setattr(external_routes, "JsonRpcClient", _Rpc)
     _Rpc.receipt = receipt
     _Rpc.tx = tx
