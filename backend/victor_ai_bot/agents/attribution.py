@@ -41,6 +41,15 @@ class AgentAttributionStore:
             out['realized_pnl_impact_usd'] = float(item.get('realized_pnl_impact_usd') or 0.0)
         except (TypeError, ValueError):
             out['realized_pnl_impact_usd'] = 0.0
+        for key in ('signal', 'confidence'):
+            if key in item:
+                try:
+                    out[key] = float(item.get(key))
+                except (TypeError, ValueError):
+                    out[key] = 0.0
+        features = item.get('features_used')
+        if isinstance(features, dict):
+            out['features_used'] = dict(features)
         return out
 
     def _coerce_row(self, item: Any) -> Dict[str, Any] | None:
@@ -120,5 +129,4 @@ class AgentAttributionStore:
                 'precision': round(s['precision_hits'] / max(1.0, s['count']), 6),
                 'realizedImpactUsd': round(s['realized_pnl_impact_usd'], 6),
             })
-        out.sort(key=lambda x: (-x['realizedImpactUsd'], x['agent']))
-        return {'agents': out}
+        return {'agents': sorted(out, key=lambda x: (-x['realizedImpactUsd'], x['agent']))}

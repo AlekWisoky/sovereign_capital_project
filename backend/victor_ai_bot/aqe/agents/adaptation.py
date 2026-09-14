@@ -16,12 +16,6 @@ def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
-def _status(ok: bool, code: str, **extra: Any) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"ok": bool(ok), "code": str(code)}
-    payload.update(extra)
-    return payload
-
-
 def _coerce_float(value: Any, default: float = 0.0) -> Tuple[float, bool]:
     try:
         return float(value if value is not None else default), True
@@ -37,6 +31,7 @@ class OnlineLinearCalibrator:
       - Only updates when enabled via env `VICTOR_AGENT_LEARN=1`.
       - Bounded learning rate and weights.
       - Stores per-agent weights to JSON under data_dir/aqe/agents/.
+      - A supplied update key makes one physical outcome idempotent per agent.
     """
 
     name: str
@@ -47,6 +42,7 @@ class OnlineLinearCalibrator:
 
     w: Dict[str, float] = field(default_factory=dict)
     last_save_ts: float = 0.0
+    last_update_key: str = ""
     _runtime: Dict[str, Dict[str, Any]] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -76,11 +72,13 @@ class OnlineLinearCalibrator:
             payload["ok"] = True
             payload["code"] = str(payload.get("apply", {}).get("code", "calibration_ok"))
         payload["degraded"] = not bool(payload["ok"])
+        payload["last_update_key"] = str(self.last_update_key or "")
         return payload
 
     def _load(self) -> None:
         if not os.path.exists(self._path):
             self.w = {}
+            self.last_update_key = ""
             self._mark("load", True, "calibration_load_absent", count=0)
             return
         try:
@@ -88,16 +86,19 @@ class OnlineLinearCalibrator:
                 raw = json.loads(fh.read() or "{}")
         except _SAFE_IO_EXCEPTIONS:
             self.w = {}
+            self.last_update_key = ""
             self._mark("load", False, "calibration_load_failed")
             return
         except _SAFE_JSON_EXCEPTIONS:
             self.w = {}
+            self.last_update_key = ""
             self._mark("load", False, "calibration_load_failed")
             return
 
         weights = raw.get("w") or {}
         if not isinstance(weights, dict):
             self.w = {}
+            self.last_update_key = ""
             self._mark("load", False, "calibration_load_invalid")
             return
 
@@ -111,6 +112,7 @@ class OnlineLinearCalibrator:
             else:
                 invalid.append(key)
         self.w = loaded
+        self.last_update_key = str(raw.get("last_update_key") or "")
         self._mark(
             "load",
             not bool(invalid),
@@ -124,7 +126,11 @@ class OnlineLinearCalibrator:
         tmp_path = f"{self._path}.tmp"
         try:
             os.makedirs(directory, exist_ok=True)
-            raw = {"ts": int(time.time()), "w": dict(self.w)}
+            raw = {
+                "ts": int(time.time()),
+                "w": dict(self.w),
+                "last_update_key": str(self.last_update_key or ""),
+            }
             with open(tmp_path, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(raw, indent=2, sort_keys=True))
             os.replace(tmp_path, self._path)
@@ -164,27 +170,48 @@ class OnlineLinearCalibrator:
         )
         return float(score)
 
-    def update(self, *, reward: float, features: Mapping[str, Any] | Dict[str, Any] | None) -> None:
+    def update(
+        self,
+        *,
+        reward: float,
+        features: Mapping[str, Any] | Dict[str, Any] | None,
+        update_key: str = "",
+    ) -> None:
+        key = str(update_key or "")
+        if key and key == self.last_update_key:
+            self._mark("update", True, "calibration_update_duplicate", update_key=key)
+            return
         if not self.enabled:
             self._mark("update", True, "calibration_update_disabled")
             return
         reward_value, _ = _coerce_float(reward, 0.0)
         r = float(_clip(reward_value, -1.0, 1.0))
         invalid = []
-        for key, value in dict(features or {}).items():
+        for feature_key, value in dict(features or {}).items():
             feature_value, feature_ok = _coerce_float(value, 0.0)
-            prev_value, _ = _coerce_float(self.w.get(str(key), 0.0), 0.0)
+            prev_value, _ = _coerce_float(self.w.get(str(feature_key), 0.0), 0.0)
             if not feature_ok:
-                invalid.append(str(key))
+                invalid.append(str(feature_key))
                 continue
             g = r * float(feature_value)
-            self.w[str(key)] = float(_clip(float(prev_value) + self.lr * g, -self.max_w, self.max_w))
+            self.w[str(feature_key)] = float(_clip(float(prev_value) + self.lr * g, -self.max_w, self.max_w))
+        if key:
+            self.last_update_key = key
         self._mark(
             "update",
             not bool(invalid),
             "calibration_update_ok" if not invalid else "calibration_update_partial",
             invalid=invalid,
             count=len(self.w),
+            update_key=key,
         )
-        if (time.time() - float(self.last_save_ts)) > 10.0:
+        # Outcome-keyed updates must be durable immediately so a process restart
+        # cannot replay the same physical outcome into this agent's calibrator.
+        if key or (time.time() - float(self.last_save_ts)) > 10.0:
             self._save()
+
+
+def _status(ok: bool, code: str, **extra: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"ok": bool(ok), "code": str(code)}
+    payload.update(extra)
+    return payload

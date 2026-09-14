@@ -35,6 +35,7 @@ def test_agent_hub_exposes_full_specialist_roster_and_portfolio_manager(tmp_path
     hub = AgentHub(data_dir=str(tmp_path))
     state = {
         'local': {'margin_ratio': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000},
+        'local.margin_ratio': 0.002,
         'dex': {'mid': 101.0, 'opps_per_block': 5},
         'cex': {'mid': 100.0, 'spread_bps': 8.0, 'depth_usd': 2.0, 'funding_bps': 3.0, 'funding_change_bps': 1.0},
         'mev': {'sandwich_risk': 0.2, 'router_flow': 0.3},
@@ -156,3 +157,125 @@ def test_agent_attribution_preserves_canonical_lifecycle_lineage(tmp_path):
 
     loaded = store.load()
     assert loaded == [row]
+
+
+def test_agent_hub_preserves_features_used_for_calibration(tmp_path):
+    hub = AgentHub(data_dir=str(tmp_path))
+    out = hub.step(state={'local': {'mr': 0.002, 'gas_ratio': 0.0003, 'p_success': 0.92, 'legs': 2, 'ev_wei': 1000}, 'local.margin_ratio': 0.002})
+    agent_name = 'Ben Graham Agent'
+    assert out.outputs[agent_name]['features_used']
+    assert out.outputs[agent_name]['features_used']['mr'] == 0.002
+
+
+def test_agent_attribution_preserves_calibration_evidence(tmp_path):
+    store = AgentAttributionStore(path=str(tmp_path / 'attrib.json'))
+    row = {
+        'decision_id': 'decision-1',
+        'receipt_id': 'receipt-1',
+        'outcome_id': 'outcome-1',
+        'opportunity_id': 'opportunity-1',
+        'route_id': 'route-1',
+        'contributors': [
+            {
+                'agent': 'Ben Graham Agent',
+                'signal': 0.4,
+                'confidence': 0.8,
+                'features_used': {'mr': 0.002, 'legs': 2.0},
+                'followed': True,
+                'realized_pnl_impact_usd': 1.0,
+                'precision_hit': True,
+            }
+        ],
+    }
+    store.append(row)
+    loaded = store.load()
+    assert loaded[0]['contributors'][0]['signal'] == 0.4
+    assert loaded[0]['contributors'][0]['confidence'] == 0.8
+    assert loaded[0]['contributors'][0]['features_used'] == {'mr': 0.002, 'legs': 2.0}
+
+
+def test_agent_decision_evidence_is_write_once_against_later_hub_cycle():
+    from types import SimpleNamespace
+    from victor_ai_bot.runtime_services.runtime_agent_consensus_facade import RuntimeAgentConsensusFacade
+
+    class _EvidenceRuntime(RuntimeAgentConsensusFacade):
+        def __init__(self):
+            self._agent_hub_last = {}
+
+    runtime = _EvidenceRuntime()
+    runtime._agent_hub_last = {
+        'signals': {'alpha': 0.8},
+        'confidences': {'alpha': 0.6},
+        'features_used': {'alpha': {'margin_ratio': 0.01}},
+        'regime': 'risk_on',
+    }
+    decision = SimpleNamespace(
+        metadata={'canonical_decision_id': 'decision-1', 'correlation_id': 'corr-1'}
+    )
+
+    first = runtime.freeze_agent_decision_evidence(decision)
+    runtime._agent_hub_last = {
+        'signals': {'alpha': 0.1},
+        'confidences': {'alpha': 0.2},
+        'features_used': {'alpha': {'margin_ratio': 0.99}},
+        'regime': 'risk_off',
+    }
+    second = runtime.freeze_agent_decision_evidence(decision)
+
+    assert first['decision_id'] == 'decision-1'
+    assert first['correlation_id'] == 'corr-1'
+    assert first['signals'] == {'alpha': 0.8}
+    assert first['features_used']['alpha']['margin_ratio'] == 0.01
+    assert second == first
+    assert decision.metadata['agent_decision_evidence'] == first
+
+
+def test_decision_finalize_freezes_evidence_before_downstream_steps():
+    import asyncio
+    from types import SimpleNamespace
+    from victor_ai_bot.runtime_services.runtime_decision_finalize_facade import RuntimeDecisionFinalizeFacade
+
+    class _FinalizeRuntime(RuntimeDecisionFinalizeFacade):
+        def __init__(self):
+            self._pending = []
+            self._auto_trading = False
+            self.cfg = SimpleNamespace(chain=SimpleNamespace(name='ethereum'))
+            self.calls = []
+
+        def _gas_budget_remaining_wei(self):
+            self.calls.append('gas_budget')
+            return 1
+
+        def _safe_decide_opportunities(self, opps, **kwargs):
+            self.calls.append('decide')
+            return SimpleNamespace(action='trade', opp_id='opp-1', metadata={})
+
+        def freeze_agent_decision_evidence(self, decision):
+            self.calls.append('freeze')
+            return {'decision_id': 'decision-1', 'correlation_id': 'corr-1'}
+
+        def _apply_treasury_borrow_overlay(self, **kwargs):
+            self.calls.append('treasury')
+            return kwargs['decision']
+
+        def _refresh_auto_queue_from_decision(self, decision, *, current_block):
+            self.calls.append('queue')
+
+        async def _run_postdecision_analytics_state(self, **kwargs):
+            self.calls.append('postdecision')
+
+    async def _run():
+        runtime = _FinalizeRuntime()
+        runtime._agent_hub_last = {'signals': {'alpha': 0.9}}
+        decision = await runtime._run_decision_finalize(
+            opps=[SimpleNamespace(id='opp-1')],
+            rpc=object(),
+            regime_label='balanced',
+            treasury_state={},
+            current_block=12,
+            loop_started_at=1.0,
+        )
+        assert decision.action == 'trade'
+        assert runtime.calls == ['gas_budget', 'decide', 'freeze', 'treasury', 'queue', 'postdecision']
+
+    asyncio.run(_run())
