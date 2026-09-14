@@ -37,7 +37,7 @@ class _Consensus:
     def __init__(self):
         self.calls = []
 
-    def compute(self, *, signals, confidences, regime, strategy_type, deterministic_key):
+    def compute(self, *, signals, confidences, regime, strategy_type, deterministic_key, weight_overrides=None):
         self.calls.append(
             {
                 'signals': dict(signals),
@@ -45,9 +45,10 @@ class _Consensus:
                 'regime': regime,
                 'strategy_type': strategy_type,
                 'deterministic_key': deterministic_key,
+                'weight_overrides': dict(weight_overrides or {}),
             }
         )
-        return {'consensus_score': 0.77, 'allow': True, 'key': deterministic_key}
+        return {'consensus_score': 0.77, 'allow': True, 'key': deterministic_key, 'weights': dict(weight_overrides or {})}
 
 
 class _Weighting:
@@ -149,6 +150,8 @@ def test_runtime_agent_consensus_facade_preserves_gate(monkeypatch):
     assert runtime._agent_weighting.calls[0] == {'regime': 'risk_on', 'agents': ['alpha', 'beta']}
     assert runtime._agent_hub_last['weights'] == {'alpha': 0.7, 'beta': 0.3}
     assert runtime._consensus.calls[0]['deterministic_key'] == '12345:best-1'
+    assert runtime._consensus.calls[0]['weight_overrides'] == {'alpha': 0.7, 'beta': 0.3}
+    assert runtime._consensus_last['weights'] == {'alpha': 0.7, 'beta': 0.3}
     assert runtime._consensus_last['allow'] is True
     assert updates == [('consensus', runtime._consensus_last)]
 
@@ -171,6 +174,7 @@ def test_runtime_agent_consensus_facade_weighting_is_best_effort(monkeypatch):
 
     assert state is not None
     assert runtime._agent_hub_last['weights'] == {}
+    assert runtime._consensus.calls[0]['weight_overrides'] == {}
     assert runtime._consensus_last['key'] == '7:opp-1'
 
 
