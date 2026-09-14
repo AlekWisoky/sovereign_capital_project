@@ -93,6 +93,10 @@ class AgentHub:
             "agents": _status(True, "agents_ok"),
             "portfolio_manager": _status(True, "portfolio_manager_ok"),
         }
+        state_map = dict(state or {})
+        regime = str(state_map.get("regime") or "balanced")
+        weight_override = state_map.get("agent_weights")
+        weight_status = _status(True, "dynamic_weights_available") if isinstance(weight_override, dict) else _status(False, "dynamic_weights_unavailable")
 
         for a in list(self.agents):
             name = str(getattr(a, "name", a.__class__.__name__))
@@ -108,7 +112,7 @@ class AgentHub:
             }
             try:
                 t0 = time.perf_counter()
-                o = a.act(state=dict(state or {}))
+                o = a.act(state=state_map)
                 dur_ms = float((time.perf_counter() - t0) * 1000.0)
                 _merge_status(runtime_parts, "act", _status(True, "act_ok", duration_ms=round(dur_ms, 3)))
 
@@ -158,7 +162,7 @@ class AgentHub:
                 }
                 out_obj["info"]["runtime"] = dict(runtime_state)
                 out_obj["reasoning"]["runtime"] = dict(runtime_state)
-                vin = c.validate_inputs(state or {})
+                vin = c.validate_inputs(state_map)
                 vout = c.validate_outputs(out_obj)
                 out_obj["task_contract"] = c.to_dict()
                 out_obj["contract_validation"] = {"inputs": vin, "outputs": vout}
@@ -198,7 +202,7 @@ class AgentHub:
                     "health": health[name],
                     "mandate": mandate.to_dict(),
                     "task_contract": c.to_dict(),
-                    "contract_validation": {"inputs": c.validate_inputs(state or {}), "outputs": {"ok": False, "missing": []}},
+                    "contract_validation": {"inputs": c.validate_inputs(state_map), "outputs": {"ok": False, "missing": []}},
                     "duration_ms": float(c.sla_ms),
                     "sla_ms": int(c.sla_ms),
                     "sla_ok": False,
@@ -210,7 +214,7 @@ class AgentHub:
         portfolio_summary: Dict[str, Any] | None = None
         try:
             t0 = time.perf_counter()
-            agg = self.portfolio_manager.aggregate(agent_outputs)
+            agg = self.portfolio_manager.aggregate(agent_outputs, weight_override=weight_override if isinstance(weight_override, dict) else None)
             dur_ms = float((time.perf_counter() - t0) * 1000.0)
             name = "Portfolio Manager"
             c = contract_for_agent(name)
@@ -240,6 +244,7 @@ class AgentHub:
                     "confidence": confidence_status,
                     "contributors": contrib_status,
                     "weights": weights_status,
+                    "dynamic_weights": weight_status,
                 }
             )
             portfolio_summary = {
@@ -262,6 +267,7 @@ class AgentHub:
                 "sla_ok": bool(dur_ms <= float(c.sla_ms)),
                 "contrib": dict(contrib),
                 "weights_used": dict(weights_used),
+                "regime": regime,
                 "runtime": runtime_state,
             }
             outs[name] = portfolio_summary
