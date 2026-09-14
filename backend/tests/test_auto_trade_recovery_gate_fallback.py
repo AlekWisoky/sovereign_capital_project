@@ -310,10 +310,14 @@ def test_auto_trade_recovery_reads_fail_closed_with_bounded_sqlite_lock_timeout(
         locker.execute("BEGIN EXCLUSIVE")
 
         started = time.monotonic()
-        assert repo.load() == {}
-        assert repo.recent_events() == []
+        state = repo.load()
+        events = repo.recent_events()
         elapsed = time.monotonic() - started
 
+        assert state["is_degraded"] is True
+        assert state["last_reason_code"] == "auto_trade_recovery_read_failed"
+        assert state["history_status"] == "blocked"
+        assert events == []
         assert elapsed < 1.5
     finally:
         locker.rollback()
