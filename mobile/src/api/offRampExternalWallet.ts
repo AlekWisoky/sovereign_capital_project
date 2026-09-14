@@ -65,9 +65,9 @@ function normalizeQuantity(value: unknown): string {
 function canonicalIntent(tx: ExternalWalletTransaction): string {
   return JSON.stringify({
     chainId: tx.chainId,
+    data: tx.data.toLowerCase(),
     from: tx.from.toLowerCase(),
     to: tx.to.toLowerCase(),
-    data: tx.data.toLowerCase(),
     value: tx.value,
   });
 }
