@@ -36,6 +36,7 @@
     "react-native-screens": "3.29.0",
     "react-native-gesture-handler": "~2.14.0",
     "@react-native-async-storage/async-storage": "1.21.0",
+    "react-native-get-random-values": "1.11.0",
     "@walletconnect/modal-react-native": "1.1.0",
     "expo-secure-store": "~15.0.8",
     "expo-linear-gradient": "~12.7.2",
@@ -54,6 +55,7 @@
   },
   "overrides": {
     "@walletconnect/sign-client": "2.23.8",
-    "@walletconnect/universal-provider": "2.23.8"
+    "@walletconnect/universal-provider": "2.23.8",
+    "@xmldom/xmldom": "0.8.11"
   }
 }
