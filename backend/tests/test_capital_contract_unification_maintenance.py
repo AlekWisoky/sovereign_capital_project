@@ -11,6 +11,7 @@ from victor_ai_bot.runtime_services.state_service import StateService
 from victor_ai_bot.server import app
 from victor_ai_bot.runtime_services.capital_truth_read_context import build_capital_truth_read_context
 from victor_ai_bot.api_routes.system_routes import _system_summary_payload
+import victor_ai_bot.api_routes._route_helpers as route_helpers
 
 
 class _RpcManager:
@@ -308,7 +309,7 @@ def test_capital_read_context_reuses_one_canonical_snapshot_across_surfaces_with
     assert system_summary["capitalSummary"]["navUsd"] == 12.5
 
 
-def test_capital_read_context_invalidates_when_tick_scope_changes():
+def test_capital_read_context_invalidates_when_tick_scope_changes(monkeypatch):
     runtime = _CapitalContractRuntime()
     aux = _CountingAuxiliaryStateService()
 
@@ -317,3 +318,30 @@ def test_capital_read_context_invalidates_when_tick_scope_changes():
     build_capital_truth_read_context(runtime, auxiliary_state=aux)
 
     assert aux.capital_summary_calls == 2
+
+    def _unexpected_capital_truth_context(*args, **kwargs):
+        raise AssertionError("consensus summary contract must not build capital-truth context")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            route_helpers,
+            "build_capital_truth_read_context",
+            _unexpected_capital_truth_context,
+        )
+        consensus = route_helpers.attach_summary_contract(
+            {"ok": True, "state": {}},
+            family="consensus_state",
+            read_model="consensus_state_projection_v1",
+            runtime=runtime,
+        )
+        projected = route_helpers.with_auto_trade_route_projection(
+            consensus,
+            runtime=runtime,
+        )
+
+    assert consensus["summaryContract"]["contractVersion"] == "canonical_summary_read_contract_v1"
+    assert consensus["summaryContract"]["capitalContractVersion"] == "canonical_capital_summary_v1"
+    assert consensus["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"
+    assert projected["auto_trade_recovery"]
+    assert projected["auto_trade_gate"]
+    assert "capitalTruthHealth" not in projected

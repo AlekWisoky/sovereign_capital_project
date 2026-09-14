@@ -1,9 +1,38 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
+
+
+_RECOVERY_READ_TABLES = (
+    "auto_trade_recovery_state",
+    "auto_trade_recovery_events",
+)
+_RECOVERY_READ_BUSY_TIMEOUT_MS = 500
+_DEFAULT_BUSY_TIMEOUT_MS = 5000
+
+
+class _PersistenceConnection(sqlite3.Connection):
+    """Persistence connection with a bounded timeout only for recovery-table reads."""
+
+    def _set_busy_timeout(self, timeout_ms: int) -> None:
+        super().execute(f"PRAGMA busy_timeout={int(timeout_ms)}")
+
+    @staticmethod
+    def _is_recovery_read(sql: str) -> bool:
+        normalized = re.sub(r"\s+", " ", str(sql or "")).strip().lower()
+        if not normalized.startswith("select "):
+            return False
+        return any(re.search(rf"\b{re.escape(table)}\b", normalized) for table in _RECOVERY_READ_TABLES)
+
+    def execute(self, sql, parameters=(), /):
+        self._set_busy_timeout(
+            _RECOVERY_READ_BUSY_TIMEOUT_MS if self._is_recovery_read(sql) else _DEFAULT_BUSY_TIMEOUT_MS
+        )
+        return super().execute(sql, parameters)
 
 
 class PersistenceDB:
@@ -13,8 +42,9 @@ class PersistenceDB:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, factory=_PersistenceConnection, timeout=_DEFAULT_BUSY_TIMEOUT_MS / 1000)
         conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout={_DEFAULT_BUSY_TIMEOUT_MS}")
         return conn
 
     @contextmanager
@@ -129,7 +159,6 @@ class PersistenceDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_treasury_chain_ts ON treasury_metrics(chain, ts_ms DESC);
 
-
                 CREATE TABLE IF NOT EXISTS bankroll_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     chain TEXT NOT NULL,
@@ -200,7 +229,6 @@ class PersistenceDB:
                     actual_realized_edge_usd REAL NOT NULL,
                     PRIMARY KEY(chain, route_family, lane, regime)
                 );
-                
 
                 CREATE TABLE IF NOT EXISTS edge_model_priors (
                     chain TEXT NOT NULL,
@@ -256,7 +284,6 @@ class PersistenceDB:
                     PRIMARY KEY(chain, component)
                 );
                 CREATE INDEX IF NOT EXISTS idx_capital_recovery_chain_component ON capital_recovery_state(chain, component);
-                
 
                 CREATE TABLE IF NOT EXISTS auto_trade_recovery_state (
                     chain TEXT NOT NULL,
@@ -270,7 +297,6 @@ class PersistenceDB:
                     PRIMARY KEY(chain, component)
                 );
                 CREATE INDEX IF NOT EXISTS idx_auto_trade_recovery_chain_component ON auto_trade_recovery_state(chain, component);
-
 
                 CREATE TABLE IF NOT EXISTS auto_trade_recovery_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

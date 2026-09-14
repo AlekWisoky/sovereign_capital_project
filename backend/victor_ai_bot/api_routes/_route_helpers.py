@@ -12,7 +12,11 @@ from ..runtime_services.state_service import (
     auto_trade_recovery_info,
     current_auto_trade_recovery_info,
 )
-from ..runtime_services.auxiliary_state_service import AuxiliaryStateService
+from ..runtime_services.auxiliary_state_service import (
+    AuxiliaryStateService,
+    CAPITAL_CONTRACT_VERSION,
+    CAPITAL_POLICY_VERSION,
+)
 from ..runtime_services.summary_read_contract import build_summary_read_contract
 from ..runtime_services.capital_truth_read_context import build_capital_truth_read_context
 
@@ -221,6 +225,7 @@ def auto_trade_route_projection(
     runtime: Any | None = None,
     *,
     include_recent_events: bool = False,
+    include_capital_truth_health: bool = True,
 ) -> dict[str, Any]:
     recovery = (
         dict(current_auto_trade_recovery_info(runtime))
@@ -233,7 +238,7 @@ def auto_trade_route_projection(
         "auto_trade_recovery": recovery,
         "auto_trade_gate": auto_trade_gate_info_from_recovery(recovery),
     }
-    if runtime is not None:
+    if runtime is not None and include_capital_truth_health:
         try:
             projection["capitalTruthHealth"] = build_capital_truth_read_context(runtime).capital_truth_health
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
@@ -252,7 +257,11 @@ def attach_summary_contract(
     out = dict(payload or {})
     capital_contract: Mapping[str, Any] | None = None
     capital_policy: Mapping[str, Any] | None = None
-    if runtime is not None:
+    normalized_family = str(family or "summary")
+    if runtime is not None and normalized_family == "consensus_state":
+        capital_contract = {"contractVersion": CAPITAL_CONTRACT_VERSION}
+        capital_policy = {"contractVersion": CAPITAL_POLICY_VERSION}
+    elif runtime is not None:
         try:
             context = build_capital_truth_read_context(runtime, auxiliary_state=AuxiliaryStateService())
             capital_contract = dict(context.capital_contract or {})
@@ -261,13 +270,13 @@ def attach_summary_contract(
             capital_contract = None
             capital_policy = None
     out["summaryContract"] = build_summary_read_contract(
-        family=str(family or "summary"),
+        family=normalized_family,
         payload=out,
         capital_contract=capital_contract,
         capital_policy=capital_policy,
         source_contracts=source_contracts,
-        phase=str(f"{family}_summary"),
-        read_model=str(read_model or f"{family}_summary_projection_v1"),
+        phase=str(f"{normalized_family}_summary"),
+        read_model=str(read_model or f"{normalized_family}_summary_projection_v1"),
     )
     return out
 
@@ -279,10 +288,15 @@ def with_auto_trade_route_projection(
     include_recent_events: bool = False,
 ) -> dict[str, Any]:
     out = dict(payload or {})
+    is_consensus_state = (
+        isinstance(out.get("summaryContract"), Mapping)
+        and str(out["summaryContract"].get("truthFamily") or "") == "consensus_state"
+    )
     out.update(
         auto_trade_route_projection(
             runtime,
             include_recent_events=include_recent_events,
+            include_capital_truth_health=not is_consensus_state,
         )
     )
     return out
