@@ -144,3 +144,41 @@ def test_anvil_fork_executor_scenario_digest_is_reproducible():
     second = AnvilForkExecutor._scenario_digest(100, tx, scenarios)
     assert first == second
     assert len(first) == 64
+
+
+class _FakeForkExecutor:
+    def __init__(self, evidence):
+        self.evidence = evidence
+        self.calls = []
+
+    def simulate(self, **request):
+        self.calls.append(request)
+        return self.evidence
+
+
+def test_mev_search_wires_executor_evidence_into_candidate_boundary():
+    evidence = _valid_simulation_evidence()
+    executor = _FakeForkExecutor(evidence)
+    rows = MEVSearchEngine(fork_executor=executor).search(
+        mev_state={'sample_pending': [{
+            'hash': '0x3',
+            'to': '0xrouter',
+            'value_wei': 5 * 10**18,
+            'tags': ['dex_like'],
+            'sel': '0xabcdef12',
+            'simulation_request': {
+                'fork_url': 'https://example.invalid/rpc',
+                'fork_block': 123,
+                'transaction': {'to': '0xrouter', 'data': '0xabcdef12'},
+                'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0}],
+            },
+        }], 'high_risk_ratio': 0.2},
+        base_opportunities=[],
+    )
+    assert rows
+    assert len(executor.calls) == 1
+    assert rows[0].metadata['simulation_gate']['reason_code'] == 'simulation_evidence_verified'
+    assert rows[0].metadata['simulation_evidence'] == evidence
+    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
+    assert rows[0].lifecycle_eligibility == 'observe_only'
+    assert rows[0].policy_eligibility == 'observe_only'
