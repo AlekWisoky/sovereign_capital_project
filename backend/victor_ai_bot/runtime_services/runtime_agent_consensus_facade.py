@@ -131,6 +131,10 @@ class RuntimeAgentConsensusFacade:
                         },
                     }
                 )
+                if not agent_names and getattr(self, "_agent_weighting", None) is not None:
+                    dynamic_weights = self._agent_hub_weights(
+                        regime_label=str(regime_label), hub_out=hub_out
+                    )
                 weights = self._agent_hub_weights(regime_label=str(regime_label), hub_out=hub_out)
                 self._agent_hub_last = {
                     "signals": dict(hub_out.signals),
