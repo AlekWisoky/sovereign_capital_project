@@ -8,7 +8,7 @@ from ..caq_kds.bus import BUS
 from .treasury_governance_truth import treasury_governance_view
 from ..models import Opportunity
 from ..portfolio_optimizer import opportunity_route_ready
-from ..runtime_services.profitability_truth import inspect_profit_after_costs_truth
+from .profitability_truth import inspect_profit_after_costs_truth
 
 _SAFE_AGENT_CONSENSUS_EXCEPTIONS = (
     AttributeError,
