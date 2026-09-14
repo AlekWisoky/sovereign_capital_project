@@ -41,8 +41,8 @@
     "withdraw_all_routes",
     "withdraw_routes"
   ],
-  "app_route_count": 162,
-  "application_route_count": 154,
+  "app_route_count": 163,
+  "application_route_count": 155,
   "backend_broad_except_count": 1,
   "backend_broad_exception_sites": [
     {
@@ -674,12 +674,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-14T17:16:17.127000Z",
-  "generatedAtIso": "2026-09-14T17:16:17.127000Z",
-  "generatedAtMs": 1789406177127,
-  "generated_at": "2026-09-14T17:16:17.127000Z",
-  "generated_at_iso": "2026-09-14T17:16:17.127000Z",
-  "generated_at_ms": 1789406177127,
+  "generatedAt": "2026-09-14T19:29:36.818000Z",
+  "generatedAtIso": "2026-09-14T19:29:36.818000Z",
+  "generatedAtMs": 1789414176818,
+  "generated_at": "2026-09-14T19:29:36.818000Z",
+  "generated_at_iso": "2026-09-14T19:29:36.818000Z",
+  "generated_at_ms": 1789414176818,
   "health_states": [
     "live",
     "degraded",
@@ -688,7 +688,7 @@
     "disabled",
     "quarantined"
   ],
-  "http_route_count": 158,
+  "http_route_count": 159,
   "http_route_count_basis": "http_methods_excluding_head_options",
   "launch_modes": [
     "V1_ONLY",
@@ -721,7 +721,7 @@
     "wealth-goal-summary.test.ts",
     "ws-summary.test.ts"
   ],
-  "route_count": 162,
+  "route_count": 163,
   "route_count_basis": "app_routes",
   "route_inventory": [
     {
@@ -1765,6 +1765,13 @@
       "method": "POST",
       "module": "victor_ai_bot.api_routes.withdraw_routes",
       "path": "/api/withdraw/execute",
+      "route_type": "APIRoute"
+    },
+    {
+      "handler": "reconcile_external_withdraw",
+      "method": "POST",
+      "module": "victor_ai_bot.withdraw_external",
+      "path": "/api/withdraw/external/reconcile",
       "route_type": "APIRoute"
     },
     {
