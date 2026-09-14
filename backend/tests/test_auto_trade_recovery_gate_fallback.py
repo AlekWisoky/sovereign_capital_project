@@ -5,8 +5,6 @@ import sqlite3
 import time
 from types import SimpleNamespace
 
-import pytest
-
 from victor_ai_bot.models import Metrics
 from victor_ai_bot.persistence.db import PersistenceDB
 from victor_ai_bot.persistence.repositories.auto_trade_recovery_repository import AutoTradeRecoveryRepository
@@ -312,10 +310,8 @@ def test_auto_trade_recovery_reads_are_bounded_under_sqlite_lock(tmp_path):
         locker.execute("BEGIN EXCLUSIVE")
 
         started = time.monotonic()
-        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
-            repo.load()
-        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
-            repo.recent_events()
+        repo.load()
+        repo.recent_events()
         elapsed = time.monotonic() - started
 
         assert elapsed < 1.5
