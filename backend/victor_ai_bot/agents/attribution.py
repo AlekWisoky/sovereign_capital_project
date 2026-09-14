@@ -51,7 +51,27 @@ class AgentAttributionStore:
             contributors = []
         if not isinstance(contributors, list):
             return None
+
         out: Dict[str, Any] = {'contributors': []}
+        # Preserve the existing attribution record's canonical lineage metadata
+        # in the JSON read history. This is projection-only: decision identity,
+        # settlement truth, and persistence authority remain elsewhere.
+        for key in (
+            'decision_id',
+            'correlation_id',
+            'execution_id',
+            'receipt_id',
+            'outcome_id',
+            'sizing_id',
+            'opportunity_id',
+            'route_id',
+            'strategy_family',
+            'regime',
+            'ts_ms',
+        ):
+            if key in item:
+                out[key] = item.get(key)
+
         for contrib in contributors:
             coerced = self._coerce_contributor(contrib)
             if coerced is not None:
