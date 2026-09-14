@@ -1,6 +1,7 @@
 from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrageEngine
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
 from victor_ai_bot.aqe.funding import FundingArbStrategy, FundingArbConfig
+from victor_ai_bot.aqe.mev.fork_executor import AnvilForkExecutor, ForkSimulationUnavailable
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
 from victor_ai_bot.aqe.mev.simulator import validate_deterministic_simulation_evidence
 from victor_ai_bot.runtime_services.engine_service import EngineService
@@ -196,3 +197,22 @@ def test_mev_search_records_simulation_gate_without_promoting_heuristic_economic
     assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
     assert rows[0].lifecycle_eligibility == 'observe_only'
     assert rows[0].policy_eligibility == 'observe_only'
+
+
+def test_anvil_fork_executor_fails_closed_without_local_executor():
+    executor = AnvilForkExecutor(anvil_binary='definitely-not-anvil')
+    try:
+        executor._validate_request('https://example.invalid/rpc', 100, {'to': '0x1'}, [{}])
+    except ForkSimulationUnavailable as exc:
+        assert str(exc) == 'anvil_binary_missing'
+    else:
+        raise AssertionError('missing Anvil must fail closed')
+
+
+def test_anvil_fork_executor_scenario_digest_is_reproducible():
+    tx = {'to': '0x1', 'data': '0x'}
+    scenarios = [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0}]
+    first = AnvilForkExecutor._scenario_digest(100, tx, scenarios)
+    second = AnvilForkExecutor._scenario_digest(100, tx, scenarios)
+    assert first == second
+    assert len(first) == 64
