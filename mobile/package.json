@@ -32,8 +32,6 @@
     "@react-navigation/native-stack": "6.9.17",
     "@react-navigation/stack": "6.3.29",
     "@react-navigation/bottom-tabs": "6.5.11",
-    "@react-navigation/stack": "6.3.29",
-    "@react-navigation/bottom-tabs": "6.5.11",
     "react-native-safe-area-context": "4.8.2",
     "react-native-screens": "3.29.0",
     "react-native-gesture-handler": "~2.14.0",
