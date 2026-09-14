@@ -77,11 +77,14 @@ const ACTIVE_OPERATOR_SCREENS = [
   'v2/TrackerScreen.tsx',
   'v2/WalletScreen.tsx',
   'cc/OffRampScreen.tsx',
+  'cc/HomeCommandScreen.tsx',
+  'FamilyReadinessScreen.tsx',
   'LaunchSetupScreen.tsx',
 ] as const;
 
 const RAW_MUTATION_NAMES = [
   'setSettings',
+  'setWealthGoal',
   'tradeOpportunity',
   'withdrawExecute',
   'withdrawAllExecute',

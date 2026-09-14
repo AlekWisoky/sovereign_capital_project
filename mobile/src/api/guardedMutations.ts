@@ -1,5 +1,6 @@
 import {
   setSettings,
+  setWealthGoal,
   tradeOpportunity,
   withdrawExecute,
   withdrawAllExecute,
@@ -33,6 +34,11 @@ function assertAllowed(kind: Parameters<typeof guardMutation>[0], context: Mutat
 export async function guardedSetSettings(baseUrl: string, patch: Record<string, unknown>, adminKey: string, context: MutationGuardContext): Promise<JsonObject> {
   assertAllowed(mutationKindForSettingsPatch(patch), context);
   return setSettings(baseUrl, patch, adminKey);
+}
+
+export async function guardedSetWealthGoal(baseUrl: string, patch: Record<string, unknown>, adminKey: string, context: MutationGuardContext): Promise<JsonObject> {
+  assertAllowed('settings', context);
+  return setWealthGoal(baseUrl, patch, adminKey);
 }
 
 export async function guardedSaveRpcPreferences(baseUrl: string, body: Record<string, unknown>, adminKey: string, context: MutationGuardContext): Promise<JsonObject> {
