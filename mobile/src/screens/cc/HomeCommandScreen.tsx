@@ -374,12 +374,12 @@ export function HomeCommandScreen() {
         </View>
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: theme.spacing.md }}>
-          {["view_only", "assist", "auto"].map((mode) => {
+          {(["view_only", "assist", "auto"] as const).map((mode) => {
             const active = controlMode === mode;
             return (
               <Pressable
                 key={mode}
-                onPress={() => void setMode(mode as ControlMode)}
+                onPress={() => void setMode(mode)}
                 style={{
                   flex: 1,
                   paddingVertical: 12,
@@ -401,12 +401,12 @@ export function HomeCommandScreen() {
         <View style={{ marginTop: theme.spacing.md }}>
           <Text style={{ color: theme.colors.textFaint, ...theme.typography.mono }}>Trading aggression</Text>
           <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-            {["conservative", "balanced", "aggressive"].map((mode) => {
+            {(["conservative", "balanced", "aggressive"] as const).map((mode) => {
               const active = aggressionMode === mode;
               return (
                 <Pressable
                   key={mode}
-                  onPress={() => void cc.setControls({ aggressionMode: mode as AggressionMode }, `Aggression mode → ${mode}`).then(() => cc.refresh())}
+                  onPress={() => void cc.setControls({ aggressionMode: mode }, `Aggression mode → ${mode}`).then(() => cc.refresh())}
                   style={{
                     flex: 1,
                     paddingVertical: 10,
@@ -510,12 +510,12 @@ export function HomeCommandScreen() {
         <View style={{ marginTop: theme.spacing.md }}>
           <Text style={{ color: theme.colors.textMuted, ...theme.typography.mono }}>Risk tolerance</Text>
           <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-            {["conservative", "moderate", "aggressive"].map((risk) => {
+            (["conservative", "moderate", "aggressive"] as const).map((risk) => {
               const active = riskTolerance === risk;
               return (
                 <Pressable
                   key={risk}
-                  onPress={() => setRiskTolerance(risk as "conservative" | "moderate" | "aggressive")}
+                  onPress={() => setRiskTolerance(risk)}
                   style={{
                     flex: 1,
                     paddingVertical: 12,
