@@ -127,42 +127,75 @@ def _event_log(
     return topics, data, None
 
 
-def _direct_withdrawal_inputs(calldata: str, destination: str) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
-    words = _calldata_words(calldata, 3)
+def _withdrawal_inputs(calldata: str, destination: str, *, converted: bool) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
+    count = 7 if converted else 3
+    words = _calldata_words(calldata, count)
     if words is None:
-        return None, {"ok": False, "reason_code": "invalid_withdraw_calldata"}
-    expected = {"token": _word_address(words[0]), "destination": _word_address(words[1]), "amount": words[2]}
+        reason = "invalid_convert_withdraw_calldata" if converted else "invalid_withdraw_calldata"
+        return None, {"ok": False, "reason_code": reason}
+    if converted:
+        expected = {
+            "token_in": _word_address(words[0]), "token_out": _word_address(words[1]),
+            "amount_in": words[2], "min_out": words[3], "destination": _word_address(words[4]),
+        }
+        invalid_amount_reason = "invalid_convert_amount_in"
+    else:
+        expected = {"token": _word_address(words[0]), "destination": _word_address(words[1]), "amount": words[2]}
+        invalid_amount_reason = "invalid_withdraw_amount"
     if expected["destination"] != destination:
         return None, {"ok": False, "reason_code": "calldata_destination_mismatch"}
-    if expected["amount"] <= 0:
-        return None, {"ok": False, "reason_code": "invalid_withdraw_amount"}
+    amount_in = expected["amount_in"] if converted else expected["amount"]
+    if amount_in <= 0:
+        return None, {"ok": False, "reason_code": invalid_amount_reason}
     return expected, None
 
 
-def _direct_withdrawal_event(
-    *, receipt: Mapping[str, Any], executor: str, destination: str
+def _withdrawal_event(
+    *, receipt: Mapping[str, Any], executor: str, destination: str, converted: bool
 ) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
+    event_topic = CONVERTED_TOPIC0 if converted else WITHDRAWAL_TOPIC0
+    destination_topic_index = 3 if converted else 2
+    missing_reason = "convert_receipt_event_missing" if converted else "withdrawal_receipt_event_missing"
+    ambiguous_reason = "ambiguous_convert_receipt_event" if converted else "ambiguous_withdrawal_receipt_event"
     topics, data, error = _event_log(
         receipt=receipt, executor=executor, destination=destination,
-        event_topic=WITHDRAWAL_TOPIC0, destination_topic_index=2,
-        missing_reason="withdrawal_receipt_event_missing", ambiguous_reason="ambiguous_withdrawal_receipt_event",
+        event_topic=event_topic, destination_topic_index=destination_topic_index,
+        missing_reason=missing_reason, ambiguous_reason=ambiguous_reason,
     )
     if error is not None:
         return None, error
     assert topics is not None and data is not None
+    if converted:
+        return {
+            "token_in": _topic_address(topics[1]), "token_out": _topic_address(topics[2]),
+            "amount_in": _uint_word(data, 0), "amount_out": _uint_word(data, 1),
+        }, None
     return {"token": _topic_address(topics[1]), "amount": _uint_word(data, 0)}, None
 
 
-def _decode_direct_withdrawal_effect(
-    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
+def _build_effect(
+    expected: Mapping[str, Any], event: Mapping[str, Any], *, converted: bool
 ) -> Dict[str, Any]:
-    expected, error = _direct_withdrawal_inputs(calldata, destination)
-    if error is not None:
-        return error
-    event, error = _direct_withdrawal_event(receipt=receipt, executor=executor, destination=destination)
-    if error is not None:
-        return error
-    assert expected is not None and event is not None
+    if converted:
+        amount_out = event["amount_out"]
+        valid = (
+            event["token_in"] == expected["token_in"]
+            and event["token_out"] == expected["token_out"]
+            and event["amount_in"] == expected["amount_in"]
+            and amount_out is not None
+            and amount_out >= expected["min_out"]
+            and amount_out > 0
+        )
+        if not valid:
+            return {"ok": False, "reason_code": "convert_event_mismatch"}
+        return {
+            "ok": True, "kind": "convert_and_withdraw", "token": event["token_out"],
+            "amount": str(amount_out), "amount_unit": "token_base_units",
+            "token_in": event["token_in"], "token_out": event["token_out"],
+            "amount_in": str(event["amount_in"]), "amount_out": str(amount_out),
+            "min_out": str(expected["min_out"]),
+        }
+
     if event["token"] != expected["token"] or event["amount"] != expected["amount"]:
         return {"ok": False, "reason_code": "withdrawal_event_mismatch"}
     amount = event["amount"]
@@ -171,65 +204,6 @@ def _decode_direct_withdrawal_effect(
         "amount": str(amount), "amount_unit": "token_base_units",
         "token_in": event["token"], "token_out": event["token"],
         "amount_in": str(amount), "amount_out": str(amount),
-    }
-
-
-def _convert_withdrawal_inputs(calldata: str, destination: str) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
-    words = _calldata_words(calldata, 7)
-    if words is None:
-        return None, {"ok": False, "reason_code": "invalid_convert_withdraw_calldata"}
-    expected = {
-        "token_in": _word_address(words[0]), "token_out": _word_address(words[1]),
-        "amount_in": words[2], "min_out": words[3], "destination": _word_address(words[4]),
-    }
-    if expected["destination"] != destination:
-        return None, {"ok": False, "reason_code": "calldata_destination_mismatch"}
-    if expected["amount_in"] <= 0:
-        return None, {"ok": False, "reason_code": "invalid_convert_amount_in"}
-    return expected, None
-
-
-def _convert_withdrawal_event(
-    *, receipt: Mapping[str, Any], executor: str, destination: str
-) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
-    topics, data, error = _event_log(
-        receipt=receipt, executor=executor, destination=destination,
-        event_topic=CONVERTED_TOPIC0, destination_topic_index=3,
-        missing_reason="convert_receipt_event_missing", ambiguous_reason="ambiguous_convert_receipt_event",
-    )
-    if error is not None:
-        return None, error
-    assert topics is not None and data is not None
-    return {
-        "token_in": _topic_address(topics[1]), "token_out": _topic_address(topics[2]),
-        "amount_in": _uint_word(data, 0), "amount_out": _uint_word(data, 1),
-    }, None
-
-
-def _decode_convert_withdrawal_effect(
-    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
-) -> Dict[str, Any]:
-    expected, error = _convert_withdrawal_inputs(calldata, destination)
-    if error is not None:
-        return error
-    event, error = _convert_withdrawal_event(receipt=receipt, executor=executor, destination=destination)
-    if error is not None:
-        return error
-    assert expected is not None and event is not None
-    amount_out = event["amount_out"]
-    valid = (
-        event["token_in"] == expected["token_in"] and event["token_out"] == expected["token_out"]
-        and event["amount_in"] == expected["amount_in"] and amount_out is not None
-        and amount_out >= expected["min_out"] and amount_out > 0
-    )
-    if not valid:
-        return {"ok": False, "reason_code": "convert_event_mismatch"}
-    return {
-        "ok": True, "kind": "convert_and_withdraw", "token": event["token_out"],
-        "amount": str(amount_out), "amount_unit": "token_base_units",
-        "token_in": event["token_in"], "token_out": event["token_out"],
-        "amount_in": str(event["amount_in"]), "amount_out": str(amount_out),
-        "min_out": str(expected["min_out"]),
     }
 
 
@@ -249,11 +223,19 @@ def decode_external_withdrawal_effect(
     if raw_calldata is None or len(raw_calldata) < 4:
         return {"ok": False, "reason_code": "invalid_settlement_calldata"}
     selector_hex = raw_calldata[:4].hex()
-    if selector_hex == WITHDRAW_SELECTOR:
-        return _decode_direct_withdrawal_effect(receipt=receipt, executor=executor_s, calldata=calldata, destination=destination_s)
-    if selector_hex == CONVERT_WITHDRAW_SELECTOR:
-        return _decode_convert_withdrawal_effect(receipt=receipt, executor=executor_s, calldata=calldata, destination=destination_s)
-    return {"ok": False, "reason_code": "unsupported_withdrawal_calldata"}
+    converted = selector_hex == CONVERT_WITHDRAW_SELECTOR
+    if selector_hex not in {WITHDRAW_SELECTOR, CONVERT_WITHDRAW_SELECTOR}:
+        return {"ok": False, "reason_code": "unsupported_withdrawal_calldata"}
+    expected, error = _withdrawal_inputs(calldata, destination_s, converted=converted)
+    if error is not None:
+        return error
+    event, error = _withdrawal_event(
+        receipt=receipt, executor=executor_s, destination=destination_s, converted=converted
+    )
+    if error is not None:
+        return error
+    assert expected is not None and event is not None
+    return _build_effect(expected, event, converted=converted)
 
 
 def canonical_external_withdrawal_transaction(
