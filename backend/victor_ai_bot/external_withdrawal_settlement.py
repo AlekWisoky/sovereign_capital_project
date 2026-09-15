@@ -173,29 +173,28 @@ def _withdrawal_event(
     return {"token": _topic_address(topics[1]), "amount": _uint_word(data, 0)}, None
 
 
-def _build_effect(
-    expected: Mapping[str, Any], event: Mapping[str, Any], *, converted: bool
-) -> Dict[str, Any]:
-    if converted:
-        amount_out = event["amount_out"]
-        valid = (
-            event["token_in"] == expected["token_in"]
-            and event["token_out"] == expected["token_out"]
-            and event["amount_in"] == expected["amount_in"]
-            and amount_out is not None
-            and amount_out >= expected["min_out"]
-            and amount_out > 0
-        )
-        if not valid:
-            return {"ok": False, "reason_code": "convert_event_mismatch"}
-        return {
-            "ok": True, "kind": "convert_and_withdraw", "token": event["token_out"],
-            "amount": str(amount_out), "amount_unit": "token_base_units",
-            "token_in": event["token_in"], "token_out": event["token_out"],
-            "amount_in": str(event["amount_in"]), "amount_out": str(amount_out),
-            "min_out": str(expected["min_out"]),
-        }
+def _build_convert_effect(expected: Mapping[str, Any], event: Mapping[str, Any]) -> Dict[str, Any]:
+    amount_out = event["amount_out"]
+    valid = (
+        event["token_in"] == expected["token_in"]
+        and event["token_out"] == expected["token_out"]
+        and event["amount_in"] == expected["amount_in"]
+        and amount_out is not None
+        and amount_out >= expected["min_out"]
+        and amount_out > 0
+    )
+    if not valid:
+        return {"ok": False, "reason_code": "convert_event_mismatch"}
+    return {
+        "ok": True, "kind": "convert_and_withdraw", "token": event["token_out"],
+        "amount": str(amount_out), "amount_unit": "token_base_units",
+        "token_in": event["token_in"], "token_out": event["token_out"],
+        "amount_in": str(event["amount_in"]), "amount_out": str(amount_out),
+        "min_out": str(expected["min_out"]),
+    }
 
+
+def _build_withdraw_effect(expected: Mapping[str, Any], event: Mapping[str, Any]) -> Dict[str, Any]:
     if event["token"] != expected["token"] or event["amount"] != expected["amount"]:
         return {"ok": False, "reason_code": "withdrawal_event_mismatch"}
     amount = event["amount"]
@@ -205,6 +204,14 @@ def _build_effect(
         "token_in": event["token"], "token_out": event["token"],
         "amount_in": str(amount), "amount_out": str(amount),
     }
+
+
+def _build_effect(
+    expected: Mapping[str, Any], event: Mapping[str, Any], *, converted: bool
+) -> Dict[str, Any]:
+    if converted:
+        return _build_convert_effect(expected, event)
+    return _build_withdraw_effect(expected, event)
 
 
 def decode_external_withdrawal_effect(
