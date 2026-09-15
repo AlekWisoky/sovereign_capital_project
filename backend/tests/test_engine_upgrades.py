@@ -1,20 +1,14 @@
 from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrageEngine
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
 from victor_ai_bot.aqe.funding import FundingArbStrategy, FundingArbConfig
-from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable, validate_deterministic_simulation_evidence
+from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable, validate_deterministic_simulation_evidence, validate_simulation_economics
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
 from victor_ai_bot.runtime_services.engine_service import EngineService
 
 
 def test_cross_cex_dex_respects_inventory_and_penalties():
     eng = CrossCEXDEXArbitrageEngine()
-    rows = eng.scan(
-        quotes=[{'symbol': 'ETHUSDT', 'venue': 'binance', 'bid': 2050.0, 'ask': 2051.0, 'depth_usd': 4000.0}],
-        dex_prices={'ETHUSDT': 2025.0},
-        dex_depths={'ETHUSDT': 3000.0},
-        venue_inventory={'binance': {'ETHUSDT': 1.5}, 'dex': {'ETHUSDT': 2.0}},
-        chain='ethereum', chain_id=1, regime='balanced',
-    )
+    rows = eng.scan(quotes=[{'symbol': 'ETHUSDT', 'venue': 'binance', 'bid': 2050.0, 'ask': 2051.0, 'depth_usd': 4000.0}], dex_prices={'ETHUSDT': 2025.0}, dex_depths={'ETHUSDT': 3000.0}, venue_inventory={'binance': {'ETHUSDT': 1.5}, 'dex': {'ETHUSDT': 2.0}}, chain='ethereum', chain_id=1, regime='balanced')
     assert rows
     top = rows[0]
     assert top.engine_type == 'cross_cex_dex'
@@ -24,11 +18,7 @@ def test_cross_cex_dex_respects_inventory_and_penalties():
 
 def test_funding_engine_models_carry_and_risk():
     eng = FundingArbStrategy(cfg=FundingArbConfig(enabled=True, min_rate_diff=0.00001, max_positions=3))
-    rows = eng.scan(
-        funding_rows=[
-            {'symbol': 'BTCUSDT', 'venue': 'a', 'funding_rate': 0.0009, 'hours_to_funding': 2.0, 'basis_bps': 3.0, 'fee_bps': 4.0, 'notional_usd': 5000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.95, 'liquidation_buffer_pct': 18.0},
-            {'symbol': 'BTCUSDT', 'venue': 'b', 'funding_rate': -0.0002, 'hours_to_funding': 2.0, 'basis_bps': -1.0, 'fee_bps': 4.0, 'notional_usd': 5000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.92, 'liquidation_buffer_pct': 15.0},
-        ], chain='offchain', chain_id=0, regime='bear')
+    rows = eng.scan(funding_rows=[{'symbol': 'BTCUSDT', 'venue': 'a', 'funding_rate': 0.0009, 'hours_to_funding': 2.0, 'basis_bps': 3.0, 'fee_bps': 4.0, 'notional_usd': 5000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.95, 'liquidation_buffer_pct': 18.0}, {'symbol': 'BTCUSDT', 'venue': 'b', 'funding_rate': -0.0002, 'hours_to_funding': 2.0, 'basis_bps': -1.0, 'fee_bps': 4.0, 'notional_usd': 5000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.92, 'liquidation_buffer_pct': 15.0}], chain='offchain', chain_id=0, regime='bear')
     assert rows
     top = rows[0]
     assert top.engine_type == 'funding_arb'
@@ -37,11 +27,7 @@ def test_funding_engine_models_carry_and_risk():
 
 def test_cross_chain_engine_fails_closed_when_inventory_uncertain():
     eng = CrossChainArbitrageEngine()
-    rows = eng.scan(
-        spreads=[{'src_chain': 'ethereum', 'dst_chain': 'arbitrum', 'symbol': 'ETH', 'spread_ratio': 0.03, 'capital_required_usd': 1000.0, 'class': 'prepositioned_capital_arb', 'chain_id': 1}],
-        chain_inventory={'ethereum': 600.0, 'arbitrum': 100.0},
-        bridge_quotes={'ethereum->arbitrum': {'bridge': 'canonical', 'finality_seconds': 1800.0, 'bridge_fee_bps': 20.0, 'timeout_probability': 0.08}},
-        regime='balanced')
+    rows = eng.scan(spreads=[{'src_chain': 'ethereum', 'dst_chain': 'arbitrum', 'symbol': 'ETH', 'spread_ratio': 0.03, 'capital_required_usd': 1000.0, 'class': 'prepositioned_capital_arb', 'chain_id': 1}], chain_inventory={'ethereum': 600.0, 'arbitrum': 100.0}, bridge_quotes={'ethereum->arbitrum': {'bridge': 'canonical', 'finality_seconds': 1800.0, 'bridge_fee_bps': 20.0, 'timeout_probability': 0.08}}, regime='balanced')
     assert rows
     top = rows[0]
     assert top.engine_type == 'cross_chain_arb'
@@ -50,9 +36,7 @@ def test_cross_chain_engine_fails_closed_when_inventory_uncertain():
 
 
 def test_mev_search_private_only_candidates():
-    rows = MEVSearchEngine().search(
-        mev_state={'sample_pending': [{'hash': '0x1', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12'}], 'high_risk_ratio': 0.2},
-        base_opportunities=[], regime='high_volatility', chain='ethereum', chain_id=1)
+    rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x1', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12'}], 'high_risk_ratio': 0.2}, base_opportunities=[], regime='high_volatility', chain='ethereum', chain_id=1)
     assert rows
     assert all(r.engine_type == 'mev_search' for r in rows)
     assert all('private_send' in r.risk_flags for r in rows)
@@ -60,25 +44,7 @@ def test_mev_search_private_only_candidates():
 
 def test_engine_service_outputs_all_major_engines():
     svc = EngineService(capture_engine=None, telemetry_service=None)
-    state = svc.scan(
-        chain='ethereum', chain_id=1, regime='balanced',
-        quotes=[
-            {'symbol': 'ETHUSDT', 'venue': 'binance', 'bid': 2050.0, 'ask': 2051.0, 'depth_usd': 4000.0, 'product': 'spot'},
-            {'symbol': 'BTCUSDT', 'venue': 'a', 'bid': 50010.0, 'ask': 50020.0, 'product': 'futures', 'funding_rate': 0.0009, 'notional_usd': 4000.0, 'mark_price': 50000.0},
-            {'symbol': 'BTCUSDT', 'venue': 'b', 'bid': 50000.0, 'ask': 50010.0, 'product': 'futures', 'funding_rate': -0.0002, 'notional_usd': 4000.0, 'mark_price': 50000.0},
-        ],
-        funding_rows=[
-            {'symbol': 'BTCUSDT', 'venue': 'a', 'funding_rate': 0.0009, 'hours_to_funding': 2.0, 'basis_bps': 3.0, 'fee_bps': 4.0, 'notional_usd': 4000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.95, 'liquidation_buffer_pct': 18.0},
-            {'symbol': 'BTCUSDT', 'venue': 'b', 'funding_rate': -0.0002, 'hours_to_funding': 2.0, 'basis_bps': -1.0, 'fee_bps': 4.0, 'notional_usd': 4000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.92, 'liquidation_buffer_pct': 15.0},
-        ],
-        dex_prices={'ETHUSDT': 2025.0}, dex_depths={'ETHUSDT': 3000.0},
-        venue_inventory={'binance': {'ETHUSDT': 2.0}, 'dex': {'ETHUSDT': 2.0}},
-        bridge_spreads=[{'src_chain': 'ethereum', 'dst_chain': 'arbitrum', 'symbol': 'ETH', 'spread_ratio': 0.03, 'capital_required_usd': 1000.0, 'class': 'prepositioned_capital_arb', 'chain_id': 1}],
-        bridge_quotes={'ethereum->arbitrum': {'bridge': 'canonical', 'finality_seconds': 1800.0, 'bridge_fee_bps': 20.0, 'timeout_probability': 0.08}},
-        chain_inventory={'ethereum': 2000.0, 'arbitrum': 600.0},
-        mev_state={'sample_pending': [{'hash': '0x1', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12'}], 'high_risk_ratio': 0.2},
-        base_opportunities=[], meta_candidates=[{'id': 'cand-1', 'score': 12.0, 'strategy_family': 'oracle_drift', 'lifecycle_stage': 'sandbox'}],
-        treasury_state={'estimated_capital_usd': 10000.0, 'capital_engine': {'deployable_bankroll_wei': int(8000 * 1e18), 'experimental_bankroll_wei': int(500 * 1e18), 'family_allocations_wei': {'cross_cex_dex': int(1000 * 1e18), 'funding_arb': int(1200 * 1e18)}}}, public_mode=False)
+    state = svc.scan(chain='ethereum', chain_id=1, regime='balanced', quotes=[{'symbol': 'ETHUSDT', 'venue': 'binance', 'bid': 2050.0, 'ask': 2051.0, 'depth_usd': 4000.0, 'product': 'spot'}, {'symbol': 'BTCUSDT', 'venue': 'a', 'bid': 50010.0, 'ask': 50020.0, 'product': 'futures', 'funding_rate': 0.0009, 'notional_usd': 4000.0, 'mark_price': 50000.0}, {'symbol': 'BTCUSDT', 'venue': 'b', 'bid': 50000.0, 'ask': 50010.0, 'product': 'futures', 'funding_rate': -0.0002, 'notional_usd': 4000.0, 'mark_price': 50000.0}], funding_rows=[{'symbol': 'BTCUSDT', 'venue': 'a', 'funding_rate': 0.0009, 'hours_to_funding': 2.0, 'basis_bps': 3.0, 'fee_bps': 4.0, 'notional_usd': 4000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.95, 'liquidation_buffer_pct': 18.0}, {'symbol': 'BTCUSDT', 'venue': 'b', 'funding_rate': -0.0002, 'hours_to_funding': 2.0, 'basis_bps': -1.0, 'fee_bps': 4.0, 'notional_usd': 4000.0, 'mark_price': 50000.0, 'collateral_efficiency': 0.92, 'liquidation_buffer_pct': 15.0}], dex_prices={'ETHUSDT': 2025.0}, dex_depths={'ETHUSDT': 3000.0}, venue_inventory={'binance': {'ETHUSDT': 2.0}, 'dex': {'ETHUSDT': 2.0}}, bridge_spreads=[{'src_chain': 'ethereum', 'dst_chain': 'arbitrum', 'symbol': 'ETH', 'spread_ratio': 0.03, 'capital_required_usd': 1000.0, 'class': 'prepositioned_capital_arb', 'chain_id': 1}], bridge_quotes={'ethereum->arbitrum': {'bridge': 'canonical', 'finality_seconds': 1800.0, 'bridge_fee_bps': 20.0, 'timeout_probability': 0.08}}, chain_inventory={'ethereum': 2000.0, 'arbitrum': 600.0}, mev_state={'sample_pending': [{'hash': '0x1', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12'}], 'high_risk_ratio': 0.2}, base_opportunities=[], meta_candidates=[{'id': 'cand-1', 'score': 12.0, 'strategy_family': 'oracle_drift', 'lifecycle_stage': 'sandbox'}], treasury_state={'estimated_capital_usd': 10000.0, 'capital_engine': {'deployable_bankroll_wei': int(8000 * 1e18), 'experimental_bankroll_wei': int(500 * 1e18), 'family_allocations_wei': {'cross_cex_dex': int(1000 * 1e18), 'funding_arb': int(1200 * 1e18)}}}, public_mode=False)
     engine_types = {item['opportunity']['engine_type'] for item in state['items']}
     assert 'cross_cex_dex' in engine_types
     assert 'funding_arb' in engine_types
@@ -97,9 +63,7 @@ def test_heuristic_mev_candidates_are_observe_only_until_simulation_exists():
 
 
 def _valid_simulation_evidence():
-    return {'simulation_id': 'sim-1', 'deterministic': True, 'fork_block': 100, 'pre_state_root': '0xpre', 'post_state_root': '0xpost', 'scenario_digest': 'sha256:scenario-1', 'scenario_results': [
-        {'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'conflict_checked': True, 'reverted': False},
-        {'gas_multiplier': 1.25, 'liquidity_multiplier': 0.90, 'oracle_multiplier': 0.99, 'conflict_checked': True, 'reverted': False}], 'reverted': False}
+    return {'simulation_id': 'sim-1', 'deterministic': True, 'fork_block': 100, 'pre_state_root': '0xpre', 'post_state_root': '0xpost', 'scenario_digest': 'sha256:scenario-1', 'scenario_results': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'conflict_checked': True, 'reverted': False}, {'gas_multiplier': 1.25, 'liquidity_multiplier': 0.90, 'oracle_multiplier': 0.99, 'conflict_checked': True, 'reverted': False}], 'reverted': False, 'economics': {'simulation_id': 'sim-1', 'scenario_digest': 'sha256:scenario-1', 'expected_realized_profit_usd': 17.5, 'gross_asset_delta_usd': 20.0, 'gas_cost_usd': 2.0, 'borrow_cost_usd': 0.5}}
 
 
 def test_deterministic_mev_simulation_evidence_is_fail_closed():
@@ -116,30 +80,41 @@ def test_deterministic_mev_simulation_evidence_is_fail_closed():
     assert validate_deterministic_simulation_evidence(failed)['reason_code'] == 'simulation_reverted'
 
 
-def test_mev_search_records_simulation_gate_without_promoting_heuristic_economics():
-    evidence = _valid_simulation_evidence()
-    rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x2', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'simulation_evidence': evidence}], 'high_risk_ratio': 0.2}, base_opportunities=[])
-    assert rows
-    gate = rows[0].metadata['simulation_gate']
-    assert gate['ok'] is True
-    assert gate['reason_code'] == 'simulation_evidence_verified'
-    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
-    assert rows[0].lifecycle_eligibility == 'observe_only'
-    assert rows[0].policy_eligibility == 'observe_only'
-    assert rows[0].expected_profit_usd == 0.0
+def test_simulation_economics_fail_closed_for_missing_malformed_and_mismatched_inputs():
+    valid = _valid_simulation_evidence()
+    assert validate_simulation_economics(valid)['ok'] is True
+    assert validate_simulation_economics(dict(valid, economics=None))['reason_code'] == 'simulation_economics_missing'
+    malformed = dict(valid, economics=dict(valid['economics'], gas_cost_usd='not-a-number'))
+    assert validate_simulation_economics(malformed)['reason_code'] == 'simulation_economics_invalid'
+    mismatch = dict(valid, economics=dict(valid['economics'], scenario_digest='sha256:other'))
+    assert validate_simulation_economics(mismatch)['reason_code'] == 'simulation_economics_scenario_mismatch'
+    identity = dict(valid, economics=dict(valid['economics'], simulation_id='sim-other'))
+    assert validate_simulation_economics(identity)['reason_code'] == 'simulation_economics_identity_mismatch'
 
 
-def test_mev_search_accepts_only_explicit_simulation_economics():
-    evidence = dict(_valid_simulation_evidence(), economics={'expected_realized_profit_usd': 17.5})
-    rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x4', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'simulation_evidence': evidence}], 'high_risk_ratio': 0.2}, base_opportunities=[])
-    assert rows
-    row = rows[0]
-    assert row.expected_profit_usd == 17.5
-    assert row.expected_realized_profit_usd == 17.5
-    assert row.metadata['economics_status'] == 'simulation_backed'
-    assert row.metadata['economics_source'] == 'simulation_evidence'
-    assert row.lifecycle_eligibility == 'observe_only'
-    assert row.policy_eligibility == 'observe_only'
+def test_simulation_economics_preserves_zero_and_negative_results_without_promoting_them():
+    zero = dict(_valid_simulation_evidence(), economics=dict(_valid_simulation_evidence()['economics'], expected_realized_profit_usd=0.0, gross_asset_delta_usd=2.5, gas_cost_usd=2.0, borrow_cost_usd=0.5))
+    negative = dict(_valid_simulation_evidence(), economics=dict(_valid_simulation_evidence()['economics'], expected_realized_profit_usd=-1.0, gross_asset_delta_usd=1.5, gas_cost_usd=2.0, borrow_cost_usd=0.5))
+    assert validate_simulation_economics(zero)['ok'] is True
+    assert validate_simulation_economics(negative)['ok'] is True
+    assert MEVSearchEngine()._simulation_economics(zero) == (None, 'non_positive')
+    assert MEVSearchEngine()._simulation_economics(negative) == (None, 'non_positive')
+
+
+def test_simulation_economics_reconciliation_rejects_fabricated_net():
+    evidence = dict(_valid_simulation_evidence(), economics=dict(_valid_simulation_evidence()['economics'], expected_realized_profit_usd=99.0))
+    assert validate_simulation_economics(evidence)['reason_code'] == 'simulation_economics_not_reconciled'
+
+
+def test_anvil_economic_derivation_uses_simulated_balance_deltas_and_gas_receipt():
+    observation = {'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 2000.0, 'role': 'profit'}, {'address': '0x0000000000000000000000000000000000000001', 'decimals': 6, 'price_usd': 1.0, 'role': 'cost'}]}
+    before = {'native': {'address': 'native', 'decimals': 18, 'price_usd': 2000.0, 'role': 'profit', 'balance': 10 * 10**18}, '0x0000000000000000000000000000000000000001': {'address': '0x0000000000000000000000000000000000000001', 'decimals': 6, 'price_usd': 1.0, 'role': 'cost', 'balance': 5_000_000}}
+    after = {'native': {'address': 'native', 'decimals': 18, 'price_usd': 2000.0, 'role': 'profit', 'balance': 10 * 10**18 + 2 * 10**15}, '0x0000000000000000000000000000000000000001': {'address': '0x0000000000000000000000000000000000000001', 'decimals': 6, 'price_usd': 1.0, 'role': 'cost', 'balance': 4_000_000}}
+    receipt = {'gasUsed': hex(100_000), 'effectiveGasPrice': hex(10**9)}
+    economics = AnvilForkExecutor._derive_economics(observation, before, after, receipt)
+    assert economics['gas_cost_usd'] == 0.2
+    assert economics['gross_asset_delta_usd'] == 3.0
+    assert economics['expected_realized_profit_usd'] == 2.8
 
 
 def test_anvil_fork_executor_fails_closed_without_local_executor():
@@ -174,26 +149,12 @@ class _FakeForkExecutor:
 def test_mev_search_wires_executor_evidence_into_candidate_boundary():
     evidence = _valid_simulation_evidence()
     executor = _FakeForkExecutor(evidence)
-    rows = MEVSearchEngine(fork_executor=executor).search(
-        mev_state={'sample_pending': [{
-            'hash': '0x3',
-            'to': '0xrouter',
-            'value_wei': 5 * 10**18,
-            'tags': ['dex_like'],
-            'sel': '0xabcdef12',
-            'simulation_request': {
-                'fork_url': 'https://example.invalid/rpc',
-                'fork_block': 123,
-                'transaction': {'to': '0xrouter', 'data': '0xabcdef12'},
-                'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0}],
-            },
-        }], 'high_risk_ratio': 0.2},
-        base_opportunities=[],
-    )
+    rows = MEVSearchEngine(fork_executor=executor).search(mev_state={'sample_pending': [{'hash': '0x3', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'simulation_request': {'fork_url': 'https://example.invalid/rpc', 'fork_block': 123, 'transaction': {'to': '0xrouter', 'data': '0xabcdef12'}, 'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0}]}}], 'high_risk_ratio': 0.2}, base_opportunities=[])
     assert rows
     assert len(executor.calls) == 1
     assert rows[0].metadata['simulation_gate']['reason_code'] == 'simulation_evidence_verified'
     assert rows[0].metadata['simulation_evidence'] == evidence
-    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
+    assert rows[0].metadata['economics_status'] == 'simulation_backed'
+    assert rows[0].expected_realized_profit_usd == 17.5
     assert rows[0].lifecycle_eligibility == 'observe_only'
     assert rows[0].policy_eligibility == 'observe_only'
