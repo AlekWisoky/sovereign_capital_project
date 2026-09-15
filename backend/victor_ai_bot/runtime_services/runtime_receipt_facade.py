@@ -18,6 +18,26 @@ _RECEIPT_RETRY_LIMIT = 3
 
 
 class RuntimeReceiptFacade:
+    @staticmethod
+    def _explicit_usd_economics(decoded: dict, pending: dict) -> tuple[float | None, float | None]:
+        decoded = decoded if isinstance(decoded, dict) else {}
+        pending = pending if isinstance(pending, dict) else {}
+        authority = pending.get("terminal_profitability_authority") or {}
+        profitability = authority.get("profitability") or {}
+
+        def _micro_to_usd(value: object) -> float | None:
+            if value is None or isinstance(value, bool):
+                return None
+            try:
+                return float(value) / 1_000_000.0
+            except (TypeError, ValueError):
+                return None
+
+        return (
+            _micro_to_usd(decoded.get("realized_profit_after_gas_usd_micro")),
+            _micro_to_usd(profitability.get("profit_after_costs_usd_micro")),
+        )
+
     def _update_settlement_followthrough(
         self,
         *,
@@ -628,6 +648,59 @@ class RuntimeReceiptFacade:
             )
             return
 
+        realized_usd, expected_usd = self._explicit_usd_economics(decoded or {}, pending)
+        if realized_usd is None or expected_usd is None:
+            self._update_settlement_followthrough(
+                learning_ok=False,
+                memory_ok=False,
+            )
+            self._run_receipt_finalize_step(
+                receipt_tx_hash=str(tx_hash),
+                step="update_agent_performance",
+                critical=False,
+                fn=service.update_agent_performance,
+                runtime=self,
+                pending=pending,
+                status=status,
+                amount_in=amount_in,
+                realized_after=realized_after,
+            )
+            self._run_receipt_finalize_step(
+                receipt_tx_hash=str(tx_hash),
+                step="observe_blockspace",
+                critical=False,
+                fn=service.observe_blockspace,
+                runtime=self,
+                status=status,
+                realized_after=realized_after,
+                decoded=decoded or {},
+            )
+            self._run_receipt_finalize_step(
+                receipt_tx_hash=str(tx_hash),
+                step="notify_governance",
+                critical=False,
+                fn=service.notify_governance,
+                runtime=self,
+                pending=pending,
+                route_id=route_id,
+                amount_in=amount_in,
+                status=status,
+                expected_after=expected_after,
+                realized_after=realized_after,
+            )
+            self._run_receipt_finalize_step(
+                receipt_tx_hash=str(tx_hash),
+                step="notify_narrative",
+                critical=False,
+                fn=service.notify_narrative,
+                runtime=self,
+                tx_hash=str(tx_hash),
+                status=status,
+                decoded=decoded or {},
+                pending=pending,
+            )
+            return
+
         persisted_ok, persisted = self._run_receipt_finalize_step(
             receipt_tx_hash=str(tx_hash),
             step="persist_execution_outcome",
@@ -637,10 +710,8 @@ class RuntimeReceiptFacade:
             pending=pending,
             status=status,
             submit_to_receipt_ms=submit_to_receipt_ms,
-            realized_usd=service._realized_usd_from_wei(
-                int(max(0, realized_after)) if status == 1 else 0
-            ),
-            expected_usd=service._realized_usd_from_wei(int(expected_after)),
+            realized_usd=realized_usd,
+            expected_usd=expected_usd,
             reward_trace=dict(reward_trace or {}),
             capture_lane_pending=capture_lane_pending,
         )
