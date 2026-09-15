@@ -94,7 +94,7 @@ def test_convert_withdrawal_uses_realized_event_amount_not_min_out():
                     _topic_address(TOKEN_OUT),
                     _topic_address(DESTINATION),
                 ],
-                "data": "0x" + _word(realized_out) + _word(0),
+                "data": "0x" + _word(amount_in) + _word(realized_out),
             }
         ]
     }
@@ -200,7 +200,11 @@ async def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent
     )
 
     monkeypatch.setattr(withdraw_external, "JsonRpcClient", lambda *args, **kwargs: FakeRpc())
-    monkeypatch.setattr(withdraw_external, "assess_submitted_tx", lambda *args, **kwargs: status)
+
+    async def fake_assess(*args, **kwargs):
+        return status
+
+    monkeypatch.setattr(withdraw_external, "assess_submitted_tx", fake_assess)
     monkeypatch.setattr(withdraw_external, "attach_summary_contract", lambda response, **kwargs: response)
 
     payload = {
