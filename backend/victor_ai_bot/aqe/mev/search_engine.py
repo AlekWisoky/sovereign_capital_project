@@ -34,6 +34,22 @@ class MEVSearchEngine:
             return gate, None
         return gate, dict(candidate_evidence)
 
+    @staticmethod
+    def _simulation_economics(evidence: Mapping[str, Any] | None) -> tuple[float | None, str]:
+        """Return only explicitly producer-supplied simulation economics."""
+        if not isinstance(evidence, Mapping):
+            return None, 'missing'
+        economics = evidence.get('economics')
+        if not isinstance(economics, Mapping):
+            return None, 'missing'
+        try:
+            value = float(economics.get('expected_realized_profit_usd'))
+        except (TypeError, ValueError, OverflowError):
+            return None, 'invalid'
+        if value <= 0.0:
+            return None, 'non_positive'
+        return value, 'simulation_evidence'
+
     def search(self, *, mev_state: Dict[str, Any], base_opportunities: List[Any], regime: str = 'balanced', chain: str = 'ethereum', chain_id: int = 1) -> List[EngineOpportunity]:
         pending = list(mev_state.get('sample_pending') or [])
         high_risk = float(mev_state.get('high_risk_ratio') or 0.0)
@@ -42,18 +58,23 @@ class MEVSearchEngine:
             tags = set(tx.get('tags') or [])
             if 'dex_like' not in tags and not str(tx.get('sel') or '').startswith('0x'):
                 continue
-            expected = 4.0 + float(tx.get('value_wei') or 0) / 1e18 * 0.02
-            realized = expected * max(0.25, 0.85 - high_risk * 0.35)
+            heuristic_expected = 4.0 + float(tx.get('value_wei') or 0) / 1e18 * 0.02
+            heuristic_realized = heuristic_expected * max(0.25, 0.85 - high_risk * 0.35)
             risk_flags = ['private_send']
             conf = max(0.35, min(0.90, 0.58 + (0.15 if 'sandwich_risk' not in tags else -0.10)))
             simulation_gate, simulation_evidence = self._simulation_boundary(
                 evidence=tx.get('simulation_evidence'),
                 request=tx.get('simulation_request'),
             )
+            simulated_profit, economics_source = self._simulation_economics(simulation_evidence)
+            simulation_usable = bool(simulation_gate.get('ok')) and simulated_profit is not None
             metadata = {
                 'tx_hash': tx.get('hash'),
                 'candidate_type': 'backrun_or_protection',
-                'economics_status': 'heuristic_non_authoritative',
+                'economics_status': 'simulation_backed' if simulation_usable else 'heuristic_non_authoritative',
+                'economics_source': economics_source,
+                'heuristic_expected_profit_usd': round(heuristic_expected, 6),
+                'heuristic_expected_realized_profit_usd': round(heuristic_realized, 6),
                 'simulation_gate': simulation_gate,
             }
             if simulation_evidence is not None:
@@ -65,8 +86,8 @@ class MEVSearchEngine:
                 route_family=f"mev_search|backrun_protection|{tx.get('to')}",
                 chain=chain,
                 chain_id=int(chain_id),
-                expected_profit_usd=round(expected, 6),
-                expected_realized_profit_usd=round(realized, 6),
+                expected_profit_usd=round(simulated_profit, 6) if simulation_usable else 0.0,
+                expected_realized_profit_usd=round(simulated_profit, 6) if simulation_usable else 0.0,
                 capital_required_usd=25.0,
                 inventory_requirements={},
                 confidence=round(conf, 6),
@@ -83,31 +104,36 @@ class MEVSearchEngine:
             mev_risk = float((((meta.get('aqe') or {}) if isinstance(meta.get('aqe'), dict) else {}).get('mev_risk') or 0.0))
             if mev_risk < 0.55:
                 continue
-            expected = float(getattr(base, 'expected_profit_usd', 0.0) or 0.0)
-            if expected > 1000:
-                expected /= 1_000_000.0
-            realized = expected * max(0.25, 0.9 - mev_risk * 0.4)
+            heuristic_expected = float(getattr(base, 'expected_profit_usd', 0.0) or 0.0)
+            if heuristic_expected > 1000:
+                heuristic_expected /= 1_000_000.0
+            heuristic_realized = heuristic_expected * max(0.25, 0.9 - mev_risk * 0.4)
             simulation_gate, simulation_evidence = self._simulation_boundary(
                 evidence=meta.get('simulation_evidence'),
                 request=meta.get('simulation_request'),
             )
+            simulated_profit, economics_source = self._simulation_economics(simulation_evidence)
+            simulation_usable = bool(simulation_gate.get('ok')) and simulated_profit is not None
             metadata = {
                 'base_opportunity_id': getattr(base, 'id', ''),
                 'candidate_type': 'route_protection',
-                'economics_status': 'heuristic_non_authoritative',
+                'economics_status': 'simulation_backed' if simulation_usable else 'heuristic_non_authoritative',
+                'economics_source': economics_source,
+                'heuristic_expected_profit_usd': round(heuristic_expected, 6),
+                'heuristic_expected_realized_profit_usd': round(heuristic_realized, 6),
                 'simulation_gate': simulation_gate,
             }
             if simulation_evidence is not None:
                 metadata['simulation_evidence'] = simulation_evidence
             out.append(EngineOpportunity(
                 opportunity_id=f"mev-protect:{getattr(base, 'id', '')}",
-                engine_type=self.engine_type,
+                engine_type='mev_search',
                 strategy_family='mev_search',
                 route_family='mev_search|protect_existing_route',
                 chain=chain,
                 chain_id=int(chain_id),
-                expected_profit_usd=round(expected, 6),
-                expected_realized_profit_usd=round(realized, 6),
+                expected_profit_usd=round(simulated_profit, 6) if simulation_usable else 0.0,
+                expected_realized_profit_usd=round(simulated_profit, 6) if simulation_usable else 0.0,
                 capital_required_usd=50.0,
                 inventory_requirements={},
                 confidence=round(max(0.5, 0.82 - mev_risk * 0.2), 6),
