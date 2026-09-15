@@ -7,6 +7,7 @@ from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrag
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
 from victor_ai_bot.aqe.funding import FundingArbStrategy, FundingArbConfig
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
+from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor
 from victor_ai_bot.aqe.meta.predictor import predict_candidate_success
 from victor_ai_bot.engine_control import (
     EngineAdmissionGovernor,
@@ -20,7 +21,13 @@ from victor_ai_bot.treasury.engine_capital_policy import engine_capital_limits
 
 
 class EngineService:
-    def __init__(self, *, capture_engine: Any | None = None, telemetry_service: Any | None = None):
+    def __init__(
+        self,
+        *,
+        capture_engine: Any | None = None,
+        telemetry_service: Any | None = None,
+        mev_fork_executor: Any | None = None,
+    ):
         self.capture_engine = capture_engine
         self.telemetry_service = telemetry_service
         self.registry = default_engine_capability_registry()
@@ -31,7 +38,9 @@ class EngineService:
             cfg=FundingArbConfig(enabled=True, min_rate_diff=0.00005, max_positions=6)
         )
         self.cross_chain = CrossChainArbitrageEngine()
-        self.mev = MEVSearchEngine()
+        self.mev = MEVSearchEngine(
+            fork_executor=mev_fork_executor if mev_fork_executor is not None else AnvilForkExecutor()
+        )
         self._last: Dict[str, Any] = {"items": []}
 
     def _telemetry_points(self, engine_type: str) -> int:
