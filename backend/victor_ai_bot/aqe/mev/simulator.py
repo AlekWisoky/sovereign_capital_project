@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -16,15 +17,12 @@ def simulate_bundle(*, expected_profit_usd: float, gas_cost_usd: float, contenti
     gas = float(gas_cost_usd)
     risk = max(0.0, min(1.0, float(contention_risk)))
     realized = max(0.0, float(expected_profit_usd) - gas - float(expected_profit_usd) * risk * 0.35)
-    return {
-        'ok': bool(realized > 0.0),
-        'expected_realized_profit_usd': round(realized, 6),
-        'contention_penalty_usd': round(float(expected_profit_usd) * risk * 0.35, 6),
-    }
+    return {'ok': bool(realized > 0.0), 'expected_realized_profit_usd': round(realized, 6), 'contention_penalty_usd': round(float(expected_profit_usd) * risk * 0.35, 6)}
 
 
 _REQUIRED_EVIDENCE_KEYS = ('simulation_id', 'fork_block', 'pre_state_root', 'post_state_root', 'scenario_digest', 'scenario_results')
 _REQUIRED_SCENARIO_KEYS = ('gas_multiplier', 'liquidity_multiplier', 'oracle_multiplier', 'conflict_checked', 'reverted')
+_BALANCE_OF_SELECTOR = '70a08231'
 
 
 def _validate_simulation_scenario(scenario: Any, index: int) -> Dict[str, Any] | None:
@@ -40,9 +38,41 @@ def _validate_simulation_scenario(scenario: Any, index: int) -> Dict[str, Any] |
             value = float(scenario[key])
         except (TypeError, ValueError, OverflowError):
             return {'ok': False, 'reason_code': 'simulation_scenario_parameter_invalid', 'index': index, 'field': key}
-        if value <= 0.0:
+        if not math.isfinite(value) or value <= 0.0:
             return {'ok': False, 'reason_code': 'simulation_scenario_parameter_invalid', 'index': index, 'field': key}
     return None
+
+
+def validate_simulation_economics(evidence: Any) -> Dict[str, Any]:
+    """Validate simulation economics are explicit, finite, and bound to this simulation."""
+    if not isinstance(evidence, Mapping):
+        return {'ok': False, 'reason_code': 'simulation_economics_missing'}
+    economics = evidence.get('economics')
+    if not isinstance(economics, Mapping):
+        return {'ok': False, 'reason_code': 'simulation_economics_missing'}
+    if str(economics.get('simulation_id') or '') != str(evidence.get('simulation_id') or ''):
+        return {'ok': False, 'reason_code': 'simulation_economics_identity_mismatch'}
+    if str(economics.get('scenario_digest') or '') != str(evidence.get('scenario_digest') or ''):
+        return {'ok': False, 'reason_code': 'simulation_economics_scenario_mismatch'}
+    required = ('expected_realized_profit_usd', 'gross_asset_delta_usd', 'gas_cost_usd', 'borrow_cost_usd')
+    missing = [key for key in required if economics.get(key) in (None, '')]
+    if missing:
+        return {'ok': False, 'reason_code': 'simulation_economics_incomplete', 'missing': missing}
+    values: Dict[str, float] = {}
+    for key in required:
+        try:
+            value = float(economics[key])
+        except (TypeError, ValueError, OverflowError):
+            return {'ok': False, 'reason_code': 'simulation_economics_invalid', 'field': key}
+        if not math.isfinite(value):
+            return {'ok': False, 'reason_code': 'simulation_economics_non_finite', 'field': key}
+        if key in ('gas_cost_usd', 'borrow_cost_usd') and value < 0.0:
+            return {'ok': False, 'reason_code': 'simulation_economics_negative_cost', 'field': key}
+        values[key] = value
+    expected = values['gross_asset_delta_usd'] - values['gas_cost_usd'] - values['borrow_cost_usd']
+    if abs(expected - values['expected_realized_profit_usd']) > 1e-8:
+        return {'ok': False, 'reason_code': 'simulation_economics_not_reconciled'}
+    return {'ok': True, 'reason_code': 'simulation_economics_verified', 'expected_realized_profit_usd': values['expected_realized_profit_usd']}
 
 
 def validate_deterministic_simulation_evidence(evidence: Any) -> Dict[str, Any]:
@@ -69,7 +99,10 @@ def validate_deterministic_simulation_evidence(evidence: Any) -> Dict[str, Any]:
         failure = _validate_simulation_scenario(scenario, index)
         if failure is not None:
             return failure
-    return {'ok': True, 'reason_code': 'simulation_evidence_verified', 'simulation_id': str(evidence['simulation_id']), 'fork_block': fork_block, 'pre_state_root': str(evidence['pre_state_root']), 'post_state_root': str(evidence['post_state_root']), 'scenario_digest': str(evidence['scenario_digest']), 'scenario_count': len(scenarios)}
+    economics_gate = validate_simulation_economics(evidence)
+    if economics_gate.get('ok') is not True:
+        return economics_gate
+    return {'ok': True, 'reason_code': 'simulation_evidence_verified', 'simulation_id': str(evidence['simulation_id']), 'fork_block': fork_block, 'pre_state_root': str(evidence['pre_state_root']), 'post_state_root': str(evidence['post_state_root']), 'scenario_digest': str(evidence['scenario_digest']), 'scenario_count': len(scenarios), 'expected_realized_profit_usd': economics_gate['expected_realized_profit_usd']}
 
 
 class ForkSimulationUnavailable(RuntimeError):
@@ -92,7 +125,8 @@ class AnvilForkExecutor:
             pre_root = self._require_state_root(pre_block, 'fork_block_state_root_missing')
             results = [self._run_scenario(rpc_url, transaction, scenario) for scenario in scenario_list]
             digest = self._scenario_digest(fork_block, transaction, scenario_list)
-            return {'simulation_id': f'anvil:{digest[:24]}', 'deterministic': True, 'fork_block': int(fork_block), 'pre_state_root': pre_root, 'post_state_root': results[-1]['post_state_root'], 'scenario_digest': f'sha256:{digest}', 'scenario_results': results, 'reverted': any(bool(item['reverted']) for item in results)}
+            economics = results[-1].get('economics')
+            return {'simulation_id': f'anvil:{digest[:24]}', 'deterministic': True, 'fork_block': int(fork_block), 'pre_state_root': pre_root, 'post_state_root': results[-1]['post_state_root'], 'scenario_digest': f'sha256:{digest}', 'scenario_results': results, 'economics': economics, 'reverted': any(bool(item['reverted']) for item in results)}
         finally:
             process.terminate()
             try:
@@ -120,7 +154,7 @@ class AnvilForkExecutor:
 
     @staticmethod
     def _validate_transaction(transaction: Mapping[str, Any]) -> None:
-        if not isinstance(transaction, Mapping) or not transaction.get('to'):
+        if not isinstance(transaction, Mapping) or not transaction.get('to') or not transaction.get('from'):
             raise ForkSimulationUnavailable('transaction_invalid')
 
     @staticmethod
@@ -138,7 +172,7 @@ class AnvilForkExecutor:
         deadline = time.monotonic() + self.startup_timeout_s
         while time.monotonic() < deadline:
             line = process.stdout.readline() if process.stdout is not None else ''
-            match = re.search(r'Listening on (127\.0\.0\.1):(\d+)', line)
+            match = re.search(r'Listening on (127\\.0\\.0\\.1):(\\d+)', line)
             if match:
                 return process, f'http://{match.group(1)}:{match.group(2)}'
             if process.poll() is not None:
@@ -149,18 +183,103 @@ class AnvilForkExecutor:
 
     def _run_scenario(self, rpc_url: str, transaction: Mapping[str, Any], scenario: Mapping[str, Any]) -> Dict[str, Any]:
         snapshot = self._rpc(rpc_url, 'evm_snapshot', [])
+        observation = scenario.get('economic_observation')
+        if not isinstance(observation, Mapping):
+            raise ForkSimulationUnavailable('economic_observation_missing')
         try:
+            before = self._capture_economic_balances(rpc_url, observation)
             conflict_checked = self._check_conflict(rpc_url, transaction)
             gas_multiplier = float(scenario.get('gas_multiplier', 0.0))
             liquidity_multiplier = float(scenario.get('liquidity_multiplier', 0.0))
             oracle_multiplier = float(scenario.get('oracle_multiplier', 0.0))
             for mutation in scenario.get('state_mutations', []) or []:
                 self._apply_mutation(rpc_url, mutation)
-            receipt = self._rpc(rpc_url, 'eth_sendTransaction', [dict(transaction)])
+            tx_hash = self._rpc(rpc_url, 'eth_sendTransaction', [dict(transaction)])
+            receipt = self._rpc(rpc_url, 'eth_getTransactionReceipt', [tx_hash])
             block = self._rpc(rpc_url, 'eth_getBlockByNumber', ['latest', False])
-            return {'gas_multiplier': gas_multiplier, 'liquidity_multiplier': liquidity_multiplier, 'oracle_multiplier': oracle_multiplier, 'conflict_checked': conflict_checked, 'reverted': self._receipt_reverted(receipt), 'post_state_root': self._require_state_root(block, 'post_state_root_missing')}
+            reverted = self._receipt_reverted(receipt)
+            if reverted:
+                raise ForkSimulationUnavailable('simulation_transaction_reverted')
+            after = self._capture_economic_balances(rpc_url, observation)
+            economics = self._derive_economics(observation, before, after, receipt)
+            return {'gas_multiplier': gas_multiplier, 'liquidity_multiplier': liquidity_multiplier, 'oracle_multiplier': oracle_multiplier, 'conflict_checked': conflict_checked, 'reverted': False, 'post_state_root': self._require_state_root(block, 'post_state_root_missing'), 'economics': economics}
         finally:
             self._rpc(rpc_url, 'evm_revert', [snapshot])
+
+    def _capture_economic_balances(self, rpc_url: str, observation: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+        account = str(observation.get('account') or '')
+        if not re.fullmatch(r'0x[0-9a-fA-F]{40}', account):
+            raise ForkSimulationUnavailable('economic_account_invalid')
+        assets = observation.get('assets')
+        if not isinstance(assets, list) or not assets:
+            raise ForkSimulationUnavailable('economic_assets_missing')
+        out: Dict[str, Dict[str, Any]] = {}
+        for item in assets:
+            if not isinstance(item, Mapping):
+                raise ForkSimulationUnavailable('economic_asset_invalid')
+            address = str(item.get('address') or 'native')
+            key = address.lower()
+            if key in out:
+                raise ForkSimulationUnavailable('economic_asset_duplicate')
+            try:
+                decimals = int(item.get('decimals'))
+                price_usd = float(item.get('price_usd'))
+            except (TypeError, ValueError, OverflowError):
+                raise ForkSimulationUnavailable('economic_asset_value_invalid') from None
+            if decimals < 0 or decimals > 255 or not math.isfinite(price_usd) or price_usd <= 0.0:
+                raise ForkSimulationUnavailable('economic_asset_value_invalid')
+            if address == 'native':
+                raw = self._rpc(rpc_url, 'eth_getBalance', [account, 'latest'])
+            else:
+                if not re.fullmatch(r'0x[0-9a-fA-F]{40}', address):
+                    raise ForkSimulationUnavailable('economic_token_invalid')
+                data = '0x' + _BALANCE_OF_SELECTOR + account[2:].lower().rjust(64, '0')
+                raw = self._rpc(rpc_url, 'eth_call', [{'to': address, 'data': data}, 'latest'])
+            try:
+                balance = int(str(raw), 16)
+            except (TypeError, ValueError):
+                raise ForkSimulationUnavailable('economic_balance_invalid') from None
+            out[key] = {'address': address, 'decimals': decimals, 'price_usd': price_usd, 'role': str(item.get('role') or ''), 'balance': balance}
+        return out
+
+    @staticmethod
+    def _derive_economics(observation: Mapping[str, Any], before: Mapping[str, Mapping[str, Any]], after: Mapping[str, Mapping[str, Any]], receipt: Mapping[str, Any]) -> Dict[str, Any]:
+        gross = 0.0
+        native_price: float | None = None
+        for key, pre in before.items():
+            post = after.get(key)
+            if not isinstance(post, Mapping) or pre.get('role') != post.get('role') or float(pre.get('price_usd') or 0.0) != float(post.get('price_usd') or 0.0):
+                raise ForkSimulationUnavailable('economic_observation_mismatch')
+            price = float(pre['price_usd'])
+            if str(pre['address']) == 'native':
+                native_price = price
+            delta = int(post['balance']) - int(pre['balance'])
+            role = str(pre.get('role') or '')
+            if role == 'profit':
+                if delta < 0:
+                    raise ForkSimulationUnavailable('economic_profit_delta_negative')
+                gross += (delta / (10 ** int(pre['decimals']))) * price
+            elif role == 'cost':
+                if delta > 0:
+                    raise ForkSimulationUnavailable('economic_cost_delta_positive')
+                gross += (delta / (10 ** int(pre['decimals']))) * price
+            else:
+                raise ForkSimulationUnavailable('economic_asset_role_missing')
+        if native_price is None:
+            raise ForkSimulationUnavailable('economic_native_price_missing')
+        try:
+            gas_used = int(str(receipt.get('gasUsed')), 16)
+            gas_price = int(str(receipt.get('effectiveGasPrice')), 16)
+        except (AttributeError, TypeError, ValueError):
+            raise ForkSimulationUnavailable('economic_gas_receipt_invalid') from None
+        gas_cost_usd = (gas_used * gas_price / 10**18) * native_price
+        borrow_cost_usd = float(observation.get('borrow_cost_usd') or 0.0)
+        if not math.isfinite(borrow_cost_usd) or borrow_cost_usd < 0.0:
+            raise ForkSimulationUnavailable('economic_borrow_cost_invalid')
+        expected = gross - gas_cost_usd - borrow_cost_usd
+        if not all(math.isfinite(value) for value in (gross, gas_cost_usd, borrow_cost_usd, expected)):
+            raise ForkSimulationUnavailable('economic_non_finite')
+        return {'expected_realized_profit_usd': round(expected, 8), 'gross_asset_delta_usd': round(gross, 8), 'gas_cost_usd': round(gas_cost_usd, 8), 'borrow_cost_usd': round(borrow_cost_usd, 8)}
 
     def _check_conflict(self, rpc_url: str, transaction: Mapping[str, Any]) -> bool:
         self._rpc(rpc_url, 'eth_estimateGas', [dict(transaction)])
