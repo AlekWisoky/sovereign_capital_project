@@ -90,11 +90,13 @@ def _log_matches_withdrawal_destination(log: Mapping[str, Any], *, executor: str
     if not isinstance(topics, list) or not topics:
         return False
     topic = str(topics[0] or "").lower()
-    if topic == WITHDRAWAL_TOPIC0.lower():
-        return len(topics) >= 3 and _topic_address(topics[2]) == destination
-    if topic == CONVERTED_TOPIC0.lower():
-        return len(topics) >= 4 and _topic_address(topics[3]) == destination
-    return False
+    destination_topic_index = {
+        WITHDRAWAL_TOPIC0.lower(): 2,
+        CONVERTED_TOPIC0.lower(): 3,
+    }.get(topic)
+    if destination_topic_index is None:
+        return False
+    return len(topics) > destination_topic_index and _topic_address(topics[destination_topic_index]) == destination
 
 
 def _matching_logs(receipt: Mapping[str, Any], *, executor: str, destination: str) -> list[Mapping[str, Any]]:
