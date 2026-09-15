@@ -158,3 +158,30 @@ def test_mev_search_wires_executor_evidence_into_candidate_boundary():
     assert rows[0].expected_realized_profit_usd == 17.5
     assert rows[0].lifecycle_eligibility == 'observe_only'
     assert rows[0].policy_eligibility == 'observe_only'
+
+
+def test_mev_search_records_simulation_gate_without_promoting_heuristic_economics():
+    evidence = _valid_simulation_evidence()
+    evidence['economics'] = None
+    rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x2', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'simulation_evidence': evidence}], 'high_risk_ratio': 0.2}, base_opportunities=[])
+    assert rows
+    gate = rows[0].metadata['simulation_gate']
+    assert gate['ok'] is False
+    assert gate['reason_code'] == 'simulation_economics_missing'
+    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
+    assert rows[0].lifecycle_eligibility == 'observe_only'
+    assert rows[0].policy_eligibility == 'observe_only'
+    assert rows[0].expected_profit_usd == 0.0
+
+
+def test_mev_search_accepts_only_explicit_simulation_economics():
+    evidence = _valid_simulation_evidence()
+    rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x4', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'simulation_evidence': evidence}], 'high_risk_ratio': 0.2}, base_opportunities=[])
+    assert rows
+    row = rows[0]
+    assert row.expected_profit_usd == 17.5
+    assert row.expected_realized_profit_usd == 17.5
+    assert row.metadata['economics_status'] == 'simulation_backed'
+    assert row.metadata['economics_source'] == 'simulation_evidence'
+    assert row.lifecycle_eligibility == 'observe_only'
+    assert row.policy_eligibility == 'observe_only'
