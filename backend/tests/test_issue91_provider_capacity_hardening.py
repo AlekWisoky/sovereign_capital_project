@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from victor_ai_bot.calldata_builder import build_execute_calldata
 from victor_ai_bot.execution_capture.flashloan_hardening import evaluate_flashloan_resilience
 from victor_ai_bot.execution_capture.institutional_sizing import (
+    INSTITUTIONAL_V1_TIERS,
     CapitalAuthoritySizingContext,
     EconomicsSizingContext,
     ExecutionSizingContext,
@@ -15,9 +14,10 @@ from victor_ai_bot.execution_capture.institutional_sizing import (
     LiquiditySizingContext,
     SettlementSizingContext,
     WealthGoalSizingContext,
-    INSTITUTIONAL_V1_TIERS,
 )
-from victor_ai_bot.execution_capture.institutional_sizing_kernel import calculate_institutional_size
+from victor_ai_bot.execution_capture.institutional_sizing_kernel import (
+    calculate_institutional_size,
+)
 from victor_ai_bot.execution_capture.models import OpportunityEnvelope, SafeSizePoint
 
 
@@ -66,7 +66,9 @@ def _envelope() -> OpportunityEnvelope:
     )
 
 
-def _sizing_contract(*, requested: float, provider_capacity: float) -> InstitutionalSizingContract:
+def _sizing_contract(
+    *, requested: float, provider_capacity: float
+) -> InstitutionalSizingContract:
     return InstitutionalSizingContract(
         contract_version="institutional-v1",
         strategy_family="flash_arb",
