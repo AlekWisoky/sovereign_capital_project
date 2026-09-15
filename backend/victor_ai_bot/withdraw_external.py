@@ -89,18 +89,8 @@ def _persist_settlement(runtime: Any, *, chain: str, tx_hash: str, intent_id: st
                         from_address: str, destination: str, calldata: str,
                         receipt: Mapping[str, Any], executor: str) -> Dict[str, Any]:
     repo = getattr(runtime, "_ledger_repo", None)
-    if repo is None or not hasattr(repo, "append_transaction"):
+    if repo is None or not hasattr(repo, "append_receipt_idempotent"):
         return {"ok": False, "reason_code": "settlement_ledger_unavailable"}
-    try:
-        if repo.has_receipt_transaction(
-            chain=chain, receipt_id=tx_hash, tx_type="external_withdrawal_settlement"
-        ):
-            return {
-                "ok": True, "settled": True, "already_settled": True,
-                "transaction_id": f"external-withdrawal-{tx_hash.lower()}",
-            }
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-        return {"ok": False, "reason_code": "settlement_idempotency_check_failed"}
 
     effect = decode_external_withdrawal_effect(
         receipt=receipt, executor=executor, calldata=calldata, destination=destination
@@ -119,13 +109,13 @@ def _persist_settlement(runtime: Any, *, chain: str, tx_hash: str, intent_id: st
         ts_ms=int(time.time() * 1000),
     )
     try:
-        repo.append_transaction(chain=chain, payload=tx)
+        inserted = bool(repo.append_receipt_idempotent(chain=chain, payload=tx))
     except (OSError, RuntimeError, TypeError, ValueError):
         return {"ok": False, "reason_code": "settlement_ledger_persist_failed"}
     return {
         "ok": True,
         "settled": True,
-        "already_settled": False,
+        "already_settled": not inserted,
         "transaction_id": str(tx["transaction_id"]),
         "effect": effect,
     }
