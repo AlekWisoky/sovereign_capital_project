@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from victor_ai_bot.runtime_services.canonical_receipt_service import CanonicalReceiptService
+from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
 
 
 def test_successful_receipt_requires_explicit_usd_truth() -> None:
@@ -70,3 +71,18 @@ def test_settlement_accounting_blocks_without_explicit_usd_truth() -> None:
     assert result["blockedAutoTrading"] is True
     assert result["reason_code"] == "settled_usd_truth_unavailable"
     assert runtime._last_settlement_sync["reason_code"] == "settled_usd_truth_unavailable"
+
+
+# The runtime facade must consume explicit USD micro-units only; raw wei is never a USD source.
+def test_runtime_receipt_facade_accepts_explicit_usd_and_rejects_wei_only():
+    explicit = RuntimeReceiptFacade._explicit_usd_economics(
+        {"realized_profit_after_gas_usd_micro": "1250000", "realized_profit_after_gas_wei": "6000000"},
+        {"terminal_profitability_authority": {"profitability": {"profit_after_costs_usd_micro": "2500000"}}},
+    )
+    assert explicit == (1.25, 2.5)
+
+    wei_only = RuntimeReceiptFacade._explicit_usd_economics(
+        {"realized_profit_after_gas_wei": "6000000"},
+        {"expected_after": "2500000"},
+    )
+    assert wei_only == (None, None)
