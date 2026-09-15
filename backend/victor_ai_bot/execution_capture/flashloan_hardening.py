@@ -17,12 +17,17 @@ def evaluate_flashloan_resilience(
     route_plan: Dict[str, Any],
     available_providers: Iterable[str] | None = None,
 ) -> Dict[str, Any]:
-    requested_providers = list(available_providers) if available_providers is not None else ["aave", "balancer"]
+    requested_providers = (
+        list(available_providers)
+        if available_providers is not None
+        else ["aave", "balancer"]
+    )
     providers = filter_executable_flashloan_providers(requested_providers)
     unsupported_requested = [
         str(x or "").strip().lower()
         for x in requested_providers
-        if str(x or "").strip().lower() and str(x or "").strip().lower() not in providers
+        if str(x or "").strip().lower()
+        and str(x or "").strip().lower() not in providers
     ]
     pending_stale = float(pending_metrics.get("stale_probability") or 0.0)
     interference = float(pending_metrics.get("interference_probability") or 0.0)
@@ -31,7 +36,9 @@ def evaluate_flashloan_resilience(
         or pending_metrics.get("post_ordering_realized_edge")
         or 0.0
     )
-    selected_venues = [str(x) for x in list(route_plan.get("selected_venues") or []) if str(x)]
+    selected_venues = [
+        str(x) for x in list(route_plan.get("selected_venues") or []) if str(x)
+    ]
     scenarios = list(pending_metrics.get("scenarios") or [])
     scenario_pressure = (
         sum(float(x.get("ordering_mass") or 0.0) for x in scenarios[:3])
@@ -78,7 +85,9 @@ def evaluate_flashloan_resilience(
         )
         viable = bool(selected and leg_distortion < 0.72 and worst_case_edge > 0.0)
         fallback_venues = [
-            str(v) for v in list(selected_venues or envelope.venues) if str(v) and str(v) != venue
+            str(v)
+            for v in list(selected_venues or envelope.venues)
+            if str(v) and str(v) != venue
         ][:2]
         leg_states.append(
             {
@@ -100,7 +109,11 @@ def evaluate_flashloan_resilience(
     preferred = sorted(providers, key=lambda p: (0 if p == "aave" else 1, p))
     provider_scores = []
     for idx, provider in enumerate(preferred):
-        score = _clip(1.0 - race_penalty * 0.35 - venue_distortion * 0.22 - idx * 0.08, 0.05, 1.0)
+        score = _clip(
+            1.0 - race_penalty * 0.35 - venue_distortion * 0.22 - idx * 0.08,
+            0.05,
+            1.0,
+        )
         provider_scores.append({"provider": provider, "score": round(score, 6)})
     provider_scores.sort(key=lambda x: (-float(x["score"]), str(x["provider"])))
     fallback = (
@@ -119,9 +132,15 @@ def evaluate_flashloan_resilience(
             ("competed_out", worst_case_edge <= 0.0),
             (
                 "leg_degradation",
-                any(not bool(x["viable"]) and bool(x["selected"]) for x in leg_states),
+                any(
+                    not bool(x["viable"]) and bool(x["selected"])
+                    for x in leg_states
+                ),
             ),
-            ("pending_fragility", any(bool(x["pending_fragile"]) for x in leg_states)),
+            (
+                "pending_fragility",
+                any(bool(x["pending_fragile"]) for x in leg_states),
+            ),
         ]
         if ok
     ]
@@ -138,7 +157,8 @@ def evaluate_flashloan_resilience(
         "require_fallback_tree": bool(invalidation or venue_distortion >= 0.50),
         "route_viable": bool(not invalidation and not provider_unavailable),
         "route_mutation_required": bool(
-            any(bool(x["pending_fragile"]) for x in leg_states) or venue_distortion >= 0.40
+            any(bool(x["pending_fragile"]) for x in leg_states)
+            or venue_distortion >= 0.40
         ),
         "reason_codes": reason_codes,
     }
