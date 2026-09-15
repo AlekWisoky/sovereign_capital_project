@@ -126,7 +126,10 @@ class AnvilForkExecutor:
             results = [self._run_scenario(rpc_url, transaction, scenario) for scenario in scenario_list]
             digest = self._scenario_digest(fork_block, transaction, scenario_list)
             economics = results[-1].get('economics')
-            return {'simulation_id': f'anvil:{digest[:24]}', 'deterministic': True, 'fork_block': int(fork_block), 'pre_state_root': pre_root, 'post_state_root': results[-1]['post_state_root'], 'scenario_digest': f'sha256:{digest}', 'scenario_results': results, 'economics': economics, 'reverted': any(bool(item['reverted']) for item in results)}
+            simulation_id = f'anvil:{digest[:24]}'
+            if isinstance(economics, Mapping):
+                economics = dict(economics, simulation_id=simulation_id, scenario_digest=f'sha256:{digest}')
+            return {'simulation_id': simulation_id, 'deterministic': True, 'fork_block': int(fork_block), 'pre_state_root': pre_root, 'post_state_root': results[-1]['post_state_root'], 'scenario_digest': f'sha256:{digest}', 'scenario_results': results, 'economics': economics, 'reverted': any(bool(item['reverted']) for item in results)}
         finally:
             process.terminate()
             try:
@@ -244,35 +247,43 @@ class AnvilForkExecutor:
 
     @staticmethod
     def _derive_economics(observation: Mapping[str, Any], before: Mapping[str, Mapping[str, Any]], after: Mapping[str, Mapping[str, Any]], receipt: Mapping[str, Any]) -> Dict[str, Any]:
-        gross = 0.0
-        native_price: float | None = None
-        for key, pre in before.items():
-            post = after.get(key)
-            if not isinstance(post, Mapping) or pre.get('role') != post.get('role') or float(pre.get('price_usd') or 0.0) != float(post.get('price_usd') or 0.0):
-                raise ForkSimulationUnavailable('economic_observation_mismatch')
-            price = float(pre['price_usd'])
-            if str(pre['address']) == 'native':
-                native_price = price
-            delta = int(post['balance']) - int(pre['balance'])
-            role = str(pre.get('role') or '')
-            if role == 'profit':
-                if delta < 0:
-                    raise ForkSimulationUnavailable('economic_profit_delta_negative')
-                gross += (delta / (10 ** int(pre['decimals']))) * price
-            elif role == 'cost':
-                if delta > 0:
-                    raise ForkSimulationUnavailable('economic_cost_delta_positive')
-                gross += (delta / (10 ** int(pre['decimals']))) * price
-            else:
-                raise ForkSimulationUnavailable('economic_asset_role_missing')
-        if native_price is None:
-            raise ForkSimulationUnavailable('economic_native_price_missing')
         try:
             gas_used = int(str(receipt.get('gasUsed')), 16)
             gas_price = int(str(receipt.get('effectiveGasPrice')), 16)
         except (AttributeError, TypeError, ValueError):
             raise ForkSimulationUnavailable('economic_gas_receipt_invalid') from None
+        native_price: float | None = None
+        for item in before.values():
+            if str(item.get('address')) == 'native':
+                native_price = float(item.get('price_usd') or 0.0)
+                break
+        if native_price is None or not math.isfinite(native_price) or native_price <= 0.0:
+            raise ForkSimulationUnavailable('economic_native_price_missing')
         gas_cost_usd = (gas_used * gas_price / 10**18) * native_price
+        gross = 0.0
+        for key, pre in before.items():
+            post = after.get(key)
+            if not isinstance(post, Mapping) or pre.get('role') != post.get('role') or float(pre.get('price_usd') or 0.0) != float(post.get('price_usd') or 0.0):
+                raise ForkSimulationUnavailable('economic_observation_mismatch')
+            price = float(pre['price_usd'])
+            delta = int(post['balance']) - int(pre['balance'])
+            role = str(pre.get('role') or '')
+            if role == 'profit':
+                if delta < 0:
+                    raise ForkSimulationUnavailable('economic_profit_delta_negative')
+                value = (delta / (10 ** int(pre['decimals']))) * price
+                if str(pre['address']) == 'native':
+                    value += gas_cost_usd
+                gross += value
+            elif role == 'cost':
+                if delta > 0:
+                    raise ForkSimulationUnavailable('economic_cost_delta_positive')
+                value = (delta / (10 ** int(pre['decimals']))) * price
+                if str(pre['address']) == 'native':
+                    value += gas_cost_usd
+                gross += value
+            else:
+                raise ForkSimulationUnavailable('economic_asset_role_missing')
         borrow_cost_usd = float(observation.get('borrow_cost_usd') or 0.0)
         if not math.isfinite(borrow_cost_usd) or borrow_cost_usd < 0.0:
             raise ForkSimulationUnavailable('economic_borrow_cost_invalid')
