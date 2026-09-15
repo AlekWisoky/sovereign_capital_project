@@ -157,7 +157,7 @@ class AnvilForkExecutor:
 
     @staticmethod
     def _validate_transaction(transaction: Mapping[str, Any]) -> None:
-        if not isinstance(transaction, Mapping) or not transaction.get('to') or not transaction.get('from'):
+        if not isinstance(transaction, Mapping) or not transaction.get('to'):
             raise ForkSimulationUnavailable('transaction_invalid')
 
     @staticmethod
@@ -175,7 +175,7 @@ class AnvilForkExecutor:
         deadline = time.monotonic() + self.startup_timeout_s
         while time.monotonic() < deadline:
             line = process.stdout.readline() if process.stdout is not None else ''
-            match = re.search(r'Listening on (127\\.0\\.0\\.1):(\\d+)', line)
+            match = re.search(r'Listening on (127[.]0[.]0[.]1):(\\d+)', line)
             if match:
                 return process, f'http://{match.group(1)}:{match.group(2)}'
             if process.poll() is not None:
