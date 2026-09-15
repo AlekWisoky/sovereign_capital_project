@@ -6,6 +6,7 @@ import {
 } from '../src/api/reconciliation';
 import {
   externalWalletTransactionFromPrepared,
+  reconcileSubmittedExternalWalletTransaction,
   validatePreparedExternalWalletTransaction,
 } from '../src/api/offRampExternalWallet';
 import { setWalletConnectSession } from '../src/walletConnect/session';
@@ -122,4 +123,26 @@ test('external-wallet validation rejects a prepared sender different from the co
   assert.equal(result.ok, false);
   assert.equal(result.reasonCode, 'wallet_sender_mismatch');
   setWalletConnectSession({ provider: null, address: null, isConnected: false });
+});
+
+test('external-wallet reconciliation uses the bound transaction after wallet disconnect', async () => {
+  const transaction = { from: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', data: '0x1234', value: '0x0', chainId: '0x1' };
+  let body: Record<string, unknown> | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ ok: true, settled: false }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    setWalletConnectSession({ provider: null, address: null, isConnected: false });
+    const result = await reconcileSubmittedExternalWalletTransaction('https://example.test', 'admin-key', transaction, `0x${'a'.repeat(64)}`);
+    assert.deepEqual(result, { ok: true, settled: false });
+    assert.equal(body?.from_address, transaction.from);
+    assert.equal(body?.to, transaction.to);
+    assert.equal(body?.data, transaction.data);
+    assert.equal(body?.value, transaction.value);
+    assert.equal(body?.chain_id, transaction.chainId);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

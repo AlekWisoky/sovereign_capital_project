@@ -53,7 +53,7 @@ async function externalWalletWithdraw(
   const reconciled = await reconcileSubmittedExternalWalletTransaction(
     baseUrl,
     adminKey,
-    prepared,
+    submitted.transaction,
     submitted.txHash,
   );
   return {
@@ -79,7 +79,7 @@ async function externalWalletConvertWithdraw(
   const reconciled = await reconcileSubmittedExternalWalletTransaction(
     baseUrl,
     adminKey,
-    prepared,
+    submitted.transaction,
     submitted.txHash,
   );
   return {
