@@ -4,7 +4,6 @@ from typing import Any, Dict, Mapping
 
 from .abi_utils import topic0, selector
 
-
 WITHDRAW_SIG = "withdraw(address,address,uint256)"
 CONVERT_WITHDRAW_SIG = "convertAndWithdraw(address,address,uint256,uint256,address,uint24,uint256)"
 WITHDRAWAL_EVENT_SIG = "Withdrawal(address,address,uint256)"
@@ -69,9 +68,7 @@ def _word_address(word: int) -> str:
     return "0x" + f"{int(word):064x}"[-40:]
 
 
-def _matching_logs(
-    receipt: Mapping[str, Any], *, executor: str, destination: str
-) -> list[Mapping[str, Any]]:
+def _matching_logs(receipt: Mapping[str, Any], *, executor: str, destination: str) -> list[Mapping[str, Any]]:
     logs = receipt.get("logs")
     if not isinstance(logs, list):
         return []
@@ -79,33 +76,28 @@ def _matching_logs(
     destination_s = _address(destination)
     matches: list[Mapping[str, Any]] = []
     for log in logs:
-        if not isinstance(log, Mapping):
-            continue
-        if _address(log.get("address")) != executor_s:
+        if not isinstance(log, Mapping) or _address(log.get("address")) != executor_s:
             continue
         topics = log.get("topics")
         if not isinstance(topics, list) or not topics:
             continue
         topic = str(topics[0] or "").lower()
-        if topic not in {WITHDRAWAL_TOPIC0.lower(), CONVERTED_TOPIC0.lower()}:
-            continue
         if topic == WITHDRAWAL_TOPIC0.lower():
-            if len(topics) < 3 or _topic_address(topics[2]) != destination_s:
-                continue
-        else:
-            if len(topics) < 4 or _topic_address(topics[3]) != destination_s:
-                continue
-        matches.append(log)
+            if len(topics) >= 3 and _topic_address(topics[2]) == destination_s:
+                matches.append(log)
+        elif topic == CONVERTED_TOPIC0.lower():
+            if len(topics) >= 4 and _topic_address(topics[3]) == destination_s:
+                matches.append(log)
     return matches
 
 
 def decode_external_withdrawal_effect(
     *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
 ) -> Dict[str, Any]:
-    """Decode one executor withdrawal event and prove it matches submitted calldata.
+    """Prove the mined receipt contains exactly one executor withdrawal effect.
 
-    This is deliberately asset-unit only. It does not assign USD value and does not
-    treat the requested conversion minOut as realized output.
+    The result is asset-unit only. No USD valuation is inferred from token amounts,
+    wei, gas, or conversion limits.
     """
     executor_s = _address(executor)
     destination_s = _address(destination)
@@ -116,6 +108,7 @@ def decode_external_withdrawal_effect(
     if raw_calldata is None or len(raw_calldata) < 4:
         return {"ok": False, "reason_code": "invalid_settlement_calldata"}
     selector_hex = raw_calldata[:4].hex()
+
     if selector_hex == WITHDRAW_SELECTOR:
         words = _calldata_words(calldata, 3)
         if words is None:
@@ -127,33 +120,22 @@ def decode_external_withdrawal_effect(
             return {"ok": False, "reason_code": "calldata_destination_mismatch"}
         if expected_amount <= 0:
             return {"ok": False, "reason_code": "invalid_withdraw_amount"}
-        matches = _matching_logs(receipt, executor=executor_s, destination=destination_s)
         matches = [
-            log
-            for log in matches
+            log for log in _matching_logs(receipt, executor=executor_s, destination=destination_s)
             if str((log.get("topics") or [""])[0]).lower() == WITHDRAWAL_TOPIC0.lower()
         ]
         if len(matches) != 1:
-            return {
-                "ok": False,
-                "reason_code": "ambiguous_withdrawal_receipt_event" if matches else "withdrawal_receipt_event_missing",
-            }
-        log = matches[0]
-        topics = list(log.get("topics") or [])
+            return {"ok": False, "reason_code": "ambiguous_withdrawal_receipt_event" if matches else "withdrawal_receipt_event_missing"}
+        topics = list(matches[0].get("topics") or [])
         token = _topic_address(topics[1])
-        amount = _uint_word(_hex_bytes(str(log.get("data") or "0x")) or b"", 0)
+        amount = _uint_word(_hex_bytes(str(matches[0].get("data") or "0x")) or b"", 0)
         if token != expected_token or amount != expected_amount:
             return {"ok": False, "reason_code": "withdrawal_event_mismatch"}
         return {
-            "ok": True,
-            "kind": "withdraw",
-            "token": token,
-            "amount": str(amount),
-            "amount_unit": "token_base_units",
-            "token_in": token,
-            "token_out": token,
-            "amount_in": str(amount),
-            "amount_out": str(amount),
+            "ok": True, "kind": "withdraw", "token": token,
+            "amount": str(amount), "amount_unit": "token_base_units",
+            "token_in": token, "token_out": token,
+            "amount_in": str(amount), "amount_out": str(amount),
         }
 
     if selector_hex == CONVERT_WITHDRAW_SELECTOR:
@@ -169,43 +151,25 @@ def decode_external_withdrawal_effect(
             return {"ok": False, "reason_code": "calldata_destination_mismatch"}
         if expected_amount_in <= 0:
             return {"ok": False, "reason_code": "invalid_convert_amount_in"}
-        matches = _matching_logs(receipt, executor=executor_s, destination=destination_s)
         matches = [
-            log
-            for log in matches
+            log for log in _matching_logs(receipt, executor=executor_s, destination=destination_s)
             if str((log.get("topics") or [""])[0]).lower() == CONVERTED_TOPIC0.lower()
         ]
         if len(matches) != 1:
-            return {
-                "ok": False,
-                "reason_code": "ambiguous_convert_receipt_event" if matches else "convert_receipt_event_missing",
-            }
-        log = matches[0]
-        topics = list(log.get("topics") or [])
+            return {"ok": False, "reason_code": "ambiguous_convert_receipt_event" if matches else "convert_receipt_event_missing"}
+        topics = list(matches[0].get("topics") or [])
         token_in = _topic_address(topics[1])
         token_out = _topic_address(topics[2])
-        data = _hex_bytes(str(log.get("data") or "0x")) or b""
+        data = _hex_bytes(str(matches[0].get("data") or "0x")) or b""
         amount_in = _uint_word(data, 0)
         amount_out = _uint_word(data, 1)
-        if (
-            token_in != expected_in
-            or token_out != expected_out
-            or amount_in != expected_amount_in
-            or amount_out is None
-            or amount_out < expected_min_out
-            or amount_out <= 0
-        ):
+        if token_in != expected_in or token_out != expected_out or amount_in != expected_amount_in or amount_out is None or amount_out < expected_min_out or amount_out <= 0:
             return {"ok": False, "reason_code": "convert_event_mismatch"}
         return {
-            "ok": True,
-            "kind": "convert_and_withdraw",
-            "token": token_out,
-            "amount": str(amount_out),
-            "amount_unit": "token_base_units",
-            "token_in": token_in,
-            "token_out": token_out,
-            "amount_in": str(amount_in),
-            "amount_out": str(amount_out),
+            "ok": True, "kind": "convert_and_withdraw", "token": token_out,
+            "amount": str(amount_out), "amount_unit": "token_base_units",
+            "token_in": token_in, "token_out": token_out,
+            "amount_in": str(amount_in), "amount_out": str(amount_out),
             "min_out": str(expected_min_out),
         }
 
@@ -213,14 +177,8 @@ def decode_external_withdrawal_effect(
 
 
 def canonical_external_withdrawal_transaction(
-    *,
-    chain: str,
-    receipt_id: str,
-    intent_id: str,
-    from_address: str,
-    destination: str,
-    calldata: str,
-    effect: Mapping[str, Any],
+    *, chain: str, receipt_id: str, intent_id: str, from_address: str,
+    destination: str, calldata: str, effect: Mapping[str, Any], ts_ms: int,
 ) -> Dict[str, Any]:
     token = _address(effect.get("token_out"))
     amount = int(str(effect.get("amount_out") or effect.get("amount") or "0"))
@@ -228,27 +186,17 @@ def canonical_external_withdrawal_transaction(
         raise ValueError("invalid_external_withdrawal_effect")
     return {
         "transaction_id": f"external-withdrawal-{receipt_id.lower()}",
-        "ts_ms": 0,
+        "ts_ms": int(ts_ms),
         "tx_type": "external_withdrawal_settlement",
         "chain": str(chain or ""),
         "receipt_id": str(receipt_id),
         "lines": [
-            {
-                "account": f"asset:{token}",
-                "asset": token,
-                "amount": float(-amount),
-                "family": "",
-                "venue": "WITHDRAW",
-                "note": "external_withdrawal_settlement",
-            },
-            {
-                "account": "equity:external_withdrawal",
-                "asset": token,
-                "amount": float(amount),
-                "family": "",
-                "venue": "WITHDRAW",
-                "note": "external_withdrawal_offset",
-            },
+            {"account": f"asset:{token}", "asset": token, "amount": -amount,
+             "family": "", "venue": "WITHDRAW", "note": "external_withdrawal_settlement",
+             "amount_raw": str(-amount)},
+            {"account": "equity:external_withdrawal", "asset": token, "amount": amount,
+             "family": "", "venue": "WITHDRAW", "note": "external_withdrawal_offset",
+             "amount_raw": str(amount)},
         ],
         "metadata": {
             "settlement_kind": "external_withdrawal",
