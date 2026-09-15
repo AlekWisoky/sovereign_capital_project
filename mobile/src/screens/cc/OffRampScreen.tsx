@@ -213,6 +213,7 @@ export function OffRampScreen() {
           fee: quote.fee ?? 3000,
           to: dest,
           reason,
+          prepared,
         },
         state.adminKey,
         mutationContext(),
@@ -260,7 +261,7 @@ export function OffRampScreen() {
     }
     setStatus("Executing…");
     try {
-      const res = await guardedWithdrawExecute(state.baseUrl, { token: wToken, to: dest, amount: wAmount, reason }, state.adminKey, mutationContext());
+      const res = await guardedWithdrawExecute(state.baseUrl, { token: wToken, to: dest, amount: wAmount, reason, prepared }, state.adminKey, mutationContext());
       setDrawer({ open: true, title: "Withdraw Execute Result", payload: res as unknown as JsonValue });
       const summary = summarizeWithdrawExecution(res, "Withdraw");
       if (summary.ok && saveRecipientOnConfirm) rememberRecipient(dest);

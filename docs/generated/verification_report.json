@@ -514,9 +514,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-14T17:16:17.402000Z",
-  "generated_at_iso": "2026-09-14T17:16:17.402000Z",
-  "generated_at_ms": 1789406177402,
+  "generated_at": "2026-09-14T19:29:32.504000Z",
+  "generated_at_iso": "2026-09-14T19:29:32.504000Z",
+  "generated_at_ms": 1789414172504,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
@@ -581,7 +581,7 @@
   "runtime_surface": {
     "api_legacy_lines": 83,
     "backend_broad_except_count": 1,
-    "route_count": 162,
+    "route_count": 163,
     "runtime_legacy_lines": 181,
     "websocket_route_count": 4
   },
