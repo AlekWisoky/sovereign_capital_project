@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable
 
-from .flashloan_providers import filter_executable_flashloan_providers
+from ..flashloan_providers import filter_executable_flashloan_providers
 from .models import OpportunityEnvelope
 
 
