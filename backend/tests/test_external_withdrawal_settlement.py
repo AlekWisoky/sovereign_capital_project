@@ -131,7 +131,8 @@ def test_mismatched_event_cannot_settle():
     assert effect == {"ok": False, "reason_code": "withdrawal_event_mismatch"}
 
 
-def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.asyncio
+async def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent(monkeypatch: pytest.MonkeyPatch):
     amount = 1000
     calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, amount)
     tx_hash = "0x" + "a" * 64
@@ -196,7 +197,7 @@ def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent(monke
     monkeypatch.setattr(withdraw_external, "assess_submitted_tx", lambda *args, **kwargs: status)
     monkeypatch.setattr(withdraw_external, "attach_summary_contract", lambda response, **kwargs: response)
 
-    first = await withdraw_external.reconcile_external_withdraw(request, {
+    payload = {
         "intent_id": intent_id,
         "tx_hash": tx_hash,
         "chain_id": chain_id,
@@ -204,16 +205,9 @@ def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent(monke
         "to": EXECUTOR,
         "data": calldata,
         "value": 0,
-    })
-    second = await withdraw_external.reconcile_external_withdraw(request, {
-        "intent_id": intent_id,
-        "tx_hash": tx_hash,
-        "chain_id": chain_id,
-        "from_address": SENDER,
-        "to": EXECUTOR,
-        "data": calldata,
-        "value": 0,
-    })
+    }
+    first = await withdraw_external.reconcile_external_withdraw(request, payload)
+    second = await withdraw_external.reconcile_external_withdraw(request, payload)
 
     assert first["settled"] is True
     assert first["already_settled"] is False
