@@ -1,7 +1,14 @@
 from dataclasses import replace
 
+import pytest
+
 from victor_ai_bot.execution_capture.flashloan_sizing import choose_flashloan_size
 from victor_ai_bot.execution_capture.models import OpportunityEnvelope, SafeSizePoint
+from victor_ai_bot.flashloan_capacity import (
+    observe_flashloan_asset_capacity,
+    provider_address_from_config,
+    raw_capacity_to_usd,
+)
 from victor_ai_bot.flashloan_providers import (
     EXECUTABLE_FLASHLOAN_PROVIDERS,
     filter_executable_flashloan_providers,
@@ -175,3 +182,67 @@ def test_flashloan_provider_registry_is_fail_closed_and_deterministic():
     assert filter_executable_flashloan_providers(
         ['maker', 'aave', 'AAVE', 'uniswap_flash', 'balancer']
     ) == ['aave', 'balancer']
+
+
+class _FakeRpc:
+    def __init__(self, result='0x0'):
+        self.result = result
+        self.calls = []
+
+    async def eth_call(self, to, data_hex, *, block='latest', from_addr=None):
+        self.calls.append((to, data_hex, block, from_addr))
+        return type('Result', (), {'ok': True, 'result': self.result, 'error': None})()
+
+
+class _Chain:
+    aave_v3_pool = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'
+    balancer_vault = '0xba12222222228d8ba445958a75a0704d566bf2c8'
+
+
+class _Cfg:
+    chain = _Chain()
+
+
+@pytest.mark.asyncio
+async def test_provider_asset_capacity_observes_raw_provider_balance():
+    rpc = _FakeRpc('0x' + format(25 * 10**18, '064x'))
+    result = await observe_flashloan_asset_capacity(
+        rpc,
+        provider=' AAVE ',
+        asset='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+        provider_address=_Chain.aave_v3_pool,
+    )
+    assert result['ok'] is True
+    assert result['raw_available'] == 25 * 10**18
+    assert result['capacity_usd'] is None
+    assert result['source'] == 'erc20_balance_of_provider_contract'
+    assert rpc.calls[0][1].startswith('0x70a08231')
+
+
+@pytest.mark.asyncio
+async def test_provider_asset_capacity_fails_closed_for_unsupported_provider():
+    rpc = _FakeRpc()
+    result = await observe_flashloan_asset_capacity(
+        rpc,
+        provider='maker',
+        asset='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+        provider_address=_Chain.aave_v3_pool,
+    )
+    assert result['ok'] is False
+    assert result['raw_available'] is None
+    assert result['capacity_usd'] is None
+    assert result['reason_code'].startswith('unsupported_flashloan_provider:')
+    assert rpc.calls == []
+
+
+def test_provider_capacity_usd_requires_explicit_price():
+    assert raw_capacity_to_usd(25 * 10**18, asset_price_usd=2500.0, asset_decimals=18) == pytest.approx(62_500.0)
+    with pytest.raises(ValueError, match='asset_price_usd_invalid'):
+        raw_capacity_to_usd(25 * 10**18, asset_price_usd=0.0, asset_decimals=18)
+
+
+def test_provider_address_resolution_uses_canonical_config():
+    assert provider_address_from_config(_Cfg(), 'aave') == _Chain.aave_v3_pool
+    assert provider_address_from_config(_Cfg(), 'balancer') == _Chain.balancer_vault
+    with pytest.raises(ValueError, match='unsupported_flashloan_provider:maker'):
+        provider_address_from_config(_Cfg(), 'maker')
