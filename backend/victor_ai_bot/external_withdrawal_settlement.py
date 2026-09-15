@@ -83,27 +83,30 @@ def external_withdrawal_recipient(calldata: str) -> str:
     return ""
 
 
+def _log_matches_withdrawal_destination(log: Mapping[str, Any], *, executor: str, destination: str) -> bool:
+    if not isinstance(log, Mapping) or _address(log.get("address")) != executor:
+        return False
+    topics = log.get("topics")
+    if not isinstance(topics, list) or not topics:
+        return False
+    topic = str(topics[0] or "").lower()
+    if topic == WITHDRAWAL_TOPIC0.lower():
+        return len(topics) >= 3 and _topic_address(topics[2]) == destination
+    if topic == CONVERTED_TOPIC0.lower():
+        return len(topics) >= 4 and _topic_address(topics[3]) == destination
+    return False
+
+
 def _matching_logs(receipt: Mapping[str, Any], *, executor: str, destination: str) -> list[Mapping[str, Any]]:
     logs = receipt.get("logs")
     if not isinstance(logs, list):
         return []
     executor_s = _address(executor)
     destination_s = _address(destination)
-    matches: list[Mapping[str, Any]] = []
-    for log in logs:
-        if not isinstance(log, Mapping) or _address(log.get("address")) != executor_s:
-            continue
-        topics = log.get("topics")
-        if not isinstance(topics, list) or not topics:
-            continue
-        topic = str(topics[0] or "").lower()
-        if topic == WITHDRAWAL_TOPIC0.lower():
-            if len(topics) >= 3 and _topic_address(topics[2]) == destination_s:
-                matches.append(log)
-        elif topic == CONVERTED_TOPIC0.lower():
-            if len(topics) >= 4 and _topic_address(topics[3]) == destination_s:
-                matches.append(log)
-    return matches
+    return [
+        log for log in logs
+        if _log_matches_withdrawal_destination(log, executor=executor_s, destination=destination_s)
+    ]
 
 
 def _decode_direct_withdrawal_effect(
