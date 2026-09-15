@@ -68,6 +68,21 @@ def _word_address(word: int) -> str:
     return "0x" + f"{int(word):064x}"[-40:]
 
 
+def external_withdrawal_recipient(calldata: str) -> str:
+    """Return the recipient encoded by a supported withdrawal calldata payload."""
+    raw = _hex_bytes(calldata)
+    if raw is None or len(raw) < 4:
+        return ""
+    selector_hex = raw[:4].hex()
+    if selector_hex == WITHDRAW_SELECTOR:
+        words = _calldata_words(calldata, 3)
+        return _word_address(words[1]) if words is not None else ""
+    if selector_hex == CONVERT_WITHDRAW_SELECTOR:
+        words = _calldata_words(calldata, 7)
+        return _word_address(words[4]) if words is not None else ""
+    return ""
+
+
 def _matching_logs(receipt: Mapping[str, Any], *, executor: str, destination: str) -> list[Mapping[str, Any]]:
     logs = receipt.get("logs")
     if not isinstance(logs, list):
