@@ -175,7 +175,7 @@ class AnvilForkExecutor:
         deadline = time.monotonic() + self.startup_timeout_s
         while time.monotonic() < deadline:
             line = process.stdout.readline() if process.stdout is not None else ''
-            match = re.search(r'Listening on (127[.]0[.]0[.]1):(\\d+)', line)
+            match = re.search(r'Listening on (127[.]0[.]0[.]1):([0-9]+)', line)
             if match:
                 return process, f'http://{match.group(1)}:{match.group(2)}'
             if process.poll() is not None:
