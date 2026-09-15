@@ -2,6 +2,12 @@ from dataclasses import replace
 
 from victor_ai_bot.execution_capture.flashloan_sizing import choose_flashloan_size
 from victor_ai_bot.execution_capture.models import OpportunityEnvelope, SafeSizePoint
+from victor_ai_bot.flashloan_providers import (
+    EXECUTABLE_FLASHLOAN_PROVIDERS,
+    filter_executable_flashloan_providers,
+    is_executable_flashloan_provider,
+    normalize_flashloan_provider,
+)
 
 
 def _env():
@@ -158,3 +164,14 @@ def test_flashloan_sizing_fails_closed_when_capital_family_target_is_zero():
     )
     assert result['allowed'] is False
     assert 'family_target_zero' in result['reason_codes']
+
+
+def test_flashloan_provider_registry_is_fail_closed_and_deterministic():
+    assert EXECUTABLE_FLASHLOAN_PROVIDERS == ('aave', 'balancer')
+    assert normalize_flashloan_provider(' AAVE ') == 'aave'
+    assert is_executable_flashloan_provider('balancer') is True
+    assert is_executable_flashloan_provider('maker') is False
+    assert is_executable_flashloan_provider('uniswap_flash') is False
+    assert filter_executable_flashloan_providers(
+        ['maker', 'aave', 'AAVE', 'uniswap_flash', 'balancer']
+    ) == ['aave', 'balancer']
