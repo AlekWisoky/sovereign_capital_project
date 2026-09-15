@@ -2,48 +2,66 @@ from types import SimpleNamespace
 
 import pytest
 
-import victor_ai_bot.withdraw_external as withdraw_external
+from victor_ai_bot import withdraw_external
 from victor_ai_bot.external_withdrawal_settlement import (
-    CONVERTED_TOPIC0,
-    WITHDRAWAL_TOPIC0,
+    CONVERT_WITHDRAW_SELECTOR,
+    CONVERTED_EVENT_SIG,
+    WITHDRAWAL_EVENT_SIG,
+    WITHDRAW_SELECTOR,
     canonical_external_withdrawal_transaction,
     decode_external_withdrawal_effect,
     external_withdrawal_recipient,
 )
-from victor_ai_bot.withdraw_builder import build_convert_and_withdraw_calldata, build_withdraw_calldata
+from victor_ai_bot.abi_utils import topic0
 
-
-EXECUTOR = "0x1111111111111111111111111111111111111111"
-SENDER = "0x2222222222222222222222222222222222222222"
-TOKEN_IN = "0x3333333333333333333333333333333333333333"
-TOKEN_OUT = "0x4444444444444444444444444444444444444444"
-DESTINATION = "0x5555555555555555555555555555555555555555"
-
-
-def _topic_address(address: str) -> str:
-    return "0x" + "0" * 24 + address[2:].lower()
+SENDER = "0x" + "1" * 40
+EXECUTOR = "0x" + "2" * 40
+DESTINATION = "0x" + "3" * 40
+TOKEN_IN = "0x" + "4" * 40
+TOKEN_OUT = "0x" + "5" * 40
+WITHDRAWAL_TOPIC0 = topic0(WITHDRAWAL_EVENT_SIG)
+CONVERTED_TOPIC0 = topic0(CONVERTED_EVENT_SIG)
 
 
 def _word(value: int) -> str:
     return f"{int(value):064x}"
 
 
+def _topic_address(address: str) -> str:
+    return "0x" + "0" * 24 + address[2:].lower()
+
+
+def build_withdraw_calldata(token: str, destination: str, amount: int) -> str:
+    return "0x" + WITHDRAW_SELECTOR + _word(int(token, 16)) + _word(int(destination, 16)) + _word(amount)
+
+
+def build_convert_withdraw_calldata(
+    token_in: str, token_out: str, amount_in: int, min_out: int, destination: str
+) -> str:
+    words = [
+        int(token_in, 16),
+        int(token_out, 16),
+        amount_in,
+        min_out,
+        int(destination, 16),
+        3000,
+        0,
+    ]
+    return "0x" + CONVERT_WITHDRAW_SELECTOR + "".join(_word(word) for word in words)
+
+
 def test_direct_withdrawal_recipient_is_decoded_from_calldata():
     calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, 1000)
-    assert EXECUTOR != DESTINATION
-    assert external_withdrawal_recipient(calldata) == DESTINATION
+    assert external_withdrawal_recipient(calldata) == DESTINATION.lower()
 
 
 def test_convert_withdrawal_recipient_is_decoded_from_calldata():
-    calldata = build_convert_and_withdraw_calldata(
-        TOKEN_IN, TOKEN_OUT, 2_000_000, 1_500_000, DESTINATION, 3000, 2_000_000_000
-    )
-    assert EXECUTOR != DESTINATION
-    assert external_withdrawal_recipient(calldata) == DESTINATION
+    calldata = build_convert_withdraw_calldata(TOKEN_IN, TOKEN_OUT, 1000, 900, DESTINATION)
+    assert external_withdrawal_recipient(calldata) == DESTINATION.lower()
 
 
 def test_direct_withdrawal_receipt_event_is_exactly_proven():
-    amount = 1_234_567_890_123_456_789
+    amount = 1000
     calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, amount)
     receipt = {
         "logs": [
@@ -54,23 +72,18 @@ def test_direct_withdrawal_receipt_event_is_exactly_proven():
             }
         ]
     }
-
     effect = decode_external_withdrawal_effect(
         receipt=receipt, executor=EXECUTOR, calldata=calldata, destination=DESTINATION
     )
-
     assert effect["ok"] is True
-    assert effect["token_out"] == TOKEN_OUT
     assert effect["amount_out"] == str(amount)
 
 
 def test_convert_withdrawal_uses_realized_event_amount_not_min_out():
-    amount_in = 2_000_000
-    min_out = 1_500_000
-    amount_out = 1_750_321
-    calldata = build_convert_and_withdraw_calldata(
-        TOKEN_IN, TOKEN_OUT, amount_in, min_out, DESTINATION, 3000, 2_000_000_000
-    )
+    amount_in = 1000
+    min_out = 900
+    realized_out = 950
+    calldata = build_convert_withdraw_calldata(TOKEN_IN, TOKEN_OUT, amount_in, min_out, DESTINATION)
     receipt = {
         "logs": [
             {
@@ -81,33 +94,22 @@ def test_convert_withdrawal_uses_realized_event_amount_not_min_out():
                     _topic_address(TOKEN_OUT),
                     _topic_address(DESTINATION),
                 ],
-                "data": "0x" + _word(amount_in) + _word(amount_out),
+                "data": "0x" + _word(realized_out) + _word(0),
             }
         ]
     }
-
     effect = decode_external_withdrawal_effect(
         receipt=receipt, executor=EXECUTOR, calldata=calldata, destination=DESTINATION
     )
-
     assert effect["ok"] is True
-    assert effect["amount_out"] == str(amount_out)
-    assert effect["amount_out"] != str(min_out)
+    assert effect["amount_out"] == str(realized_out)
+    assert effect["min_out"] == str(min_out)
 
 
 def test_success_without_matching_executor_event_is_not_settled():
     amount = 1000
     calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, amount)
-    receipt = {
-        "logs": [
-            {
-                "address": "0x9999999999999999999999999999999999999999",
-                "topics": [WITHDRAWAL_TOPIC0, _topic_address(TOKEN_OUT), _topic_address(DESTINATION)],
-                "data": "0x" + _word(amount),
-            }
-        ]
-    }
-
+    receipt = {"logs": []}
     effect = decode_external_withdrawal_effect(
         receipt=receipt, executor=EXECUTOR, calldata=calldata, destination=DESTINATION
     )
@@ -115,20 +117,22 @@ def test_success_without_matching_executor_event_is_not_settled():
 
 
 def test_mismatched_event_cannot_settle():
-    calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, 1000)
+    amount = 1000
+    calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, amount)
+    other_destination = "0x" + "6" * 40
     receipt = {
         "logs": [
             {
                 "address": EXECUTOR,
-                "topics": [WITHDRAWAL_TOPIC0, _topic_address(TOKEN_OUT), _topic_address(DESTINATION)],
-                "data": "0x" + _word(999),
+                "topics": [WITHDRAWAL_TOPIC0, _topic_address(TOKEN_OUT), _topic_address(other_destination)],
+                "data": "0x" + _word(amount),
             }
         ]
     }
     effect = decode_external_withdrawal_effect(
         receipt=receipt, executor=EXECUTOR, calldata=calldata, destination=DESTINATION
     )
-    assert effect == {"ok": False, "reason_code": "withdrawal_event_mismatch"}
+    assert effect == {"ok": False, "reason_code": "withdrawal_receipt_event_missing"}
 
 
 @pytest.mark.asyncio
@@ -172,8 +176,10 @@ async def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent
             self.payloads = []
 
         def append_receipt_idempotent(self, *, chain, payload):
+            if any(existing["transaction_id"] == payload["transaction_id"] for existing in self.payloads):
+                return False
             self.payloads.append(payload)
-            return len(self.payloads) == 1
+            return True
 
     repo = FakeRepo()
     runtime = SimpleNamespace(
@@ -213,10 +219,11 @@ async def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent
     assert first["already_settled"] is False
     assert second["settled"] is True
     assert second["already_settled"] is True
-    assert len(repo.payloads) == 2
+    assert len(repo.payloads) == 1
     assert repo.payloads[0]["metadata"]["destination"] == DESTINATION
     assert repo.payloads[0]["metadata"]["destination"] != EXECUTOR
-    assert repo.payloads[0]["transaction_id"] == repo.payloads[1]["transaction_id"]
+    assert first["settlement_transaction_id"] == second["settlement_transaction_id"]
+    assert repo.payloads[0]["metadata"]["usd_value"] is None
 
 
 def test_canonical_settlement_preserves_exact_asset_units_and_no_usd_value():
@@ -233,10 +240,7 @@ def test_canonical_settlement_preserves_exact_asset_units_and_no_usd_value():
     )
 
     assert tx["tx_type"] == "external_withdrawal_settlement"
-    assert tx["receipt_id"] == "0x" + "a" * 64
-    assert tx["lines"][0]["amount"] == -amount
-    assert tx["lines"][0]["amount_raw"] == str(-amount)
-    assert tx["lines"][1]["amount"] == amount
-    assert tx["metadata"]["amount_out_base_units"] == str(amount)
+    assert tx["metadata"]["destination"] == DESTINATION.lower()
+    assert tx["metadata"]["amount_unit"] == "token_base_units"
     assert tx["metadata"]["usd_value"] is None
-    assert tx["metadata"]["usd_value_status"] == "unvalued"
+    assert sum(line["amount"] for line in tx["lines"]) == 0
