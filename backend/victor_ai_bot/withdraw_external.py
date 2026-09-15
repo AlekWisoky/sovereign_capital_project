@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from typing import Any, Dict, Mapping
 
 from fastapi import APIRouter, Body, Depends, Request
@@ -11,6 +12,11 @@ from .jsonsafe import to_json_safe as json_safe
 from .tx_confirmation import assess_submitted_tx
 from .rpc import JsonRpcClient
 from .api_routes._route_helpers import attach_summary_contract
+from .external_withdrawal_settlement import (
+    canonical_external_withdrawal_transaction,
+    decode_external_withdrawal_effect,
+    external_withdrawal_recipient,
+)
 
 router = APIRouter(tags=["withdraw"])
 
@@ -38,7 +44,7 @@ def _is_tx_hash(value: Any) -> bool:
 
 
 def _quantity(value: Any) -> str:
-    text = str(value or "").strip()
+    text = str(value if value is not None else "").strip()
     if not text:
         return ""
     try:
@@ -80,6 +86,46 @@ def _runtime(request: Request):
     return request.app.state.runtime  # type: ignore[attr-defined]
 
 
+def _persist_settlement(runtime: Any, *, chain: str, tx_hash: str, intent_id: str,
+                        from_address: str, executor: str, calldata: str,
+                        receipt: Mapping[str, Any]) -> Dict[str, Any]:
+    repo = getattr(runtime, "_ledger_repo", None)
+    if repo is None or not hasattr(repo, "append_receipt_idempotent"):
+        return {"ok": False, "reason_code": "settlement_ledger_unavailable"}
+
+    destination = external_withdrawal_recipient(calldata)
+    if not destination:
+        return {"ok": False, "reason_code": "invalid_settlement_recipient"}
+
+    effect = decode_external_withdrawal_effect(
+        receipt=receipt, executor=executor, calldata=calldata, destination=destination
+    )
+    if not effect.get("ok"):
+        return {"ok": False, "reason_code": str(effect.get("reason_code") or "settlement_effect_unverified")}
+
+    tx = canonical_external_withdrawal_transaction(
+        chain=chain,
+        receipt_id=tx_hash,
+        intent_id=intent_id,
+        from_address=from_address,
+        destination=destination,
+        calldata=calldata,
+        effect=effect,
+        ts_ms=int(time.time() * 1000),
+    )
+    try:
+        inserted = bool(repo.append_receipt_idempotent(chain=chain, payload=tx))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return {"ok": False, "reason_code": "settlement_ledger_persist_failed"}
+    return {
+        "ok": True,
+        "settled": True,
+        "already_settled": not inserted,
+        "transaction_id": str(tx["transaction_id"]),
+        "effect": effect,
+    }
+
+
 @router.post("/api/withdraw/external/reconcile", dependencies=[Depends(require_admin)])
 async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] = Body(...)):
     allowed = {"intent_id", "tx_hash", "chain_id", "from_address", "to", "data", "value"}
@@ -110,13 +156,7 @@ async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] 
     if len(intent_id) != 64:
         return json_safe(_reject("invalid_intent_id"))
 
-    expected_intent = _intent_digest(
-        chain_id=chain_id,
-        from_address=from_address,
-        to=to,
-        data=data,
-        value=value,
-    )
+    expected_intent = _intent_digest(chain_id=chain_id, from_address=from_address, to=to, data=data, value=value)
     if intent_id != expected_intent:
         return json_safe(_reject("intent_mismatch"))
 
@@ -140,16 +180,10 @@ async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] 
         tx = await rpc.get_tx_by_hash(tx_hash)
         if not isinstance(tx, Mapping):
             status = await assess_submitted_tx(rpc, tx_hash=tx_hash, send_mode="public")
-            return json_safe({
-                "ok": True,
-                "status": str(status.tx_status),
-                "tx_hash": tx_hash,
-                "intent_id": intent_id,
-                "settled": False,
-                "submission_evidence": True,
-                "settlement_truth": False,
-                "proof_reason": str(status.proof_reason),
-            })
+            return json_safe({"ok": True, "status": str(status.tx_status), "tx_hash": tx_hash,
+                              "intent_id": intent_id, "settled": False,
+                              "submission_evidence": True, "settlement_truth": False,
+                              "proof_reason": str(status.proof_reason)})
 
         actual_from = str(tx.get("from", "") or "").lower()
         actual_to = str(tx.get("to", "") or "").lower()
@@ -169,16 +203,30 @@ async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] 
 
         status = await assess_submitted_tx(rpc, tx_hash=tx_hash, send_mode="public")
         receipt_truth = status.tx_status in {"mined_success", "mined_reverted"}
-        return json_safe(attach_summary_contract({
-            "ok": True,
-            "status": str(status.tx_status),
-            "tx_hash": tx_hash,
-            "intent_id": intent_id,
-            "settled": False,
-            "submission_evidence": True,
-            "settlement_truth": receipt_truth,
-            "receipt_status": status.receipt_status,
-            "block_number": status.block_number,
-            "proof_reason": str(status.proof_reason),
+        response: Dict[str, Any] = {
+            "ok": True, "status": str(status.tx_status), "tx_hash": tx_hash,
+            "intent_id": intent_id, "settled": False, "submission_evidence": True,
+            "settlement_truth": receipt_truth, "receipt_status": status.receipt_status,
+            "block_number": status.block_number, "proof_reason": str(status.proof_reason),
             "canonical_receipt": dict(status.receipt or {}) if receipt_truth else None,
-        }, family="withdraw_external_reconciliation", read_model="withdraw_external_reconciliation_v1", runtime=runtime))
+        }
+        if status.tx_status == "mined_success":
+            settlement = _persist_settlement(
+                runtime, chain=str(getattr(cfg.chain, "name", "") or "default"),
+                tx_hash=tx_hash, intent_id=intent_id, from_address=from_address,
+                calldata=data, receipt=dict(status.receipt or {}),
+                executor=configured_executor,
+            )
+            if settlement.get("ok"):
+                response.update({"settled": True, "settlement_truth": True,
+                                 "settlement_status": "settled",
+                                 "settlement_transaction_id": settlement.get("transaction_id"),
+                                 "already_settled": bool(settlement.get("already_settled", False)),
+                                 "settlement_effect": settlement.get("effect")})
+            else:
+                response.update({"settlement_status": "unverified",
+                                 "settlement_reason_code": settlement.get("reason_code")})
+        elif status.tx_status == "mined_reverted":
+            response["settlement_status"] = "reverted"
+            response["settlement_truth"] = True
+        return json_safe(attach_summary_contract(response, family="withdraw_external_reconciliation", read_model="withdraw_external_reconciliation_v1", runtime=runtime))
