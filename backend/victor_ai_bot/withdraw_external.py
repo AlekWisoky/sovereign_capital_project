@@ -44,7 +44,7 @@ def _is_tx_hash(value: Any) -> bool:
 
 
 def _quantity(value: Any) -> str:
-    text = str(value or "").strip()
+    text = str(value if value is not None else "").strip()
     if not text:
         return ""
     try:
