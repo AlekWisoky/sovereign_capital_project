@@ -3,11 +3,9 @@ import {
   setWealthGoal,
   tradeOpportunity,
   withdrawExecute,
-  withdrawPrepare,
   withdrawConfig,
   withdrawAllExecute,
   convertWithdrawExecute,
-  convertWithdrawPrepare,
   saveRpcPreferences,
   setLaunchMode,
   enableNextFamily,
@@ -48,21 +46,14 @@ async function externalWalletWithdraw(
   const session = walletConnectState();
   if (!session.connected || !session.address) denied('wallet_not_connected');
 
-  const prepared = await withdrawPrepare(
-    baseUrl,
-    {
-      token: req.token,
-      to: req.to,
-      amount: req.amount,
-      from_address: session.address,
-    },
-    adminKey,
-  );
-  const submitted = await submitPreparedExternalWalletTransaction(prepared as PreparedOffRamp);
+  const prepared = req.prepared as PreparedOffRamp | undefined;
+  if (!prepared) denied('prepared_transaction_required');
+
+  const submitted = await submitPreparedExternalWalletTransaction(prepared);
   const reconciled = await reconcileSubmittedExternalWalletTransaction(
     baseUrl,
     adminKey,
-    prepared as PreparedOffRamp,
+    prepared,
     submitted.txHash,
   );
   return {
@@ -81,25 +72,14 @@ async function externalWalletConvertWithdraw(
   const session = walletConnectState();
   if (!session.connected || !session.address) denied('wallet_not_connected');
 
-  const prepared = await convertWithdrawPrepare(
-    baseUrl,
-    {
-      token_in: req.token_in,
-      token_out: req.token_out,
-      to: req.to,
-      amount_in: req.amount_in,
-      min_out: req.min_out,
-      fee: req.fee,
-      deadline: req.deadline,
-      from_address: session.address,
-    },
-    adminKey,
-  );
-  const submitted = await submitPreparedExternalWalletTransaction(prepared as PreparedOffRamp);
+  const prepared = req.prepared as PreparedOffRamp | undefined;
+  if (!prepared) denied('prepared_transaction_required');
+
+  const submitted = await submitPreparedExternalWalletTransaction(prepared);
   const reconciled = await reconcileSubmittedExternalWalletTransaction(
     baseUrl,
     adminKey,
-    prepared as PreparedOffRamp,
+    prepared,
     submitted.txHash,
   );
   return {
