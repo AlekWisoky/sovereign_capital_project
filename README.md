@@ -107,11 +107,11 @@ OMAR is an advisory/learning subsystem, not an identity authority and not a sett
 - OMAR learning is accepted only after canonical settlement truth and exact lineage validation.
 - OMAR remains explicitly enabled/configured; staging must keep live execution authority disabled.
 
-The controlled integration branch is:
+The historical controlled integration branch was:
 
 `integration/canonical-omar-controlled`
 
-The single integration PR is #88 against `main`.
+Current `main` is the authoritative integration line. The latest merged acceptance slice is PR #158; its post-merge main CI is the current verification gate.
 
 ## Withdrawals and WalletConnect
 
@@ -119,10 +119,13 @@ The default withdrawal posture is **external signing**.
 
 1. Backend validates destination, amount, executor, capital truth, and produces deterministic transaction calldata through `/api/withdraw/prepare` or `/api/withdraw/convert/prepare`.
 2. Mobile's WalletConnect/EIP-1193 session provides the external wallet provider.
-3. **Current gap:** the OffRamp screen still stops at preparation; the final action that verifies the prepared sender/chain/transaction fields, invokes `eth_sendTransaction`, records the returned hash as submitted/pending, and reconciles it against backend/read-RPC truth is not yet wired.
-4. Backend hot-signing (`withdraw_mode=backend`) is a separate privileged mode and is disabled in public/staging deployments.
+3. The guarded OffRamp mutation path verifies the connected sender/chain and prepared transaction fields, invokes `eth_sendTransaction`, validates the returned transaction hash, retains the exact bound transaction, and immediately reconciles through `/api/withdraw/external/reconcile`.
+4. Submitted/pending state is evidence of transaction progress only. Completion and economics are accepted only from canonical receipt/settlement truth.
+5. PR #158 added focused acceptance coverage for wrong chain, missing wallet, invalid transaction hash, and successful submission transition with exact bound transaction fields/status. PR #158 is merged as `b8fbaab1d868a193d1aba670fdd72f1132d4591b`; its PR CI is green and the post-merge main CI is the remaining immediate verification gate.
 
-Until step 3 is complete and tested, external-wallet withdrawal is **not** considered end-to-end complete. Do not replace this gap with client-side calldata construction or automatic broadcast.
+Do not replace this path with client-side calldata construction, optimistic settlement, automatic broadcast, or a second withdrawal authority.
+
+Backend hot-signing (`withdraw_mode=backend`) is a separate privileged mode and is disabled in public/staging deployments.
 
 Withdrawal controls remain fail-closed on invalid input, missing dependencies, destination policy violations, degraded capital truth, and public-mode execution restrictions.
 
