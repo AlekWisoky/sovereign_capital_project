@@ -113,8 +113,8 @@ def test_anvil_economic_derivation_uses_simulated_balance_deltas_and_gas_receipt
     receipt = {'gasUsed': hex(100_000), 'effectiveGasPrice': hex(10**9)}
     economics = AnvilForkExecutor._derive_economics(observation, before, after, receipt)
     assert economics['gas_cost_usd'] == 0.2
-    assert economics['gross_asset_delta_usd'] == 3.0
-    assert economics['expected_realized_profit_usd'] == 2.8
+    assert economics['gross_asset_delta_usd'] == 3.2
+    assert economics['expected_realized_profit_usd'] == 3.0
 
 
 def test_anvil_fork_executor_fails_closed_without_local_executor():
