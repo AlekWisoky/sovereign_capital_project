@@ -1,8 +1,14 @@
+from types import SimpleNamespace
+
+import pytest
+
+import victor_ai_bot.withdraw_external as withdraw_external
 from victor_ai_bot.external_withdrawal_settlement import (
     CONVERTED_TOPIC0,
     WITHDRAWAL_TOPIC0,
     canonical_external_withdrawal_transaction,
     decode_external_withdrawal_effect,
+    external_withdrawal_recipient,
 )
 from victor_ai_bot.withdraw_builder import build_convert_and_withdraw_calldata, build_withdraw_calldata
 
@@ -20,6 +26,20 @@ def _topic_address(address: str) -> str:
 
 def _word(value: int) -> str:
     return f"{int(value):064x}"
+
+
+def test_direct_withdrawal_recipient_is_decoded_from_calldata():
+    calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, 1000)
+    assert EXECUTOR != DESTINATION
+    assert external_withdrawal_recipient(calldata) == DESTINATION
+
+
+def test_convert_withdrawal_recipient_is_decoded_from_calldata():
+    calldata = build_convert_and_withdraw_calldata(
+        TOKEN_IN, TOKEN_OUT, 2_000_000, 1_500_000, DESTINATION, 3000, 2_000_000_000
+    )
+    assert EXECUTOR != DESTINATION
+    assert external_withdrawal_recipient(calldata) == DESTINATION
 
 
 def test_direct_withdrawal_receipt_event_is_exactly_proven():
@@ -109,6 +129,100 @@ def test_mismatched_event_cannot_settle():
         receipt=receipt, executor=EXECUTOR, calldata=calldata, destination=DESTINATION
     )
     assert effect == {"ok": False, "reason_code": "withdrawal_event_mismatch"}
+
+
+def test_reconcile_success_settles_to_calldata_recipient_and_is_idempotent(monkeypatch: pytest.MonkeyPatch):
+    amount = 1000
+    calldata = build_withdraw_calldata(TOKEN_OUT, DESTINATION, amount)
+    tx_hash = "0x" + "a" * 64
+    chain_id = 1
+    intent_id = withdraw_external._intent_digest(
+        chain_id=chain_id, from_address=SENDER, to=EXECUTOR, data=calldata, value=0
+    )
+    receipt = {
+        "logs": [
+            {
+                "address": EXECUTOR,
+                "topics": [WITHDRAWAL_TOPIC0, _topic_address(TOKEN_OUT), _topic_address(DESTINATION)],
+                "data": "0x" + _word(amount),
+            }
+        ]
+    }
+
+    class FakeRpc:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get_tx_by_hash(self, requested_hash):
+            assert requested_hash == tx_hash
+            return {
+                "from": SENDER,
+                "to": EXECUTOR,
+                "input": calldata,
+                "value": "0x0",
+                "chainId": "0x1",
+            }
+
+    class FakeRepo:
+        def __init__(self):
+            self.payloads = []
+
+        def append_receipt_idempotent(self, *, chain, payload):
+            self.payloads.append(payload)
+            return len(self.payloads) == 1
+
+    repo = FakeRepo()
+    runtime = SimpleNamespace(
+        cfg=SimpleNamespace(
+            chain=SimpleNamespace(chain_id=chain_id, name="ethereum"),
+            execution=SimpleNamespace(executor_address=EXECUTOR),
+        ),
+        rpc_manager=SimpleNamespace(best_read=lambda: "https://rpc.example"),
+        _ledger_repo=repo,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=runtime)))
+    status = SimpleNamespace(
+        tx_status="mined_success",
+        receipt_status=1,
+        block_number=123,
+        proof_reason="receipt_success",
+        receipt=receipt,
+    )
+
+    monkeypatch.setattr(withdraw_external, "JsonRpcClient", lambda *args, **kwargs: FakeRpc())
+    monkeypatch.setattr(withdraw_external, "assess_submitted_tx", lambda *args, **kwargs: status)
+    monkeypatch.setattr(withdraw_external, "attach_summary_contract", lambda response, **kwargs: response)
+
+    first = await withdraw_external.reconcile_external_withdraw(request, {
+        "intent_id": intent_id,
+        "tx_hash": tx_hash,
+        "chain_id": chain_id,
+        "from_address": SENDER,
+        "to": EXECUTOR,
+        "data": calldata,
+        "value": 0,
+    })
+    second = await withdraw_external.reconcile_external_withdraw(request, {
+        "intent_id": intent_id,
+        "tx_hash": tx_hash,
+        "chain_id": chain_id,
+        "from_address": SENDER,
+        "to": EXECUTOR,
+        "data": calldata,
+        "value": 0,
+    })
+
+    assert first["settled"] is True
+    assert first["already_settled"] is False
+    assert second["settled"] is True
+    assert second["already_settled"] is True
+    assert len(repo.payloads) == 2
+    assert repo.payloads[0]["metadata"]["destination"] == DESTINATION
+    assert repo.payloads[0]["metadata"]["destination"] != EXECUTOR
+    assert repo.payloads[0]["transaction_id"] == repo.payloads[1]["transaction_id"]
 
 
 def test_canonical_settlement_preserves_exact_asset_units_and_no_usd_value():
