@@ -238,6 +238,32 @@ def decode_external_withdrawal_effect(
     return _build_effect(expected, event, converted=converted)
 
 
+def _external_withdrawal_lines(token: str, amount: int) -> list[Dict[str, Any]]:
+    return [
+        {"account": f"asset:{token}", "asset": token, "amount": -amount,
+         "family": "", "venue": "WITHDRAW", "note": "external_withdrawal_settlement",
+         "amount_raw": str(-amount)},
+        {"account": "equity:external_withdrawal", "asset": token, "amount": amount,
+         "family": "", "venue": "WITHDRAW", "note": "external_withdrawal_offset",
+         "amount_raw": str(amount)},
+    ]
+
+
+def _external_withdrawal_metadata(
+    *, intent_id: str, receipt_id: str, from_address: str, destination: str,
+    calldata: str, token: str, effect: Mapping[str, Any], amount: int,
+) -> Dict[str, Any]:
+    return {
+        "settlement_kind": "external_withdrawal", "settlement_status": "settled",
+        "intent_id": str(intent_id), "tx_hash": str(receipt_id),
+        "from_address": str(from_address).lower(), "destination": str(destination).lower(),
+        "calldata": str(calldata).lower(), "token_in": str(effect.get("token_in") or "").lower(),
+        "token_out": token, "amount_in_base_units": str(effect.get("amount_in") or ""),
+        "amount_out_base_units": str(effect.get("amount_out") or amount),
+        "amount_unit": "token_base_units", "usd_value": None, "usd_value_status": "unvalued",
+    }
+
+
 def canonical_external_withdrawal_transaction(
     *, chain: str, receipt_id: str, intent_id: str, from_address: str,
     destination: str, calldata: str, effect: Mapping[str, Any], ts_ms: int,
@@ -250,21 +276,10 @@ def canonical_external_withdrawal_transaction(
         "transaction_id": f"external-withdrawal-{receipt_id.lower()}",
         "ts_ms": int(ts_ms), "tx_type": "external_withdrawal_settlement",
         "chain": str(chain or ""), "receipt_id": str(receipt_id),
-        "lines": [
-            {"account": f"asset:{token}", "asset": token, "amount": -amount,
-             "family": "", "venue": "WITHDRAW", "note": "external_withdrawal_settlement",
-             "amount_raw": str(-amount)},
-            {"account": "equity:external_withdrawal", "asset": token, "amount": amount,
-             "family": "", "venue": "WITHDRAW", "note": "external_withdrawal_offset",
-             "amount_raw": str(amount)},
-        ],
-        "metadata": {
-            "settlement_kind": "external_withdrawal", "settlement_status": "settled",
-            "intent_id": str(intent_id), "tx_hash": str(receipt_id),
-            "from_address": str(from_address).lower(), "destination": str(destination).lower(),
-            "calldata": str(calldata).lower(), "token_in": str(effect.get("token_in") or "").lower(),
-            "token_out": token, "amount_in_base_units": str(effect.get("amount_in") or ""),
-            "amount_out_base_units": str(effect.get("amount_out") or amount),
-            "amount_unit": "token_base_units", "usd_value": None, "usd_value_status": "unvalued",
-        },
+        "lines": _external_withdrawal_lines(token, amount),
+        "metadata": _external_withdrawal_metadata(
+            intent_id=intent_id, receipt_id=receipt_id, from_address=from_address,
+            destination=destination, calldata=calldata, token=token,
+            effect=effect, amount=amount,
+        ),
     }
