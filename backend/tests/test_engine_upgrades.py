@@ -93,6 +93,7 @@ def test_heuristic_mev_candidates_are_observe_only_until_simulation_exists():
     assert all(row.lifecycle_eligibility == 'observe_only' for row in rows)
     assert all(row.policy_eligibility == 'observe_only' for row in rows)
     assert all(row.metadata.get('economics_status') == 'heuristic_non_authoritative' for row in rows)
+    assert all(row.expected_profit_usd == 0.0 for row in rows)
 
 
 def _valid_simulation_evidence():
@@ -125,6 +126,20 @@ def test_mev_search_records_simulation_gate_without_promoting_heuristic_economic
     assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
     assert rows[0].lifecycle_eligibility == 'observe_only'
     assert rows[0].policy_eligibility == 'observe_only'
+    assert rows[0].expected_profit_usd == 0.0
+
+
+def test_mev_search_accepts_only_explicit_simulation_economics():
+    evidence = dict(_valid_simulation_evidence(), economics={'expected_realized_profit_usd': 17.5})
+    rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x4', 'to': '0xrouter', 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'simulation_evidence': evidence}], 'high_risk_ratio': 0.2}, base_opportunities=[])
+    assert rows
+    row = rows[0]
+    assert row.expected_profit_usd == 17.5
+    assert row.expected_realized_profit_usd == 17.5
+    assert row.metadata['economics_status'] == 'simulation_backed'
+    assert row.metadata['economics_source'] == 'simulation_evidence'
+    assert row.lifecycle_eligibility == 'observe_only'
+    assert row.policy_eligibility == 'observe_only'
 
 
 def test_anvil_fork_executor_fails_closed_without_local_executor():
