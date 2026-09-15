@@ -139,43 +139,71 @@ def _decode_direct_withdrawal_effect(
     }
 
 
-def _decode_convert_withdrawal_effect(
-    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
-) -> Dict[str, Any]:
+def _convert_withdrawal_inputs(calldata: str, destination: str) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
     words = _calldata_words(calldata, 7)
     if words is None:
-        return {"ok": False, "reason_code": "invalid_convert_withdraw_calldata"}
-    expected_in = _word_address(words[0])
-    expected_out = _word_address(words[1])
-    expected_amount_in = words[2]
-    expected_min_out = words[3]
-    expected_to = _word_address(words[4])
-    if expected_to != destination:
-        return {"ok": False, "reason_code": "calldata_destination_mismatch"}
-    if expected_amount_in <= 0:
-        return {"ok": False, "reason_code": "invalid_convert_amount_in"}
+        return None, {"ok": False, "reason_code": "invalid_convert_withdraw_calldata"}
+    expected = {
+        "token_in": _word_address(words[0]),
+        "token_out": _word_address(words[1]),
+        "amount_in": words[2],
+        "min_out": words[3],
+        "destination": _word_address(words[4]),
+    }
+    if expected["destination"] != destination:
+        return None, {"ok": False, "reason_code": "calldata_destination_mismatch"}
+    if expected["amount_in"] <= 0:
+        return None, {"ok": False, "reason_code": "invalid_convert_amount_in"}
+    return expected, None
+
+
+def _convert_withdrawal_event(
+    *, receipt: Mapping[str, Any], executor: str, destination: str
+) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
     matches = [
         log for log in _matching_logs(receipt, executor=executor, destination=destination)
         if str((log.get("topics") or [""])[0]).lower() == CONVERTED_TOPIC0.lower()
     ]
     if len(matches) != 1:
         reason = "ambiguous_convert_receipt_event" if matches else "convert_receipt_event_missing"
-        return {"ok": False, "reason_code": reason}
+        return None, {"ok": False, "reason_code": reason}
     topics = list(matches[0].get("topics") or [])
-    token_in = _topic_address(topics[1])
-    token_out = _topic_address(topics[2])
     data = _hex_bytes(str(matches[0].get("data") or "0x")) or b""
-    amount_in = _uint_word(data, 0)
-    amount_out = _uint_word(data, 1)
-    valid_amount_out = amount_out is not None and amount_out >= expected_min_out and amount_out > 0
-    if token_in != expected_in or token_out != expected_out or amount_in != expected_amount_in or not valid_amount_out:
+    return {
+        "token_in": _topic_address(topics[1]),
+        "token_out": _topic_address(topics[2]),
+        "amount_in": _uint_word(data, 0),
+        "amount_out": _uint_word(data, 1),
+    }, None
+
+
+def _decode_convert_withdrawal_effect(
+    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
+) -> Dict[str, Any]:
+    expected, error = _convert_withdrawal_inputs(calldata, destination)
+    if error is not None:
+        return error
+    event, error = _convert_withdrawal_event(receipt=receipt, executor=executor, destination=destination)
+    if error is not None:
+        return error
+    assert expected is not None and event is not None
+    amount_out = event["amount_out"]
+    valid = (
+        event["token_in"] == expected["token_in"]
+        and event["token_out"] == expected["token_out"]
+        and event["amount_in"] == expected["amount_in"]
+        and amount_out is not None
+        and amount_out >= expected["min_out"]
+        and amount_out > 0
+    )
+    if not valid:
         return {"ok": False, "reason_code": "convert_event_mismatch"}
     return {
-        "ok": True, "kind": "convert_and_withdraw", "token": token_out,
+        "ok": True, "kind": "convert_and_withdraw", "token": event["token_out"],
         "amount": str(amount_out), "amount_unit": "token_base_units",
-        "token_in": token_in, "token_out": token_out,
-        "amount_in": str(amount_in), "amount_out": str(amount_out),
-        "min_out": str(expected_min_out),
+        "token_in": event["token_in"], "token_out": event["token_out"],
+        "amount_in": str(event["amount_in"]), "amount_out": str(amount_out),
+        "min_out": str(expected["min_out"]),
     }
 
 
