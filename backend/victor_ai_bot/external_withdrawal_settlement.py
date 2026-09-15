@@ -109,35 +109,54 @@ def _matching_logs(receipt: Mapping[str, Any], *, executor: str, destination: st
     ]
 
 
-def _decode_direct_withdrawal_effect(
-    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
-) -> Dict[str, Any]:
+def _direct_withdrawal_inputs(calldata: str, destination: str) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
     words = _calldata_words(calldata, 3)
     if words is None:
-        return {"ok": False, "reason_code": "invalid_withdraw_calldata"}
-    expected_token = _word_address(words[0])
-    expected_to = _word_address(words[1])
-    expected_amount = words[2]
-    if expected_to != destination:
-        return {"ok": False, "reason_code": "calldata_destination_mismatch"}
-    if expected_amount <= 0:
-        return {"ok": False, "reason_code": "invalid_withdraw_amount"}
+        return None, {"ok": False, "reason_code": "invalid_withdraw_calldata"}
+    expected = {
+        "token": _word_address(words[0]),
+        "destination": _word_address(words[1]),
+        "amount": words[2],
+    }
+    if expected["destination"] != destination:
+        return None, {"ok": False, "reason_code": "calldata_destination_mismatch"}
+    if expected["amount"] <= 0:
+        return None, {"ok": False, "reason_code": "invalid_withdraw_amount"}
+    return expected, None
+
+
+def _direct_withdrawal_event(
+    *, receipt: Mapping[str, Any], executor: str, destination: str
+) -> tuple[dict[str, Any] | None, Dict[str, Any] | None]:
     matches = [
         log for log in _matching_logs(receipt, executor=executor, destination=destination)
         if str((log.get("topics") or [""])[0]).lower() == WITHDRAWAL_TOPIC0.lower()
     ]
     if len(matches) != 1:
         reason = "ambiguous_withdrawal_receipt_event" if matches else "withdrawal_receipt_event_missing"
-        return {"ok": False, "reason_code": reason}
+        return None, {"ok": False, "reason_code": reason}
     topics = list(matches[0].get("topics") or [])
-    token = _topic_address(topics[1])
-    amount = _uint_word(_hex_bytes(str(matches[0].get("data") or "0x")) or b"", 0)
-    if token != expected_token or amount != expected_amount:
+    data = _hex_bytes(str(matches[0].get("data") or "0x")) or b""
+    return {"token": _topic_address(topics[1]), "amount": _uint_word(data, 0)}, None
+
+
+def _decode_direct_withdrawal_effect(
+    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
+) -> Dict[str, Any]:
+    expected, error = _direct_withdrawal_inputs(calldata, destination)
+    if error is not None:
+        return error
+    event, error = _direct_withdrawal_event(receipt=receipt, executor=executor, destination=destination)
+    if error is not None:
+        return error
+    assert expected is not None and event is not None
+    if event["token"] != expected["token"] or event["amount"] != expected["amount"]:
         return {"ok": False, "reason_code": "withdrawal_event_mismatch"}
+    amount = event["amount"]
     return {
-        "ok": True, "kind": "withdraw", "token": token,
+        "ok": True, "kind": "withdraw", "token": event["token"],
         "amount": str(amount), "amount_unit": "token_base_units",
-        "token_in": token, "token_out": token,
+        "token_in": event["token"], "token_out": event["token"],
         "amount_in": str(amount), "amount_out": str(amount),
     }
 
