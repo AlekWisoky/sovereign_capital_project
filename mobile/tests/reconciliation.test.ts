@@ -7,6 +7,7 @@ import {
 import {
   externalWalletTransactionFromPrepared,
   reconcileSubmittedExternalWalletTransaction,
+  submitPreparedExternalWalletTransaction,
   validatePreparedExternalWalletTransaction,
 } from '../src/api/offRampExternalWallet';
 import { setWalletConnectSession } from '../src/walletConnect/session';
@@ -122,6 +123,120 @@ test('external-wallet validation rejects a prepared sender different from the co
 
   assert.equal(result.ok, false);
   assert.equal(result.reasonCode, 'wallet_sender_mismatch');
+  setWalletConnectSession({ provider: null, address: null, isConnected: false });
+});
+
+test('external-wallet validation rejects a connected wallet on the wrong chain', async () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const provider = { request: async ({ method }: { method: string }) => method === 'eth_chainId' ? '0x2' : null };
+  setWalletConnectSession({ provider, address, isConnected: true });
+
+  const result = await validatePreparedExternalWalletTransaction({
+    ok: true,
+    from_address: address,
+    tx: {
+      to: '0x2222222222222222222222222222222222222222',
+      data: '0x1234',
+      value: '0x0',
+      chainId: 1,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reasonCode, 'wallet_chain_mismatch');
+  setWalletConnectSession({ provider: null, address: null, isConnected: false });
+});
+
+test('external-wallet submission fails closed when no wallet is connected', async () => {
+  setWalletConnectSession({ provider: null, address: null, isConnected: false });
+
+  await assert.rejects(
+    submitPreparedExternalWalletTransaction({
+      ok: true,
+      from_address: '0x1111111111111111111111111111111111111111',
+      tx: {
+        to: '0x2222222222222222222222222222222222222222',
+        data: '0x1234',
+        value: '0x0',
+        chainId: 1,
+      },
+    }),
+    /external_wallet_wallet_not_connected/,
+  );
+});
+
+test('external-wallet submission rejects an invalid transaction hash from the wallet', async () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const provider = {
+    request: async ({ method }: { method: string }) => {
+      if (method === 'eth_chainId') return '0x1';
+      if (method === 'eth_sendTransaction') return '0xdeadbeef';
+      return null;
+    },
+  };
+  setWalletConnectSession({ provider, address, isConnected: true });
+
+  await assert.rejects(
+    submitPreparedExternalWalletTransaction({
+      ok: true,
+      from_address: address,
+      tx: {
+        to: '0x2222222222222222222222222222222222222222',
+        data: '0x1234',
+        value: '0x0',
+        chainId: 1,
+      },
+    }),
+    /Wallet returned an invalid transaction hash/,
+  );
+  setWalletConnectSession({ provider: null, address: null, isConnected: false });
+});
+
+test('external-wallet submission returns the bound transaction and submitted status', async () => {
+  const address = '0x1111111111111111111111111111111111111111';
+  const transactionHash = `0x${'a'.repeat(64)}`;
+  let sent: Record<string, unknown> | undefined;
+  const provider = {
+    request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+      if (method === 'eth_chainId') return '0x1';
+      if (method === 'eth_sendTransaction') {
+        sent = params?.[0] as Record<string, unknown>;
+        return transactionHash;
+      }
+      return null;
+    },
+  };
+  setWalletConnectSession({ provider, address, isConnected: true });
+
+  const prepared = {
+    ok: true,
+    from_address: address,
+    tx: {
+      to: '0x2222222222222222222222222222222222222222',
+      data: '0x1234',
+      value: '0x0',
+      chainId: 1,
+    },
+  };
+  const result = await submitPreparedExternalWalletTransaction(prepared);
+
+  assert.equal(result.txHash, transactionHash);
+  assert.equal(result.status, 'submitted');
+  assert.equal(result.intentId.length, 64);
+  assert.deepEqual(result.transaction, {
+    from: address,
+    to: '0x2222222222222222222222222222222222222222',
+    data: '0x1234',
+    value: '0x0',
+    chainId: '0x1',
+  });
+  assert.deepEqual(sent, {
+    from: address,
+    to: '0x2222222222222222222222222222222222222222',
+    data: '0x1234',
+    value: '0x0',
+    chainId: '0x1',
+  });
   setWalletConnectSession({ provider: null, address: null, isConnected: false });
 });
 
