@@ -216,6 +216,34 @@ def _build_effect(
     return _build_withdraw_effect(expected, event)
 
 
+def _withdrawal_calldata_kind(calldata: str) -> tuple[bool | None, Dict[str, Any] | None]:
+    raw = _hex_bytes(calldata)
+    if raw is None or len(raw) < 4:
+        return None, {"ok": False, "reason_code": "invalid_settlement_calldata"}
+    selector_hex = raw[:4].hex()
+    if selector_hex == WITHDRAW_SELECTOR:
+        return False, None
+    if selector_hex == CONVERT_WITHDRAW_SELECTOR:
+        return True, None
+    return None, {"ok": False, "reason_code": "unsupported_withdrawal_calldata"}
+
+
+def _decode_withdrawal_components(
+    *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str,
+    converted: bool,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, Dict[str, Any] | None]:
+    expected, error = _withdrawal_inputs(calldata, destination, converted=converted)
+    if error is not None:
+        return None, None, error
+    event, error = _withdrawal_event(
+        receipt=receipt, executor=executor, destination=destination, converted=converted
+    )
+    if error is not None:
+        return None, None, error
+    assert expected is not None and event is not None
+    return expected, event, None
+
+
 def decode_external_withdrawal_effect(
     *, receipt: Mapping[str, Any], executor: str, calldata: str, destination: str
 ) -> Dict[str, Any]:
@@ -228,18 +256,13 @@ def decode_external_withdrawal_effect(
     destination_s = _address(destination)
     if not executor_s or not destination_s:
         return {"ok": False, "reason_code": "invalid_settlement_identity"}
-    raw_calldata = _hex_bytes(calldata)
-    if raw_calldata is None or len(raw_calldata) < 4:
-        return {"ok": False, "reason_code": "invalid_settlement_calldata"}
-    selector_hex = raw_calldata[:4].hex()
-    converted = selector_hex == CONVERT_WITHDRAW_SELECTOR
-    if selector_hex not in {WITHDRAW_SELECTOR, CONVERT_WITHDRAW_SELECTOR}:
-        return {"ok": False, "reason_code": "unsupported_withdrawal_calldata"}
-    expected, error = _withdrawal_inputs(calldata, destination_s, converted=converted)
+    converted, error = _withdrawal_calldata_kind(calldata)
     if error is not None:
         return error
-    event, error = _withdrawal_event(
-        receipt=receipt, executor=executor_s, destination=destination_s, converted=converted
+    assert converted is not None
+    expected, event, error = _decode_withdrawal_components(
+        receipt=receipt, executor=executor_s, calldata=calldata,
+        destination=destination_s, converted=converted,
     )
     if error is not None:
         return error
