@@ -26,10 +26,10 @@ at API boundaries.
 CALLDATA_BUILDER_ABI_VERSION = 2
 CALLDATA_BUILDER_VERSION = "2.0.0"
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from .ethabi import selector, enc_uint, enc_address, enc_bytes32
+from .flashloan_providers import is_executable_flashloan_provider, normalize_flashloan_provider
 from .route_encoding import EncLeg, route_id_hex
 
 
@@ -106,8 +106,16 @@ def build_execute_calldata(
     deadline: int,
     legs: List[Dict[str, Any]],
 ) -> Tuple[str, str]:
-    """Returns (calldata_hex, route_id_hex)."""
-    prov_id = PROVIDER_ID.get(provider, 1)
+    """Returns (calldata_hex, route_id_hex).
+
+    Unsupported providers fail closed here because this is the canonical
+    executable-provider boundary. Never silently reinterpret an unknown
+    provider as Aave.
+    """
+    normalized_provider = normalize_flashloan_provider(provider)
+    if not is_executable_flashloan_provider(normalized_provider):
+        raise ValueError(f"unsupported_flashloan_provider:{normalized_provider or 'missing'}")
+    prov_id = PROVIDER_ID[normalized_provider]
     enc_legs_for_id = [
         EncLeg(
             dex=str(l["dex"]),

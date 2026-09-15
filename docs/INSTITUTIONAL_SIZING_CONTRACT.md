@@ -28,14 +28,21 @@ The contract does not grant execution permission. `live_authority`, governance a
 
 ## Candidate institutional tiers
 
-These are design targets only and are disabled in this slice:
+These are design targets only and remain disabled until governance/live-authority explicitly activates them:
 
 - controlled_250k — $250,000
 - controlled_500k — $500,000
 - institutional_1m — $1,000,000
-- institutional_2m — $2,000,000
+- institutional_2_5m — $2,500,000
+- institutional_5m — $5,000,000
+
+These tier values are metadata/design targets. They are **not** a global ceiling on provider-backed flash-loan principal. Actual executable size remains the intersection of provider/asset availability, route and pool depth, slippage/requote economics, governance, risk, and capital-authority constraints.
 
 No existing configured borrow amount is replaced by these values.
+
+## Provider capacity boundary
+
+When an authoritative provider/asset capacity observation is available, it enters sizing as `liquidity.provider_capacity_usd` and is an ordinary hard constraint. It does not create a new capital authority, and missing provider capacity must not be replaced with a guessed fixed dollar ceiling.
 
 ## Settlement rule
 
@@ -43,4 +50,4 @@ Canonical settlement is not an input that authorizes a trade. It supplies verifi
 
 ## Next slice
 
-After this contract is reviewed and tested, the next implementation slice can make the existing V1 sizing kernel consume it. That later change must remain downstream of governance/admission, preserve hard caps, respect liquidity/depth and Internal Prime constraints, and keep `flash_arb` as the only real-capital family.
+After this contract is reviewed and tested, the existing V1 sizing kernel consumes it downstream of governance/admission, preserving hard caps, liquidity/depth and Internal Prime constraints, while keeping `flash_arb` as the only real-capital family. Final quote/requote remains the execution-time economics boundary.

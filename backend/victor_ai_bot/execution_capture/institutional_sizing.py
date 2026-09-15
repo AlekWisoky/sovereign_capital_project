@@ -11,7 +11,8 @@ INSTITUTIONAL_V1_TIERS: tuple[dict[str, Any], ...] = (
     {"id": "controlled_250k", "target_notional_usd": 250_000.0, "enabled": False},
     {"id": "controlled_500k", "target_notional_usd": 500_000.0, "enabled": False},
     {"id": "institutional_1m", "target_notional_usd": 1_000_000.0, "enabled": False},
-    {"id": "institutional_2m", "target_notional_usd": 2_000_000.0, "enabled": False},
+    {"id": "institutional_2_5m", "target_notional_usd": 2_500_000.0, "enabled": False},
+    {"id": "institutional_5m", "target_notional_usd": 5_000_000.0, "enabled": False},
 )
 
 
