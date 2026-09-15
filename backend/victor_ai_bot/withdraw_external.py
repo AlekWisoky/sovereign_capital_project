@@ -15,6 +15,7 @@ from .api_routes._route_helpers import attach_summary_contract
 from .external_withdrawal_settlement import (
     canonical_external_withdrawal_transaction,
     decode_external_withdrawal_effect,
+    external_withdrawal_recipient,
 )
 
 router = APIRouter(tags=["withdraw"])
@@ -86,11 +87,15 @@ def _runtime(request: Request):
 
 
 def _persist_settlement(runtime: Any, *, chain: str, tx_hash: str, intent_id: str,
-                        from_address: str, destination: str, calldata: str,
-                        receipt: Mapping[str, Any], executor: str) -> Dict[str, Any]:
+                        from_address: str, executor: str, calldata: str,
+                        receipt: Mapping[str, Any]) -> Dict[str, Any]:
     repo = getattr(runtime, "_ledger_repo", None)
     if repo is None or not hasattr(repo, "append_receipt_idempotent"):
         return {"ok": False, "reason_code": "settlement_ledger_unavailable"}
+
+    destination = external_withdrawal_recipient(calldata)
+    if not destination:
+        return {"ok": False, "reason_code": "invalid_settlement_recipient"}
 
     effect = decode_external_withdrawal_effect(
         receipt=receipt, executor=executor, calldata=calldata, destination=destination
@@ -209,7 +214,7 @@ async def reconcile_external_withdraw(request: Request, payload: Dict[str, Any] 
             settlement = _persist_settlement(
                 runtime, chain=str(getattr(cfg.chain, "name", "") or "default"),
                 tx_hash=tx_hash, intent_id=intent_id, from_address=from_address,
-                destination=to, calldata=data, receipt=dict(status.receipt or {}),
+                calldata=data, receipt=dict(status.receipt or {}),
                 executor=configured_executor,
             )
             if settlement.get("ok"):
