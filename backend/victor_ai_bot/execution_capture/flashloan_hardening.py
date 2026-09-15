@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable
 
+from .flashloan_providers import filter_executable_flashloan_providers
 from .models import OpportunityEnvelope
 
 
@@ -16,8 +17,12 @@ def evaluate_flashloan_resilience(
     route_plan: Dict[str, Any],
     available_providers: Iterable[str] | None = None,
 ) -> Dict[str, Any]:
-    providers = [str(x) for x in list(available_providers or ["aave", "balancer"]) if str(x)] or [
-        "aave"
+    requested_providers = list(available_providers) if available_providers is not None else ["aave", "balancer"]
+    providers = filter_executable_flashloan_providers(requested_providers)
+    unsupported_requested = [
+        str(x or "").strip().lower()
+        for x in requested_providers
+        if str(x or "").strip().lower() and str(x or "").strip().lower() not in providers
     ]
     pending_stale = float(pending_metrics.get("stale_probability") or 0.0)
     interference = float(pending_metrics.get("interference_probability") or 0.0)
@@ -85,8 +90,10 @@ def evaluate_flashloan_resilience(
                 "fallback_venues": fallback_venues,
             }
         )
+    provider_unavailable = not providers
     invalidation = bool(
-        race_penalty >= 0.82
+        provider_unavailable
+        or race_penalty >= 0.82
         or worst_case_edge <= 0.0
         or any(not bool(x["viable"]) and bool(x["selected"]) for x in leg_states)
     )
@@ -99,35 +106,39 @@ def evaluate_flashloan_resilience(
     fallback = (
         provider_scores[1]["provider"]
         if len(provider_scores) > 1
-        else provider_scores[0]["provider"]
+        else (provider_scores[0]["provider"] if provider_scores else "")
     )
-    chosen_provider = provider_scores[0]["provider"]
+    chosen_provider = provider_scores[0]["provider"] if provider_scores else ""
+    reason_codes = [
+        code
+        for code, ok in [
+            ("unsupported_provider", bool(unsupported_requested)),
+            ("provider_unavailable", provider_unavailable),
+            ("reserve_distortion", venue_distortion >= 0.50),
+            ("ordering_race", race_penalty >= 0.60),
+            ("competed_out", worst_case_edge <= 0.0),
+            (
+                "leg_degradation",
+                any(not bool(x["viable"]) and bool(x["selected"]) for x in leg_states),
+            ),
+            ("pending_fragility", any(bool(x["pending_fragile"]) for x in leg_states)),
+        ]
+        if ok
+    ]
     return {
         "provider_priority": [x["provider"] for x in provider_scores],
         "provider_scores": provider_scores,
         "fallback_provider": fallback,
         "selected_provider": chosen_provider,
+        "unsupported_providers": unsupported_requested,
         "reserve_distortion": round(venue_distortion, 6),
         "race_penalty": round(race_penalty, 6),
         "leg_states": leg_states,
         "searcher_invalidation": invalidation,
         "require_fallback_tree": bool(invalidation or venue_distortion >= 0.50),
-        "route_viable": not invalidation,
+        "route_viable": bool(not invalidation and not provider_unavailable),
         "route_mutation_required": bool(
             any(bool(x["pending_fragile"]) for x in leg_states) or venue_distortion >= 0.40
         ),
-        "reason_codes": [
-            code
-            for code, ok in [
-                ("reserve_distortion", venue_distortion >= 0.50),
-                ("ordering_race", race_penalty >= 0.60),
-                ("competed_out", worst_case_edge <= 0.0),
-                (
-                    "leg_degradation",
-                    any(not bool(x["viable"]) and bool(x["selected"]) for x in leg_states),
-                ),
-                ("pending_fragility", any(bool(x["pending_fragile"]) for x in leg_states)),
-            ]
-            if ok
-        ],
+        "reason_codes": reason_codes,
     }
