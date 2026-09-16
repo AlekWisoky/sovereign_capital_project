@@ -69,7 +69,8 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
     borrow_token = _address(context.get("borrow_token"))
     profit_to = _address(context.get("profit_to"))
     amount_borrow = _positive_int(context.get("amount_borrow"))
-    if not borrow_token or not profit_to or amount_borrow is None:
+    expected_profit_raw = _positive_int(context.get("expected_profit_raw"))
+    if not borrow_token or not profit_to or amount_borrow is None or expected_profit_raw is None:
         return None
 
     legs = _validated_legs(context.get("legs"))
@@ -127,6 +128,7 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
         "borrow_token": borrow_token,
         "amount_borrow": amount_borrow,
         "profit_to": profit_to,
+        "expected_profit_raw": expected_profit_raw,
         "route_id": route_id,
     }
     return normalized, legs, dict(gate)
@@ -158,6 +160,7 @@ def opportunity_from_engine_candidate(candidate: Any) -> Opportunity | None:
         "route_family": "flash_arb",
         "capital_source": "flashloan",
         "flash_provider": normalized["provider"],
+        "flash_providers": [normalized["provider"]],
         "flash_arb_context": dict(context),
         "mev_origin": {
             "engine_type": "mev_search",
@@ -175,7 +178,7 @@ def opportunity_from_engine_candidate(candidate: Any) -> Opportunity | None:
         id=opportunity_id,
         chain=str(getattr(candidate, "chain", "ethereum") or "ethereum"),
         strategy="flash_arb",
-        expected_profit_raw=str(max(1, int(round(expected_profit * 1_000_000)))),
+        expected_profit_raw=str(normalized["expected_profit_raw"]),
         expected_profit_usd=str(expected_profit),
         route=Route(legs=legs),
         min_outs=min_outs,
