@@ -30,8 +30,6 @@ class RuntimeTickScanFacade:
             amount_in=int(amount_in),
         )
 
-        await self._safe_annotate_can_execute(rpc, opps)
-
         gas_signals = await self._gas_signal_snapshot(rpc)
         basefee_gwei = float(gas_signals.get("basefee_gwei", 0.0) or 0.0)
         prio_gwei = float(gas_signals.get("priority_gwei", 0.0) or 0.0)
@@ -87,6 +85,31 @@ class RuntimeTickScanFacade:
             current_block=int(current_block),
         )
         mev_snap = dict(predecision_state.get("mev_snap") or {})
+
+        # Run the existing engine scan before canonical decisioning so an
+        # explicitly validated MEV flash-arb route can enter the same Opportunity
+        # set. Engine admission remains a prerequisite; canonical decision,
+        # flash-loan sizing, governance and execution remain downstream owners.
+        if not tick_failed if False else True:
+            self._scan_engine_opportunities(
+                regime_label=str(regime_label or "balanced"),
+                mev_state=dict(mev_snap or {}),
+                base_opportunities=list(opps or []),
+                treasury_state=dict(treasury_state or {}),
+            )
+            engine_service = getattr(self, "_engine_service", None)
+            if engine_service is not None and hasattr(engine_service, "flash_arb_opportunities"):
+                try:
+                    existing_ids = {str(getattr(opp, "id", "") or "") for opp in opps}
+                    for mev_opp in list(engine_service.flash_arb_opportunities() or []):
+                        mev_id = str(getattr(mev_opp, "id", "") or "")
+                        if mev_id and mev_id not in existing_ids:
+                            opps.append(mev_opp)
+                            existing_ids.add(mev_id)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    pass
+
+        await self._safe_annotate_can_execute(rpc, opps)
 
         decision = await self._run_decision_finalize(
             opps=opps,
