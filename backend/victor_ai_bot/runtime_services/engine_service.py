@@ -28,6 +28,7 @@ class EngineService:
         capture_engine: Any | None = None,
         telemetry_service: Any | None = None,
         mev_fork_executor: Any | None = None,
+        config: Any | None = None,
     ):
         self.capture_engine = capture_engine
         self.telemetry_service = telemetry_service
@@ -39,8 +40,13 @@ class EngineService:
             cfg=FundingArbConfig(enabled=True, min_rate_diff=0.00005, max_positions=6)
         )
         self.cross_chain = CrossChainArbitrageEngine()
+        chain_cfg = getattr(config, "chain", None)
+        execution_cfg = getattr(config, "execution", None)
         self.mev = MEVSearchEngine(
-            fork_executor=mev_fork_executor if mev_fork_executor is not None else AnvilForkExecutor()
+            fork_executor=mev_fork_executor if mev_fork_executor is not None else AnvilForkExecutor(),
+            router=str(getattr(chain_cfg, "univ3_swap_router", "") or ""),
+            provider=str(getattr(execution_cfg, "flash_provider", "") or ""),
+            profit_to=str(getattr(execution_cfg, "profit_to", "") or ""),
         )
         self._last: Dict[str, Any] = {"items": []}
 
