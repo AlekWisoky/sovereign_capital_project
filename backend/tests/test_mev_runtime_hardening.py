@@ -7,14 +7,11 @@ import pytest
 
 import victor_ai_bot.aqe.mev.runtime as mev_runtime_module
 from victor_ai_bot.aqe.mev.mempool import MempoolMonitor
-from victor_ai_bot.aqe.mev.models import (
-    MEVConfig,
-    MEVRuntime,
-    decode_allowlisted_univ3_swap,
-    produce_flash_arb_context_from_router,
-)
+from victor_ai_bot.aqe.mev.models import MEVConfig, decode_allowlisted_univ3_swap, produce_flash_arb_context_from_router
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine, MEVStrategySimulationContextProducer
 from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable
+
+MEVRuntime = mev_runtime_module.MEVRuntime
 
 ROOT = Path(__file__).resolve().parents[1] / 'victor_ai_bot' / 'aqe' / 'mev'
 
@@ -99,11 +96,8 @@ async def test_bus_update_programmer_bug_is_not_swallowed(monkeypatch):
 async def test_stop_cancels_task_without_swallowing(monkeypatch):
     runtime = _runtime(txd={'to': '0x1'})
     class _FakeTask:
-        def __init__(self):
-            self.cancelled = False
-        def cancel(self):
-            self.cancelled = True
-            return True
+        def __init__(self): self.cancelled = False
+        def cancel(self): self.cancelled = True; return True
     runtime._task = _FakeTask()
     await runtime.stop()
     assert runtime._task.cancelled is True
@@ -113,27 +107,18 @@ def test_mev_runtime_module_has_no_broad_exception_handlers():
     module = ast.parse((ROOT / 'runtime.py').read_text(encoding='utf-8'))
     broad = []
     for node in ast.walk(module):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        if node.type is None:
-            broad.append('bare except')
-        elif isinstance(node.type, ast.Name) and node.type.id == 'Exception':
-            broad.append('except Exception')
+        if not isinstance(node, ast.ExceptHandler): continue
+        if node.type is None: broad.append('bare except')
+        elif isinstance(node.type, ast.Name) and node.type.id == 'Exception': broad.append('except Exception')
     assert broad == []
 
 
 def test_anvil_cleanup_kills_and_fails_closed_if_forced_wait_times_out():
     class _CleanupProcess:
-        def __init__(self):
-            self.terminated = False
-            self.killed = False
-            self.wait_calls = 0
-        def terminate(self):
-            self.terminated = True
-        def kill(self):
-            self.killed = True
-        def poll(self):
-            return None
+        def __init__(self): self.terminated = False; self.killed = False; self.wait_calls = 0
+        def terminate(self): self.terminated = True
+        def kill(self): self.killed = True
+        def poll(self): return None
         def wait(self, *, timeout):
             self.wait_calls += 1
             raise subprocess.TimeoutExpired(cmd='anvil', timeout=timeout)
@@ -147,61 +132,42 @@ def test_anvil_cleanup_kills_and_fails_closed_if_forced_wait_times_out():
 
 def _strategy_context(tx_hash):
     address = '0x' + '1' * 40
-    return {
-        'strategy': 'flash_arb', 'tx_hash': tx_hash, 'provider': 'aave', 'borrow_token': address,
-        'profit_to': address, 'amount_borrow': 1_000_000, 'expected_profit_raw': 50_000,
-        'legs': [{'dex': 'univ3', 'venue': address, 'token_in': address, 'token_out': '0x' + '2' * 40, 'data': '0x01'}],
-        'simulation_request': {
-            'fork_url': 'https://example.invalid/rpc', 'fork_block': 123,
-            'transaction': {'hash': tx_hash, 'to': address, 'data': '0xabcdef12'},
-            'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0,
-                           'economic_observation': {'account': address, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 2000.0, 'role': 'profit'}]}}],
-        },
-    }
+    return {'strategy': 'flash_arb', 'tx_hash': tx_hash, 'provider': 'aave', 'borrow_token': address, 'profit_to': address,
+            'amount_borrow': 1_000_000, 'expected_profit_raw': 50_000,
+            'legs': [{'dex': 'univ3', 'venue': address, 'token_in': address, 'token_out': '0x' + '2' * 40, 'data': '0x01'}],
+            'simulation_request': {'fork_url': 'https://example.invalid/rpc', 'fork_block': 123,
+                'transaction': {'hash': tx_hash, 'to': address, 'data': '0xabcdef12'},
+                'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0,
+                    'economic_observation': {'account': address, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 2000.0, 'role': 'profit'}]}}]}}
 
 
 def test_strategy_context_producer_requires_explicit_economic_observation():
-    producer = MEVStrategySimulationContextProducer()
-    tx_hash = '0x' + '1' * 64
-    context = _strategy_context(tx_hash)
+    producer = MEVStrategySimulationContextProducer(); tx_hash = '0x' + '1' * 64; context = _strategy_context(tx_hash)
     assert producer.produce(tx_hash=tx_hash, strategy_context=context) is not None
     context['simulation_request']['scenarios'][0].pop('economic_observation')
     assert producer.produce(tx_hash=tx_hash, strategy_context=context) is None
 
 
 def test_strategy_context_producer_rejects_mismatched_pending_transaction():
-    producer = MEVStrategySimulationContextProducer()
-    context = _strategy_context('0x' + '1' * 64)
+    producer = MEVStrategySimulationContextProducer(); context = _strategy_context('0x' + '1' * 64)
     assert producer.produce(tx_hash='0x' + '2' * 64, strategy_context=context) is None
 
 
 def test_mev_search_consumes_produced_context():
-    tx_hash = '0x' + '3' * 64
-    context = _strategy_context(tx_hash)
-    evidence = {'simulation_id': 'sim-1', 'deterministic': True, 'fork_block': 123,
-                'pre_state_root': '0xpre', 'post_state_root': '0xpost', 'scenario_digest': 'sha256:scenario-1',
-                'scenario_results': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'conflict_checked': True, 'reverted': False}],
-                'reverted': False,
+    tx_hash = '0x' + '3' * 64; context = _strategy_context(tx_hash)
+    evidence = {'simulation_id': 'sim-1', 'deterministic': True, 'fork_block': 123, 'pre_state_root': '0xpre', 'post_state_root': '0xpost', 'scenario_digest': 'sha256:scenario-1',
+                'scenario_results': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'conflict_checked': True, 'reverted': False}], 'reverted': False,
                 'economics': {'simulation_id': 'sim-1', 'scenario_digest': 'sha256:scenario-1', 'expected_realized_profit_usd': 17.5, 'gross_asset_delta_usd': 20.0, 'gas_cost_usd': 2.0, 'borrow_cost_usd': 0.5}}
     class _Executor:
         def simulate(self, **request):
-            assert request['transaction']['hash'] == tx_hash
-            assert request['scenarios'][0]['economic_observation']['assets']
-            return evidence
-    rows = MEVSearchEngine(fork_executor=_Executor()).search(
-        mev_state={'sample_pending': [{'hash': tx_hash, 'to': '0x' + '1' * 40, 'value_wei': 0, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'strategy_context': context}], 'high_risk_ratio': 0.0},
-        base_opportunities=[],
-    )
-    assert len(rows) == 1
-    assert rows[0].expected_profit_usd == 17.5
-    assert rows[0].metadata['economics_status'] == 'simulation_backed'
-    assert rows[0].metadata['flash_arb_context']['strategy'] == 'flash_arb'
+            assert request['transaction']['hash'] == tx_hash; assert request['scenarios'][0]['economic_observation']['assets']; return evidence
+    rows = MEVSearchEngine(fork_executor=_Executor()).search(mev_state={'sample_pending': [{'hash': tx_hash, 'to': '0x' + '1' * 40, 'value_wei': 0, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'strategy_context': context}], 'high_risk_ratio': 0.0}, base_opportunities=[])
+    assert len(rows) == 1; assert rows[0].expected_profit_usd == 17.5; assert rows[0].metadata['economics_status'] == 'simulation_backed'; assert rows[0].metadata['flash_arb_context']['strategy'] == 'flash_arb'
 
 
 def test_pending_transaction_without_explicit_context_stays_non_authoritative():
     rows = MEVSearchEngine().search(mev_state={'sample_pending': [{'hash': '0x4', 'to': '0x' + '1' * 40, 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12'}], 'high_risk_ratio': 0.2}, base_opportunities=[])
-    assert rows[0].expected_profit_usd == 0.0
-    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
+    assert rows[0].expected_profit_usd == 0.0; assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
 
 
 ROUTER = '0x0000000000000000000000000000000000000010'
@@ -213,13 +179,9 @@ VENUE_A = '0x0000000000000000000000000000000000000060'
 VENUE_B = '0x0000000000000000000000000000000000000070'
 
 
-def _word(value: int) -> str:
-    return f'{int(value):064x}'
+def _word(value: int) -> str: return f'{int(value):064x}'
 
-
-def _address_word(address: str) -> str:
-    return address[2:].rjust(64, '0')
-
+def _address_word(address: str) -> str: return address[2:].rjust(64, '0')
 
 def _swap_tx(*, to: str = ROUTER, tx_hash: str = '0xabc') -> dict:
     payload = ''.join([_address_word(TOKEN_A), _address_word(TOKEN_B), _word(3000), _address_word(RECIPIENT), _word(9999999999), _word(1000), _word(950), _word(0)])
@@ -227,42 +189,22 @@ def _swap_tx(*, to: str = ROUTER, tx_hash: str = '0xabc') -> dict:
 
 
 def _base_opportunity():
-    return SimpleNamespace(id='opp-1', strategy='two-leg:univ3->univ3', expected_profit_raw='25', route_id='route-1', route=SimpleNamespace(legs=[
-        SimpleNamespace(dex='univ3', venue=VENUE_A, token_in=TOKEN_A, token_out=TOKEN_B, amount_in='1000', min_out='950', data='0x' + '00' * 32),
-        SimpleNamespace(dex='univ3', venue=VENUE_B, token_in=TOKEN_B, token_out=TOKEN_A, amount_in='950', min_out='1005', data='0x' + '00' * 32),
-    ]))
+    return SimpleNamespace(id='opp-1', strategy='two-leg:univ3->univ3', expected_profit_raw='25', route_id='route-1', route=SimpleNamespace(legs=[SimpleNamespace(dex='univ3', venue=VENUE_A, token_in=TOKEN_A, token_out=TOKEN_B, amount_in='1000', min_out='950', data='0x' + '00' * 32), SimpleNamespace(dex='univ3', venue=VENUE_B, token_in=TOKEN_B, token_out=TOKEN_A, amount_in='950', min_out='1005', data='0x' + '00' * 32)]))
 
 
 def test_decode_allowlisted_univ3_exact_input_single():
     decoded = decode_allowlisted_univ3_swap(_swap_tx(), router=ROUTER)
-    assert decoded is not None
-    assert decoded['token_in'] == TOKEN_A
-    assert decoded['token_out'] == TOKEN_B
-    assert decoded['fee'] == 3000
-    assert decoded['amount_in'] == 1000
-    assert decoded['amount_out_minimum'] == 950
+    assert decoded is not None; assert decoded['token_in'] == TOKEN_A; assert decoded['token_out'] == TOKEN_B; assert decoded['fee'] == 3000; assert decoded['amount_in'] == 1000; assert decoded['amount_out_minimum'] == 950
 
 
 def test_decode_rejects_non_allowlisted_router_and_unknown_selector():
     assert decode_allowlisted_univ3_swap(_swap_tx(to=VENUE_A), router=ROUTER) is None
-    tx = _swap_tx()
-    tx['input'] = '0xdeadbeef' + tx['input'][10:]
+    tx = _swap_tx(); tx['input'] = '0xdeadbeef' + tx['input'][10:]
     assert decode_allowlisted_univ3_swap(tx, router=ROUTER) is None
 
 
 def test_context_uses_existing_two_leg_route_and_requires_explicit_simulation():
     kwargs = {'tx': _swap_tx(), 'router': ROUTER, 'base_opportunities': [_base_opportunity()], 'provider': 'aave', 'profit_to': PROFIT_TO}
     assert produce_flash_arb_context_from_router(**kwargs) is None
-    context = produce_flash_arb_context_from_router(**kwargs, simulation_request={
-        'fork_url': 'https://example.invalid/rpc', 'fork_block': 100,
-        'transaction': {'to': '0x0000000000000000000000000000000000000090', 'data': '0x'},
-        'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0,
-                       'economic_observation': {'account': PROFIT_TO, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 1.0}]}}],
-    })
-    assert context is not None
-    assert context['strategy'] == 'flash_arb'
-    assert context['borrow_token'] == TOKEN_A
-    assert context['amount_borrow'] == 1000
-    assert context['expected_profit_raw'] == 25
-    assert len(context['legs']) == 2
-    assert context['observed_router_call']['fee'] == 3000
+    context = produce_flash_arb_context_from_router(**kwargs, simulation_request={'fork_url': 'https://example.invalid/rpc', 'fork_block': 100, 'transaction': {'to': '0x0000000000000000000000000000000000000090', 'data': '0x'}, 'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'economic_observation': {'account': PROFIT_TO, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 1.0}]}}]})
+    assert context is not None; assert context['strategy'] == 'flash_arb'; assert context['borrow_token'] == TOKEN_A; assert context['amount_borrow'] == 1000; assert context['expected_profit_raw'] == 25; assert len(context['legs']) == 2; assert context['observed_router_call']['fee'] == 3000
