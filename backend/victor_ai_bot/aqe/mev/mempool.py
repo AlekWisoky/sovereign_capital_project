@@ -146,13 +146,22 @@ class MempoolMonitor:
         self._seen_hash_set.add(tx_hash)
         if self.q.full():
             try:
-                _ = self.q.get_nowait()
+                dropped = self.q.get_nowait()
+                self._seen_hash_set.discard(dropped)
+                try:
+                    self._seen_hashes.remove(dropped)
+                except ValueError:
+                    pass
             except asyncio.QueueEmpty:
                 pass
         try:
             self.q.put_nowait(tx_hash)
         except asyncio.QueueFull:
-            pass
+            self._seen_hash_set.discard(tx_hash)
+            try:
+                self._seen_hashes.remove(tx_hash)
+            except ValueError:
+                pass
 
     async def _connect_once(self, ws_url: Optional[str] = None) -> None:
         source_url = str(ws_url or self.ws_url)
