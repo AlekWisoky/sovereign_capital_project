@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.aqe.mev.runtime as mev_runtime_module
+from victor_ai_bot.aqe.mev.mempool import MempoolMonitor
 from victor_ai_bot.aqe.mev.models import MEVConfig
 from victor_ai_bot.aqe.mev.runtime import MEVRuntime
 from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable
@@ -44,6 +45,21 @@ def _runtime(*, txd, hashes=None) -> MEVRuntime:
     runtime = MEVRuntime(cfg=MEVConfig(enabled=True, max_pending=4), ws_urls=['ws://demo'], rpc_http_url='http://rpc')
     runtime._monitor = _FakeMonitor(hashes or ['0xabc'])
     return runtime
+
+
+def test_mempool_monitor_supports_multiple_sources_and_suppresses_duplicates():
+    monitor = MempoolMonitor(ws_urls=['ws://one', 'ws://two'], max_queue=4)
+
+    assert monitor.ws_urls == ['ws://one', 'ws://two']
+    assert set(monitor.source_status) == {'ws://one', 'ws://two'}
+
+    monitor._enqueue_hash('0xabc', source_url='ws://one')
+    monitor._enqueue_hash('0xabc', source_url='ws://two')
+    monitor._enqueue_hash('0xdef', source_url='ws://two')
+
+    assert monitor.q.qsize() == 2
+    assert monitor.q.get_nowait() == '0xabc'
+    assert monitor.q.get_nowait() == '0xdef'
 
 
 @pytest.mark.asyncio
