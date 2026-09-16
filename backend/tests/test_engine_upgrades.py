@@ -1,8 +1,10 @@
 from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrageEngine
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
 from victor_ai_bot.aqe.funding import FundingArbStrategy, FundingArbConfig
+from victor_ai_bot.aqe.mev.flash_arb_adapter import opportunity_from_engine_candidate
 from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable, validate_deterministic_simulation_evidence, validate_simulation_economics
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
+from victor_ai_bot.engine_control.models import EngineOpportunity
 from victor_ai_bot.runtime_services.engine_service import EngineService
 
 
@@ -185,3 +187,90 @@ def test_mev_search_accepts_only_explicit_simulation_economics():
     assert row.metadata['economics_source'] == 'simulation_evidence'
     assert row.lifecycle_eligibility == 'observe_only'
     assert row.policy_eligibility == 'observe_only'
+
+
+def _valid_flash_arb_context():
+    address = '0x0000000000000000000000000000000000000001'
+    return {
+        'provider': 'aave',
+        'borrow_token': address,
+        'amount_borrow': 1_000_000,
+        'profit_to': address,
+        'legs': [
+            {
+                'dex': 'univ3',
+                'venue': address,
+                'token_in': address,
+                'token_out': '0x0000000000000000000000000000000000000002',
+                'amount_in': 1_000_000,
+                'min_out': 1_100_000,
+                'data': '0x',
+            },
+            {
+                'dex': 'curve',
+                'venue': '0x0000000000000000000000000000000000000003',
+                'token_in': '0x0000000000000000000000000000000000000002',
+                'token_out': address,
+                'amount_in': 1_100_000,
+                'min_out': 1_050_000,
+                'data': '0x',
+            },
+        ],
+        'simulation_evidence': _valid_simulation_evidence(),
+    }
+
+
+def test_mev_flash_arb_adapter_requires_explicit_validated_route_context():
+    context = _valid_flash_arb_context()
+    candidate = EngineOpportunity(
+        opportunity_id='mev:0xflash',
+        engine_type='mev_search',
+        strategy_family='mev_search',
+        route_family='mev_search|backrun_protection',
+        chain='ethereum',
+        chain_id=1,
+        expected_profit_usd=17.5,
+        expected_realized_profit_usd=17.5,
+        capital_required_usd=25.0,
+        inventory_requirements={},
+        confidence=0.8,
+        regime='balanced',
+        latency_sensitivity=0.95,
+        risk_flags=['private_send'],
+        lifecycle_eligibility='observe_only',
+        policy_eligibility='observe_only',
+        venues=['private_relay'],
+        metadata={'tx_hash': '0xflash', 'flash_arb_context': context},
+    )
+    opportunity = opportunity_from_engine_candidate(candidate)
+    assert opportunity is not None
+    assert opportunity.strategy == 'flash_arb'
+    assert opportunity.meta['capital_source'] == 'flashloan'
+    assert opportunity.meta['flash_provider'] == 'aave'
+    assert opportunity.meta['simulation_gate']['reason_code'] == 'simulation_evidence_verified'
+    assert opportunity.route.legs[0].amount_in == '1000000'
+    assert opportunity.route_id
+
+
+def test_mev_flash_arb_adapter_rejects_mempool_only_candidate():
+    candidate = EngineOpportunity(
+        opportunity_id='mev:0xplain',
+        engine_type='mev_search',
+        strategy_family='mev_search',
+        route_family='mev_search|backrun_protection',
+        chain='ethereum',
+        chain_id=1,
+        expected_profit_usd=17.5,
+        expected_realized_profit_usd=17.5,
+        capital_required_usd=25.0,
+        inventory_requirements={},
+        confidence=0.8,
+        regime='balanced',
+        latency_sensitivity=0.95,
+        risk_flags=['private_send'],
+        lifecycle_eligibility='observe_only',
+        policy_eligibility='observe_only',
+        venues=['private_relay'],
+        metadata={'tx_hash': '0xplain'},
+    )
+    assert opportunity_from_engine_candidate(candidate) is None
