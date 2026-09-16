@@ -11,6 +11,33 @@ class RuntimeTickScanFacade:
     decision helpers so the legacy loop no longer owns that orchestration.
     """
 
+    def _mev_snapshot(self, fallback: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the current MEV observation without creating a new authority."""
+        mev_runtime = getattr(self, "_mev", None)
+        if mev_runtime is None or not hasattr(mev_runtime, "state"):
+            return dict(fallback)
+        try:
+            raw_mev_snap = mev_runtime.state()
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return dict(fallback)
+        return dict(raw_mev_snap) if isinstance(raw_mev_snap, dict) else dict(fallback)
+
+    def _merge_admitted_mev_opportunities(self, opps: list[Any]) -> None:
+        """Append only already-admitted, validated MEV flash-arb opportunities."""
+        engine_service = getattr(self, "_engine_service", None)
+        if engine_service is None or not hasattr(engine_service, "flash_arb_opportunities"):
+            return
+        try:
+            existing_ids = {str(getattr(opp, "id", "") or "") for opp in opps}
+            candidates = list(engine_service.flash_arb_opportunities() or [])
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return
+        for mev_opp in candidates:
+            mev_id = str(getattr(mev_opp, "id", "") or "")
+            if mev_id and mev_id not in existing_ids:
+                opps.append(mev_opp)
+                existing_ids.add(mev_id)
+
     async def _run_tick_scan_pipeline(
         self,
         *,
@@ -84,40 +111,17 @@ class RuntimeTickScanFacade:
             pending_rate=float(pending_rate),
             current_block=int(current_block),
         )
-        predecision_mev_snap = dict(predecision_state.get("mev_snap") or {})
-        mev_runtime = getattr(self, "_mev", None)
-        if mev_runtime is not None and hasattr(mev_runtime, "state"):
-            try:
-                raw_mev_snap = mev_runtime.state()
-                if isinstance(raw_mev_snap, dict):
-                    mev_snap = dict(raw_mev_snap)
-            except (AttributeError, KeyError, TypeError, ValueError):
-                mev_snap = predecision_mev_snap
-        else:
-            mev_snap = predecision_mev_snap
+        mev_snap = self._mev_snapshot(dict(predecision_state.get("mev_snap") or {}))
 
-        # Run the existing engine scan before canonical decisioning so an
-        # explicitly validated MEV flash-arb route can enter the same Opportunity
-        # set. Engine admission remains a prerequisite; canonical decision,
-        # flash-loan sizing, governance and execution remain downstream owners.
+        # Engine admission remains the prerequisite. This inserts only validated
+        # MEV flash-arb opportunities before the existing canonical decision path.
         self._scan_engine_opportunities(
             regime_label=str(regime_label or "balanced"),
             mev_state=dict(mev_snap or {}),
             base_opportunities=list(opps or []),
             treasury_state=dict(treasury_state or {}),
         )
-        engine_service = getattr(self, "_engine_service", None)
-        if engine_service is not None and hasattr(engine_service, "flash_arb_opportunities"):
-            try:
-                existing_ids = {str(getattr(opp, "id", "") or "") for opp in opps}
-                for mev_opp in list(engine_service.flash_arb_opportunities() or []):
-                    mev_id = str(getattr(mev_opp, "id", "") or "")
-                    if mev_id and mev_id not in existing_ids:
-                        opps.append(mev_opp)
-                        existing_ids.add(mev_id)
-            except (AttributeError, KeyError, TypeError, ValueError):
-                pass
-
+        self._merge_admitted_mev_opportunities(opps)
         await self._safe_annotate_can_execute(rpc, opps)
 
         decision = await self._run_decision_finalize(
