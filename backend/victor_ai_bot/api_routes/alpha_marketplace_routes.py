@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Header, Request
 
 from ..alpha_marketplace.contracts import submission_contract
 from ..jsonsafe import to_json_safe as json_safe
@@ -17,8 +17,11 @@ def get_runtime(request: Request):
     return request.app.state.runtime  # type: ignore[attr-defined]
 
 
-def require_admin_write(request: Request):
-    return require_capability(Capability.ADMIN_WRITE, request=request)
+def require_admin_write(
+    request: Request,
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+):
+    return require_capability(Capability.ADMIN_WRITE, request=request, x_admin_key=x_admin_key)
 
 
 @router.get("/api/fund/alpha-marketplace")
