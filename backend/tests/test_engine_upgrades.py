@@ -195,6 +195,7 @@ def _valid_flash_arb_context():
         'provider': 'aave',
         'borrow_token': address,
         'amount_borrow': 1_000_000,
+        'expected_profit_raw': 50_000,
         'profit_to': address,
         'legs': [
             {
