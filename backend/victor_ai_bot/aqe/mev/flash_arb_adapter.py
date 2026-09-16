@@ -32,34 +32,39 @@ def _positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _validated_leg(raw: Any) -> RouteLeg | None:
+    if not isinstance(raw, Mapping):
+        return None
+    dex = str(raw.get("dex") or "")
+    if dex not in _ALLOWED_DEXES:
+        return None
+    venue = _address(raw.get("venue"))
+    token_in = _address(raw.get("token_in"))
+    token_out = _address(raw.get("token_out"))
+    amount_in = _positive_int(raw.get("amount_in"))
+    min_out = _positive_int(raw.get("min_out"))
+    if not all((venue, token_in, token_out, amount_in, min_out)):
+        return None
+    return RouteLeg(
+        dex=dex,
+        venue=venue,
+        token_in=token_in,
+        token_out=token_out,
+        amount_in=str(amount_in),
+        min_out=str(min_out),
+        data=str(raw.get("data") or raw.get("aux") or ""),
+    )
+
+
 def _validated_legs(raw_legs: Any) -> List[RouteLeg] | None:
     if not isinstance(raw_legs, list) or not raw_legs:
         return None
     legs: List[RouteLeg] = []
     for raw in raw_legs:
-        if not isinstance(raw, Mapping):
+        leg = _validated_leg(raw)
+        if leg is None:
             return None
-        dex = str(raw.get("dex") or "")
-        if dex not in _ALLOWED_DEXES:
-            return None
-        venue = _address(raw.get("venue"))
-        token_in = _address(raw.get("token_in"))
-        token_out = _address(raw.get("token_out"))
-        amount_in = _positive_int(raw.get("amount_in"))
-        min_out = _positive_int(raw.get("min_out"))
-        if not all((venue, token_in, token_out, amount_in, min_out)):
-            return None
-        legs.append(
-            RouteLeg(
-                dex=dex,
-                venue=venue,
-                token_in=token_in,
-                token_out=token_out,
-                amount_in=str(amount_in),
-                min_out=str(min_out),
-                data=str(raw.get("data") or raw.get("aux") or ""),
-            )
-        )
+        legs.append(leg)
     return legs
 
 
@@ -157,6 +162,8 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
 
 
 def _candidate_metadata(candidate: Any, context: Mapping[str, Any], gate: Mapping[str, Any], provider: str) -> dict[str, Any]:
+    metadata = getattr(candidate, "metadata", {})
+    tx_hash = str(metadata.get("tx_hash") or "") if isinstance(metadata, Mapping) else ""
     return {
         "strategy_family": "flash_arb",
         "route_family": "flash_arb",
@@ -166,7 +173,7 @@ def _candidate_metadata(candidate: Any, context: Mapping[str, Any], gate: Mappin
         "flash_arb_context": dict(context),
         "mev_origin": {
             "engine_type": "mev_search",
-            "tx_hash": str(getattr(candidate, "metadata", {}).get("tx_hash") or ""),
+            "tx_hash": tx_hash,
         },
         "simulation_evidence": dict(context.get("simulation_evidence") or {}),
         "simulation_gate": dict(gate),
