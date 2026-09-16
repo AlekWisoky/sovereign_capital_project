@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrageEngine
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
