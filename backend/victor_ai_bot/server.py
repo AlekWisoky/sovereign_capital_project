@@ -190,7 +190,7 @@ def create_app() -> FastAPI:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["*"]
+        expose_headers=["*"],
     )
 
     # Lightweight in-memory rate limits for expensive endpoints.
