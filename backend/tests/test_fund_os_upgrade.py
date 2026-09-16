@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from victor_ai_bot.alpha_marketplace.contracts import submission_contract
+from victor_ai_bot.alpha_marketplace.intake import candidate_to_submission
 from victor_ai_bot.alpha_marketplace.submissions import AlphaMarketplaceStore
 from victor_ai_bot.alpha_platform.registry import alpha_engine_registry
+from victor_ai_bot.aqe.meta.types import StrategyCandidate
+from victor_ai_bot.api_routes.alpha_marketplace_routes import router as alpha_marketplace_router
 from victor_ai_bot.fund_os.manifests import build_fund_manifest
 from victor_ai_bot.research_pipeline.candidates import CandidateStore
 from victor_ai_bot.research_pipeline.promotion import promotion_allowed
@@ -54,17 +58,13 @@ def test_portfolio_risk_and_controls():
     assert 'deployableScale' in ctrl
 
 
-
 def test_marketplace_store_recovers_from_corrupt_json(tmp_path):
     marketplace_dir = tmp_path / 'marketplace'
     marketplace_dir.mkdir()
     path = marketplace_dir / 'submissions_test.json'
     path.write_text('{not valid json', encoding='utf-8')
-
     store = AlphaMarketplaceStore(data_dir=str(tmp_path), chain='test', enabled=True)
-
     assert store.snapshot() == {'enabled': True, 'items': []}
-
 
 
 def test_marketplace_store_sanitizes_partial_state(tmp_path):
@@ -91,10 +91,8 @@ def test_marketplace_store_sanitizes_partial_state(tmp_path):
         ),
         encoding='utf-8',
     )
-
     store = AlphaMarketplaceStore(data_dir=str(tmp_path), chain='test', enabled=True)
     snap = store.snapshot()
-
     assert snap['enabled'] is True
     assert len(snap['items']) == 1
     item = snap['items'][0]
@@ -103,3 +101,41 @@ def test_marketplace_store_sanitizes_partial_state(tmp_path):
     assert item['createdTs'] == 42
     assert item['profitSharingPlaceholder'] is False
     assert 'junk' not in item
+
+
+def test_ai_candidate_enters_marketplace_with_distinct_strategy_identity():
+    candidate = StrategyCandidate(
+        id='strategy-1', created_ts=1.0, description='Cross-venue spread', score=0.71,
+        settings_patch={'max_slippage_bps': 20}, safety_patch={'max_drawdown_pct': 5},
+        strategy_family='cross_cex_dex', lifecycle_stage='experimental',
+        parent_ids=['strategy-parent'], stress_report={'oos': {'passed': True}},
+    )
+    payload = candidate_to_submission(candidate)
+    assert payload['strategyId'] == 'strategy-1'
+    assert payload['submissionId'] == 'strategy-1'
+    assert payload['generatingEngine'] == 'aqe_meta'
+    assert payload['reviewState'] == 'pending'
+    assert payload['stage'] == 'sandbox'
+    assert payload['governanceStatus'] == 'pending'
+    assert payload['capitalSleeveStatus'] == 'unfunded'
+    assert 'decision_id' not in payload
+
+
+def test_marketplace_candidate_intake_is_fail_closed_when_disabled(tmp_path):
+    candidate = StrategyCandidate(
+        id='strategy-2', created_ts=1.0, description='Funding spread', score=0.60,
+        settings_patch={}, safety_patch={}, strategy_family='funding_arb',
+    )
+    store = AlphaMarketplaceStore(data_dir=str(tmp_path), chain='test', enabled=False)
+    out = store.submit_candidate(candidate=candidate_to_submission(candidate))
+    assert out == {'ok': False, 'reason': 'marketplace_disabled'}
+
+
+def test_marketplace_read_and_write_routes_share_internal_surface():
+    paths = {(route.path, tuple(sorted(route.methods or []))) for route in alpha_marketplace_router.routes}
+    assert ('/api/fund/alpha-marketplace', ('GET',)) in paths
+    assert ('/api/fund/alpha-marketplace', ('POST',)) in paths
+    contract = submission_contract()
+    assert contract['mode'] == 'internal_only'
+    assert contract['executionAuthority'] == 'canonical_lifecycle_only'
+    assert contract['evidenceRequiredForPromotion'] is True
