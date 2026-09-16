@@ -10,7 +10,7 @@ class RuntimeAfterTickFacade:
 
     This isolates the remaining after-tick residual orchestration from
     ``RuntimeBundle._loop`` while preserving existing auto-dispatch,
-    cooldown, engine-tail, post-tick, and loop-tail behavior.
+    cooldown, post-tick, and loop-tail behavior.
     """
 
     async def _run_after_tick_orchestration(
@@ -35,7 +35,7 @@ class RuntimeAfterTickFacade:
                 f"circuit_breaker_tripped:cooldown_s={self._cb.remaining_cooldown_s()}"
             )
 
-        # Engine service is now scanned before canonical decisioning so validated
+        # Engine service is scanned before canonical decisioning so validated
         # MEV flash-arb candidates can enter the canonical Opportunity set. Keep
         # the post-decision tail free of a second scan to avoid duplicate work.
         await self._run_post_tick_tails(tick_failed=bool(tick_failed))
