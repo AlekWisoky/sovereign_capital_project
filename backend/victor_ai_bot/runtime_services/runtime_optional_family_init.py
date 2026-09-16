@@ -82,6 +82,7 @@ def initialize_optional_family_runtimes(runtime: Any, cfg: Any, data_dir: str) -
                 data_dir=meta_data_dir,
                 cfg=meta_cfg,
                 allow_auto_apply=allow_auto,
+                marketplace_store=getattr(runtime, "_alpha_marketplace", None),
             )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._meta = None
