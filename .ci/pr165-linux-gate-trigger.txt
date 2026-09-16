@@ -1,1 +1,0 @@
-Temporary verification trigger for PR #165. This file is removed immediately after the Linux gate completes; it carries no runtime or application semantics.
