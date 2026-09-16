@@ -9,6 +9,7 @@ import victor_ai_bot.aqe.mev.runtime as mev_runtime_module
 from victor_ai_bot.aqe.mev.mempool import MempoolMonitor
 from victor_ai_bot.aqe.mev.models import MEVConfig
 from victor_ai_bot.aqe.mev.runtime import MEVRuntime
+from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine, MEVStrategySimulationContextProducer
 from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable
 
 ROOT = Path(__file__).resolve().parents[1] / 'victor_ai_bot' / 'aqe' / 'mev'
@@ -171,3 +172,79 @@ def test_anvil_cleanup_kills_and_fails_closed_if_forced_wait_times_out():
     assert process.terminated is True
     assert process.killed is True
     assert process.wait_calls == 2
+
+
+def _strategy_context(tx_hash):
+    address = '0x' + '1' * 40
+    return {
+        'strategy': 'flash_arb',
+        'tx_hash': tx_hash,
+        'provider': 'aave',
+        'borrow_token': address,
+        'profit_to': address,
+        'amount_borrow': 1_000_000,
+        'expected_profit_raw': 50_000,
+        'legs': [{'dex': 'univ3', 'venue': address, 'token_in': address, 'token_out': '0x' + '2' * 40, 'data': '0x01'}],
+        'simulation_request': {
+            'fork_url': 'https://example.invalid/rpc',
+            'fork_block': 123,
+            'transaction': {'hash': tx_hash, 'to': address, 'data': '0xabcdef12'},
+            'scenarios': [{
+                'gas_multiplier': 1.0,
+                'liquidity_multiplier': 1.0,
+                'oracle_multiplier': 1.0,
+                'economic_observation': {'account': address, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 2000.0, 'role': 'profit'}]},
+            }],
+        },
+    }
+
+
+def test_strategy_context_producer_requires_explicit_economic_observation():
+    producer = MEVStrategySimulationContextProducer()
+    tx_hash = '0x' + '1' * 64
+    context = _strategy_context(tx_hash)
+    assert producer.produce(tx_hash=tx_hash, strategy_context=context) is not None
+    context['simulation_request']['scenarios'][0].pop('economic_observation')
+    assert producer.produce(tx_hash=tx_hash, strategy_context=context) is None
+
+
+def test_strategy_context_producer_rejects_mismatched_pending_transaction():
+    producer = MEVStrategySimulationContextProducer()
+    context = _strategy_context('0x' + '1' * 64)
+    assert producer.produce(tx_hash='0x' + '2' * 64, strategy_context=context) is None
+
+
+def test_mev_search_consumes_produced_context():
+    tx_hash = '0x' + '3' * 64
+    context = _strategy_context(tx_hash)
+    evidence = {
+        'simulation_id': 'sim-1', 'deterministic': True, 'fork_block': 123,
+        'pre_state_root': '0xpre', 'post_state_root': '0xpost', 'scenario_digest': 'sha256:scenario-1',
+        'scenario_results': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'conflict_checked': True, 'reverted': False}],
+        'reverted': False,
+        'economics': {'simulation_id': 'sim-1', 'scenario_digest': 'sha256:scenario-1', 'expected_realized_profit_usd': 17.5, 'gross_asset_delta_usd': 20.0, 'gas_cost_usd': 2.0, 'borrow_cost_usd': 0.5},
+    }
+
+    class _Executor:
+        def simulate(self, **request):
+            assert request['transaction']['hash'] == tx_hash
+            assert request['scenarios'][0]['economic_observation']['assets']
+            return evidence
+
+    rows = MEVSearchEngine(fork_executor=_Executor()).search(
+        mev_state={'sample_pending': [{'hash': tx_hash, 'to': '0x' + '1' * 40, 'value_wei': 0, 'tags': ['dex_like'], 'sel': '0xabcdef12', 'strategy_context': context}], 'high_risk_ratio': 0.0},
+        base_opportunities=[],
+    )
+    assert len(rows) == 1
+    assert rows[0].expected_profit_usd == 17.5
+    assert rows[0].metadata['economics_status'] == 'simulation_backed'
+    assert rows[0].metadata['flash_arb_context']['strategy'] == 'flash_arb'
+
+
+def test_pending_transaction_without_explicit_context_stays_non_authoritative():
+    rows = MEVSearchEngine().search(
+        mev_state={'sample_pending': [{'hash': '0x4', 'to': '0x' + '1' * 40, 'value_wei': 5 * 10**18, 'tags': ['dex_like'], 'sel': '0xabcdef12'}], 'high_risk_ratio': 0.2},
+        base_opportunities=[],
+    )
+    assert rows[0].expected_profit_usd == 0.0
+    assert rows[0].metadata['economics_status'] == 'heuristic_non_authoritative'
