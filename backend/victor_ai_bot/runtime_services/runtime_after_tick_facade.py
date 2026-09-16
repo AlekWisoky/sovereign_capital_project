@@ -35,18 +35,9 @@ class RuntimeAfterTickFacade:
                 f"circuit_breaker_tripped:cooldown_s={self._cb.remaining_cooldown_s()}"
             )
 
-        # Engine service: normalized engine opportunities across adjacent alpha families.
-        if not tick_failed:
-            self._scan_engine_opportunities(
-                regime_label=str(regime_label or "balanced"),
-                mev_state=dict(mev_snap or {}),
-                base_opportunities=list(opps or []),
-                treasury_state=dict(treasury_state or {}),
-            )
-
-        # Phase 7+/V9: same-iteration research/observability tails.
-        # Skip them after a contained per-tick bug so they do not
-        # consume degraded pre-catch state.
+        # Engine service is now scanned before canonical decisioning so validated
+        # MEV flash-arb candidates can enter the canonical Opportunity set. Keep
+        # the post-decision tail free of a second scan to avoid duplicate work.
         await self._run_post_tick_tails(tick_failed=bool(tick_failed))
 
         await self._run_loop_iteration_tail(loop_started_at=float(loop_started_at))
