@@ -130,38 +130,43 @@ class MempoolMonitor:
             if item.last_error:
                 self.status.last_error = item.last_error
 
+    def _forget_hash(self, tx_hash: str) -> None:
+        self._seen_hash_set.discard(tx_hash)
+        try:
+            self._seen_hashes.remove(tx_hash)
+        except ValueError:
+            pass
+
+    def _remember_hash(self, tx_hash: str) -> None:
+        if len(self._seen_hashes) == self._seen_hashes.maxlen:
+            self._forget_hash(self._seen_hashes[0])
+        self._seen_hashes.append(tx_hash)
+        self._seen_hash_set.add(tx_hash)
+
+    def _drop_queued_hash(self) -> None:
+        try:
+            dropped = self.q.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        self._forget_hash(dropped)
+
+    def _queue_hash(self, tx_hash: str) -> None:
+        if self.q.full():
+            self._drop_queued_hash()
+        try:
+            self.q.put_nowait(tx_hash)
+        except asyncio.QueueFull:
+            self._forget_hash(tx_hash)
+
     def _enqueue_hash(self, tx_hash: str, *, source_url: str) -> None:
         if not isinstance(tx_hash, str) or not tx_hash.startswith("0x"):
             return
         if tx_hash in self._seen_hash_set:
             return
-        if self.sample_rate < 1.0:
-            u = stable_uniform_0_1(f"mempool:sample:{source_url}:{tx_hash}")
-            if u > self.sample_rate:
-                return
-        if len(self._seen_hashes) == self._seen_hashes.maxlen:
-            oldest = self._seen_hashes.popleft()
-            self._seen_hash_set.discard(oldest)
-        self._seen_hashes.append(tx_hash)
-        self._seen_hash_set.add(tx_hash)
-        if self.q.full():
-            try:
-                dropped = self.q.get_nowait()
-                self._seen_hash_set.discard(dropped)
-                try:
-                    self._seen_hashes.remove(dropped)
-                except ValueError:
-                    pass
-            except asyncio.QueueEmpty:
-                pass
-        try:
-            self.q.put_nowait(tx_hash)
-        except asyncio.QueueFull:
-            self._seen_hash_set.discard(tx_hash)
-            try:
-                self._seen_hashes.remove(tx_hash)
-            except ValueError:
-                pass
+        if self.sample_rate < 1.0 and stable_uniform_0_1(f"mempool:sample:{source_url}:{tx_hash}") > self.sample_rate:
+            return
+        self._remember_hash(tx_hash)
+        self._queue_hash(tx_hash)
 
     async def _connect_once(self, ws_url: Optional[str] = None) -> None:
         source_url = str(ws_url or self.ws_url)
