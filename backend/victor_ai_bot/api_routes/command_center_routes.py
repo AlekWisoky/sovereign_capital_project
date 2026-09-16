@@ -12,6 +12,7 @@ from ..runtime_services.auxiliary_state_service import (
     CAPITAL_POLICY_VERSION,
 )
 from ..runtime_services.command_center_service import CommandCenterService
+from ..runtime_services.summary_read_contract import build_summary_read_contract
 from ._route_helpers import attach_summary_contract
 
 router = APIRouter()
@@ -41,13 +42,16 @@ async def commandcenter_audit_tail(request: Request, limit: int = 200):
     # canonical contract versions, but it does not need a live capital-truth
     # projection. Avoid synchronously traversing the shared runtime/capital
     # state from this async request path.
-    return attach_summary_contract(
-        _service(runtime).audit_tail(runtime, limit=int(limit)),
+    payload = _service(runtime).audit_tail(runtime, limit=int(limit))
+    payload["summaryContract"] = build_summary_read_contract(
         family="command_center_audit",
-        read_model="command_center_audit_projection_v1",
+        payload=payload,
         capital_contract={"contractVersion": CAPITAL_CONTRACT_VERSION},
         capital_policy={"contractVersion": CAPITAL_POLICY_VERSION},
+        phase="command_center_audit_summary",
+        read_model="command_center_audit_projection_v1",
     )
+    return payload
 
 
 @router.get("/api/commandcenter/explain")
