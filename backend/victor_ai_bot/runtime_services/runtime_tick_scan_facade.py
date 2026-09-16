@@ -84,7 +84,17 @@ class RuntimeTickScanFacade:
             pending_rate=float(pending_rate),
             current_block=int(current_block),
         )
-        mev_snap = dict(predecision_state.get("mev_snap") or {})
+        predecision_mev_snap = dict(predecision_state.get("mev_snap") or {})
+        mev_runtime = getattr(self, "_mev", None)
+        if mev_runtime is not None and hasattr(mev_runtime, "state"):
+            try:
+                raw_mev_snap = mev_runtime.state()
+                if isinstance(raw_mev_snap, dict):
+                    mev_snap = dict(raw_mev_snap)
+            except (AttributeError, KeyError, TypeError, ValueError):
+                mev_snap = predecision_mev_snap
+        else:
+            mev_snap = predecision_mev_snap
 
         # Run the existing engine scan before canonical decisioning so an
         # explicitly validated MEV flash-arb route can enter the same Opportunity
