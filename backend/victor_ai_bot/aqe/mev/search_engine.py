@@ -5,17 +5,100 @@ from typing import Any, Dict, List
 
 from victor_ai_bot.engine_control.models import EngineOpportunity
 
+from ...flashloan_providers import is_executable_flashloan_provider, normalize_flashloan_provider
 from .simulator import (
     ForkSimulationUnavailable,
     validate_deterministic_simulation_evidence,
 )
 
 
+class MEVStrategySimulationContextProducer:
+    """Build simulation context only from explicit strategy inputs."""
+
+    @staticmethod
+    def _address(value: Any) -> str | None:
+        text = str(value or "")
+        if len(text) != 42 or not text.startswith("0x"):
+            return None
+        try:
+            int(text[2:], 16)
+        except ValueError:
+            return None
+        return text
+
+    @staticmethod
+    def _positive_int(value: Any) -> int | None:
+        try:
+            parsed = int(str(value))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def produce(self, *, tx_hash: str, strategy_context: Any) -> dict[str, Any] | None:
+        if not isinstance(tx_hash, str) or not tx_hash.startswith("0x"):
+            return None
+        if not isinstance(strategy_context, Mapping):
+            return None
+        if str(strategy_context.get("strategy") or "") != "flash_arb":
+            return None
+        if str(strategy_context.get("tx_hash") or tx_hash) != tx_hash:
+            return None
+        provider = normalize_flashloan_provider(str(strategy_context.get("provider") or ""))
+        borrow_token = self._address(strategy_context.get("borrow_token"))
+        profit_to = self._address(strategy_context.get("profit_to"))
+        amount_borrow = self._positive_int(strategy_context.get("amount_borrow"))
+        expected_profit_raw = self._positive_int(strategy_context.get("expected_profit_raw"))
+        if not is_executable_flashloan_provider(provider):
+            return None
+        if not all((borrow_token, profit_to, amount_borrow, expected_profit_raw)):
+            return None
+
+        simulation_request = strategy_context.get("simulation_request")
+        if not isinstance(simulation_request, Mapping):
+            return None
+        fork_url = str(simulation_request.get("fork_url") or "")
+        transaction = simulation_request.get("transaction")
+        scenarios = simulation_request.get("scenarios")
+        if not fork_url or not isinstance(transaction, Mapping) or not isinstance(scenarios, list) or not scenarios:
+            return None
+        if str(transaction.get("hash") or tx_hash) != tx_hash:
+            return None
+        if not str(transaction.get("to") or "") or not str(transaction.get("data") or "").startswith("0x"):
+            return None
+        for scenario in scenarios:
+            if not isinstance(scenario, Mapping):
+                return None
+            if not isinstance(scenario.get("economic_observation"), Mapping):
+                return None
+            if any(key not in scenario for key in ("gas_multiplier", "liquidity_multiplier", "oracle_multiplier")):
+                return None
+        legs = strategy_context.get("legs")
+        if not isinstance(legs, list) or not legs or any(not isinstance(leg, Mapping) for leg in legs):
+            return None
+        return {
+            "strategy": "flash_arb",
+            "tx_hash": tx_hash,
+            "provider": provider,
+            "borrow_token": borrow_token,
+            "profit_to": profit_to,
+            "amount_borrow": amount_borrow,
+            "expected_profit_raw": expected_profit_raw,
+            "legs": [dict(leg) for leg in legs],
+            "simulation_request": {
+                "fork_url": fork_url,
+                "fork_block": simulation_request.get("fork_block"),
+                "transaction": dict(transaction),
+                "scenarios": [dict(scenario) for scenario in scenarios],
+            },
+        }
+
+
 class MEVSearchEngine:
     engine_type = 'mev_search'
 
-    def __init__(self, *, fork_executor: Any | None = None):
+    def __init__(self, *, fork_executor: Any | None = None, strategy_context_producer: Any | None = None):
         self._fork_executor = fork_executor
+        self._strategy_context_producer = strategy_context_producer or MEVStrategySimulationContextProducer()
 
     def _simulation_boundary(self, *, evidence: Any, request: Any) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
         candidate_evidence = evidence
@@ -50,11 +133,25 @@ class MEVSearchEngine:
             return None, 'non_positive'
         return value, 'simulation_evidence'
 
+    def _prepare_pending_tx(self, tx: Mapping[str, Any]) -> dict[str, Any]:
+        prepared = dict(tx)
+        context = self._strategy_context_producer.produce(
+            tx_hash=str(tx.get('hash') or ''),
+            strategy_context=tx.get('strategy_context'),
+        )
+        if context is not None:
+            prepared['simulation_request'] = context['simulation_request']
+            prepared['flash_arb_context'] = context
+        return prepared
+
     def search(self, *, mev_state: Dict[str, Any], base_opportunities: List[Any], regime: str = 'balanced', chain: str = 'ethereum', chain_id: int = 1) -> List[EngineOpportunity]:
         pending = list(mev_state.get('sample_pending') or [])
         high_risk = float(mev_state.get('high_risk_ratio') or 0.0)
         out: List[EngineOpportunity] = []
-        for tx in pending[:8]:
+        for raw_tx in pending[:8]:
+            if not isinstance(raw_tx, Mapping):
+                continue
+            tx = self._prepare_pending_tx(raw_tx)
             tags = set(tx.get('tags') or [])
             if 'dex_like' not in tags and not str(tx.get('sel') or '').startswith('0x'):
                 continue
