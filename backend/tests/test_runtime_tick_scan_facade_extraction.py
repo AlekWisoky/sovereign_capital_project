@@ -15,6 +15,7 @@ EXTRACTED_METHODS = {
 class _Runtime(RuntimeTickScanFacade):
     def __init__(self):
         self.calls = []
+        self._engine_service = SimpleNamespace(flash_arb_opportunities=lambda: [])
 
     def _resolve_amount_in(self):
         self.calls.append(('resolve_amount_in', {}))
@@ -56,6 +57,9 @@ class _Runtime(RuntimeTickScanFacade):
         self.calls.append(('predecision_state', dict(kwargs)))
         return {'mev_snap': {'danger': 0.7}}
 
+    def _scan_engine_opportunities(self, **kwargs):
+        self.calls.append(('engine_scan', dict(kwargs)))
+
     async def _run_decision_finalize(self, **kwargs):
         self.calls.append(('decision_finalize', dict(kwargs)))
         return SimpleNamespace(action='trade')
@@ -87,13 +91,14 @@ async def test_tick_scan_pipeline_preserves_order_and_outputs():
     assert [name for name, _ in runtime.calls] == [
         'resolve_amount_in',
         'scan_primary',
-        'annotate_can_execute',
         'gas_signals',
         'market_signals',
         'behave_regime',
         'resolve_market_regime',
         'treasury_guidance',
         'predecision_state',
+        'engine_scan',
+        'annotate_can_execute',
         'decision_finalize',
     ]
     assert result['regime_label'] == 'volatile'
