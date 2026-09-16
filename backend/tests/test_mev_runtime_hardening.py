@@ -208,3 +208,47 @@ def test_context_uses_existing_two_leg_route_and_requires_explicit_simulation():
     assert produce_flash_arb_context_from_router(**kwargs) is None
     context = produce_flash_arb_context_from_router(**kwargs, simulation_request={'fork_url': 'https://example.invalid/rpc', 'fork_block': 100, 'transaction': {'to': '0x0000000000000000000000000000000000000090', 'data': '0x'}, 'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0, 'economic_observation': {'account': PROFIT_TO, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 1.0}]}}]})
     assert context is not None; assert context['strategy'] == 'flash_arb'; assert context['borrow_token'] == TOKEN_A; assert context['amount_borrow'] == 1000; assert context['expected_profit_raw'] == 25; assert len(context['legs']) == 2; assert context['observed_router_call']['fee'] == 3000
+
+
+def test_pending_router_call_flows_through_search_with_simulation_backed_economics():
+    tx = _swap_tx()
+    tx['simulation_request'] = {
+        'fork_url': 'https://example.invalid/rpc',
+        'fork_block': 123,
+        'transaction': {'hash': tx['hash'], 'to': tx['to'], 'data': tx['input']},
+        'scenarios': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0,
+                       'economic_observation': {'account': PROFIT_TO, 'assets': [{'address': 'native', 'decimals': 18, 'price_usd': 1.0}]}}],
+    }
+
+    class _Executor:
+        def simulate(self, **request):
+            return {'simulation_id': 'router-sim', 'deterministic': True, 'fork_block': 123,
+                    'pre_state_root': '0xpre', 'post_state_root': '0xpost', 'scenario_digest': 'sha256:router',
+                    'scenario_results': [{'gas_multiplier': 1.0, 'liquidity_multiplier': 1.0, 'oracle_multiplier': 1.0,
+                                          'conflict_checked': True, 'reverted': False}], 'reverted': False,
+                    'economics': {'simulation_id': 'router-sim', 'scenario_digest': 'sha256:router',
+                                  'expected_realized_profit_usd': 17.5, 'gross_asset_delta_usd': 20.0,
+                                  'gas_cost_usd': 2.0, 'borrow_cost_usd': 0.5}}
+
+    rows = MEVSearchEngine(fork_executor=_Executor(), router=ROUTER, provider='aave', profit_to=PROFIT_TO).search(
+        mev_state={'sample_pending': [tx], 'high_risk_ratio': 0.0},
+        base_opportunities=[_base_opportunity()],
+    )
+    assert len(rows) == 1
+    assert rows[0].expected_profit_usd == 17.5
+    assert rows[0].metadata['economics_status'] == 'simulation_backed'
+    assert rows[0].metadata['flash_arb_context']['source_route_id'] == 'route-1'
+    assert rows[0].lifecycle_eligibility == 'observe_only'
+    assert rows[0].policy_eligibility == 'observe_only'
+
+
+def test_arbitrary_router_call_without_explicit_simulation_context_cannot_be_promoted():
+    rows = MEVSearchEngine(router=ROUTER, provider='aave', profit_to=PROFIT_TO).search(
+        mev_state={'sample_pending': [_swap_tx()], 'high_risk_ratio': 0.0},
+        base_opportunities=[_base_opportunity()],
+    )
+    assert len(rows) == 1
+    assert rows[0].expected_profit_usd == 0.0
+    assert 'flash_arb_context' not in rows[0].metadata
+    assert rows[0].lifecycle_eligibility == 'observe_only'
+    assert rows[0].policy_eligibility == 'observe_only'
