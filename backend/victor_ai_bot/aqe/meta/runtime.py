@@ -17,6 +17,7 @@ from victor_ai_bot.runtime_services.profitability_truth import opportunity_profi
 from victor_ai_bot.profitability_projection import profitability_summary_projection
 from victor_ai_bot.alpha_marketplace.intake import candidate_to_submission
 
+
 _SAFE_META_RUNTIME_EXCEPTIONS = (AttributeError, RuntimeError, TypeError, ValueError)
 _SAFE_META_SETTINGS_EXCEPTIONS = (AttributeError, RuntimeError, TypeError, ValueError)
 
@@ -94,9 +95,13 @@ class MetaStrategyRuntime:
 
     def state(self) -> Dict[str, Any]:
         data = MetaState(
-            enabled=bool(self.enabled), mode=str(self.mode), last_tick_ts=float(self._last_tick),
-            last_regime=str(self._last_regime), last_actions=dict(self._last_actions),
-            last_candidates=list(self._last_candidates), memory_summary=self.memory.summary(),
+            enabled=bool(self.enabled),
+            mode=str(self.mode),
+            last_tick_ts=float(self._last_tick),
+            last_regime=str(self._last_regime),
+            last_actions=dict(self._last_actions),
+            last_candidates=list(self._last_candidates),
+            memory_summary=self.memory.summary(),
         ).to_dict()
         data['genealogy'] = {'recent': self.genealogy.load()[-20:]}
         return data
@@ -109,11 +114,13 @@ class MetaStrategyRuntime:
         route_fail_rate = 0.0
         route_fail_ok = True
         safety_ok = True
+
         try:
             route_fail_rate = float(rt._route_fail_rate())
         except _SAFE_META_RUNTIME_EXCEPTIONS:
             route_fail_ok = False
             route_fail_rate = 0.0
+
         safety = {}
         try:
             s = rt.cfg.safety
@@ -121,6 +128,7 @@ class MetaStrategyRuntime:
         except _SAFE_META_RUNTIME_EXCEPTIONS:
             safety_ok = False
             safety = {}
+
         top = _best_telemetry_opportunity(opps)
         gas_source = top
         if gas_source is None and opps and route_fail_ok and safety_ok:
@@ -136,14 +144,21 @@ class MetaStrategyRuntime:
             gas_cost_usd = float(unit.get('gas_cost_usd_micro') or 0.0)
             if gas_cost_usd > 1000.0:
                 gas_cost_usd /= 1_000_000.0
+
         scan_ms = float(metrics.get('scan_ms') or 0.0)
         fail_streak = float(metrics.get('fail_streak') or 0.0)
         vol_proxy = min(1.0, 0.15 * fail_streak + min(0.4, scan_ms / 1500.0))
         return {
-            **safety, 'volatility_proxy': vol_proxy, 'basefee_gwei': float(metrics.get('basefee_gwei') or 0.0),
-            'success_rate': float(metrics.get('success_rate') or 0.0), 'opportunity_rate': float(metrics.get('opportunity_rate') or 0.0),
-            'efficiency_pct': float(metrics.get('efficiency_pct') or 0.0), 'realized_profit_raw': str(metrics.get('realized_profit_raw') or '0'),
-            'expected_profit_usd': float(expected_profit_usd), 'gas_cost_usd': float(gas_cost_usd), 'route_fail_rate': float(route_fail_rate),
+            **safety,
+            'volatility_proxy': vol_proxy,
+            'basefee_gwei': float(metrics.get('basefee_gwei') or 0.0),
+            'success_rate': float(metrics.get('success_rate') or 0.0),
+            'opportunity_rate': float(metrics.get('opportunity_rate') or 0.0),
+            'efficiency_pct': float(metrics.get('efficiency_pct') or 0.0),
+            'realized_profit_raw': str(metrics.get('realized_profit_raw') or '0'),
+            'expected_profit_usd': float(expected_profit_usd),
+            'gas_cost_usd': float(gas_cost_usd),
+            'route_fail_rate': float(route_fail_rate),
         }
 
     def generate(self, rt: Any) -> List[Dict[str, Any]]:
@@ -151,10 +166,13 @@ class MetaStrategyRuntime:
         regime = detect_regime(telemetry)
         self._last_regime = regime.name
         bounds = {
-            'max_candidates': int(getattr(self.cfg, 'max_candidates', 5)), 'max_slippage_bps': int(getattr(self.cfg, 'max_slippage_bps', 120)),
+            'max_candidates': int(getattr(self.cfg, 'max_candidates', 5)),
+            'max_slippage_bps': int(getattr(self.cfg, 'max_slippage_bps', 120)),
             'min_profit_abs_bump_wei': int(getattr(self.cfg, 'min_profit_abs_bump_wei', 2 * 10**15)),
-            'min_profit_bps_step': int(getattr(self.cfg, 'min_profit_bps_step', 10)), 'max_min_profit_bps': int(getattr(self.cfg, 'max_min_profit_bps', 80)),
-            'max_submit_per_block': int(getattr(self.cfg, 'max_submit_per_block', 2)), 'min_trade_cooldown': int(getattr(self.cfg, 'min_trade_cooldown', 2)),
+            'min_profit_bps_step': int(getattr(self.cfg, 'min_profit_bps_step', 10)),
+            'max_min_profit_bps': int(getattr(self.cfg, 'max_min_profit_bps', 80)),
+            'max_submit_per_block': int(getattr(self.cfg, 'max_submit_per_block', 2)),
+            'min_trade_cooldown': int(getattr(self.cfg, 'min_trade_cooldown', 2)),
             'allow_private': bool(getattr(self.cfg, 'allow_private', True)),
         }
         rows = self.memory.load()
@@ -204,7 +222,13 @@ class MetaStrategyRuntime:
             return {'ok': False, 'error': 'apply_failed', 'detail': str(e)}
         stage = str(cand.get('lifecycle_stage') or 'paper_trading')
         self.registry.mark_stage(cand_id, stage)
-        self._last_actions = {'applied': cand_id, 'settings_patch': settings_patch, 'safety_patch': safety_patch, 'structure_patch': cand.get('structure_patch') or {}, 'lifecycle_stage': stage}
+        self._last_actions = {
+            'applied': cand_id,
+            'settings_patch': settings_patch,
+            'safety_patch': safety_patch,
+            'structure_patch': cand.get('structure_patch') or {},
+            'lifecycle_stage': stage,
+        }
         return {'ok': True, 'applied': cand_id, 'lifecycle_stage': stage, 'structure_patch': cand.get('structure_patch') or {}, 'stress_report': cand.get('stress_report') or {}}
 
     async def tick(self, rt: Any) -> None:
