@@ -31,6 +31,8 @@ from ..withdraw_external import router as withdraw_external_router
 # Keep the external-wallet reconciliation endpoint inside the canonical withdrawal
 # router namespace; it is observation/reconciliation only and never a signer.
 withdraw_router.include_router(withdraw_external_router)
+# Keep the alpha marketplace as a read/admission surface inside the existing fund router.
+fund_router.include_router(alpha_marketplace_router)
 
 __all__ = [
     "admin_router",
