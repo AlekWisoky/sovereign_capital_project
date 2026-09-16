@@ -146,7 +146,7 @@
       "family": "aqe",
       "path": "backend/victor_ai_bot/aqe",
       "primaryEvidenceCount": 35,
-      "pythonFileCount": 86,
+      "pythonFileCount": 87,
       "referenceCount": 61,
       "status": "live",
       "statusInputs": {
