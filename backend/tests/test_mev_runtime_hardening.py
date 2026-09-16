@@ -185,7 +185,7 @@ def _address_word(address: str) -> str: return address[2:].rjust(64, '0')
 
 def _swap_tx(*, to: str = ROUTER, tx_hash: str = '0xabc') -> dict:
     payload = ''.join([_address_word(TOKEN_A), _address_word(TOKEN_B), _word(3000), _address_word(RECIPIENT), _word(9999999999), _word(1000), _word(950), _word(0)])
-    return {'hash': tx_hash, 'to': to, 'input': '0x414bf389' + payload}
+    return {'hash': tx_hash, 'to': to, 'input': '0x414bf389' + payload, 'tags': ['dex_like'], 'sel': '0x414bf389'}
 
 
 def _base_opportunity():
