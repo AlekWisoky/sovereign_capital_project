@@ -131,12 +131,36 @@ class AnvilForkExecutor:
                 economics = dict(economics, simulation_id=simulation_id, scenario_digest=f'sha256:{digest}')
             return {'simulation_id': simulation_id, 'deterministic': True, 'fork_block': int(fork_block), 'pre_state_root': pre_root, 'post_state_root': results[-1]['post_state_root'], 'scenario_digest': f'sha256:{digest}', 'scenario_results': results, 'economics': economics, 'reverted': any(bool(item['reverted']) for item in results)}
         finally:
+            self._cleanup_process(process)
+
+    @staticmethod
+    def _cleanup_process(process: subprocess.Popen[str]) -> None:
+        """Terminate an Anvil child and fail closed if forced cleanup cannot complete."""
+        try:
             process.terminate()
+        except OSError as exc:
+            if process.poll() is not None:
+                return
+            try:
+                process.kill()
+            except OSError as kill_exc:
+                raise ForkSimulationUnavailable('anvil_process_cleanup_failed') from kill_exc
             try:
                 process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as wait_exc:
+                raise ForkSimulationUnavailable('anvil_process_cleanup_timeout') from wait_exc
+            return
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
                 process.kill()
+            except OSError as kill_exc:
+                raise ForkSimulationUnavailable('anvil_process_cleanup_failed') from kill_exc
+            try:
                 process.wait(timeout=3)
+            except subprocess.TimeoutExpired as wait_exc:
+                raise ForkSimulationUnavailable('anvil_process_cleanup_timeout') from wait_exc
 
     def _validate_request(self, fork_url: str, fork_block: int, transaction: Mapping[str, Any], scenarios: Iterable[Mapping[str, Any]]) -> None:
         self._validate_fork_url(fork_url)

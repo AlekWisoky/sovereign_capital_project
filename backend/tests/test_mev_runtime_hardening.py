@@ -1,4 +1,5 @@
 import ast
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import pytest
 import victor_ai_bot.aqe.mev.runtime as mev_runtime_module
 from victor_ai_bot.aqe.mev.models import MEVConfig
 from victor_ai_bot.aqe.mev.runtime import MEVRuntime
+from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable
 
 ROOT = Path(__file__).resolve().parents[1] / 'victor_ai_bot' / 'aqe' / 'mev'
 
@@ -125,3 +127,31 @@ def test_mev_runtime_module_has_no_broad_exception_handlers():
         if isinstance(node.type, ast.Name) and node.type.id == 'Exception':
             broad.append('except Exception')
     assert broad == []
+
+
+def test_anvil_cleanup_kills_and_fails_closed_if_forced_wait_times_out():
+    class _CleanupProcess:
+        def __init__(self):
+            self.terminated = False
+            self.killed = False
+            self.wait_calls = 0
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+        def poll(self):
+            return None
+
+        def wait(self, *, timeout):
+            self.wait_calls += 1
+            raise subprocess.TimeoutExpired(cmd='anvil', timeout=timeout)
+
+    process = _CleanupProcess()
+    with pytest.raises(ForkSimulationUnavailable, match='anvil_process_cleanup_timeout'):
+        AnvilForkExecutor._cleanup_process(process)
+    assert process.terminated is True
+    assert process.killed is True
+    assert process.wait_calls == 2
