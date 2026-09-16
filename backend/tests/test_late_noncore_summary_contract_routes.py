@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from victor_ai_bot.api_routes import (
+    _route_helpers,
     command_center_routes,
     evolution,
     operator_command_routes,
@@ -64,14 +65,30 @@ def test_operator_command_state_emits_summary_contract(monkeypatch) -> None:
     assert body["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"
 
 
-def test_command_center_audit_and_explain_emit_summary_contract(monkeypatch) -> None:
+def test_command_center_audit_contract_does_not_read_live_capital_truth(monkeypatch) -> None:
     runtime = _Runtime()
     runtime._command_center_service = _CommandCenterService()
     monkeypatch.setattr(command_center_routes, "get_runtime", lambda request: runtime)
 
+    def _unexpected_live_capital_read(*args, **kwargs):
+        raise AssertionError("audit route must not build live capital truth")
+
+    monkeypatch.setattr(
+        _route_helpers,
+        "build_capital_truth_read_context",
+        _unexpected_live_capital_read,
+    )
+
     audit = asyncio.run(command_center_routes.commandcenter_audit_tail(SimpleNamespace(), limit=5))
     assert audit["summaryContract"]["truthFamily"] == "command_center_audit"
     assert audit["summaryContract"]["capitalContractVersion"] == "canonical_capital_summary_v1"
+    assert audit["summaryContract"]["capitalPolicyVersion"] == "capital_policy_v1"
+
+
+def test_command_center_explain_emits_summary_contract(monkeypatch) -> None:
+    runtime = _Runtime()
+    runtime._command_center_service = _CommandCenterService()
+    monkeypatch.setattr(command_center_routes, "get_runtime", lambda request: runtime)
 
     explain = asyncio.run(command_center_routes.commandcenter_explain(SimpleNamespace()))
     assert explain["summaryContract"]["truthFamily"] == "command_center_explain"
