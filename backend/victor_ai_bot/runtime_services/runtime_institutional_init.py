@@ -114,6 +114,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._engine_service = EngineService(
         capture_engine=getattr(runtime, "_capture_engine", None),
         telemetry_service=getattr(runtime, "_telemetry_service", None),
+        config=cfg,
     )
     runtime._fund_service = FundService()
     runtime._cio_service = CIOService()
