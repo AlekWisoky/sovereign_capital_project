@@ -9,13 +9,15 @@ from .simulator import (
     ForkSimulationUnavailable,
     validate_deterministic_simulation_evidence,
 )
+from .strategy_context import MEVStrategySimulationContextProducer
 
 
 class MEVSearchEngine:
     engine_type = 'mev_search'
 
-    def __init__(self, *, fork_executor: Any | None = None):
+    def __init__(self, *, fork_executor: Any | None = None, strategy_context_producer: Any | None = None):
         self._fork_executor = fork_executor
+        self._strategy_context_producer = strategy_context_producer or MEVStrategySimulationContextProducer()
 
     def _simulation_boundary(self, *, evidence: Any, request: Any) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
         candidate_evidence = evidence
@@ -50,11 +52,25 @@ class MEVSearchEngine:
             return None, 'non_positive'
         return value, 'simulation_evidence'
 
+    def _prepare_pending_tx(self, tx: Mapping[str, Any]) -> dict[str, Any]:
+        prepared = dict(tx)
+        context = self._strategy_context_producer.produce(
+            tx_hash=str(tx.get('hash') or ''),
+            strategy_context=tx.get('strategy_context'),
+        )
+        if context is not None:
+            prepared['simulation_request'] = context['simulation_request']
+            prepared['flash_arb_context'] = context
+        return prepared
+
     def search(self, *, mev_state: Dict[str, Any], base_opportunities: List[Any], regime: str = 'balanced', chain: str = 'ethereum', chain_id: int = 1) -> List[EngineOpportunity]:
         pending = list(mev_state.get('sample_pending') or [])
         high_risk = float(mev_state.get('high_risk_ratio') or 0.0)
         out: List[EngineOpportunity] = []
-        for tx in pending[:8]:
+        for raw_tx in pending[:8]:
+            if not isinstance(raw_tx, Mapping):
+                continue
+            tx = self._prepare_pending_tx(raw_tx)
             tags = set(tx.get('tags') or [])
             if 'dex_like' not in tags and not str(tx.get('sel') or '').startswith('0x'):
                 continue
