@@ -1,4 +1,3 @@
-from victor_ai_bot.aqe.mev.models import MEVConfig
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
 from victor_ai_bot.aqe.mev.strategy_context import MEVStrategySimulationContextProducer
 
