@@ -1,0 +1,27 @@
+name: one-time generated truth refresh
+on:
+  push:
+    branches:
+      - codex/mev-flash-arb-integration
+permissions:
+  contents: write
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refresh generated optional-family status and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/render_optional_family_status.py
+          rm .github/workflows/_one_time_refresh_optional_family_status.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/generated/optional_family_status.json .github/workflows/_one_time_refresh_optional_family_status.yml
+          if git diff --cached --quiet; then
+            echo "No generated change; nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore: refresh generated optional family status"
+          git push origin HEAD:codex/mev-flash-arb-integration
