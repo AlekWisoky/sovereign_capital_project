@@ -50,7 +50,7 @@ class MEVRuntime:
             return
 
         self._monitor = MempoolMonitor(
-            ws_url=ws_url,
+            ws_urls=self._ws_urls,
             sample_rate=float(self.cfg.sample_rate),
             max_queue=max(200, int(self.cfg.max_pending)),
             reconnect_backoff_s=float(self.cfg.reconnect_backoff_s),
@@ -66,7 +66,6 @@ class MEVRuntime:
             self._task.cancel()
 
     def _pick_ws(self) -> str:
-        # Prefer explicitly configured URLs; otherwise none.
         if self._ws_urls:
             return self._ws_urls[0]
         return ""
