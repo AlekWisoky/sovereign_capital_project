@@ -50,9 +50,11 @@ from .state_service import StateService
 from .state_summary_service import StateSummaryService
 from .treasury_service import TreasuryService
 from .wealth_goal_service import WealthGoalService
+from .capital_admission_service import CapitalAdmissionService
 from .institutional_sizing_runtime import InstitutionalSizingAdmissionService
 from .withdraw_all_service import WithdrawAllService
 
+# Compatibility alias retained for constructor tests and older integrations.
 ReceiptService = CanonicalReceiptService
 
 _SAFE_RUNTIME_EXCEPTIONS = (
@@ -82,8 +84,13 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
         runtime._cc = CommandCenterOverlay(data_dir=data_dir, chain=cfg.chain.name)
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._cc = None
+
     try:
-        runtime._replay = ReplayBundleStore(data_dir=data_dir, chain=cfg.chain.name, chain_id=int(getattr(cfg.chain, "chain_id", 0) or 0))
+        runtime._replay = ReplayBundleStore(
+            data_dir=data_dir,
+            chain=cfg.chain.name,
+            chain_id=int(getattr(cfg.chain, "chain_id", 0) or 0),
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._replay = None
 
@@ -103,8 +110,13 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._replay_service = ReplayService()
     runtime._state_summary_service = StateSummaryService()
     runtime._auxiliary_state_service = AuxiliaryStateService()
-    runtime._capital_admission_service = InstitutionalSizingAdmissionService(auxiliary_state=runtime._auxiliary_state_service, treasury_service=runtime._treasury_service)
-    runtime._operator_summary_service = OperatorSummaryService(state_summary=runtime._state_summary_service)
+    runtime._capital_admission_service = InstitutionalSizingAdmissionService(
+        auxiliary_state=runtime._auxiliary_state_service,
+        treasury_service=runtime._treasury_service,
+    )
+    runtime._operator_summary_service = OperatorSummaryService(
+        state_summary=runtime._state_summary_service
+    )
     try:
         runtime._data_root_migration = migrate_legacy_data_roots()
     except _SAFE_RUNTIME_EXCEPTIONS:
@@ -127,10 +139,18 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._capital_event_repo = None
     runtime._ledger = TreasuryLedger(data_dir=data_dir, chain=cfg.chain.name)
-    runtime._ledger_repo = LedgerRepository(runtime._db, capital_event_repo=runtime._capital_event_repo, chain=cfg.chain.name)
+    runtime._ledger_repo = LedgerRepository(
+        runtime._db, capital_event_repo=runtime._capital_event_repo, chain=cfg.chain.name
+    )
     runtime._capital_recovery_repo = CapitalRecoveryRepository(runtime._db, chain=cfg.chain.name)
     runtime._auto_trade_recovery_repo = AutoTradeRecoveryRepository(runtime._db, chain=cfg.chain.name)
-    runtime._internal_prime = InternalPrimeAllocator(data_dir=data_dir, chain=cfg.chain.name, db=runtime._db, capital_event_repo=runtime._capital_event_repo, capital_write_service=runtime._capital_write_service)
+    runtime._internal_prime = InternalPrimeAllocator(
+        data_dir=data_dir,
+        chain=cfg.chain.name,
+        db=runtime._db,
+        capital_event_repo=runtime._capital_event_repo,
+        capital_write_service=runtime._capital_write_service,
+    )
     runtime._internal_prime_state_repo = getattr(runtime._internal_prime, "_state_repo", None)
     runtime._rl_registry = PolicyRegistry(data_dir=data_dir, chain=cfg.chain.name)
     runtime._engine_last = {"items": [], "capabilities": {}, "summary": {"engines": []}}
@@ -144,7 +164,11 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._launch_rollout = None
     try:
-        runtime._alpha_marketplace = AlphaMarketplaceStore(data_dir=data_dir, chain=cfg.chain.name, enabled=bool((getattr(cfg.execution, "meta", {}) or {}).get("enable_alpha_marketplace", False)))
+        runtime._alpha_marketplace = AlphaMarketplaceStore(
+            data_dir=data_dir,
+            chain=cfg.chain.name,
+            enabled=bool((getattr(cfg.execution, "meta", {}) or {}).get("enable_alpha_marketplace", False)),
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._alpha_marketplace = None
     try:
@@ -152,22 +176,35 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._fund_audit = None
     try:
-        runtime._agent_weighting = AgentWeightingGovernor(path=os.path.join(data_dir, "agents", f"weights_{cfg.chain.name}.json"))
+        runtime._agent_weighting = AgentWeightingGovernor(
+            path=os.path.join(data_dir, "agents", f"weights_{cfg.chain.name}.json")
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._agent_weighting = None
     try:
-        runtime._agent_attribution = AgentAttributionStore(path=os.path.join(data_dir, "agents", f"attribution_{cfg.chain.name}.json"), chain=cfg.chain.name)
+        runtime._agent_attribution = AgentAttributionStore(
+            path=os.path.join(data_dir, "agents", f"attribution_{cfg.chain.name}.json"),
+            chain=cfg.chain.name,
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._agent_attribution = None
     try:
-        runtime._family_scorecards = FamilyScorecardStore(path=os.path.join(data_dir, "strategies", f"family_scorecards_{cfg.chain.name}.json"), chain=cfg.chain.name)
+        runtime._family_scorecards = FamilyScorecardStore(
+            path=os.path.join(data_dir, "strategies", f"family_scorecards_{cfg.chain.name}.json"),
+            chain=cfg.chain.name,
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._family_scorecards = None
     try:
-        runtime._family_covariance = FamilyCovarianceStore(path=os.path.join(data_dir, "strategies", f"family_covariance_{cfg.chain.name}.json"))
+        runtime._family_covariance = FamilyCovarianceStore(
+            path=os.path.join(data_dir, "strategies", f"family_covariance_{cfg.chain.name}.json")
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._family_covariance = None
     try:
-        runtime._lifecycle_memory = StrategyLifecycleMemory(path=os.path.join(data_dir, "strategies", f"lifecycle_{cfg.chain.name}.json"), chain=cfg.chain.name)
+        runtime._lifecycle_memory = StrategyLifecycleMemory(
+            path=os.path.join(data_dir, "strategies", f"lifecycle_{cfg.chain.name}.json"),
+            chain=cfg.chain.name,
+        )
     except _SAFE_RUNTIME_EXCEPTIONS:
         runtime._lifecycle_memory = None
