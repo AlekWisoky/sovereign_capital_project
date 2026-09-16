@@ -90,24 +90,23 @@ class RuntimeTickScanFacade:
         # explicitly validated MEV flash-arb route can enter the same Opportunity
         # set. Engine admission remains a prerequisite; canonical decision,
         # flash-loan sizing, governance and execution remain downstream owners.
-        if not tick_failed if False else True:
-            self._scan_engine_opportunities(
-                regime_label=str(regime_label or "balanced"),
-                mev_state=dict(mev_snap or {}),
-                base_opportunities=list(opps or []),
-                treasury_state=dict(treasury_state or {}),
-            )
-            engine_service = getattr(self, "_engine_service", None)
-            if engine_service is not None and hasattr(engine_service, "flash_arb_opportunities"):
-                try:
-                    existing_ids = {str(getattr(opp, "id", "") or "") for opp in opps}
-                    for mev_opp in list(engine_service.flash_arb_opportunities() or []):
-                        mev_id = str(getattr(mev_opp, "id", "") or "")
-                        if mev_id and mev_id not in existing_ids:
-                            opps.append(mev_opp)
-                            existing_ids.add(mev_id)
-                except (AttributeError, KeyError, TypeError, ValueError):
-                    pass
+        self._scan_engine_opportunities(
+            regime_label=str(regime_label or "balanced"),
+            mev_state=dict(mev_snap or {}),
+            base_opportunities=list(opps or []),
+            treasury_state=dict(treasury_state or {}),
+        )
+        engine_service = getattr(self, "_engine_service", None)
+        if engine_service is not None and hasattr(engine_service, "flash_arb_opportunities"):
+            try:
+                existing_ids = {str(getattr(opp, "id", "") or "") for opp in opps}
+                for mev_opp in list(engine_service.flash_arb_opportunities() or []):
+                    mev_id = str(getattr(mev_opp, "id", "") or "")
+                    if mev_id and mev_id not in existing_ids:
+                        opps.append(mev_opp)
+                        existing_ids.add(mev_id)
+            except (AttributeError, KeyError, TypeError, ValueError):
+                pass
 
         await self._safe_annotate_can_execute(rpc, opps)
 
