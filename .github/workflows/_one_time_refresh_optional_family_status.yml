@@ -14,6 +14,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m pip install -c backend/constraints.txt -r backend/requirements-dev.txt
           python3 scripts/render_optional_family_status.py
           rm .github/workflows/_one_time_refresh_optional_family_status.yml
           git config user.name "github-actions[bot]"
