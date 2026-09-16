@@ -107,17 +107,12 @@ def _simulation_gate(context: Mapping[str, Any]) -> dict[str, Any] | None:
     gate = validate_deterministic_simulation_evidence(context.get("simulation_evidence"))
     if gate.get("ok") is not True:
         return None
-    expected_profit = float(gate.get("expected_realized_profit_usd") or 0.0)
-    if expected_profit <= 0.0:
+    if float(gate.get("expected_realized_profit_usd") or 0.0) <= 0.0:
         return None
     return dict(gate)
 
 
-def _calldata_contract_check(
-    *,
-    basics: Mapping[str, Any],
-    legs: List[RouteLeg],
-) -> bool:
+def _calldata_contract_check(*, basics: Mapping[str, Any], legs: List[RouteLeg]) -> bool:
     try:
         build_execute_calldata(
             provider=str(basics["provider"]),
@@ -161,6 +156,54 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
     return normalized, legs, gate
 
 
+def _candidate_metadata(candidate: Any, context: Mapping[str, Any], gate: Mapping[str, Any], provider: str) -> dict[str, Any]:
+    return {
+        "strategy_family": "flash_arb",
+        "route_family": "flash_arb",
+        "capital_source": "flashloan",
+        "flash_provider": provider,
+        "flash_providers": [provider],
+        "flash_arb_context": dict(context),
+        "mev_origin": {
+            "engine_type": "mev_search",
+            "tx_hash": str(getattr(candidate, "metadata", {}).get("tx_hash") or ""),
+        },
+        "simulation_evidence": dict(context.get("simulation_evidence") or {}),
+        "simulation_gate": dict(gate),
+        "economics_status": "simulation_backed",
+        "economics_source": "deterministic_fork_simulation",
+        "private_send_preference": True,
+        "source_policy_eligibility": str(getattr(candidate, "policy_eligibility", "observe_only") or "observe_only"),
+        "source_lifecycle_eligibility": str(getattr(candidate, "lifecycle_eligibility", "observe_only") or "observe_only"),
+    }
+
+
+def _build_flash_arb_opportunity(
+    candidate: Any,
+    context: Mapping[str, Any],
+    normalized: Mapping[str, Any],
+    legs: List[RouteLeg],
+    gate: Mapping[str, Any],
+) -> Opportunity:
+    metadata = getattr(candidate, "metadata", {})
+    tx_hash = str(metadata.get("tx_hash") or "") if isinstance(metadata, Mapping) else ""
+    opportunity_id = f"mev-flash-arb:{tx_hash}" if tx_hash else f"mev-flash-arb:{normalized['route_id']}"
+    expected_profit = float(gate["expected_realized_profit_usd"])
+    return Opportunity(
+        id=opportunity_id,
+        chain=str(getattr(candidate, "chain", "ethereum") or "ethereum"),
+        strategy="flash_arb",
+        expected_profit_raw=str(normalized["expected_profit_raw"]),
+        expected_profit_usd=str(expected_profit),
+        route=Route(legs=legs),
+        min_outs=[leg.min_out for leg in legs],
+        route_id=str(normalized["route_id"]),
+        can_execute=False,
+        created_at_ms=0,
+        meta=_candidate_metadata(candidate, context, gate, str(normalized["provider"])),
+    )
+
+
 def opportunity_from_engine_candidate(candidate: Any) -> Opportunity | None:
     """Convert only an explicitly validated MEV flash-arb context.
 
@@ -178,42 +221,7 @@ def opportunity_from_engine_candidate(candidate: Any) -> Opportunity | None:
     if validated is None:
         return None
     normalized, legs, gate = validated
-    tx_hash = str(metadata.get("tx_hash") or "")
-    opportunity_id = f"mev-flash-arb:{tx_hash}" if tx_hash else f"mev-flash-arb:{normalized['route_id']}"
-    expected_profit = float(gate["expected_realized_profit_usd"])
-    min_outs = [leg.min_out for leg in legs]
-    meta = {
-        "strategy_family": "flash_arb",
-        "route_family": "flash_arb",
-        "capital_source": "flashloan",
-        "flash_provider": normalized["provider"],
-        "flash_providers": [normalized["provider"]],
-        "flash_arb_context": dict(context),
-        "mev_origin": {
-            "engine_type": "mev_search",
-            "tx_hash": tx_hash,
-        },
-        "simulation_evidence": dict(context.get("simulation_evidence") or {}),
-        "simulation_gate": gate,
-        "economics_status": "simulation_backed",
-        "economics_source": "deterministic_fork_simulation",
-        "private_send_preference": True,
-        "source_policy_eligibility": str(getattr(candidate, "policy_eligibility", "observe_only") or "observe_only"),
-        "source_lifecycle_eligibility": str(getattr(candidate, "lifecycle_eligibility", "observe_only") or "observe_only"),
-    }
-    return Opportunity(
-        id=opportunity_id,
-        chain=str(getattr(candidate, "chain", "ethereum") or "ethereum"),
-        strategy="flash_arb",
-        expected_profit_raw=str(normalized["expected_profit_raw"]),
-        expected_profit_usd=str(expected_profit),
-        route=Route(legs=legs),
-        min_outs=min_outs,
-        route_id=normalized["route_id"],
-        can_execute=False,
-        created_at_ms=0,
-        meta=meta,
-    )
+    return _build_flash_arb_opportunity(candidate, context, normalized, legs, gate)
 
 
 def opportunities_from_engine_state(items: Iterable[Any], admissions: Iterable[Any]) -> List[Opportunity]:
