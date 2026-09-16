@@ -1,10 +1,10 @@
+import importlib
 import json
 
 import pytest
 
 from victor_ai_bot.execution_capture import endpoint_quality as mod
 from victor_ai_bot.execution_capture.endpoint_quality import EndpointQualityStore, _safe_float, _safe_int
-from victor_ai_bot.aqe.mev.relay import RelayClient
 from victor_ai_bot.rpc import RpcResult
 
 
@@ -56,6 +56,8 @@ def test_endpoint_quality_safe_numeric_coercion_does_not_swallow_unexpected_bugs
 
 @pytest.mark.asyncio
 async def test_relay_client_records_success_latency_in_existing_quality_store(tmp_path):
+    RelayClient = importlib.import_module('victor_ai_bot.aqe.mev.relay').RelayClient
+
     class _Rpc:
         url = 'https://relay.example'
 
@@ -73,6 +75,8 @@ async def test_relay_client_records_success_latency_in_existing_quality_store(tm
 
 @pytest.mark.asyncio
 async def test_relay_client_records_failed_bundle_as_error(tmp_path):
+    RelayClient = importlib.import_module('victor_ai_bot.aqe.mev.relay').RelayClient
+
     class _Rpc:
         url = 'https://relay.example'
 
