@@ -131,6 +131,7 @@ class RuntimeExecuteWrapperFacade:
                             force_dry_run=force_dry,
                             mev_guard=getattr(self, "_mev_guard", None),
                             profiler=span,
+                            endpoint_quality=getattr(self, "_endpoint_quality", None),
                         )
 
                     execution_service = getattr(self, "_execution_service", None)

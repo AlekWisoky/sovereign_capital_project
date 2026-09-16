@@ -25,6 +25,7 @@ from .abi_utils import extract_revert_data, decode_revert_data
 from .arb_engine import requote_opportunity
 from .cache import PerBlockCache
 from .aqe.mev.evaluator import evaluate_adversarial_execution
+from .aqe.mev.relay import RelayClient
 from .execution_capture.route_execution_plan import apply_execution_route_plan
 from .domain_errors import ExecutionError, RouteUnavailableError, SettlementRiskError
 from .latency_profiler import LatencySpan
@@ -169,6 +170,7 @@ async def try_execute_opportunity(
     force_dry_run: bool = False,
     mev_guard: Any | None = None,
     profiler: LatencySpan | None = None,
+    endpoint_quality: Any | None = None,
 ) -> ExecResult:
     # Observability-only stage profiling. MUST NOT affect decisions.
     profiler = _mark_profiler(profiler, "enter")
@@ -788,7 +790,9 @@ async def try_execute_opportunity(
 
     # Send modes
     if send_mode == "private":
-        r = await rpc_send.send_private_tx(raw, max_block_number=current_block + 2)
+        r = await RelayClient(rpc_send, quality_store=endpoint_quality).send_private_transaction(
+            raw, max_block=current_block + 2
+        )
     else:
         r = await rpc_send.send_raw_tx(raw)
 
