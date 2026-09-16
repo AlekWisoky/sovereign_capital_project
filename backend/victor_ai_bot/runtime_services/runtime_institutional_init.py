@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 from typing import Any
 
@@ -66,6 +67,17 @@ _SAFE_RUNTIME_EXCEPTIONS = (
 )
 
 
+def _initialize_engine_service(runtime: Any, cfg: Any) -> None:
+    """Construct EngineService with canonical config while tolerating test doubles."""
+    kwargs = {
+        "capture_engine": getattr(runtime, "_capture_engine", None),
+        "telemetry_service": getattr(runtime, "_telemetry_service", None),
+    }
+    if "config" in inspect.signature(EngineService).parameters:
+        kwargs["config"] = cfg
+    runtime._engine_service = EngineService(**kwargs)
+
+
 def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str) -> None:
     """Initialize constructor-time institutional/control-plane state on a runtime."""
     try:
@@ -111,10 +123,7 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
         runtime._data_root_migration = {}
     runtime._lifecycle_service = LifecycleService()
     runtime._state_service = StateService()
-    runtime._engine_service = EngineService(
-        capture_engine=getattr(runtime, "_capture_engine", None),
-        telemetry_service=getattr(runtime, "_telemetry_service", None),
-    )
+    _initialize_engine_service(runtime, cfg)
     runtime._fund_service = FundService()
     runtime._cio_service = CIOService()
     runtime._launch_service = LaunchService()

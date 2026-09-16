@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from victor_ai_bot.engine_control.models import EngineOpportunity
 
 from ...flashloan_providers import is_executable_flashloan_provider, normalize_flashloan_provider
+from .models import produce_flash_arb_context_from_router
 from .simulator import (
     ForkSimulationUnavailable,
     validate_deterministic_simulation_evidence,
@@ -96,9 +97,12 @@ class MEVStrategySimulationContextProducer:
 class MEVSearchEngine:
     engine_type = 'mev_search'
 
-    def __init__(self, *, fork_executor: Any | None = None, strategy_context_producer: Any | None = None):
+    def __init__(self, *, fork_executor: Any | None = None, strategy_context_producer: Any | None = None, router: str = "", provider: str = "", profit_to: str = ""):
         self._fork_executor = fork_executor
         self._strategy_context_producer = strategy_context_producer or MEVStrategySimulationContextProducer()
+        self._router = str(router or "")
+        self._provider = str(provider or "")
+        self._profit_to = str(profit_to or "")
 
     def _simulation_boundary(self, *, evidence: Any, request: Any) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
         candidate_evidence = evidence
@@ -133,12 +137,25 @@ class MEVSearchEngine:
             return None, 'non_positive'
         return value, 'simulation_evidence'
 
-    def _prepare_pending_tx(self, tx: Mapping[str, Any]) -> dict[str, Any]:
+    def _prepare_pending_tx(self, tx: Mapping[str, Any], base_opportunities: List[Any]) -> dict[str, Any]:
         prepared = dict(tx)
-        context = self._strategy_context_producer.produce(
-            tx_hash=str(tx.get('hash') or ''),
-            strategy_context=tx.get('strategy_context'),
-        )
+        explicit_context = tx.get('strategy_context')
+        if isinstance(explicit_context, Mapping):
+            context = self._strategy_context_producer.produce(
+                tx_hash=str(tx.get('hash') or ''),
+                strategy_context=explicit_context,
+            )
+        else:
+            context = None
+            if self._router and self._provider and self._profit_to:
+                context = produce_flash_arb_context_from_router(
+                    tx=tx,
+                    router=self._router,
+                    base_opportunities=base_opportunities,
+                    provider=self._provider,
+                    profit_to=self._profit_to,
+                    simulation_request=tx.get('simulation_request'),
+                )
         if context is not None:
             prepared['simulation_request'] = context['simulation_request']
             prepared['flash_arb_context'] = context
@@ -151,7 +168,7 @@ class MEVSearchEngine:
         for raw_tx in pending[:8]:
             if not isinstance(raw_tx, Mapping):
                 continue
-            tx = self._prepare_pending_tx(raw_tx)
+            tx = self._prepare_pending_tx(raw_tx, base_opportunities)
             tags = set(tx.get('tags') or [])
             if 'dex_like' not in tags and not str(tx.get('sel') or '').startswith('0x'):
                 continue
