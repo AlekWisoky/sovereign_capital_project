@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 from victor_ai_bot.aqe.arbitrage.cross_cex_dex_engine import CrossCEXDEXArbitrageEngine
 from victor_ai_bot.aqe.cross_chain import CrossChainArbitrageEngine
 from victor_ai_bot.aqe.funding import FundingArbStrategy, FundingArbConfig
+from victor_ai_bot.aqe.mev.flash_arb_adapter import opportunity_from_engine_candidate
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
 from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor
 from victor_ai_bot.aqe.meta.predictor import predict_candidate_success
@@ -97,6 +98,29 @@ class EngineService:
             },
             route=SimpleNamespace(legs=legs),
         )
+
+    def flash_arb_opportunities(self) -> List[Any]:
+        """Translate only admitted, explicitly validated MEV candidates."""
+        out: List[Any] = []
+        for entry in list((self._last or {}).get("items") or []):
+            if not isinstance(entry, dict):
+                continue
+            candidate = entry.get("opportunity")
+            admission = entry.get("admission")
+            if not isinstance(candidate, dict) or not isinstance(admission, dict):
+                continue
+            if str(candidate.get("engine_type") or "") != "mev_search":
+                continue
+            if not bool(admission.get("allowed", False)):
+                continue
+            try:
+                engine_candidate = EngineOpportunity(**candidate)
+            except (TypeError, ValueError):
+                continue
+            opportunity = opportunity_from_engine_candidate(engine_candidate)
+            if opportunity is not None:
+                out.append(opportunity)
+        return out
 
     def scan(
         self,

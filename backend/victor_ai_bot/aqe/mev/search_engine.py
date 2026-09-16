@@ -77,6 +77,9 @@ class MEVSearchEngine:
                 'heuristic_expected_realized_profit_usd': round(heuristic_realized, 6),
                 'simulation_gate': simulation_gate,
             }
+            flash_arb_context = tx.get('flash_arb_context')
+            if isinstance(flash_arb_context, Mapping):
+                metadata['flash_arb_context'] = dict(flash_arb_context)
             if simulation_evidence is not None:
                 metadata['simulation_evidence'] = simulation_evidence
             out.append(EngineOpportunity(
@@ -123,6 +126,9 @@ class MEVSearchEngine:
                 'heuristic_expected_realized_profit_usd': round(heuristic_realized, 6),
                 'simulation_gate': simulation_gate,
             }
+            flash_arb_context = meta.get('flash_arb_context')
+            if isinstance(flash_arb_context, Mapping):
+                metadata['flash_arb_context'] = dict(flash_arb_context)
             if simulation_evidence is not None:
                 metadata['simulation_evidence'] = simulation_evidence
             out.append(EngineOpportunity(
