@@ -154,7 +154,15 @@ def _route_legs(opportunity: Any) -> list[dict[str, Any]] | None:
             return None
         if amount_in <= 0 or min_out <= 0:
             return None
-        out.append({"dex": dex, "venue": venue, "token_in": token_in, "token_out": token_out, "amount_in": amount_in, "min_out": min_out, "aux": str(getattr(leg, "data", "") or "0x")})
+        out.append({
+            "dex": dex,
+            "venue": venue,
+            "token_in": token_in,
+            "token_out": token_out,
+            "amount_in": amount_in,
+            "min_out": min_out,
+            "aux": str(getattr(leg, "data", "") or "0x"),
+        })
     return out
 
 
@@ -178,7 +186,34 @@ def _canonical_flash_arb_source(base_opportunities: Sequence[Any], observed: Map
     return None
 
 
-def produce_flash_arb_context_from_router(*, tx: Mapping[str, Any], router: str, base_opportunities: Sequence[Any], provider: str, profit_to: str, simulation_request: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+def _valid_simulation_request(value: Any, tx_hash: str) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    fork_url = str(value.get("fork_url") or "")
+    transaction = value.get("transaction")
+    scenarios = value.get("scenarios")
+    if not fork_url or not isinstance(transaction, Mapping) or not isinstance(scenarios, list) or not scenarios:
+        return None
+    if str(transaction.get("hash") or tx_hash) != tx_hash:
+        return None
+    if not str(transaction.get("to") or "") or not str(transaction.get("data") or "").startswith("0x"):
+        return None
+    if any(
+        not isinstance(scenario, Mapping)
+        or not isinstance(scenario.get("economic_observation"), Mapping)
+        or any(key not in scenario for key in ("gas_multiplier", "liquidity_multiplier", "oracle_multiplier"))
+        for scenario in scenarios
+    ):
+        return None
+    return {
+        "fork_url": fork_url,
+        "fork_block": value.get("fork_block"),
+        "transaction": dict(transaction),
+        "scenarios": [dict(scenario) for scenario in scenarios],
+    }
+
+
+def _router_context_inputs(*, tx: Mapping[str, Any], router: str, base_opportunities: Sequence[Any], provider: str, profit_to: str, simulation_request: Mapping[str, Any] | None) -> tuple[dict[str, Any], Opportunity, str, str, list[dict[str, Any]], int, dict[str, Any]] | None:
     observed = decode_allowlisted_univ3_swap(tx, router=router)
     if observed is None:
         return None
@@ -196,9 +231,37 @@ def produce_flash_arb_context_from_router(*, tx: Mapping[str, Any], router: str,
         expected_profit_raw = int(str(getattr(opportunity, "expected_profit_raw", "") or ""))
     except (TypeError, ValueError, OverflowError):
         return None
-    if expected_profit_raw <= 0 or simulation_request is None:
+    if expected_profit_raw <= 0:
         return None
-    request = dict(simulation_request)
-    if not isinstance(request.get("transaction"), Mapping) or not isinstance(request.get("scenarios"), list) or not request.get("scenarios"):
+    request = _valid_simulation_request(simulation_request, str(observed["tx_hash"]))
+    if request is None:
         return None
-    return {"strategy": "flash_arb", "tx_hash": observed["tx_hash"], "provider": normalized_provider, "borrow_token": legs[0]["token_in"], "profit_to": destination, "amount_borrow": int(legs[0]["amount_in"]), "expected_profit_raw": expected_profit_raw, "legs": legs, "observed_router_call": observed, "source_opportunity_id": str(getattr(opportunity, "id", "") or ""), "source_route_id": str(getattr(opportunity, "route_id", "") or ""), "simulation_request": request}
+    return observed, opportunity, normalized_provider, destination, legs, expected_profit_raw, request
+
+
+def produce_flash_arb_context_from_router(*, tx: Mapping[str, Any], router: str, base_opportunities: Sequence[Any], provider: str, profit_to: str, simulation_request: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    parts = _router_context_inputs(
+        tx=tx,
+        router=router,
+        base_opportunities=base_opportunities,
+        provider=provider,
+        profit_to=profit_to,
+        simulation_request=simulation_request,
+    )
+    if parts is None:
+        return None
+    observed, opportunity, normalized_provider, destination, legs, expected_profit_raw, request = parts
+    return {
+        "strategy": "flash_arb",
+        "tx_hash": observed["tx_hash"],
+        "provider": normalized_provider,
+        "borrow_token": legs[0]["token_in"],
+        "profit_to": destination,
+        "amount_borrow": int(legs[0]["amount_in"]),
+        "expected_profit_raw": expected_profit_raw,
+        "legs": legs,
+        "observed_router_call": observed,
+        "source_opportunity_id": str(getattr(opportunity, "id", "") or ""),
+        "source_route_id": str(getattr(opportunity, "route_id", "") or ""),
+        "simulation_request": request,
+    }
