@@ -10,6 +10,9 @@ from ...route_encoding import EncLeg, route_id_hex
 from .simulator import validate_deterministic_simulation_evidence
 
 
+_ALLOWED_DEXES = {"univ3", "curve", "balancer"}
+
+
 def _address(value: Any) -> str:
     text = str(value or "")
     if len(text) != 42 or not text.startswith("0x"):
@@ -37,7 +40,7 @@ def _validated_legs(raw_legs: Any) -> List[RouteLeg] | None:
         if not isinstance(raw, Mapping):
             return None
         dex = str(raw.get("dex") or "")
-        if dex not in {"univ3", "curve", "balancer"}:
+        if dex not in _ALLOWED_DEXES:
             return None
         venue = _address(raw.get("venue"))
         token_in = _address(raw.get("token_in"))
@@ -60,9 +63,7 @@ def _validated_legs(raw_legs: Any) -> List[RouteLeg] | None:
     return legs
 
 
-def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], dict[str, Any]] | None:
-    if not isinstance(context, Mapping):
-        return None
+def _context_basics(context: Mapping[str, Any]) -> dict[str, Any] | None:
     provider = normalize_flashloan_provider(str(context.get("provider") or ""))
     if not is_executable_flashloan_provider(provider):
         return None
@@ -72,41 +73,58 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
     expected_profit_raw = _positive_int(context.get("expected_profit_raw"))
     if not borrow_token or not profit_to or amount_borrow is None or expected_profit_raw is None:
         return None
+    return {
+        "provider": provider,
+        "borrow_token": borrow_token,
+        "profit_to": profit_to,
+        "amount_borrow": amount_borrow,
+        "expected_profit_raw": expected_profit_raw,
+    }
 
+
+def _context_route(context: Mapping[str, Any], basics: Mapping[str, Any]) -> tuple[List[RouteLeg], str] | None:
     legs = _validated_legs(context.get("legs"))
-    if legs is None or legs[0].token_in.lower() != borrow_token.lower():
+    if legs is None or legs[0].token_in.lower() != str(basics["borrow_token"]).lower():
         return None
-    if int(legs[0].amount_in) != amount_borrow:
+    if int(legs[0].amount_in) != int(basics["amount_borrow"]):
         return None
+    route_id = route_id_hex(
+        [
+            EncLeg(
+                dex=leg.dex,
+                venue=leg.venue,
+                token_in=leg.token_in,
+                token_out=leg.token_out,
+                aux=leg.data or "0x",
+            )
+            for leg in legs
+        ]
+    )
+    return legs, route_id
 
-    evidence = context.get("simulation_evidence")
-    gate = validate_deterministic_simulation_evidence(evidence)
+
+def _simulation_gate(context: Mapping[str, Any]) -> dict[str, Any] | None:
+    gate = validate_deterministic_simulation_evidence(context.get("simulation_evidence"))
     if gate.get("ok") is not True:
         return None
     expected_profit = float(gate.get("expected_realized_profit_usd") or 0.0)
     if expected_profit <= 0.0:
         return None
+    return dict(gate)
 
-    enc_legs = [
-        EncLeg(
-            dex=leg.dex,
-            venue=leg.venue,
-            token_in=leg.token_in,
-            token_out=leg.token_out,
-            aux=leg.data or "0x",
-        )
-        for leg in legs
-    ]
-    route_id = route_id_hex(enc_legs)
-    # Exercise the existing canonical calldata builder as a contract check, but
-    # defer the actual transaction bytes until canonical sizing/execution time.
+
+def _calldata_contract_check(
+    *,
+    basics: Mapping[str, Any],
+    legs: List[RouteLeg],
+) -> bool:
     try:
         build_execute_calldata(
-            provider=provider,
-            borrow_token=borrow_token,
-            amount_borrow=amount_borrow,
+            provider=str(basics["provider"]),
+            borrow_token=str(basics["borrow_token"]),
+            amount_borrow=int(basics["amount_borrow"]),
             min_profit=1,
-            profit_to=profit_to,
+            profit_to=str(basics["profit_to"]),
             deadline=1,
             legs=[
                 {
@@ -121,17 +139,26 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
             ],
         )
     except (TypeError, ValueError, KeyError):
-        return None
+        return False
+    return True
 
-    normalized = {
-        "provider": provider,
-        "borrow_token": borrow_token,
-        "amount_borrow": amount_borrow,
-        "profit_to": profit_to,
-        "expected_profit_raw": expected_profit_raw,
-        "route_id": route_id,
-    }
-    return normalized, legs, dict(gate)
+
+def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], dict[str, Any]] | None:
+    if not isinstance(context, Mapping):
+        return None
+    basics = _context_basics(context)
+    if basics is None:
+        return None
+    routed = _context_route(context, basics)
+    if routed is None:
+        return None
+    legs, route_id = routed
+    gate = _simulation_gate(context)
+    if gate is None or not _calldata_contract_check(basics=basics, legs=legs):
+        return None
+    normalized = dict(basics)
+    normalized["route_id"] = route_id
+    return normalized, legs, gate
 
 
 def opportunity_from_engine_candidate(candidate: Any) -> Opportunity | None:
