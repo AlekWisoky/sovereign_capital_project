@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from collections import deque
 from victor_ai_bot.determinism import stable_uniform_0_1
@@ -70,7 +71,8 @@ class MempoolMonitor:
         self._stop.set()
         if self._task:
             self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
+            if inspect.isawaitable(self._task):
+                await asyncio.gather(self._task, return_exceptions=True)
 
     async def _run(self) -> None:
         if not self.ws_urls:
