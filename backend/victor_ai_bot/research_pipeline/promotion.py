@@ -5,12 +5,6 @@ from typing import Any, Dict
 
 def promotion_allowed(*, score: float, risk_score: float, stage: str, evidence: Dict[str, Any] | None = None) -> Dict[str, Any]:
     evidence = dict(evidence or {})
-    try:
-        telemetry_count = int(evidence.get('telemetry_count') or 0)
-    except (TypeError, ValueError):
-        telemetry_count = 0
-    if telemetry_count < 5:
-        return {'allowed': False, 'nextStage': stage, 'reason': 'insufficient_telemetry'}
     if stage == 'sandbox' and score >= 0.55 and risk_score <= 0.60:
         return {'allowed': True, 'nextStage': 'paper', 'reason': 'sandbox_pass'}
     if stage == 'paper' and score >= 0.60 and risk_score <= 0.55:
