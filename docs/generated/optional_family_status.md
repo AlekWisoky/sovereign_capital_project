@@ -205,7 +205,7 @@ External imports establish reachability, but no mounted-route or runtime-init pr
 No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree.
 
 
-| omar | staged | 16 | 21 | 15 | 0 | 3 | 10 | 2 |
+| omar | staged | 16 | 23 | 16 | 0 | 3 | 11 | 2 |
 
 Explicit lifecycle policy keeps this family staged until production authority is intentionally promoted.
 
@@ -216,18 +216,19 @@ Explicit lifecycle policy keeps this family staged until production authority is
 - **omar importReachability**
   - backend/tests/test_canonical_omar_closed_loop.py
   - backend/tests/test_canonical_omar_decision_context.py
+  - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_omar_operator_intent.py
   - backend/tests/test_omar_progressive_decision_context.py
   - backend/tests/test_omar_runtime.py
   - backend/tests/test_runtime_method_chain_learning_attribution.py
   - backend/victor_ai_bot/runtime.py
-  - backend/victor_ai_bot/runtime_services/omar_receipt_facade.py
 - **omar gatingConditions**
   - backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py
   - backend/victor_ai_bot/server.py
 - **omar tests**
   - backend/tests/test_canonical_omar_closed_loop.py
   - backend/tests/test_canonical_omar_decision_context.py
+  - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_omar_operator_intent.py
   - backend/tests/test_omar_progressive_decision_context.py
   - backend/tests/test_omar_runtime.py
