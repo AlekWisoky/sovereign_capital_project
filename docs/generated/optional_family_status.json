@@ -11,9 +11,13 @@
         ],
         "importReachability": [
           "backend/tests/test_fund_os_upgrade.py",
+          "backend/victor_ai_bot/api_routes/alpha_marketplace_routes.py",
+          "backend/victor_ai_bot/aqe/meta/runtime.py",
           "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
         ],
-        "mountedRoutes": [],
+        "mountedRoutes": [
+          "backend/victor_ai_bot/api_routes/alpha_marketplace_routes.py"
+        ],
         "runtimeInitialization": [
           "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
         ],
@@ -23,18 +27,18 @@
       },
       "family": "alpha_marketplace",
       "path": "backend/victor_ai_bot/alpha_marketplace",
-      "primaryEvidenceCount": 4,
-      "pythonFileCount": 4,
-      "referenceCount": 5,
-      "status": "staged",
+      "primaryEvidenceCount": 7,
+      "pythonFileCount": 5,
+      "referenceCount": 8,
+      "status": "live",
       "statusInputs": {
         "gatingConditions": 1,
-        "importReachability": 2,
-        "mountedRoutes": 0,
+        "importReachability": 4,
+        "mountedRoutes": 1,
         "runtimeInitialization": 1
       },
       "supplementalReferenceCount": 1,
-      "why": "Runtime or server reachability exists, but only behind explicit gating or optional initialization."
+      "why": "Mounted routes or ungated runtime initialization establish live reachability."
     },
     {
       "evidence": {
@@ -87,6 +91,7 @@
           "backend/tests/test_consensus_engine_persistence.py",
           "backend/tests/test_decision_engine_hardening.py",
           "backend/tests/test_engine_upgrades.py",
+          "backend/tests/test_fund_os_upgrade.py",
           "backend/tests/test_investment_agents_maintenance.py",
           "backend/tests/test_meta_memory_persistence_hardening.py",
           "backend/tests/test_mev_guard_helper.py",
@@ -101,6 +106,7 @@
           "backend/tests/test_stage85_dex_adapters_hardening.py",
           "backend/tests/test_stage88_exchange_adapter_hardening.py",
           "backend/tests/test_unified_state_maintenance.py",
+          "backend/victor_ai_bot/alpha_marketplace/intake.py",
           "backend/victor_ai_bot/decision_engine.py",
           "backend/victor_ai_bot/execution.py",
           "backend/victor_ai_bot/runtime.py",
@@ -127,6 +133,7 @@
           "backend/tests/test_consensus_engine_persistence.py",
           "backend/tests/test_decision_engine_hardening.py",
           "backend/tests/test_engine_upgrades.py",
+          "backend/tests/test_fund_os_upgrade.py",
           "backend/tests/test_investment_agents_maintenance.py",
           "backend/tests/test_meta_memory_persistence_hardening.py",
           "backend/tests/test_mev_guard_helper.py",
@@ -145,17 +152,17 @@
       },
       "family": "aqe",
       "path": "backend/victor_ai_bot/aqe",
-      "primaryEvidenceCount": 35,
+      "primaryEvidenceCount": 37,
       "pythonFileCount": 87,
-      "referenceCount": 61,
+      "referenceCount": 64,
       "status": "live",
       "statusInputs": {
         "gatingConditions": 0,
-        "importReachability": 32,
+        "importReachability": 34,
         "mountedRoutes": 0,
         "runtimeInitialization": 3
       },
-      "supplementalReferenceCount": 26,
+      "supplementalReferenceCount": 27,
       "why": "Mounted routes or ungated runtime initialization establish live reachability."
     },
     {
@@ -852,9 +859,9 @@
     "familyCount": 23,
     "statusCounts": {
       "dead": 7,
-      "live": 11,
+      "live": 12,
       "shadow": 3,
-      "staged": 2
+      "staged": 1
     }
   }
 }
