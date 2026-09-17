@@ -675,12 +675,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-17T10:31:08.848000Z",
-  "generatedAtIso": "2026-09-17T10:31:08.848000Z",
-  "generatedAtMs": 1789641068848,
-  "generated_at": "2026-09-17T10:31:08.848000Z",
-  "generated_at_iso": "2026-09-17T10:31:08.848000Z",
-  "generated_at_ms": 1789641068848,
+  "generatedAt": "2026-09-17T10:46:13.458000Z",
+  "generatedAtIso": "2026-09-17T10:46:13.458000Z",
+  "generatedAtMs": 1789641973458,
+  "generated_at": "2026-09-17T10:46:13.458000Z",
+  "generated_at_iso": "2026-09-17T10:46:13.458000Z",
+  "generated_at_ms": 1789641973458,
   "health_states": [
     "live",
     "degraded",

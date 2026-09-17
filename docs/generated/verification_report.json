@@ -514,9 +514,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-17T10:31:09.111000Z",
-  "generated_at_iso": "2026-09-17T10:31:09.111000Z",
-  "generated_at_ms": 1789641069111,
+  "generated_at": "2026-09-17T10:46:13.786000Z",
+  "generated_at_iso": "2026-09-17T10:46:13.786000Z",
+  "generated_at_ms": 1789641973786,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
