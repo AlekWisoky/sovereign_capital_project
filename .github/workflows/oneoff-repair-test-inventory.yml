@@ -15,8 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Temporary repair: generated truth must be rendered from PR merge state.
-          ref: refs/pull/173/merge
+          ref: codex/profitability-edge-objective
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -24,10 +23,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
-      - name: Regenerate deterministic artifacts
+      - name: Regenerate deterministic artifacts from PR merge state
         run: |
+          git fetch origin refs/pull/173/merge:refs/remotes/origin/pr-173-merge
+          git worktree add --detach /tmp/pr-173-merge refs/remotes/origin/pr-173-merge
+          cd /tmp/pr-173-merge
           PYTHONPATH=backend python scripts/render_system_truth.py
           PYTHONPATH=backend python scripts/render_verification_report.py
+          cd -
+          cp /tmp/pr-173-merge/docs/generated/system_truth.json docs/generated/system_truth.json
+          cp /tmp/pr-173-merge/docs/generated/system_truth.md docs/generated/system_truth.md
+          cp /tmp/pr-173-merge/docs/generated/verification_report.json docs/generated/verification_report.json
+          cp /tmp/pr-173-merge/docs/generated/verification_report.md docs/generated/verification_report.md
       - name: Commit generated artifacts
         run: |
           git config user.name 'github-actions[bot]'
