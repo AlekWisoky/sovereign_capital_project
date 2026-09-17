@@ -7,6 +7,8 @@ import uuid
 from json import JSONDecodeError
 from typing import Any, Dict
 
+from ..research_pipeline.promotion import promotion_allowed, retirement_allowed
+
 
 class AlphaMarketplaceStore:
     _STAGES = ('sandbox', 'paper', 'shadow', 'capped_live', 'live')
@@ -134,6 +136,67 @@ class AlphaMarketplaceStore:
         self._items[sid] = item
         self._save()
         return {'ok': True, 'item': dict(item)}
+
+    def set_governance(self, submission_id: str, *, review_state: str, governance_status: str, reviewer: str = "", reason: str = "") -> Dict[str, Any]:
+        item = self._items.get(str(submission_id))
+        if item is None:
+            return {"ok": False, "reason": "submission_not_found"}
+        review = str(review_state or "pending").strip().lower()
+        governance = str(governance_status or "pending").strip().lower()
+        if review not in {"pending", "approved", "rejected"} or governance not in {"pending", "approved", "rejected"}:
+            return {"ok": False, "reason": "invalid_governance_state"}
+        item["reviewState"] = review
+        item["governanceStatus"] = governance
+        item.setdefault("evidence", {})["lastReview"] = {
+            "reviewer": str(reviewer or ""),
+            "reason": str(reason or ""),
+            "reviewState": review,
+            "governanceStatus": governance,
+            "ts": int(time.time()),
+        }
+        item["promotionReason"] = str(reason or item.get("promotionReason") or "")
+        self._items[str(submission_id)] = item
+        self._save()
+        return {"ok": True, "item": dict(item)}
+
+    def promote(self, submission_id: str, *, score: float | None = None, risk_score: float | None = None, reviewer: str = "") -> Dict[str, Any]:
+        item = self._items.get(str(submission_id))
+        if item is None:
+            return {"ok": False, "reason": "submission_not_found"}
+        if str(item.get("reviewState")) != "approved" or str(item.get("governanceStatus")) != "approved":
+            return {"ok": False, "reason": "governance_approval_required"}
+        evidence = dict(item.get("evidence") or {})
+        economics = dict(item.get("expectedEconomics") or {})
+        score_value = float(score if score is not None else evidence.get("score", economics.get("score", 0.0)))
+        risk_value = float(risk_score if risk_score is not None else evidence.get("riskScore", 1.0))
+        decision = promotion_allowed(score=score_value, risk_score=risk_value, stage=str(item.get("stage") or "sandbox"), evidence=evidence)
+        if not bool(decision.get("allowed")):
+            return {"ok": False, "reason": str(decision.get("reason") or "promotion_denied"), "decision": decision}
+        next_stage = str(decision.get("nextStage") or item.get("stage") or "sandbox")
+        projection = {"shadow_live": "shadow", "production": "live"}
+        next_stage = projection.get(next_stage, next_stage)
+        item["stage"] = next_stage
+        item["promotionReason"] = str(decision.get("reason") or "promotion_allowed")
+        item.setdefault("evidence", {})["lastPromotion"] = {"score": score_value, "riskScore": risk_value, "reviewer": str(reviewer or ""), "decision": dict(decision), "ts": int(time.time())}
+        self._items[str(submission_id)] = item
+        self._save()
+        return {"ok": True, "item": dict(item), "decision": decision}
+
+    def retire(self, submission_id: str, *, evidence: Dict[str, Any] | None = None, reviewer: str = "") -> Dict[str, Any]:
+        item = self._items.get(str(submission_id))
+        if item is None:
+            return {"ok": False, "reason": "submission_not_found"}
+        merged = dict(item.get("evidence") or {})
+        merged.update(dict(evidence or {}))
+        decision = retirement_allowed(stage=str(item.get("stage") or "sandbox"), evidence=merged)
+        if not bool(decision.get("allowed")):
+            return {"ok": False, "reason": str(decision.get("reason") or "retirement_denied"), "decision": decision}
+        item["stage"] = "retired"
+        item["promotionReason"] = str(decision.get("reason") or "retired")
+        item.setdefault("evidence", {})["lastRetirement"] = {"reviewer": str(reviewer or ""), "decision": dict(decision), "ts": int(time.time())}
+        self._items[str(submission_id)] = item
+        self._save()
+        return {"ok": True, "item": dict(item), "decision": decision}
 
     def snapshot(self) -> Dict[str, Any]:
         return {'enabled': self.enabled, 'items': [dict(v) for v in self._items.values()]}
