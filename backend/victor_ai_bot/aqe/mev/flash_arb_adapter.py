@@ -117,6 +117,69 @@ def _simulation_gate(context: Mapping[str, Any]) -> dict[str, Any] | None:
     return dict(gate)
 
 
+def _simulation_route_economics(
+    context: Mapping[str, Any], legs: List[RouteLeg]
+) -> tuple[float, float] | None:
+    """Derive only the USD notional/validated route size proven by simulation inputs.
+
+    Flash-loan borrow capacity is not Treasury/Prime capital. For the executable-edge
+    objective we therefore use the simulation's explicitly priced input notional as
+    the capital-efficiency denominator. Executable depth is the conservative minimum
+    USD size of the validated route legs; it is a proven executable-size lower bound,
+    not an inferred pool-capacity claim.
+    """
+    request = context.get("simulation_request")
+    if not isinstance(request, Mapping):
+        return None
+    scenarios = request.get("scenarios")
+    if not isinstance(scenarios, list) or not scenarios:
+        return None
+    observation = scenarios[0].get("economic_observation") if isinstance(scenarios[0], Mapping) else None
+    if not isinstance(observation, Mapping):
+        return None
+    assets = observation.get("assets")
+    if not isinstance(assets, list) or not assets:
+        return None
+    prices: dict[str, tuple[int, float]] = {}
+    for asset in assets:
+        if not isinstance(asset, Mapping):
+            return None
+        address = str(asset.get("address") or "")
+        try:
+            decimals = int(asset.get("decimals"))
+            price_usd = float(asset.get("price_usd"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not address or decimals < 0 or decimals > 255 or price_usd <= 0.0:
+            return None
+        if address.lower() in prices:
+            return None
+        prices[address.lower()] = (decimals, price_usd)
+
+    def _usd(token: str, raw_amount: str) -> float | None:
+        priced = prices.get(str(token or "").lower())
+        if priced is None:
+            return None
+        decimals, price = priced
+        try:
+            amount = int(str(raw_amount))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if amount <= 0:
+            return None
+        value = (float(amount) / (10 ** decimals)) * price
+        return value if value > 0.0 else None
+
+    capital_required_usd = _usd(str(legs[0].token_in), legs[0].amount_in)
+    if capital_required_usd is None:
+        return None
+    route_sizes = [_usd(str(leg.token_in), leg.amount_in) for leg in legs]
+    if any(value is None for value in route_sizes):
+        return None
+    executable_depth_usd = min(float(value) for value in route_sizes if value is not None)
+    return float(capital_required_usd), float(executable_depth_usd)
+
+
 def _calldata_contract_check(*, basics: Mapping[str, Any], legs: List[RouteLeg]) -> bool:
     try:
         build_execute_calldata(
@@ -156,8 +219,14 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
     gate = _simulation_gate(context)
     if gate is None or not _calldata_contract_check(basics=basics, legs=legs):
         return None
+    route_economics = _simulation_route_economics(context, legs)
+    if route_economics is None:
+        return None
+    capital_required_usd, executable_depth_usd = route_economics
     normalized = dict(basics)
     normalized["route_id"] = route_id
+    normalized["capital_required_usd"] = capital_required_usd
+    normalized["executable_depth_usd"] = executable_depth_usd
     return normalized, legs, gate
 
 
@@ -177,6 +246,9 @@ def _candidate_metadata(candidate: Any, context: Mapping[str, Any], gate: Mappin
         },
         "simulation_evidence": dict(context.get("simulation_evidence") or {}),
         "simulation_gate": dict(gate),
+        "capital_required_usd": float(normalized["capital_required_usd"]),
+        "requested_notional_usd": float(normalized["capital_required_usd"]),
+        "executable_depth_usd": float(normalized["executable_depth_usd"]),
         "economics_status": "simulation_backed",
         "economics_source": "deterministic_fork_simulation",
         "private_send_preference": True,
