@@ -25,6 +25,7 @@ class PrimeBorrowRequest:
 class PrimeLoanPosition:
     loan_id: str
     family: str
+    strategy_id: str = ""
     asset: str
     notional_usd: float
     borrow_cost_usd: float
