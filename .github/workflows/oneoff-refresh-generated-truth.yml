@@ -1,6 +1,9 @@
 name: One-off refresh generated truth
 
 on:
+  push:
+    branches:
+      - codex/profitability-edge-objective
   pull_request:
 
 permissions:
@@ -14,8 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Align checkout to PR head branch
         run: |
-          git fetch origin "${{ github.head_ref }}"
-          git reset --hard "origin/${{ github.head_ref }}"
+          git fetch origin "${{ github.head_ref || github.ref_name }}"
+          git reset --hard "origin/${{ github.head_ref || github.ref_name }}"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -37,4 +40,4 @@ jobs:
             exit 0
           fi
           git commit -m 'chore: refresh generated truth artifacts'
-          git push origin HEAD:${{ github.head_ref }}
+          git push origin HEAD:${{ github.head_ref || github.ref_name }}
