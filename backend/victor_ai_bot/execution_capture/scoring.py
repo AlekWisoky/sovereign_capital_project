@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict
 
 from .models import OpportunityEnvelope, CaptureScore
+from ..fund_os.profit_doctrine import executable_edge_objective
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -94,7 +95,51 @@ def compute_capture_score(
         - latency_decay_cost
         - failure_cost_estimate
     )
-    capture_score = expected_realized_pnl
+
+    # Canonical pre-settlement ranking objective. Deterministic costs are
+    # removed before the quality factors are applied; failure/reliability is
+    # represented by the explicit execution_reliability factor.
+    extra_costs = sum(
+        max(0.0, float(telemetry.get(key, 0.0) or 0.0))
+        for key in (
+            "flashloan_fee_usd",
+            "bridge_fee_usd",
+            "private_execution_cost_usd",
+        )
+    )
+    executable_net_profit = max(
+        0.0,
+        envelope.expected_profit_usd
+        - envelope.gas_estimate_usd
+        - slippage_cost_estimate
+        - extra_costs,
+    )
+    liquidity_quality = _clip(
+        float(telemetry.get("liquidity_quality", 1.0 - envelope.liquidity_fragility) or 0.0),
+        0.0,
+        1.0,
+    )
+    execution_reliability = _clip(
+        route_success
+        * venue_success
+        * lane_success
+        * (1.0 - revert_rate)
+        * (1.0 - timeout_rate),
+        0.0,
+        1.0,
+    )
+    objective = executable_edge_objective(
+        executable_net_profit=executable_net_profit,
+        probability_of_success=success_probability,
+        route_quality=venue_quality,
+        liquidity_quality=liquidity_quality,
+        capital_efficiency=float(telemetry.get("capital_efficiency_factor", 1.0) or 1.0),
+        latency_survivability=freshness_probability,
+        execution_reliability=execution_reliability,
+    )
+    realized_edge = float(objective["realizedEdge"])
+
+    capture_score = realized_edge
     return CaptureScore(
         success_probability=float(success_probability),
         freshness_probability=float(freshness_probability),
@@ -116,5 +161,20 @@ def compute_capture_score(
             "endpoint_quality": float(endpoint_quality),
             "lane_avg_latency_ms": float(lane_avg_latency_ms),
             "latency_pressure": float(latency_pressure),
+            "liquidity_quality": float(liquidity_quality),
+            "execution_reliability": float(execution_reliability),
+            "capital_efficiency_factor": float(objective["capitalEfficiency"]),
+            "executable_net_profit": float(objective["executableNetProfit"]),
+            "extra_execution_costs": float(extra_costs),
+        },
+        realized_edge=realized_edge,
+        objective_components={
+            "executableNetProfit": float(objective["executableNetProfit"]),
+            "probabilityOfSuccess": float(objective["probabilityOfSuccess"]),
+            "routeQuality": float(objective["routeQuality"]),
+            "liquidityQuality": float(objective["liquidityQuality"]),
+            "capitalEfficiency": float(objective["capitalEfficiency"]),
+            "latencySurvivability": float(objective["latencySurvivability"]),
+            "executionReliability": float(objective["executionReliability"]),
         },
     )
