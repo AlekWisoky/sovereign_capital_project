@@ -68,6 +68,7 @@ class CanonicalCapitalWriteService(CapitalWriteService):
         opportunity_id = _text(context.get("opportunity_id") or lineage.get("opportunity_id"))
         resolved_route_id = _text(context.get("route_id") or route_id or lineage.get("route_id"))
         action = _text(context.get("action") or lineage.get("action"))
+        strategy_id = _text(context.get("strategy_id") or lineage.get("strategy_id"))
         outcome_id = _text(context.get("outcome_id"))
         if not outcome_id and bool(outcome_truth_verified):
             outcome_id = _outcome_id(
@@ -108,9 +109,10 @@ class CanonicalCapitalWriteService(CapitalWriteService):
             "opportunity_id": opportunity_id,
             "route_id": resolved_route_id,
             "action": action,
+            "strategy_id": strategy_id,
         }
         canonical_lineage.update(_dict(context.get("canonical_lineage")))
-        canonical_lineage.update({"receipt_id": _text(receipt_id), "outcome_id": outcome_id})
+        canonical_lineage.update({"receipt_id": _text(receipt_id), "outcome_id": outcome_id, "strategy_id": strategy_id})
         metadata.update(
             {
                 "canonical_decision_id": decision_id,
@@ -123,6 +125,7 @@ class CanonicalCapitalWriteService(CapitalWriteService):
                 "opportunity_id": opportunity_id,
                 "route_id": resolved_route_id,
                 "action": action,
+                "strategy_id": strategy_id,
                 "canonical_lineage": canonical_lineage,
                 "execution_lineage": _dict(context.get("execution_lineage")),
                 "expected_net_usd": context.get("expected_net_usd"),
