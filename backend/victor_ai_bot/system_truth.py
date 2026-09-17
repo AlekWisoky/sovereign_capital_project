@@ -92,7 +92,13 @@ def _route_inventory() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict
 
 
 def _test_inventory() -> Dict[str, Any]:
-    backend_tests = sorted(p.name for p in (BACKEND_ROOT / "tests").glob("test_*.py"))
+    backend_tests = sorted(
+        {
+            p.name
+            for pattern in ("test_*.py", "*_test.py")
+            for p in (BACKEND_ROOT / "tests").rglob(pattern)
+        }
+    )
     mobile_tests = sorted(p.name for p in (MOBILE_ROOT / "tests").glob("*.test.ts"))
     return {
         "backend_test_files": len(backend_tests),
