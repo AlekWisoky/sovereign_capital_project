@@ -40,7 +40,7 @@ def test_system_truth_test_inventory_preserves_all_pytest_paths():
         for p in tests_root.rglob(pattern)
     }
     assert truth['backend_test_file_count'] == len(expected)
-    assert set(truth['backend_test_names']) == expected
+    assert set(truth['backend_test_files']) == expected
 
 
 def test_system_truth_reports_exception_inventory_and_legacy_sizes():
