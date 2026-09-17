@@ -167,6 +167,12 @@ class AlphaMarketplaceStore:
             return {"ok": False, "reason": "governance_approval_required"}
         evidence = dict(item.get("evidence") or {})
         economics = dict(item.get("expectedEconomics") or {})
+        try:
+            telemetry_count = int(evidence.get("telemetry_count") or 0)
+        except (TypeError, ValueError):
+            telemetry_count = 0
+        if telemetry_count < 5:
+            return {"ok": False, "reason": "insufficient_telemetry"}
         score_value = float(score if score is not None else evidence.get("score", economics.get("score", 0.0)))
         risk_value = float(risk_score if risk_score is not None else evidence.get("riskScore", 1.0))
         decision = promotion_allowed(score=score_value, risk_score=risk_value, stage=str(item.get("stage") or "sandbox"), evidence=evidence)
