@@ -1,12 +1,13 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 339,
+    "test_file_count": 340,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
       "backend/tests/test_agent_hub_maintenance.py",
       "backend/tests/test_agents_system.py",
+      "backend/tests/test_alpha_marketplace_sleeves.py",
       "backend/tests/test_analytics_query_surface_hardening_maintenance.py",
       "backend/tests/test_analytics_read_surface_sync_maintenance.py",
       "backend/tests/test_analytics_route_ownership_maintenance.py",
