@@ -84,6 +84,19 @@ class CapitalAdmissionService:
             or "flashloan_atomic"
         )
 
+    def _strategy_id(self, opp: Any, decision: Any | None) -> str:
+        opp_meta = self._safe_dict(getattr(opp, "meta", None))
+        decision_meta = self._safe_dict(getattr(decision, "metadata", None))
+        envelope = self._safe_dict(decision_meta.get("envelope"))
+        return str(
+            opp_meta.get("strategy_id")
+            or opp_meta.get("strategyId")
+            or envelope.get("strategy_id")
+            or envelope.get("strategyId")
+            or getattr(opp, "strategy_id", "")
+            or ""
+        ).strip()
+
     def _effective_notional_multiplier(self, decision: Any | None) -> float:
         try:
             size_mult = float(getattr(decision, "size_mult", 1.0) or 1.0)
@@ -614,6 +627,7 @@ class CapitalAdmissionService:
                     metadata={
                         "opportunity_id": str(getattr(opp, "id", "") or ""),
                         "route_id": str(getattr(opp, "route_id", "") or ""),
+                        "strategy_id": self._strategy_id(opp, decision),
                     },
                 )
                 preview = runtime._internal_prime.preview(req, stage_policy=dict(stage_policy))
