@@ -1,0 +1,38 @@
+name: One-off refresh generated truth
+
+on:
+  push:
+    branches:
+      - codex/profitability-edge-objective
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Regenerate deterministic artifacts
+        run: |
+          PYTHONPATH=backend python scripts/render_system_truth.py
+          PYTHONPATH=backend python scripts/render_verification_report.py
+      - name: Commit regenerated artifacts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/generated/system_truth.json docs/generated/system_truth.md docs/generated/verification_report.json docs/generated/verification_report.md
+          if git diff --cached --quiet; then
+            echo 'No generated truth changes.'
+            exit 0
+          fi
+          git commit -m 'chore: refresh generated truth artifacts'
+          git push
