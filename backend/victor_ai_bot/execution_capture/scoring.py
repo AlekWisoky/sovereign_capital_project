@@ -96,9 +96,9 @@ def compute_capture_score(
         - failure_cost_estimate
     )
 
-    # Canonical pre-settlement ranking objective. Deterministic costs are
-    # removed before the quality factors are applied; failure/reliability is
-    # represented by the explicit execution_reliability factor.
+    # Canonical pre-settlement objective. Existing expected-realized PnL/capture
+    # semantics remain unchanged; the new objective is exposed as a derived
+    # quality signal until its downstream ranking consumers are migrated.
     extra_costs = sum(
         max(0.0, float(telemetry.get(key, 0.0) or 0.0))
         for key in (
@@ -139,14 +139,13 @@ def compute_capture_score(
     )
     realized_edge = float(objective["realizedEdge"])
 
-    capture_score = realized_edge
     return CaptureScore(
         success_probability=float(success_probability),
         freshness_probability=float(freshness_probability),
         interference_probability=float(interference_probability),
         venue_quality=float(venue_quality),
         expected_realized_pnl=float(expected_realized_pnl),
-        capture_score=float(capture_score),
+        capture_score=float(expected_realized_pnl),
         expected_realized_value=float(expected_realized_pnl),
         slippage_cost_estimate=float(slippage_cost_estimate),
         latency_decay_cost=float(latency_decay_cost),
