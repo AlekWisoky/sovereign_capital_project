@@ -40,7 +40,7 @@ Mounted routes or ungated runtime initialization establish live reachability.
   - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_multistrategy_fund_upgrade.py
 
-| aqe | live | 87 | 64 | 37 | 0 | 3 | 34 | 0 |
+| aqe | live | 87 | 66 | 38 | 0 | 3 | 35 | 0 |
 
 Mounted routes or ungated runtime initialization establish live reachability.
 
