@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: refs/pull/173/merge
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -37,5 +37,5 @@ jobs:
             echo 'Generated artifacts already fresh.'
             exit 0
           fi
-          git commit -m 'chore: refresh generated truth artifacts'
-          git push origin HEAD:${{ github.ref_name }}
+          git commit -m 'chore: refresh generated truth artifacts from PR merge state'
+          git push origin HEAD:codex/profitability-edge-objective
