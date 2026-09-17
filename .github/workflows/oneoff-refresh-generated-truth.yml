@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Align checkout to PR head branch
+        run: |
+          git fetch origin "${{ github.head_ref }}"
+          git reset --hard "origin/${{ github.head_ref }}"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
