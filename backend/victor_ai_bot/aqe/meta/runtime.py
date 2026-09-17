@@ -15,6 +15,7 @@ from victor_ai_bot.evolution import GenealogyStore, diversity_score, validate_mu
 from victor_ai_bot.portfolio_optimizer import opportunity_route_ready
 from victor_ai_bot.runtime_services.profitability_truth import opportunity_profit_after_costs_info
 from victor_ai_bot.profitability_projection import profitability_summary_projection
+from victor_ai_bot.alpha_marketplace.intake import candidate_to_submission
 
 
 _SAFE_META_RUNTIME_EXCEPTIONS = (AttributeError, RuntimeError, TypeError, ValueError)
@@ -65,10 +66,11 @@ class MetaStrategyRuntime:
     applies only conservative config patches through existing runtime setters.
     """
 
-    def __init__(self, *, chain_name: str, data_dir: str, cfg: Any, allow_auto_apply: bool = False):
+    def __init__(self, *, chain_name: str, data_dir: str, cfg: Any, allow_auto_apply: bool = False, marketplace_store: Any = None):
         self.chain_name = chain_name
         self.cfg = cfg
         self.allow_auto_apply = bool(allow_auto_apply)
+        self.marketplace_store = marketplace_store
         reg_path = os.path.join(data_dir, 'meta', f'meta_registry_{chain_name}.json')
         mem_path = os.path.join(data_dir, 'meta', f'meta_memory_{chain_name}.json')
         self.registry = MetaRegistry(reg_path, max_items=int(getattr(cfg, 'max_registry_items', 200)))
@@ -193,6 +195,8 @@ class MetaStrategyRuntime:
             self.registry.append(c)
             self.memory.append(row)
             self.genealogy.append({'id': row.get('id'), 'parent_ids': list(row.get('parent_ids') or []), 'mutation_history': list(row.get('mutation_history') or []), 'generation_number': int(row.get('genealogy_depth') or 0), 'lifecycle_stage': row.get('lifecycle_stage'), 'retirement_reason': row.get('retirement_reason'), 'strategy_family': row.get('strategy_family')})
+            if self.marketplace_store is not None:
+                self.marketplace_store.submit_candidate(candidate=candidate_to_submission(c))
         self._last_candidates = out
         return out
 

@@ -58,6 +58,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
         "opportunity_id": _text(first("opportunity_id", "opportunityId", default=lineage.get("opportunity_id"))),
         "route_id": _text(first("route_id", "routeId", default=lineage.get("route_id"))),
         "action": _text(first("action", "aqe_action", default=lineage.get("action"))),
+        "strategy_id": _text(first("strategy_id", "strategyId", default=lineage.get("strategy_id"))),
         "strategy_family": _text(first("strategy_family", "strategyFamily", "family")),
         "ok": bool(first("ok", default=True)),
         "expected_net_usd": first("expected_net_usd", "expectedNetUsd"),
@@ -84,6 +85,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
             "opportunity_id": _text(lineage.get("opportunity_id") or metadata.get("opportunity_id") or metadata.get("opportunityId")),
             "route_id": _text(lineage.get("route_id") or metadata.get("route_id") or metadata.get("routeId")),
             "action": _text(lineage.get("action") or metadata.get("action") or metadata.get("aqe_action")),
+            "strategy_id": _text(lineage.get("strategy_id") or metadata.get("strategy_id") or metadata.get("strategyId")),
         },
         "metadata": metadata,
         "ledger_transaction": dict(row),
@@ -112,8 +114,6 @@ def canonical_settled_outcome(
             continue
         if opportunity_id and normalized["opportunity_id"] != _text(opportunity_id):
             continue
-        # When supplied, execution_id is an exact constraint. A transaction hash
-        # cannot override a mismatched execution attempt/replacement.
         if execution_id and normalized["execution_id"] != _text(execution_id):
             continue
         matches.append(normalized)

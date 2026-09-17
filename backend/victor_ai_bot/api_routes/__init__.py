@@ -2,6 +2,7 @@ from .admin_routes import router as admin_router
 from .advanced import router as advanced_router
 from .agents import router as agents_router
 from .analytics_routes import router as analytics_router
+from .alpha_marketplace_routes import router as alpha_marketplace_router
 from .command_center_routes import router as command_center_router
 from .engine_routes import router as engine_router
 from .evolution import router as evolution_router
@@ -30,12 +31,15 @@ from ..withdraw_external import router as withdraw_external_router
 # Keep the external-wallet reconciliation endpoint inside the canonical withdrawal
 # router namespace; it is observation/reconciliation only and never a signer.
 withdraw_router.include_router(withdraw_external_router)
+# Keep the alpha marketplace as a read/admission surface inside the existing fund router.
+fund_router.include_router(alpha_marketplace_router)
 
 __all__ = [
     "admin_router",
     "advanced_router",
     "agents_router",
     "analytics_router",
+    "alpha_marketplace_router",
     "command_center_router",
     "engine_router",
     "evolution_router",

@@ -3,18 +3,22 @@
 - Contract: optional_family_status_v2
 - Classification engine: automatic_runtime_reachability_v3
 - Evidence policy: status derives only from mounted routes, runtime initialization, import reachability, and gating conditions; tests and docs are supplemental evidence only
-- Status counts: {"dead": 7, "live": 11, "shadow": 3, "staged": 2}
+- Status counts: {"dead": 7, "live": 12, "shadow": 3, "staged": 1}
 
 | Family | Status | Py files | Refs | Primary evidence | Mounted | Runtime init | Imports | Gating |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| alpha_marketplace | staged | 4 | 5 | 4 | 0 | 1 | 2 | 1 |
+| alpha_marketplace | live | 5 | 8 | 7 | 1 | 1 | 4 | 1 |
 
-Runtime or server reachability exists, but only behind explicit gating or optional initialization.
+Mounted routes or ungated runtime initialization establish live reachability.
 
+- **alpha_marketplace mountedRoutes**
+  - backend/victor_ai_bot/api_routes/alpha_marketplace_routes.py
 - **alpha_marketplace runtimeInitialization**
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
 - **alpha_marketplace importReachability**
   - backend/tests/test_fund_os_upgrade.py
+  - backend/victor_ai_bot/api_routes/alpha_marketplace_routes.py
+  - backend/victor_ai_bot/aqe/meta/runtime.py
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
 - **alpha_marketplace gatingConditions**
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
@@ -36,7 +40,7 @@ Mounted routes or ungated runtime initialization establish live reachability.
   - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_multistrategy_fund_upgrade.py
 
-| aqe | live | 86 | 61 | 35 | 0 | 3 | 32 | 0 |
+| aqe | live | 87 | 64 | 37 | 0 | 3 | 34 | 0 |
 
 Mounted routes or ungated runtime initialization establish live reachability.
 
@@ -201,7 +205,7 @@ External imports establish reachability, but no mounted-route or runtime-init pr
 No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree.
 
 
-| omar | staged | 16 | 21 | 15 | 0 | 3 | 10 | 2 |
+| omar | staged | 16 | 23 | 16 | 0 | 3 | 11 | 2 |
 
 Explicit lifecycle policy keeps this family staged until production authority is intentionally promoted.
 
@@ -212,18 +216,19 @@ Explicit lifecycle policy keeps this family staged until production authority is
 - **omar importReachability**
   - backend/tests/test_canonical_omar_closed_loop.py
   - backend/tests/test_canonical_omar_decision_context.py
+  - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_omar_operator_intent.py
   - backend/tests/test_omar_progressive_decision_context.py
   - backend/tests/test_omar_runtime.py
   - backend/tests/test_runtime_method_chain_learning_attribution.py
   - backend/victor_ai_bot/runtime.py
-  - backend/victor_ai_bot/runtime_services/omar_receipt_facade.py
 - **omar gatingConditions**
   - backend/victor_ai_bot/runtime_services/runtime_constructor_facade.py
   - backend/victor_ai_bot/server.py
 - **omar tests**
   - backend/tests/test_canonical_omar_closed_loop.py
   - backend/tests/test_canonical_omar_decision_context.py
+  - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_omar_operator_intent.py
   - backend/tests/test_omar_progressive_decision_context.py
   - backend/tests/test_omar_runtime.py
