@@ -218,6 +218,25 @@ def _valid_flash_arb_context():
             },
         ],
         'simulation_evidence': _valid_simulation_evidence(),
+        'simulation_request': {
+            'fork_url': 'https://example.invalid/rpc',
+            'fork_block': 100,
+            'transaction': {'hash': '0xflash', 'to': address, 'data': '0x'},
+            'scenarios': [
+                {
+                    'gas_multiplier': 1.0,
+                    'liquidity_multiplier': 1.0,
+                    'oracle_multiplier': 1.0,
+                    'economic_observation': {
+                        'account': address,
+                        'assets': [
+                            {'address': address, 'decimals': 6, 'price_usd': 1.0, 'role': 'profit'},
+                            {'address': '0x0000000000000000000000000000000000000002', 'decimals': 6, 'price_usd': 1.0, 'role': 'cost'},
+                        ],
+                    },
+                },
+            ],
+        },
     }
 
 
@@ -249,8 +268,37 @@ def test_mev_flash_arb_adapter_requires_explicit_validated_route_context():
     assert opportunity.meta['capital_source'] == 'flashloan'
     assert opportunity.meta['flash_provider'] == 'aave'
     assert opportunity.meta['simulation_gate']['reason_code'] == 'simulation_evidence_verified'
+    assert opportunity.meta['capital_required_usd'] == 1.0
+    assert opportunity.meta['requested_notional_usd'] == 1.0
+    assert opportunity.meta['executable_depth_usd'] == 1.0
     assert opportunity.route.legs[0].amount_in == '1000000'
     assert opportunity.route_id
+
+
+def test_mev_flash_arb_adapter_requires_explicit_simulation_pricing_for_edge_contract():
+    context = _valid_flash_arb_context()
+    context['simulation_request']['scenarios'][0]['economic_observation']['assets'][0]['price_usd'] = 0.0
+    candidate = EngineOpportunity(
+        opportunity_id='mev:0xflash-unpriced',
+        engine_type='mev_search',
+        strategy_family='mev_search',
+        route_family='mev_search|backrun_protection',
+        chain='ethereum',
+        chain_id=1,
+        expected_profit_usd=17.5,
+        expected_realized_profit_usd=17.5,
+        capital_required_usd=25.0,
+        inventory_requirements={},
+        confidence=0.8,
+        regime='balanced',
+        latency_sensitivity=0.95,
+        risk_flags=['private_send'],
+        lifecycle_eligibility='observe_only',
+        policy_eligibility='observe_only',
+        venues=['private_relay'],
+        metadata={'tx_hash': '0xflash-unpriced', 'flash_arb_context': context},
+    )
+    assert opportunity_from_engine_candidate(candidate) is None
 
 
 def test_mev_flash_arb_adapter_rejects_mempool_only_candidate():

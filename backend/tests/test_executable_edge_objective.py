@@ -72,6 +72,48 @@ def _score(*, executable_depth_usd: float, capital_required_usd: float):
     )
 
 
+def test_flash_arb_contract_values_produce_nonzero_executable_edge():
+    opp = SimpleNamespace(
+        id="flash-arb-edge",
+        route_id="route-flash-arb-edge",
+        strategy="flash_arb",
+        expected_profit_usd="17.5",
+        route=SimpleNamespace(
+            legs=[
+                SimpleNamespace(venue="univ3", token_in="TOKEN", token_out="TOKEN2"),
+                SimpleNamespace(venue="curve", token_in="TOKEN2", token_out="TOKEN"),
+            ]
+        ),
+        meta={
+            "strategy_family": "flash_arb",
+            "capital_source": "flashloan",
+            "capital_required_usd": 1.0,
+            "requested_notional_usd": 1.0,
+            "executable_depth_usd": 1.0,
+            "margin_ratio": 0.18,
+            "gas_ratio": 0.15,
+            "p_success": 0.9,
+            "liquidity_fragility": 0.2,
+            "aqe": {"mev_risk": 0.1},
+            "unit_econ": {"gas_cost_usd_micro": 1_000_000},
+        },
+    )
+    envelope = build_opportunity_envelope(opp, chain_id=1, regime="balanced")
+    score = compute_capture_score(
+        envelope,
+        {
+            "route_success_rate": 0.95,
+            "lane_success_rate": 0.95,
+            "venue_success_rate": 0.95,
+            "venue_quality": 0.95,
+            "lane_avg_latency_ms": 100.0,
+        },
+    )
+    assert score.realized_edge > 0.0
+    assert score.objective_components["liquidityQuality"] == 1.0
+    assert score.objective_components["capitalEfficiency"] > 0.0
+
+
 def test_liquidity_quality_uses_executable_depth_coverage():
     shallow = _score(executable_depth_usd=50.0, capital_required_usd=100.0)
     deep = _score(executable_depth_usd=100.0, capital_required_usd=100.0)
