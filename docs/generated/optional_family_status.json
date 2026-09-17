@@ -10,6 +10,7 @@
           "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
         ],
         "importReachability": [
+          "backend/tests/test_alpha_marketplace_sleeves.py",
           "backend/tests/test_fund_os_upgrade.py",
           "backend/victor_ai_bot/api_routes/alpha_marketplace_routes.py",
           "backend/victor_ai_bot/aqe/meta/runtime.py",
@@ -22,18 +23,19 @@
           "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
         ],
         "tests": [
+          "backend/tests/test_alpha_marketplace_sleeves.py",
           "backend/tests/test_fund_os_upgrade.py"
         ]
       },
       "family": "alpha_marketplace",
       "path": "backend/victor_ai_bot/alpha_marketplace",
-      "primaryEvidenceCount": 7,
+      "primaryEvidenceCount": 8,
       "pythonFileCount": 5,
-      "referenceCount": 8,
+      "referenceCount": 9,
       "status": "live",
       "statusInputs": {
         "gatingConditions": 1,
-        "importReachability": 4,
+        "importReachability": 5,
         "mountedRoutes": 1,
         "runtimeInitialization": 1
       },
