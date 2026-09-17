@@ -1,9 +1,7 @@
 name: One-off refresh generated truth
 
 on:
-  push:
-    branches:
-      - codex/profitability-edge-objective
+  pull_request:
 
 permissions:
   contents: write
@@ -35,4 +33,4 @@ jobs:
             exit 0
           fi
           git commit -m 'chore: refresh generated truth artifacts'
-          git push
+          git push origin HEAD:${{ github.head_ref }}
