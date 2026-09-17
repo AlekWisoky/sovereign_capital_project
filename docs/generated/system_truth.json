@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 338,
+  "backend_test_file_count": 339,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -128,6 +128,7 @@
     "test_engine_upgrades.py",
     "test_evolution_lifecycle.py",
     "test_exception_budget.py",
+    "test_executable_edge_objective.py",
     "test_execution_capital_portfolio_upgrades.py",
     "test_execution_capture.py",
     "test_execution_capture_calibration.py",
@@ -675,12 +676,12 @@
     }
   },
   "framework_route_count": 4,
-  "generatedAt": "2026-09-17T10:46:13.458000Z",
-  "generatedAtIso": "2026-09-17T10:46:13.458000Z",
-  "generatedAtMs": 1789641973458,
-  "generated_at": "2026-09-17T10:46:13.458000Z",
-  "generated_at_iso": "2026-09-17T10:46:13.458000Z",
-  "generated_at_ms": 1789641973458,
+  "generatedAt": "2026-09-17T11:06:48.095000Z",
+  "generatedAtIso": "2026-09-17T11:06:48.095000Z",
+  "generatedAtMs": 1789643208095,
+  "generated_at": "2026-09-17T11:06:48.095000Z",
+  "generated_at_iso": "2026-09-17T11:06:48.095000Z",
+  "generated_at_ms": 1789643208095,
   "health_states": [
     "live",
     "degraded",
@@ -2104,7 +2105,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 338,
+    "backend_test_files": 339,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2177,6 +2178,7 @@
       "test_engine_upgrades.py",
       "test_evolution_lifecycle.py",
       "test_exception_budget.py",
+      "test_executable_edge_objective.py",
       "test_execution_capital_portfolio_upgrades.py",
       "test_execution_capture.py",
       "test_execution_capture_calibration.py",

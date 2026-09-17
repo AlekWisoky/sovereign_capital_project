@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 338,
+    "test_file_count": 339,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -74,6 +74,7 @@
       "backend/tests/test_engine_upgrades.py",
       "backend/tests/test_evolution_lifecycle.py",
       "backend/tests/test_exception_budget.py",
+      "backend/tests/test_executable_edge_objective.py",
       "backend/tests/test_execution_capital_portfolio_upgrades.py",
       "backend/tests/test_execution_capture.py",
       "backend/tests/test_execution_capture_calibration.py",
@@ -514,9 +515,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-17T10:46:13.786000Z",
-  "generated_at_iso": "2026-09-17T10:46:13.786000Z",
-  "generated_at_ms": 1789641973786,
+  "generated_at": "2026-09-17T11:06:48.408000Z",
+  "generated_at_iso": "2026-09-17T11:06:48.408000Z",
+  "generated_at_ms": 1789643208408,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
