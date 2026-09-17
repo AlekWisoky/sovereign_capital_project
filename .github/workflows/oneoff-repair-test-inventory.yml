@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Temporary repair: generated truth must be rendered from PR merge state.
           ref: refs/pull/173/merge
       - uses: actions/setup-python@v5
         with:
