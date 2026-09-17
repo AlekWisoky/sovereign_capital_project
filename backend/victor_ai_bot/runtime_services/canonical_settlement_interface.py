@@ -92,6 +92,14 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def canonical_settled_outcomes(runtime: Any) -> list[dict[str, Any]]:
+    """Read all exact canonical settled outcomes from the physical ledger."""
+    rows = [row for row in _transactions(runtime) if _text(row.get("tx_type")) == _SETTLEMENT_TX_TYPE]
+    outcomes = [_normalize(row) for row in rows]
+    outcomes.sort(key=lambda item: (int(item["ledger_transaction"].get("ts_ms") or 0), str(item.get("outcome_id") or "")))
+    return outcomes
+
+
 def canonical_settled_outcome(
     runtime: Any,
     *,
@@ -123,4 +131,4 @@ def canonical_settled_outcome(
     return matches[0]
 
 
-__all__ = ["canonical_settled_outcome"]
+__all__ = ["canonical_settled_outcome", "canonical_settled_outcomes"]
