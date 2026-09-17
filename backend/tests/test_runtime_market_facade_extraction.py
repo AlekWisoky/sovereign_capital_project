@@ -160,7 +160,10 @@ class _AdmissionService:
         if getattr(opp, 'route_id', '') == 'drop-me':
             raise AdmissionPreparationError('denied')
         return SimpleNamespace(
-            capture_decision=SimpleNamespace(expected_realized_value=float(getattr(opp, 'score', 0.0))),
+            capture_decision=SimpleNamespace(
+                expected_realized_value=float(getattr(opp, 'score', 0.0)),
+                capture_score=SimpleNamespace(realized_edge=float(getattr(opp, 'edge', 0.0))),
+            ),
             opportunity=opp,
         )
 
@@ -243,13 +246,46 @@ def test_runtime_market_facade_preserves_capture_annotation_order(monkeypatch):
     monkeypatch.setattr(market_mod, 'build_runtime_access_snapshot', lambda _runtime: {'snap': True})
     monkeypatch.setattr(market_mod, 'build_admission_context', lambda _runtime, _opp, *, snapshot: {'snapshot': snapshot})
     opps = [
-        SimpleNamespace(route_id='mid', score=2.0),
-        SimpleNamespace(route_id='drop-me', score=99.0),
-        SimpleNamespace(route_id='top', score=5.0),
+        SimpleNamespace(route_id='mid', score=9.0, edge=2.0),
+        SimpleNamespace(route_id='drop-me', score=99.0, edge=99.0),
+        SimpleNamespace(route_id='top', score=1.0, edge=5.0),
     ]
     runtime._annotate_execution_capture(opps, 'balanced')
     assert runtime._opportunity_service.calls[0][1] == 'balanced'
     assert [opp.route_id for opp in opps] == ['top', 'mid', 'drop-me']
+
+def test_runtime_market_facade_capture_annotation_uses_realized_edge_not_legacy_value(monkeypatch):
+    runtime = _Runtime()
+    monkeypatch.setattr(market_mod, 'build_runtime_access_snapshot', lambda _runtime: {'snap': True})
+    monkeypatch.setattr(market_mod, 'build_admission_context', lambda _runtime, _opp, *, snapshot: {'snapshot': snapshot})
+    opps = [
+        SimpleNamespace(route_id='legacy-high', score=100.0, edge=1.0),
+        SimpleNamespace(route_id='edge-high', score=1.0, edge=4.0),
+        SimpleNamespace(route_id='edge-tie-b', score=50.0, edge=3.0),
+        SimpleNamespace(route_id='edge-tie-a', score=2.0, edge=3.0),
+        SimpleNamespace(route_id='missing-edge', score=1000.0),
+    ]
+    runtime._annotate_execution_capture(opps, 'balanced')
+    assert [opp.route_id for opp in opps] == [
+        'edge-high',
+        'edge-tie-a',
+        'edge-tie-b',
+        'legacy-high',
+        'missing-edge',
+    ]
+
+
+def test_runtime_market_facade_capture_annotation_does_not_fallback_to_legacy_value(monkeypatch):
+    runtime = _Runtime()
+    monkeypatch.setattr(market_mod, 'build_runtime_access_snapshot', lambda _runtime: {'snap': True})
+    monkeypatch.setattr(market_mod, 'build_admission_context', lambda _runtime, _opp, *, snapshot: {'snapshot': snapshot})
+    opps = [
+        SimpleNamespace(route_id='missing-edge', score=1000.0),
+        SimpleNamespace(route_id='real-edge', score=1.0, edge=0.5),
+    ]
+    runtime._annotate_execution_capture(opps, 'balanced')
+    assert [opp.route_id for opp in opps] == ['real-edge', 'missing-edge']
+
 
 def test_runtime_market_facade_fail_rate_is_best_effort():
     runtime = _Runtime()
