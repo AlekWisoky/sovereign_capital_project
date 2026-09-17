@@ -52,6 +52,7 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
     pending = {
         "opportunity_id": opp.id,
         "route_id": opp.route_id,
+        "strategy_id": "strategy-95",
         "brain": {
             "canonical_decision_id": identity.decision_id,
             "correlation_id": identity.correlation_id,
@@ -63,6 +64,7 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
             "execution_id": "execution-1",
             "receipt_id": "receipt-1",
             "outcome_id": "outcome-1",
+            "strategy_id": "strategy-95",
             "operator_intent": intent,
             "intent_fingerprint": "intent-fp-1",
             "opportunity_id": opp.id,
@@ -89,6 +91,7 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
         "receipt_id": "receipt-1",
         "outcome_id": "outcome-1",
         "opportunity_id": opp.id,
+        "strategy_id": "strategy-95",
         "action": "flash_arb",
     }
 
@@ -103,6 +106,7 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
     assert call["latency_ms"] == 37
     assert call["outcome_truth_verified"] is True
     assert call["metadata"]["source"] == "phase2_canonical_outcome_ledger"
+    assert call["metadata"]["strategy_id"] == "strategy-95"
     assert call["metadata"]["canonical_lineage"] == {
         "decision_id": identity.decision_id,
         "correlation_id": identity.correlation_id,
@@ -110,6 +114,7 @@ def test_runtime_method_chain_settlement_uses_canonical_lineage_for_learning():
         "execution_id": "execution-1",
         "receipt_id": "receipt-1",
         "outcome_id": "outcome-1",
+        "strategy_id": "strategy-95",
         "opportunity_id": opp.id,
         "route_id": opp.route_id,
         "action": "flash_arb",
