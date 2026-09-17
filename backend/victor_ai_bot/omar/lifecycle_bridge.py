@@ -26,10 +26,7 @@ def _bounded_calibration_reward(*, realized_net_usd: Any, expected_net_usd: Any)
     if not math.isfinite(realized) or not math.isfinite(expected):
         return None
     denom = max(1.0, abs(expected))
-    trace = reward_function(
-        realized_net_pnl=realized - expected,
-        deployed_notional=denom,
-    )
+    trace = reward_function(realized_net_pnl=realized - expected, deployed_notional=denom)
     try:
         return max(-1.0, min(1.0, float(trace.get("reward", 0.0))))
     except (TypeError, ValueError, OverflowError):
@@ -52,10 +49,7 @@ def _calibrate_from_attribution(
     agents = list(getattr(hub, "agents", None) or [])
     if store is None or not hasattr(store, "load") or not agents:
         return {"ok": False, "reason_code": "calibration_context_unavailable"}
-    reward = _bounded_calibration_reward(
-        realized_net_usd=realized_net_usd,
-        expected_net_usd=expected_net_usd,
-    )
+    reward = _bounded_calibration_reward(realized_net_usd=realized_net_usd, expected_net_usd=expected_net_usd)
     if reward is None:
         return {"ok": False, "reason_code": "calibration_economics_invalid"}
 
@@ -77,10 +71,7 @@ def _calibrate_from_attribution(
     if match is None:
         return {"ok": False, "reason_code": "calibration_attribution_missing"}
 
-    by_name = {
-        _text(getattr(agent, "name", agent.__class__.__name__)): agent
-        for agent in agents
-    }
+    by_name = {_text(getattr(agent, "name", agent.__class__.__name__)): agent for agent in agents}
     updated = []
     skipped = []
     for contributor in list(match.get("contributors") or []):
@@ -95,15 +86,9 @@ def _calibrate_from_attribution(
         if calibrator is None or not hasattr(calibrator, "update"):
             skipped.append(name)
             continue
-        update_key = ":".join(
-            part for part in (receipt_id, outcome_id, decision_id, name) if str(part)
-        )
+        update_key = ":".join(part for part in (receipt_id, outcome_id, decision_id, name) if str(part))
         try:
-            calibrator.update(
-                reward=float(reward),
-                features=dict(features),
-                update_key=update_key,
-            )
+            calibrator.update(reward=float(reward), features=dict(features), update_key=update_key)
             state = dict(calibrator.state() or {})
             if state.get("update", {}).get("code") == "calibration_update_duplicate":
                 skipped.append(name)
@@ -112,23 +97,10 @@ def _calibrate_from_attribution(
         except _SAFE:
             skipped.append(name)
 
-    return {
-        "ok": True,
-        "reason_code": "calibration_updated" if updated else "calibration_noop",
-        "reward": float(reward),
-        "updated_agents": list(updated),
-        "skipped_agents": list(skipped),
-        "receipt_id": str(receipt_id),
-        "outcome_id": str(outcome_id),
-    }
+    return {"ok": True, "reason_code": "calibration_updated" if updated else "calibration_noop", "reward": float(reward), "updated_agents": list(updated), "skipped_agents": list(skipped), "receipt_id": str(receipt_id), "outcome_id": str(outcome_id)}
 
 
-def _observe_settled_outcome(
-    runtime: Any,
-    *,
-    pending: Mapping[str, Any],
-    outcome: Mapping[str, Any],
-) -> dict[str, Any]:
+def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcome: Mapping[str, Any]) -> dict[str, Any]:
     """Feed exactly one physically persisted canonical settlement into OMAR."""
     p = _dict(pending)
     row = _dict(outcome)
@@ -147,6 +119,7 @@ def _observe_settled_outcome(
     opportunity_id = _text(p.get("opportunity_id") or pending_lineage.get("opportunity_id"))
     route_id = _text(p.get("route_id") or pending_lineage.get("route_id"))
     action = _text(p.get("action") or pending_lineage.get("action"))
+    strategy_id = _text(p.get("strategy_id") or pending_lineage.get("strategy_id") or _dict(p.get("context")).get("strategy_id"))
     outcome_id = _text(row.get("outcome_id") or outcome_lineage.get("outcome_id"))
     receipt_id = _text(row.get("receipt_id") or outcome_lineage.get("receipt_id") or row.get("tx_hash"))
 
@@ -160,6 +133,7 @@ def _observe_settled_outcome(
         ("opportunity", opportunity_id, _text(row.get("opportunity_id") or outcome_lineage.get("opportunity_id"))),
         ("route", route_id, _text(row.get("route_id") or outcome_lineage.get("route_id"))),
         ("action", action, _text(row.get("action") or outcome_lineage.get("action"))),
+        ("strategy", strategy_id, _text(row.get("strategy_id") or outcome_lineage.get("strategy_id") or _dict(row.get("metadata")).get("strategy_id"))),
     ):
         if expected and actual != expected:
             return {"ok": False, "reason_code": f"{name}_lineage_mismatch"}
@@ -178,9 +152,11 @@ def _observe_settled_outcome(
             "opportunity_id": opportunity_id,
             "route_id": route_id,
             "action": action,
+            "strategy_id": strategy_id,
         },
         "source": "phase2_canonical_outcome_ledger",
         "settlement": copy.deepcopy(row),
+        "strategy_id": strategy_id,
         "capital_demand": copy.deepcopy(row.get("capital_demand") or p.get("capital_demand") or {}),
         "capital_authority": copy.deepcopy(row.get("capital_authority") or p.get("capital_authority") or {}),
         "internal_prime_authority": copy.deepcopy(row.get("internal_prime_authority") or p.get("internal_prime_authority") or {}),
@@ -191,31 +167,21 @@ def _observe_settled_outcome(
     if intent_fingerprint:
         metadata["intent_fingerprint"] = intent_fingerprint
 
-    result = dict(
-        omar.observe_outcome(
-            decision_id=decision_id,
-            ok=bool(row.get("ok", True)),
-            realized_net_usd=row.get("realized_net_usd"),
-            expected_net_usd=row.get("expected_net_usd", p.get("expected_net_usd")),
-            amount_in_wei=row.get("amount_in_wei"),
-            gas_cost_usd=row.get("gas_cost_usd"),
-            slippage_bps=row.get("slippage_bps"),
-            latency_ms=row.get("latency_ms"),
-            route_id=route_id,
-            tx_hash=_text(row.get("tx_hash") or receipt_id),
-            outcome_truth_verified=bool(row.get("truth_verified", False)),
-            metadata=metadata,
-        )
-    )
-    calibration = _calibrate_from_attribution(
-        runtime,
+    result = dict(omar.observe_outcome(
         decision_id=decision_id,
-        receipt_id=receipt_id,
-        outcome_id=outcome_id,
-        opportunity_id=opportunity_id,
-        route_id=route_id,
+        ok=bool(row.get("ok", True)),
         realized_net_usd=row.get("realized_net_usd"),
         expected_net_usd=row.get("expected_net_usd", p.get("expected_net_usd")),
-    )
+        amount_in_wei=row.get("amount_in_wei"),
+        gas_cost_usd=row.get("gas_cost_usd"),
+        slippage_bps=row.get("slippage_bps"),
+        latency_ms=row.get("latency_ms"),
+        route_id=route_id,
+        tx_hash=_text(row.get("tx_hash") or receipt_id),
+        outcome_truth_verified=bool(row.get("truth_verified", False)),
+        metadata=metadata,
+    ))
+    calibration = _calibrate_from_attribution(runtime, decision_id=decision_id, receipt_id=receipt_id, outcome_id=outcome_id, opportunity_id=opportunity_id, route_id=route_id, realized_net_usd=row.get("realized_net_usd"), expected_net_usd=row.get("expected_net_usd", p.get("expected_net_usd")))
     result["calibration"] = calibration
+    result["strategy_id"] = strategy_id
     return result
