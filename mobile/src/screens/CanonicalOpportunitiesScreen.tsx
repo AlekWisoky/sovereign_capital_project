@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../utils/useTheme';
@@ -6,6 +6,7 @@ import { pageContentContainerStyle, pageShellStyle } from '../utils/layout';
 import { SurfaceCard } from '../components/v2/SurfaceCard';
 import { useStore } from '../state/store';
 import { useCanonicalFeed } from '../domain/useCanonicalFeed';
+import { getAlphaMarketplace, AlphaMarketplaceItem } from '../api/alphaMarketplace';
 
 export function CanonicalOpportunitiesScreen() {
   const theme = useTheme();
@@ -13,6 +14,29 @@ export function CanonicalOpportunitiesScreen() {
   const { state } = useStore();
   const feed = useCanonicalFeed(state.baseUrl, state.role === 'operator' ? state.adminKey : undefined, state.ccRefreshMs ?? 4500);
   const opportunities = feed.snapshot?.opportunities ?? [];
+  const [marketplaceItems, setMarketplaceItems] = useState<AlphaMarketplaceItem[]>([]);
+  const [marketplaceEnabled, setMarketplaceEnabled] = useState(false);
+  const [marketplaceError, setMarketplaceError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setMarketplaceError('');
+    getAlphaMarketplace(state.baseUrl)
+      .then((result) => {
+        if (!active) return;
+        setMarketplaceItems(result.items ?? []);
+        setMarketplaceEnabled(Boolean(result.enabled));
+      })
+      .catch((error) => {
+        if (!active) return;
+        setMarketplaceError(error instanceof Error ? error.message : 'marketplace unavailable');
+        setMarketplaceItems([]);
+        setMarketplaceEnabled(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [state.baseUrl]);
 
   return (
     <ScrollView style={pageShellStyle(theme)} contentContainerStyle={pageContentContainerStyle(theme, 40)}>
@@ -22,6 +46,21 @@ export function CanonicalOpportunitiesScreen() {
         <Text style={{ color: theme.colors.text, fontWeight: '900' }}>{feed.freshness.toUpperCase()}</Text>
         <Text style={{ color: theme.colors.textFaint, marginTop: 4 }}>{feed.error || `${opportunities.length} opportunities from backend truth`}</Text>
       </View>
+
+      <View style={{ height: theme.spacing.md }} />
+      <SurfaceCard glow="none">
+        <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 17 }}>Alpha marketplace</Text>
+        <Text style={{ color: theme.colors.textMuted, marginTop: 6 }}>
+          {marketplaceError || (marketplaceEnabled ? `${marketplaceItems.length} candidate${marketplaceItems.length === 1 ? '' : 's'} in the internal evidence queue.` : 'Internal intake is disabled by default.')}
+        </Text>
+        {marketplaceItems.slice(0, 5).map((item, index) => (
+          <View key={String(item.strategyId ?? item.submissionId ?? index)} style={{ marginTop: 10, padding: 10, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '900' }}>{String(item.title ?? item.strategyId ?? 'Strategy candidate')}</Text>
+            <Text style={{ color: theme.colors.textFaint, marginTop: 4 }}>{String(item.family ?? 'unknown family')} · {String(item.stage ?? 'sandbox')} · {String(item.governanceStatus ?? 'pending')}</Text>
+            <Text style={{ color: theme.colors.textFaint, marginTop: 3 }}>Strategy {String(item.strategyId ?? '—')} · capital {String(item.capitalSleeveStatus ?? 'unfunded')}</Text>
+          </View>
+        ))}
+      </SurfaceCard>
 
       <View style={{ height: theme.spacing.md }} />
       {opportunities.length === 0 ? (
