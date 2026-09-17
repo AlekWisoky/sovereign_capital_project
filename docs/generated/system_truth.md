@@ -1,19 +1,19 @@
 # System Truth
 
-- generated_at: 2026-09-14T17:16:17.127000Z
-- generated_at_ms: 1789406177127
-- generated_at_iso: 2026-09-14T17:16:17.127000Z
+- generated_at: 2026-09-17T11:06:48.095000Z
+- generated_at_ms: 1789643208095
+- generated_at_iso: 2026-09-17T11:06:48.095000Z
 - thin_shell_runtime_py_lines: 47
 - thin_shell_api_py_lines: 21
-- backend_test_file_count: 338
+- backend_test_file_count: 339
 - mobile_test_file_count: 14
-- route_count: 162
+- route_count: 165
 - route_count_basis: app_routes
-- http_route_count: 158
+- http_route_count: 161
 - http_route_count_basis: http_methods_excluding_head_options
-- application_route_count: 154
+- application_route_count: 157
 - framework_route_count: 4
-- app_route_count: 162
+- app_route_count: 165
 - websocket_route_count: 4
 - runtime_legacy_lines: 181
 - api_legacy_lines: 83
@@ -139,6 +139,7 @@
 - admin_routes
 - advanced
 - agents
+- alpha_marketplace_routes
 - analytics_routes
 - command_center_routes
 - engine_routes
@@ -232,6 +233,8 @@
 - GET /api/fioa/report (victor_ai_bot.api_routes.overlay_routes.fioa_report)
 - POST /api/fioa/safe_mode (victor_ai_bot.api_routes.overlay_routes.fioa_safe_mode)
 - GET /api/fioa/state (victor_ai_bot.api_routes.overlay_routes.fioa_state)
+- GET /api/fund/alpha-marketplace (victor_ai_bot.api_routes.alpha_marketplace_routes.marketplace_snapshot)
+- POST /api/fund/alpha-marketplace (victor_ai_bot.api_routes.alpha_marketplace_routes.marketplace_submit)
 - GET /api/fund/capital-truth (victor_ai_bot.api_routes.fund_routes.fund_capital_truth)
 - GET /api/fund/doctrine (victor_ai_bot.api_routes.fund_routes.fund_doctrine)
 - GET /api/fund/family-hardening (victor_ai_bot.api_routes.fund_routes.fund_family_hardening)
@@ -251,5 +254,3 @@
 - GET /api/governance/threat_status (victor_ai_bot.api_routes.governance_routes.threat_status)
 - GET /api/inl/daily_digest (victor_ai_bot.api_routes.intelligence_routes.inl_daily_digest)
 - GET /api/inl/explain/opportunity/{opp_id} (victor_ai_bot.api_routes.intelligence_routes.inl_explain_opportunity)
-- POST /api/inl/scenario_sweep (victor_ai_bot.api_routes.intelligence_routes.inl_scenario_sweep)
-- GET /api/kds/multichain/state (victor_ai_bot.api_routes.intelligence_routes.kds_state_multichain)

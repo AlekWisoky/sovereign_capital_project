@@ -17,6 +17,63 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return default
 
 
+def _positive_meta_float(meta: Dict[str, Any], keys: tuple[str, ...]) -> float:
+    for key in keys:
+        value = _safe_float(meta.get(key), 0.0)
+        if value > 0.0:
+            return value
+    return 0.0
+
+
+def _capital_required_usd(opp: Any, meta: Dict[str, Any]) -> float:
+    direct = _positive_meta_float(
+        meta,
+        ("capital_required_usd", "capitalRequiredUsd", "requested_notional_usd", "notional_usd"),
+    )
+    if direct > 0.0:
+        return direct
+    return max(
+        0.0,
+        _safe_float(
+            getattr(opp, "capital_required_usd", None)
+            or getattr(opp, "capitalRequiredUsd", None)
+            or getattr(opp, "requested_notional_usd", None)
+            or getattr(opp, "notional_usd", None),
+            0.0,
+        ),
+    )
+
+
+def _executable_depth_usd(meta: Dict[str, Any]) -> float:
+    explicit = _positive_meta_float(
+        meta,
+        ("executable_depth_usd", "route_depth_usd", "depth_usd", "route_capacity_usd"),
+    )
+    if explicit > 0.0:
+        return explicit
+    route_depths = meta.get("route_depths_usd")
+    if isinstance(route_depths, (list, tuple)):
+        values = [_safe_float(value, 0.0) for value in route_depths]
+        positive = [value for value in values if value > 0.0]
+        if positive:
+            return min(positive)
+    nested_values: List[float] = []
+    for key in ("execution_liquidity", "route_liquidity", "liquidity"):
+        nested = meta.get(key)
+        if isinstance(nested, dict):
+            value = _positive_meta_float(
+                nested,
+                ("executable_depth_usd", "depth_usd", "available_usd", "capacity_usd"),
+            )
+            if value > 0.0:
+                nested_values.append(value)
+    for key in ("cex_depth_usd", "dex_depth_usd", "pool_depth_usd", "provider_capacity_usd"):
+        value = _safe_float(meta.get(key), 0.0)
+        if value > 0.0:
+            nested_values.append(value)
+    return min(nested_values) if nested_values else 0.0
+
+
 def _legs(opp: Any) -> list[Any]:
     try:
         legs = getattr(getattr(opp, "route", None), "legs", []) or []
@@ -157,5 +214,7 @@ def build_opportunity_envelope(
             "regime": str(regime),
             "meta": meta,
             "strategy_family": strategy_family,
+            "capital_required_usd": _capital_required_usd(opp, meta),
+            "executable_depth_usd": _executable_depth_usd(meta),
         },
     )

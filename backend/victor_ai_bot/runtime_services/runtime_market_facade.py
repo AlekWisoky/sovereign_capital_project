@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any, Dict, List
 
 from .treasury_governance_truth import treasury_governance_view
@@ -321,13 +322,15 @@ class RuntimeMarketFacade:
                 admission_ctx = build_admission_context(self, o, snapshot=runtime_snapshot)
                 prepared = self._admission_service.prepare_capture(self, o, context=admission_ctx)
                 decision = prepared.capture_decision
-                expected_value = (
-                    float(getattr(decision, "expected_realized_value", 0.0) or 0.0)
-                    if decision is not None
-                    else 0.0
-                )
+                capture_score = getattr(decision, "capture_score", None) if decision is not None else None
+                try:
+                    realized_edge = float(getattr(capture_score, "realized_edge", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    realized_edge = 0.0
+                if not math.isfinite(realized_edge) or realized_edge < 0.0:
+                    realized_edge = 0.0
                 scored.append(
-                    (expected_value, str(getattr(o, "route_id", "") or ""), prepared.opportunity)
+                    (realized_edge, str(getattr(o, "route_id", "") or ""), prepared.opportunity)
                 )
             except AdmissionPreparationError:
                 scored.append((0.0, str(getattr(o, "route_id", "") or ""), o))

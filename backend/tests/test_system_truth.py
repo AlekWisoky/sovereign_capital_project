@@ -29,6 +29,20 @@ def test_generated_docs_match_live_truth():
     assert docs_truth['backend_test_file_count'] == truth['backend_test_file_count']
 
 
+def test_system_truth_test_inventory_preserves_all_pytest_paths():
+    from pathlib import Path
+
+    truth = build_system_truth()
+    tests_root = Path(__file__).resolve().parent
+    expected = {
+        p.relative_to(tests_root).as_posix()
+        for pattern in ('test_*.py', '*_test.py')
+        for p in tests_root.rglob(pattern)
+    }
+    assert truth['backend_test_file_count'] == len(expected)
+    assert set(truth['backend_test_files']) == expected
+
+
 def test_system_truth_reports_exception_inventory_and_legacy_sizes():
     truth = build_system_truth()
     assert truth['runtime_legacy_lines'] > 0

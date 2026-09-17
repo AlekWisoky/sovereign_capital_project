@@ -65,6 +65,8 @@ class CaptureScore:
     latency_decay_cost: float
     failure_cost_estimate: float
     telemetry_adjustments: Dict[str, float] = field(default_factory=dict)
+    realized_edge: float = 0.0
+    objective_components: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

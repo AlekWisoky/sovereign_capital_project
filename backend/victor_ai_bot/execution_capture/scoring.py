@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict
 
 from .models import OpportunityEnvelope, CaptureScore
+from ..fund_os.profit_doctrine import capital_efficiency_quality, executable_edge_objective
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -94,14 +95,69 @@ def compute_capture_score(
         - latency_decay_cost
         - failure_cost_estimate
     )
-    capture_score = expected_realized_pnl
+
+    # Canonical pre-settlement objective. Existing expected-realized PnL/capture
+    # semantics remain unchanged; the new objective is exposed as a derived
+    # quality signal until its downstream ranking consumers are migrated.
+    extra_costs = sum(
+        max(0.0, float(telemetry.get(key, 0.0) or 0.0))
+        for key in (
+            "flashloan_fee_usd",
+            "bridge_fee_usd",
+            "private_execution_cost_usd",
+        )
+    )
+    executable_net_profit = max(
+        0.0,
+        envelope.expected_profit_usd
+        - envelope.gas_estimate_usd
+        - slippage_cost_estimate
+        - extra_costs,
+    )
+    capital_required_usd = float(envelope.metadata.get("capital_required_usd", 0.0) or 0.0)
+    executable_depth_usd = float(envelope.metadata.get("executable_depth_usd", 0.0) or 0.0)
+    liquidity_quality = (
+        _clip(executable_depth_usd / max(capital_required_usd, 1e-9), 0.0, 1.0)
+        if executable_depth_usd > 0.0 and capital_required_usd > 0.0
+        else 0.0
+    )
+    capital_efficiency = (
+        _clip(
+            capital_efficiency_quality(executable_net_profit / max(capital_required_usd, 1e-9))
+            / 1.25,
+            0.0,
+            1.0,
+        )
+        if capital_required_usd > 0.0
+        else 0.0
+    )
+    execution_reliability = _clip(
+        route_success
+        * venue_success
+        * lane_success
+        * (1.0 - revert_rate)
+        * (1.0 - timeout_rate),
+        0.0,
+        1.0,
+    )
+    objective = executable_edge_objective(
+        executable_net_profit=executable_net_profit,
+        probability_of_success=success_probability,
+        route_quality=venue_quality,
+        liquidity_quality=liquidity_quality,
+        capital_efficiency=capital_efficiency,
+        latency_survivability=freshness_probability,
+        execution_reliability=execution_reliability,
+    )
+    realized_edge = float(objective["realizedEdge"])
+
     return CaptureScore(
         success_probability=float(success_probability),
         freshness_probability=float(freshness_probability),
         interference_probability=float(interference_probability),
         venue_quality=float(venue_quality),
         expected_realized_pnl=float(expected_realized_pnl),
-        capture_score=float(capture_score),
+        capture_score=float(expected_realized_pnl),
         expected_realized_value=float(expected_realized_pnl),
         slippage_cost_estimate=float(slippage_cost_estimate),
         latency_decay_cost=float(latency_decay_cost),
@@ -116,5 +172,22 @@ def compute_capture_score(
             "endpoint_quality": float(endpoint_quality),
             "lane_avg_latency_ms": float(lane_avg_latency_ms),
             "latency_pressure": float(latency_pressure),
+            "liquidity_quality": float(liquidity_quality),
+            "executable_depth_usd": float(executable_depth_usd),
+            "capital_required_usd": float(capital_required_usd),
+            "execution_reliability": float(execution_reliability),
+            "capital_efficiency_factor": float(objective["capitalEfficiency"]),
+            "executable_net_profit": float(objective["executableNetProfit"]),
+            "extra_execution_costs": float(extra_costs),
+        },
+        realized_edge=realized_edge,
+        objective_components={
+            "executableNetProfit": float(objective["executableNetProfit"]),
+            "probabilityOfSuccess": float(objective["probabilityOfSuccess"]),
+            "routeQuality": float(objective["routeQuality"]),
+            "liquidityQuality": float(objective["liquidityQuality"]),
+            "capitalEfficiency": float(objective["capitalEfficiency"]),
+            "latencySurvivability": float(objective["latencySurvivability"]),
+            "executionReliability": float(objective["executionReliability"]),
         },
     )
