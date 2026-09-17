@@ -87,11 +87,28 @@ class AlphaMarketplaceStore:
             return {'ok': False, 'reason': 'marketplace_disabled'}
         sid = str(uuid.uuid4())
         item = {
-            'submissionId': sid, 'title': str(title), 'contributor': str(contributor),
-            'family': str(family), 'thesis': str(thesis), 'origin': 'human',
-            'strategyId': sid, 'reviewState': 'pending', 'stage': 'sandbox',
-            'governanceStatus': 'pending', 'capitalSleeveStatus': 'unfunded',
-            'promotionReason': '', 'createdTs': int(time.time()),
+            'submissionId': sid,
+            'title': str(title),
+            'contributor': str(contributor),
+            'family': str(family),
+            'thesis': str(thesis),
+            'origin': 'human',
+            'strategyId': sid,
+            'parentStrategyIds': [],
+            'generatingEngine': '',
+            'agentId': '',
+            'expectedEconomics': {},
+            'evidence': {},
+            'settingsPatch': {},
+            'safetyPatch': {},
+            'structurePatch': {},
+            'mutationHistory': [],
+            'reviewState': 'pending',
+            'stage': 'sandbox',
+            'governanceStatus': 'pending',
+            'capitalSleeveStatus': 'unfunded',
+            'promotionReason': '',
+            'createdTs': int(time.time()),
             'profitSharingPlaceholder': True,
         }
         self._items[sid] = item
