@@ -29,6 +29,53 @@ def default_profit_doctrine() -> ProfitDoctrine:
     return ProfitDoctrine()
 
 
+def _clip_factor(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def executable_edge_objective(
+    *,
+    executable_net_profit: float,
+    probability_of_success: float,
+    route_quality: float,
+    liquidity_quality: float,
+    capital_efficiency: float,
+    latency_survivability: float,
+    execution_reliability: float,
+) -> Dict[str, Any]:
+    """Return the canonical pre-settlement executable-edge objective.
+
+    This is a planning/ranking metric, not a capital-authority gate. Governance,
+    admission, sizing, simulation, execution, and canonical settlement remain
+    separate authorities.
+
+    ``executable_net_profit`` must already be net of deterministic execution
+    costs known at the caller's truth boundary. All quality factors are clipped
+    to [0, 1] so missing or oversized signals cannot manufacture edge.
+    """
+    factors = {
+        "probability_of_success": _clip_factor(probability_of_success),
+        "route_quality": _clip_factor(route_quality),
+        "liquidity_quality": _clip_factor(liquidity_quality),
+        "capital_efficiency": _clip_factor(capital_efficiency),
+        "latency_survivability": _clip_factor(latency_survivability),
+        "execution_reliability": _clip_factor(execution_reliability),
+    }
+    edge = max(0.0, float(executable_net_profit))
+    for factor in factors.values():
+        edge *= factor
+    return {
+        "executableNetProfit": round(max(0.0, float(executable_net_profit)), 12),
+        "probabilityOfSuccess": factors["probability_of_success"],
+        "routeQuality": factors["route_quality"],
+        "liquidityQuality": factors["liquidity_quality"],
+        "capitalEfficiency": factors["capital_efficiency"],
+        "latencySurvivability": factors["latency_survivability"],
+        "executionReliability": factors["execution_reliability"],
+        "realizedEdge": round(edge, 12),
+    }
+
+
 def objective_vector() -> Dict[str, float]:
     d = default_profit_doctrine()
     return {
