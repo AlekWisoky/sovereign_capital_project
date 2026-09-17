@@ -1,9 +1,7 @@
 name: One-off refresh optional family truth
 
 on:
-  push:
-    branches:
-      - codex/issue-95-alpha-marketplace
+  pull_request:
 
 permissions:
   contents: write
@@ -34,4 +32,4 @@ jobs:
             exit 0
           fi
           git commit -m 'chore: refresh optional family truth'
-          git push
+          git push origin HEAD:${{ github.head_ref }}
