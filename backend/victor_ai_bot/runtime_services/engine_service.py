@@ -75,13 +75,11 @@ class EngineService:
             SimpleNamespace(venue=v, token_in="USD", token_out="USD")
             for v in (opportunity.venues or ["unknown"])
         ]
-        return SimpleNamespace(
-            id=opportunity.opportunity_id,
-            route_id=opportunity.opportunity_id,
-            strategy=opportunity.strategy_family,
-            expected_profit_usd=opportunity.expected_realized_profit_usd,
-            meta={
+        metadata = dict(opportunity.metadata or {})
+        metadata.update(
+            {
                 "route_family": opportunity.route_family,
+                "capital_required_usd": float(opportunity.capital_required_usd),
                 "p_success": opportunity.confidence,
                 "freshness_score": max(0.15, 1.0 - opportunity.latency_sensitivity * 0.4),
                 "liquidity_fragility": (
@@ -101,7 +99,15 @@ class EngineService:
                         int(max(0.0, opportunity.capital_required_usd * 0.002) * 1_000_000)
                     ),
                 },
-            },
+            }
+        )
+        return SimpleNamespace(
+            id=opportunity.opportunity_id,
+            route_id=opportunity.opportunity_id,
+            strategy=opportunity.strategy_family,
+            expected_profit_usd=opportunity.expected_realized_profit_usd,
+            capital_required_usd=float(opportunity.capital_required_usd),
+            meta=metadata,
             route=SimpleNamespace(legs=legs),
         )
 

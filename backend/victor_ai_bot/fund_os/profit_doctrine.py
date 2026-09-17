@@ -33,6 +33,18 @@ def _clip_factor(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
 
 
+def capital_efficiency_quality(edge_ratio: float) -> float:
+    """Preserve the portfolio optimizer's capital-efficiency preference curve.
+
+    The portfolio optimizer historically compresses edge/capital into a stable
+    0.75-1.25 secondary-preference band. Keeping that curve here gives the
+    executable-edge objective one shared semantic without creating a second
+    sizing authority.
+    """
+    ratio = max(0.0, float(edge_ratio))
+    return max(0.75, min(1.25, 0.75 + min(0.50, ratio * 5.0)))
+
+
 def executable_edge_objective(
     *,
     executable_net_profit: float,

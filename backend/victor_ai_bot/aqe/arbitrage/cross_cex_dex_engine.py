@@ -81,6 +81,8 @@ class CrossCEXDEXArbitrageEngine:
                     'side': side,
                     'cex_mid': c_mid,
                     'dex_mid': d_mid,
+                    'executable_depth_usd': round(depth_usd, 6),
+                    'capital_required_usd': round(capital_required, 6),
                     'transfer_penalty_usd': round(transfer_penalty, 6),
                     'settlement_penalty_usd': round(settlement_penalty, 6),
                     'leg_risk_penalty_usd': round(leg_risk_penalty, 6),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict
 
 from .models import OpportunityEnvelope, CaptureScore
-from ..fund_os.profit_doctrine import executable_edge_objective
+from ..fund_os.profit_doctrine import capital_efficiency_quality, executable_edge_objective
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -114,10 +114,22 @@ def compute_capture_score(
         - slippage_cost_estimate
         - extra_costs,
     )
-    liquidity_quality = _clip(
-        float(telemetry.get("liquidity_quality", 1.0 - envelope.liquidity_fragility) or 0.0),
-        0.0,
-        1.0,
+    capital_required_usd = float(envelope.metadata.get("capital_required_usd", 0.0) or 0.0)
+    executable_depth_usd = float(envelope.metadata.get("executable_depth_usd", 0.0) or 0.0)
+    liquidity_quality = (
+        _clip(executable_depth_usd / max(capital_required_usd, 1e-9), 0.0, 1.0)
+        if executable_depth_usd > 0.0 and capital_required_usd > 0.0
+        else 0.0
+    )
+    capital_efficiency = (
+        _clip(
+            capital_efficiency_quality(executable_net_profit / max(capital_required_usd, 1e-9))
+            / 1.25,
+            0.0,
+            1.0,
+        )
+        if capital_required_usd > 0.0
+        else 0.0
     )
     execution_reliability = _clip(
         route_success
@@ -133,7 +145,7 @@ def compute_capture_score(
         probability_of_success=success_probability,
         route_quality=venue_quality,
         liquidity_quality=liquidity_quality,
-        capital_efficiency=float(telemetry.get("capital_efficiency_factor", 1.0) or 1.0),
+        capital_efficiency=capital_efficiency,
         latency_survivability=freshness_probability,
         execution_reliability=execution_reliability,
     )
@@ -161,6 +173,8 @@ def compute_capture_score(
             "lane_avg_latency_ms": float(lane_avg_latency_ms),
             "latency_pressure": float(latency_pressure),
             "liquidity_quality": float(liquidity_quality),
+            "executable_depth_usd": float(executable_depth_usd),
+            "capital_required_usd": float(capital_required_usd),
             "execution_reliability": float(execution_reliability),
             "capital_efficiency_factor": float(objective["capitalEfficiency"]),
             "executable_net_profit": float(objective["executableNetProfit"]),
