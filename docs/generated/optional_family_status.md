@@ -7,7 +7,7 @@
 
 | Family | Status | Py files | Refs | Primary evidence | Mounted | Runtime init | Imports | Gating |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| alpha_marketplace | live | 5 | 8 | 7 | 1 | 1 | 4 | 1 |
+| alpha_marketplace | live | 5 | 9 | 8 | 1 | 1 | 5 | 1 |
 
 Mounted routes or ungated runtime initialization establish live reachability.
 
@@ -16,6 +16,7 @@ Mounted routes or ungated runtime initialization establish live reachability.
 - **alpha_marketplace runtimeInitialization**
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
 - **alpha_marketplace importReachability**
+  - backend/tests/test_alpha_marketplace_sleeves.py
   - backend/tests/test_fund_os_upgrade.py
   - backend/victor_ai_bot/api_routes/alpha_marketplace_routes.py
   - backend/victor_ai_bot/aqe/meta/runtime.py
@@ -23,6 +24,7 @@ Mounted routes or ungated runtime initialization establish live reachability.
 - **alpha_marketplace gatingConditions**
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
 - **alpha_marketplace tests**
+  - backend/tests/test_alpha_marketplace_sleeves.py
   - backend/tests/test_fund_os_upgrade.py
 
 | alpha_platform | live | 7 | 7 | 5 | 0 | 1 | 4 | 0 |
