@@ -1,8 +1,8 @@
 # System Truth
 
-- generated_at: 2026-09-17T10:29:57.753000Z
-- generated_at_ms: 1789640997753
-- generated_at_iso: 2026-09-17T10:29:57.753000Z
+- generated_at: 2026-09-17T10:31:08.848000Z
+- generated_at_ms: 1789641068848
+- generated_at_iso: 2026-09-17T10:31:08.848000Z
 - thin_shell_runtime_py_lines: 47
 - thin_shell_api_py_lines: 21
 - backend_test_file_count: 338
