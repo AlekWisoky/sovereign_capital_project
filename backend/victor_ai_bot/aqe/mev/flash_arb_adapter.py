@@ -230,7 +230,13 @@ def _validated_context(context: Any) -> tuple[dict[str, Any], List[RouteLeg], di
     return normalized, legs, gate
 
 
-def _candidate_metadata(candidate: Any, context: Mapping[str, Any], gate: Mapping[str, Any], provider: str) -> dict[str, Any]:
+def _candidate_metadata(
+    candidate: Any,
+    context: Mapping[str, Any],
+    normalized: Mapping[str, Any],
+    gate: Mapping[str, Any],
+    provider: str,
+) -> dict[str, Any]:
     metadata = getattr(candidate, "metadata", {})
     tx_hash = str(metadata.get("tx_hash") or "") if isinstance(metadata, Mapping) else ""
     return {
@@ -279,7 +285,7 @@ def _build_flash_arb_opportunity(
         route_id=str(normalized["route_id"]),
         can_execute=False,
         created_at_ms=0,
-        meta=_candidate_metadata(candidate, context, gate, str(normalized["provider"])),
+        meta=_candidate_metadata(candidate, context, normalized, gate, str(normalized["provider"])),
     )
 
 
