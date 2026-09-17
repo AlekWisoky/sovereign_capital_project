@@ -26,18 +26,55 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+      - name: Repair system-truth test inventory parity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/victor_ai_bot/system_truth.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''def _test_inventory() -> Dict[str, Any]:
+              backend_tests = sorted(p.name for p in (BACKEND_ROOT / "tests").glob("test_*.py"))
+              mobile_tests = sorted(p.name for p in (MOBILE_ROOT / "tests").glob("*.test.ts"))
+              return {
+                  "backend_test_files": len(backend_tests),
+                  "mobile_test_files": len(mobile_tests),
+                  "backend_test_names": backend_tests,
+                  "mobile_test_names": mobile_tests,
+              }
+          '''
+          new = '''def _test_inventory() -> Dict[str, Any]:
+              backend_tests = sorted(
+                  {
+                      p.name
+                      for pattern in ("test_*.py", "*_test.py")
+                      for p in (BACKEND_ROOT / "tests").rglob(pattern)
+                  }
+              )
+              mobile_tests = sorted(p.name for p in (MOBILE_ROOT / "tests").glob("*.test.ts"))
+              return {
+                  "backend_test_files": len(backend_tests),
+                  "mobile_test_files": len(mobile_tests),
+                  "backend_test_names": backend_tests,
+                  "mobile_test_names": mobile_tests,
+              }
+          '''
+          if old not in text:
+              raise SystemExit('expected system_truth.py test inventory block not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Regenerate deterministic artifacts
         run: |
           PYTHONPATH=backend python scripts/render_system_truth.py
           PYTHONPATH=backend python scripts/render_verification_report.py
-      - name: Commit regenerated artifacts
+      - name: Commit deterministic repair and artifacts
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/generated/system_truth.json docs/generated/system_truth.md docs/generated/verification_report.json docs/generated/verification_report.md
+          git add backend/victor_ai_bot/system_truth.py docs/generated/system_truth.json docs/generated/system_truth.md docs/generated/verification_report.json docs/generated/verification_report.md
+          git diff --cached --check
           if git diff --cached --quiet; then
-            echo 'No generated truth changes.'
+            echo 'No deterministic repair changes.'
             exit 0
           fi
-          git commit -m 'chore: refresh generated truth artifacts'
+          git commit -m 'fix: align system truth test inventory with CI collection'
           git push origin HEAD:${{ github.head_ref || github.ref_name }}
