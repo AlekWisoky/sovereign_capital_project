@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from victor_ai_bot.runtime_services.canonical_receipt_service import CanonicalReceiptService
+from victor_ai_bot.runtime_services.receipt_service import ReceiptService
 from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
 
 
