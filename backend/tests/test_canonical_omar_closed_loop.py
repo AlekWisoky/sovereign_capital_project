@@ -393,6 +393,13 @@ def test_production_shaped_physical_ledger_to_omar_learning_preserves_loss_and_l
         },
     })
 
+    # Use the same top-level ledger envelope consumed by the production writer.
+    payload.update({
+        "transaction_id": "ledger-production-69",
+        "ts_ms": 1234,
+        "tx_type": "receipt_settlement",
+        "receipt_id": "receipt-production-69",
+    })
     ledger_repo = LedgerRepository(PersistenceDB(str(tmp_path / "state.sqlite3")))
     ledger_repo.append_transaction(chain="ethereum", payload=payload)
 
