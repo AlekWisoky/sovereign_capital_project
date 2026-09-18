@@ -140,8 +140,12 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
     if not execution_id or not sizing_id or not opportunity_id or not route_id or not action or not outcome_id or not receipt_id:
         return {"ok": False, "reason_code": "canonical_lineage_incomplete"}
 
-    operator_intent = _dict(pending_lineage.get("operator_intent") or p.get("operator_intent"))
     pending_context = _dict(p.get("context"))
+    operator_intent = _dict(
+        pending_lineage.get("operator_intent")
+        or p.get("operator_intent")
+        or pending_context.get("operator_intent")
+    )
     pending_metadata = _dict(p.get("metadata"))
     metadata = {
         "decision_context": {
