@@ -83,19 +83,31 @@ class RuntimeTickScanFacade:
             data = str(sample.get("input_0x") or "")
             if not tx_hash or not to or not data.startswith("0x"):
                 continue
+            observed = decode_allowlisted_univ3_swap(
+                {"hash": tx_hash, "to": to, "input": data, "value": hex(max(0, int(sample.get("value_wei") or 0)))},
+                router=router,
+            )
+            if not isinstance(observed, dict):
+                continue
+            token = str(observed.get("token_in") or "")
+            if not token or token.lower() not in market:
+                continue
             matching = None
-            token = ""
+            amount_in = int(observed.get("amount_in") or 0)
             for opportunity in list(base_opportunities or []):
                 strategy = str(getattr(opportunity, "strategy", "") or "")
                 if strategy != "flash_arb" and not strategy.startswith("two-leg:"):
                     continue
                 route = getattr(opportunity, "route", None)
                 legs = list(getattr(route, "legs", None) or [])
-                if legs and str(getattr(legs[0], "token_in", "") or "").lower() in market:
-                    token = str(getattr(legs[0], "token_in", "") or "")
+                if (
+                    len(legs) == 2
+                    and str(getattr(legs[0], "token_in", "") or "").lower() == token.lower()
+                    and int(str(getattr(legs[0], "amount_in", "0") or "0")) == amount_in
+                ):
                     matching = opportunity
                     break
-            if matching is None or token.lower() not in market:
+            if matching is None:
                 continue
             native_key = weth.lower()
             if native_key not in market:
