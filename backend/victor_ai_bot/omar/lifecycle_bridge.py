@@ -141,7 +141,27 @@ def _observe_settled_outcome(runtime: Any, *, pending: Mapping[str, Any], outcom
         return {"ok": False, "reason_code": "canonical_lineage_incomplete"}
 
     operator_intent = _dict(pending_lineage.get("operator_intent") or p.get("operator_intent"))
+    pending_context = _dict(p.get("context"))
+    pending_metadata = _dict(p.get("metadata"))
     metadata = {
+        "decision_context": {
+            "operator_intent": copy.deepcopy(operator_intent),
+            "wealth_goal_context": {
+                key: copy.deepcopy(pending_context[key])
+                for key in ("drawdown_pct", "execution_realism", "stability", "goal_gap_pct")
+                if key in pending_context
+            },
+            "ai_recommendation": copy.deepcopy(
+                pending_metadata.get("recommendation")
+                or pending_context.get("ai_recommendation")
+                or {}
+            ),
+            "capital_authority": copy.deepcopy(
+                p.get("capital_authority")
+                or pending_context.get("capital_authority")
+                or {}
+            ),
+        },
         "canonical_lineage": {
             "decision_id": decision_id,
             "correlation_id": correlation_id,
