@@ -86,3 +86,17 @@ def test_runtime_receipt_facade_accepts_explicit_usd_and_rejects_wei_only():
         {"expected_after": "2500000"},
     )
     assert wei_only == (None, None)
+
+
+def test_base_receipt_service_never_infers_usd_from_wei():
+    assert ReceiptService._realized_after_usd(
+        {"realized_profit_after_gas_wei": "6000000"},
+        status=1,
+    ) is None
+
+
+def test_base_receipt_service_requires_explicit_usd_for_settlement_truth():
+    assert ReceiptService().settled_outcome_truth(
+        status=1,
+        decoded={"realized_profit_after_gas_wei": "6000000"},
+    )["verified"] is False
