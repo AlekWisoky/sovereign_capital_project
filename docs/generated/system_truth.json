@@ -61,6 +61,7 @@
     "test_adaptation_maintenance.py",
     "test_agent_hub_maintenance.py",
     "test_agents_system.py",
+    "test_alpha_marketplace_sleeves.py",
     "test_analytics_query_surface_hardening_maintenance.py",
     "test_analytics_read_surface_sync_maintenance.py",
     "test_analytics_route_ownership_maintenance.py",
