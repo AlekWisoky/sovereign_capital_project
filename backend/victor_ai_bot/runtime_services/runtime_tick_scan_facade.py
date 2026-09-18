@@ -122,8 +122,11 @@ class RuntimeTickScanFacade:
     ) -> Dict[str, Any]:
         """Build explicit flash-arb simulation requests from canonical route + USD quote data."""
         samples = list((mev_snap or {}).get("sample_pending") or [])
-        execution = getattr(self.cfg, "execution", None)
-        chain = getattr(self.cfg, "chain", None)
+        cfg = getattr(self, "cfg", None)
+        if cfg is None:
+            return {}
+        execution = getattr(cfg, "execution", None)
+        chain = getattr(cfg, "chain", None)
         router = str(getattr(chain, "univ3_swap_router", "") or "")
         provider = str(getattr(execution, "flash_provider", "") or "")
         profit_to = str(getattr(execution, "profit_to", "") or "")
@@ -135,7 +138,7 @@ class RuntimeTickScanFacade:
         if not tokens:
             return {}
         try:
-            market = await produce_market_price_evidence(rpc, cfg=self.cfg, tokens=tokens, block_number=int(current_block))
+            market = await produce_market_price_evidence(rpc, cfg=cfg, tokens=tokens, block_number=int(current_block))
         except (FinalQuoteError, AttributeError, KeyError, TypeError, ValueError):
             return {}
         native_key = weth.lower()
