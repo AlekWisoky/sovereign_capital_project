@@ -437,7 +437,7 @@ def test_receipt_service_skips_bankroll_and_efficiency_when_settled_profit_truth
 
     truth = svc.settled_outcome_truth(status=1, decoded={})
     assert truth["ok"] is False
-    assert truth["reason_code"] == "settled_profit_truth_unavailable"
+    assert truth["reason_code"] == "settled_usd_truth_unavailable"
 
     svc.record_trade_outcome(
         runtime,
