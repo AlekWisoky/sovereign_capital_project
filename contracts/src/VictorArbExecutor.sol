@@ -272,6 +272,7 @@ contract VictorArbExecutor {
     ) external onlyOwner {
         if (block.timestamp > deadline) revert Deadline();
         if (!withdrawalAllowed[profitTo]) revert MinProfit(); // reuse error as deny
+        if (provider != 1 && provider != 2) revert BadProvider();
         if (legs.length == 0) revert("empty_route");
         if (legs[0].tokenIn != borrowToken) revert("route_start_mismatch");
         for (uint256 i = 1; i < legs.length; i++) {
