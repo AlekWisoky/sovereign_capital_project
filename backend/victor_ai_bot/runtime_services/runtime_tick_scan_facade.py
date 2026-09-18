@@ -22,6 +22,122 @@ class RuntimeTickScanFacade:
             return dict(fallback)
         return dict(raw_mev_snap) if isinstance(raw_mev_snap, dict) else dict(fallback)
 
+    async def _mev_simulation_requests(
+        self,
+        *,
+        rpc: Any,
+        current_block: int,
+        mev_snap: Dict[str, Any],
+        base_opportunities: list[Any],
+    ) -> Dict[str, Any]:
+        """Build explicit flash-arb simulation requests from canonical route + USD quote data."""
+        samples = list((mev_snap or {}).get("sample_pending") or [])
+        if not samples:
+            return {}
+        execution = getattr(self.cfg, "execution", None)
+        chain = getattr(self.cfg, "chain", None)
+        router = str(getattr(chain, "univ3_swap_router", "") or "")
+        provider = str(getattr(execution, "flash_provider", "") or "")
+        profit_to = str(getattr(execution, "profit_to", "") or "")
+        fork_url = str(getattr(rpc, "url", "") or "")
+        if not all((router, provider, profit_to, fork_url)):
+            return {}
+
+        tokens: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for opportunity in list(base_opportunities or []):
+            strategy = str(getattr(opportunity, "strategy", "") or "")
+            if strategy != "flash_arb" and not strategy.startswith("two-leg:"):
+                continue
+            route = getattr(opportunity, "route", None)
+            legs = list(getattr(route, "legs", None) or [])
+            if not legs:
+                continue
+            token = str(getattr(legs[0], "token_in", "") or "").strip()
+            if token and token.lower() not in seen:
+                seen.add(token.lower())
+                tokens.append((token, "profit"))
+        weth = str(getattr(chain, "weth", "") or "").strip()
+        if weth and weth.lower() not in seen:
+            seen.add(weth.lower())
+            tokens.append((weth, "cost"))
+        if not tokens:
+            return {}
+
+        try:
+            market = await produce_market_price_evidence(
+                rpc,
+                cfg=self.cfg,
+                tokens=tokens,
+                block_number=int(current_block),
+            )
+        except (FinalQuoteError, AttributeError, KeyError, TypeError, ValueError):
+            return {}
+
+        out: Dict[str, Any] = {}
+        for sample in samples:
+            if not isinstance(sample, dict):
+                continue
+            tx_hash = str(sample.get("hash") or "")
+            to = str(sample.get("to") or "")
+            data = str(sample.get("input_0x") or "")
+            if not tx_hash or not to or not data.startswith("0x"):
+                continue
+            matching = None
+            token = ""
+            for opportunity in list(base_opportunities or []):
+                strategy = str(getattr(opportunity, "strategy", "") or "")
+                if strategy != "flash_arb" and not strategy.startswith("two-leg:"):
+                    continue
+                route = getattr(opportunity, "route", None)
+                legs = list(getattr(route, "legs", None) or [])
+                if legs and str(getattr(legs[0], "token_in", "") or "").lower() in market:
+                    token = str(getattr(legs[0], "token_in", "") or "")
+                    matching = opportunity
+                    break
+            if matching is None or token.lower() not in market:
+                continue
+            native_key = weth.lower()
+            if native_key not in market:
+                continue
+            tx = {
+                "hash": tx_hash,
+                "from": str(sample.get("from") or ""),
+                "to": to,
+                "data": data,
+                "value": hex(max(0, int(sample.get("value_wei") or 0))),
+            }
+            if sample.get("gas") is not None:
+                tx["gas"] = hex(max(0, int(sample.get("gas") or 0)))
+            observation = {
+                "account": profit_to,
+                "borrow_cost_usd": 0.0,
+                "assets": [
+                    dict(market[token.lower()], role="profit"),
+                    dict(market[native_key], address="native", role="cost"),
+                ],
+            }
+            out[tx_hash] = {
+                "fork_url": fork_url,
+                "fork_block": int(current_block),
+                "transaction": tx,
+                "scenarios": [
+                    {
+                        "gas_multiplier": 1.0,
+                        "liquidity_multiplier": 1.0,
+                        "oracle_multiplier": 1.0,
+                        "economic_observation": observation,
+                    },
+                    {
+                        "gas_multiplier": 1.10,
+                        "liquidity_multiplier": 0.95,
+                        "oracle_multiplier": 0.99,
+                        "economic_observation": observation,
+                    },
+                ],
+            }
+        return out
+
     def _merge_admitted_mev_opportunities(self, opps: list[Any]) -> None:
         """Append only already-admitted, validated MEV flash-arb opportunities."""
         engine_service = getattr(self, "_engine_service", None)
@@ -115,9 +231,19 @@ class RuntimeTickScanFacade:
 
         # Engine admission remains the prerequisite. This inserts only validated
         # MEV flash-arb opportunities before the existing canonical decision path.
+        simulation_requests = await self._mev_simulation_requests(
+            rpc=rpc,
+            current_block=int(current_block),
+            mev_snap=dict(mev_snap or {}),
+            base_opportunities=list(opps or []),
+        )
+        engine_mev_state = dict(mev_snap or {})
+        if simulation_requests:
+            engine_mev_state["simulation_requests"] = simulation_requests
+
         self._scan_engine_opportunities(
             regime_label=str(regime_label or "balanced"),
-            mev_state=dict(mev_snap or {}),
+            mev_state=engine_mev_state,
             base_opportunities=list(opps or []),
             treasury_state=dict(treasury_state or {}),
         )
