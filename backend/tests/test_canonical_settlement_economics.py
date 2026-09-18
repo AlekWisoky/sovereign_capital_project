@@ -6,6 +6,7 @@ from victor_ai_bot.bankroll import BankrollConfig, BankrollManager
 from victor_ai_bot.money_loop_accounting import MoneyLoopAccounting
 from victor_ai_bot.runtime_services import canonical_capital_write_service as canonical_writer_module
 from victor_ai_bot.runtime_services.canonical_capital_write_service import CanonicalCapitalWriteService
+from victor_ai_bot.runtime_services.runtime_receipt_facade import RuntimeReceiptFacade
 
 
 def _tx(receipt_id: str, status: int, net: float) -> dict:
@@ -65,6 +66,7 @@ def test_canonical_writer_passes_settled_economics_to_bankroll(monkeypatch):
             "opportunity_id": "opportunity-test",
             "route_id": "route",
             "action": "flash_arb",
+            "expected_net_usd": 0.0,
         },
     )
     tx = _tx("loss", 0, -0.35)
@@ -77,3 +79,42 @@ def test_canonical_writer_passes_settled_economics_to_bankroll(monkeypatch):
     )
     assert captured["state"]["realized_pnl_usd"] == -0.35
     assert out["settledEconomics"]["signed_pnl_usd"] == -0.35
+
+
+def test_canonical_writer_persists_signed_expectation_error():
+    runtime = SimpleNamespace(
+        _canonical_settlement_lineage={
+            "decision_id": "decision-econ",
+            "correlation_id": "correlation-econ",
+            "sizing_id": "sizing-econ",
+            "execution_id": "execution-econ",
+            "opportunity_id": "opportunity-econ",
+            "route_id": "route-econ",
+            "action": "flash_arb",
+            "expected_net_usd": 75.0,
+        }
+    )
+    payload = CanonicalCapitalWriteService()._annotate_settlement_payload(
+        runtime,
+        {"metadata": {}},
+        receipt_id="receipt-econ",
+        status=0,
+        amount_in=1000,
+        submit_to_receipt_ms=10,
+        route_id="route-econ",
+        gas_cost_wei=1,
+        realized_after_usd=0.0,
+        net_realized_usd=-30.0,
+        borrowing={},
+        outcome_truth_verified=True,
+    )
+    assert payload["metadata"]["expected_net_usd"] == 75.0
+    assert payload["metadata"]["realized_net_usd"] == -30.0
+    assert payload["metadata"]["expectation_error"] == -105.0
+
+
+def test_runtime_receipt_usd_net_preserves_losses():
+    assert RuntimeReceiptFacade._explicit_usd_economics(
+        {"realized_profit_after_gas_usd_micro": "-30000000"},
+        {"terminal_profitability_authority": {"profitability": {"profit_after_costs_usd_micro": "75000000"}}},
+    ) == (-30.0, 75.0)
