@@ -276,3 +276,46 @@ def test_canonical_settlement_writer_and_reader_preserve_complete_lineage():
     assert outcome["canonical_lineage"]["sizing_id"] == "sizing-b3"
     assert outcome["canonical_lineage"]["outcome_id"] == "outcome-b3"
     assert canonical_settled_outcome(ledger_runtime, tx_hash="0xreceipt-b3", decision_id="decision-b3", correlation_id="corr-b3", opportunity_id="opp-b3", execution_id="execution-replacement") is None
+
+
+def test_settled_learning_record_preserves_operator_goal_ai_and_capital_context():
+    captured = {}
+
+    class _Omar:
+        enabled = True
+
+        def observe_outcome(self, **kwargs):
+            captured.update(kwargs)
+            return {"ok": True, "learned": True}
+
+    pending = _pending("decision-context", "corr-context", expected=10.0)
+    pending["context"].update({
+        "operator_intent": {
+            "aggression_mode": "balanced",
+            "goal": {"target_amount": "10000", "timeframe_days": 30},
+        },
+        "drawdown_pct": 2.0,
+        "execution_realism": 0.8,
+        "stability": 0.9,
+        "goal_gap_pct": 1.5,
+        "capital_authority": {
+            "capital_authority_source": "capital_engine_state",
+            "capital_authority_status": "authorized",
+            "capital_authority_freshness": "fresh",
+        },
+    })
+    pending["metadata"] = {
+        "recommendation": {"action": "EXECUTE", "confidence": 0.82, "trained": True},
+    }
+    outcome = _settlement("decision-context", "corr-context", expected=10.0, realized=8.0)
+    result = __import__("victor_ai_bot.omar.lifecycle_bridge", fromlist=["_observe_settled_outcome"])._observe_settled_outcome(
+        SimpleNamespace(_omar=_Omar()),
+        pending=pending,
+        outcome=outcome,
+    )
+    assert result["ok"] is True
+    context = captured["metadata"]["decision_context"]
+    assert context["operator_intent"]["goal"]["target_amount"] == "10000"
+    assert context["wealth_goal_context"]["goal_gap_pct"] == 1.5
+    assert context["ai_recommendation"]["confidence"] == 0.82
+    assert context["capital_authority"]["capital_authority_source"] == "capital_engine_state"
