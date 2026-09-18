@@ -174,16 +174,14 @@ class ReceiptService:
                 return None
 
     @classmethod
-    def _realized_after_usd(cls, decoded: Mapping[str, Any], *, status: int) -> float:
+    def _realized_after_usd(cls, decoded: Mapping[str, Any], *, status: int) -> float | None:
+        """Return only explicit USD settlement truth; never infer USD from raw wei."""
         if int(status) != 1:
             return 0.0
         usd_value = cls._usd_from_micro(decoded.get("realized_profit_after_gas_usd_micro"))
-        if usd_value is not None:
-            return max(0.0, float(usd_value))
-        return max(
-            0.0,
-            cls._realized_usd_from_wei(cls._safe_int(decoded.get("realized_profit_after_gas_wei"))),
-        )
+        if usd_value is None:
+            return None
+        return max(0.0, float(usd_value))
 
     @classmethod
     def _gas_cost_usd(cls, decoded: Mapping[str, Any]) -> float:
@@ -441,18 +439,12 @@ class ReceiptService:
     def settled_outcome_truth(self, *, status: int, decoded: Mapping[str, Any]) -> Dict[str, Any]:
         if int(status) != 1:
             return {"ok": True, "reason_code": "ok", "reason_codes": [], "verified": True}
-        realized_after = self._safe_int(decoded.get("realized_profit_after_gas_wei"))
-        realized_token_wei = self._safe_int(decoded.get("realized_profit_token_wei"))
-        realized_usd_micro = self._safe_int(decoded.get("realized_profit_after_gas_usd_micro"))
-        if any(value > 0 for value in (realized_after, realized_token_wei, realized_usd_micro)):
+        raw_usd = decoded.get("realized_profit_after_gas_usd_micro")
+        usd_value = self._usd_from_micro(raw_usd)
+        if raw_usd is not None and raw_usd != "" and usd_value is not None:
             return {"ok": True, "reason_code": "ok", "reason_codes": [], "verified": True}
-        reason_code = "settled_profit_truth_unavailable"
-        return {
-            "ok": False,
-            "reason_code": reason_code,
-            "reason_codes": [reason_code],
-            "verified": False,
-        }
+        reason_code = "settled_usd_truth_unavailable"
+        return {"ok": False, "reason_code": reason_code, "reason_codes": [reason_code], "verified": False}
 
     def observe_outcome_truth_health(
         self,
