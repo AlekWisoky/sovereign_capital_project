@@ -189,6 +189,9 @@ class MEVRuntime:
                         "from": tx.frm,
                         "value_wei": tx.value_wei,
                         "prio_fee": tx.max_priority_fee_per_gas,
+                        "max_fee_per_gas": tx.max_fee_per_gas,
+                        "gas": tx.gas,
+                        "input_0x": tx.input_0x,
                         "tags": list(tx.tags),
                         "sel": (tx.input_0x[:10] if tx.input_0x else "0x"),
                     }

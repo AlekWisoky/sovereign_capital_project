@@ -295,6 +295,66 @@ def _quote_material(
     )
 
 
+async def produce_market_price_evidence(
+    rpc: JsonRpcClient,
+    *,
+    cfg: Any,
+    tokens: list[tuple[str, str]],
+    block_number: int,
+) -> dict[str, dict[str, Any]]:
+    """Reuse the canonical USD quote path for pre-decision simulation inputs.
+
+    This is market-data evidence only. It does not create decision lineage,
+    settlement economics, or execution authority.
+    """
+    block_number = int(block_number)
+    if block_number <= 0:
+        raise FinalQuoteError("market_data_block_required")
+    chain, factory, quoter, stable = _quote_config(cfg)
+    block = hex(block_number)
+    stable_decimals = await resolve_erc20_decimals(rpc, stable, block=block)
+    out: dict[str, dict[str, Any]] = {}
+    for token, role in tokens:
+        normalized = str(token or "").strip()
+        if not normalized:
+            raise FinalQuoteError("market_data_token_missing")
+        key = normalized.lower()
+        if key == stable.lower():
+            decimals = stable_decimals
+            price_usd = 1.0
+            fee = 0
+            stable_amount = 10**stable_decimals
+        else:
+            decimals = await resolve_erc20_decimals(rpc, normalized, block=block)
+            request = FinalQuoteRequest(rpc=rpc, cfg=cfg, opp=None, decision=None, block_number=block_number)
+            price_usd, fee, stable_amount = await _best_v3_quote(
+                request,
+                factory=factory,
+                quoter=quoter,
+                token=normalized,
+                stable=stable,
+                stable_decimals=stable_decimals,
+                raw_amount=10**decimals,
+                block=block,
+            )
+        if price_usd <= 0:
+            raise FinalQuoteError("market_data_usd_price_invalid")
+        out[key] = {
+            "address": normalized,
+            "decimals": int(decimals),
+            "price_usd": float(price_usd),
+            "role": str(role or ""),
+            "price_source": "univ3_quoter_v2_direct_usd_stable",
+            "block_number": block_number,
+            "stable_token": stable,
+            "stable_decimals": int(stable_decimals),
+            "stable_amount_out_raw": int(stable_amount),
+            "fee": int(fee),
+            "chain": chain,
+        }
+    return out
+
+
 async def produce_final_quote(request: FinalQuoteRequest) -> FinalQuote:
     """Produce authoritative execution-time USD quote truth for the borrow asset."""
     block_number = int(request.block_number)
