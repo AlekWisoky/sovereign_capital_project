@@ -401,6 +401,21 @@ contract VictorArbExecutor {
     }
 
     // --- internals ---
+    function _computeRouteId(Leg[] calldata legs) internal pure returns (bytes32) {
+        bytes memory encoded = abi.encodePacked(uint8(1), uint8(legs.length));
+        for (uint256 i = 0; i < legs.length; i++) {
+            encoded = abi.encodePacked(
+                encoded,
+                legs[i].dex,
+                legs[i].venue,
+                legs[i].tokenIn,
+                legs[i].tokenOut,
+                legs[i].aux
+            );
+        }
+        return keccak256(encoded);
+    }
+
     function _approveIfNeeded(address token, address spender, uint256 amount) internal {
         if (!spenderAllowed[spender]) revert SpenderNotAllowed();
         uint256 allow = IERC20(token).allowance(address(this), spender);
