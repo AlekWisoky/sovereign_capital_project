@@ -140,8 +140,9 @@ class ReceiptService:
         return metadata
 
     @staticmethod
-    def _realized_usd_from_wei(value: int) -> float:
-        return float(value) / 1_000_000.0 if abs(float(value)) > 1000 else float(value)
+    def _realized_usd_from_wei(value: int) -> float | None:
+        """Raw wei has no USD semantics; require an explicit USD observation."""
+        return None
 
     @staticmethod
     def _safe_dict(value: Any) -> Dict[str, Any]:
@@ -180,10 +181,7 @@ class ReceiptService:
         usd_value = cls._usd_from_micro(decoded.get("realized_profit_after_gas_usd_micro"))
         if usd_value is not None:
             return max(0.0, float(usd_value))
-        return max(
-            0.0,
-            cls._realized_usd_from_wei(cls._safe_int(decoded.get("realized_profit_after_gas_wei"))),
-        )
+        return 0.0
 
     @classmethod
     def _gas_cost_usd(cls, decoded: Mapping[str, Any]) -> float:
