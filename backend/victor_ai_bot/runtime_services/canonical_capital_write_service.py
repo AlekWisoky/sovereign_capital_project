@@ -83,6 +83,15 @@ class CanonicalCapitalWriteService(CapitalWriteService):
                 receipt_id,
             )
         if bool(outcome_truth_verified):
+            expected_net_usd = context.get("expected_net_usd")
+            try:
+                expected_value = float(expected_net_usd)
+                realized_value = float(net_realized_usd)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("canonical_settlement_economics_invalid")
+            if not math.isfinite(expected_value) or not math.isfinite(realized_value):
+                raise ValueError("canonical_settlement_economics_nonfinite")
+            expectation_error = realized_value - expected_value
             required = {
                 "decision_id": decision_id,
                 "correlation_id": correlation_id,
@@ -127,6 +136,7 @@ class CanonicalCapitalWriteService(CapitalWriteService):
                 "execution_lineage": _dict(context.get("execution_lineage")),
                 "expected_net_usd": context.get("expected_net_usd"),
                 "realized_net_usd": float(net_realized_usd),
+                "expectation_error": float(expectation_error) if bool(outcome_truth_verified) else None,
                 "gas_cost_wei": int(gas_cost_wei),
                 "gas_cost_usd": metadata.get("gas_cost_usd"),
                 "slippage_bps": context.get("slippage_bps"),
