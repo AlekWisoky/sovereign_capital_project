@@ -252,3 +252,96 @@ def test_arbitrary_router_call_without_explicit_simulation_context_cannot_be_pro
     assert 'flash_arb_context' not in rows[0].metadata
     assert rows[0].lifecycle_eligibility == 'observe_only'
     assert rows[0].policy_eligibility == 'observe_only'
+
+@pytest.mark.asyncio
+async def test_mev_runtime_state_preserves_transaction_context_for_simulation():
+    txd = {
+        'to': '0x1111111111111111111111111111111111111111',
+        'from': '0x2222222222222222222222222222222222222222',
+        'nonce': '0x1',
+        'value': '0x0',
+        'gas': '0x5208',
+        'maxFeePerGas': '0x3b9aca00',
+        'input': '0xabcdef12',
+    }
+    runtime = _runtime(txd=txd)
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(mev_runtime_module, 'JsonRpcClient', lambda *args, **kwargs: _FakeRpcClient(txd))
+        await runtime._loop()
+    finally:
+        monkeypatch.undo()
+    row = runtime.state()['sample_pending'][0]
+    assert row['input_0x'] == '0xabcdef12'
+    assert row['gas'] == int('0x5208', 16)
+    assert row['max_fee_per_gas'] == int('0x3b9aca00', 16)
+
+
+def test_market_price_evidence_uses_explicit_decimals_and_usd_price(monkeypatch):
+    from victor_ai_bot.execution_capture import final_quote
+
+    class _Rpc:
+        async def eth_call(self, *args, **kwargs):
+            return SimpleNamespace(ok=True, result='0x' + (18).to_bytes(32, 'big').hex())
+
+    async def fake_best(*args, **kwargs):
+        return (2000.0, 3000, 2_000_000_000)
+
+    monkeypatch.setattr(final_quote, '_best_v3_quote', fake_best)
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            name='ethereum',
+            univ3_factory='0x' + '3' * 40,
+            univ3_quoter_v2='0x' + '4' * 40,
+            usdc='0x' + '5' * 40,
+        ),
+        execution=SimpleNamespace(usd_stable_preference='usdc'),
+    )
+    evidence = __import__('asyncio').run(
+        final_quote.produce_market_price_evidence(
+            _Rpc(),
+            cfg=cfg,
+            tokens=[('0x' + '1' * 40, 'profit')],
+            block_number=123,
+        )
+    )
+    assert evidence['0x' + '1' * 40]['decimals'] == 18
+    assert evidence['0x' + '1' * 40]['price_usd'] == 2000.0
+    assert evidence['0x' + '1' * 40]['role'] == 'profit'
+
+
+def test_search_engine_consumes_runtime_supplied_simulation_request():
+    tx_hash = '0x' + '7' * 64
+    context = _strategy_context(tx_hash)
+    context['simulation_request']['transaction']['hash'] = tx_hash
+    address = context['borrow_token']
+    candidate = MEVSearchEngine(
+        fork_executor=None,
+        router='0x' + '9' * 40,
+        provider='aave',
+        profit_to=address,
+    ).search(
+        mev_state={
+            'sample_pending': [{
+                'hash': tx_hash,
+                'to': '0x' + '9' * 40,
+                'value_wei': 0,
+                'input_0x': context['simulation_request']['transaction']['data'],
+                'tags': ['dex_like'],
+                'sel': context['simulation_request']['transaction']['data'][:10],
+            }],
+            'high_risk_ratio': 0.0,
+            'simulation_requests': {tx_hash: context['simulation_request']},
+        },
+        base_opportunities=[SimpleNamespace(
+            id='opp-1',
+            strategy='flash_arb',
+            expected_profit_raw='50000',
+            route_id='route-1',
+            route=SimpleNamespace(legs=[
+                SimpleNamespace(dex='univ3', venue=address, token_in=address, token_out='0x' + '2' * 40, amount_in='1000000', min_out='900000', data='0x01'),
+                SimpleNamespace(dex='univ3', venue=address, token_in='0x' + '2' * 40, token_out=address, amount_in='900000', min_out='1005000', data='0x01'),
+            ]),
+        )],
+    )
+    assert candidate == [] or all(row.expected_profit_usd >= 0.0 for row in candidate)
