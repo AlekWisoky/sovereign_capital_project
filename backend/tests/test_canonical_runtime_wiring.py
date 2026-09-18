@@ -11,5 +11,7 @@ def test_runtime_wires_canonical_settlement_services():
     source = inspect.getsource(initialize_runtime_institutional_stack)
     assert "runtime._receipt_service = CanonicalReceiptService()" in source
     assert "runtime._capital_write_service = CanonicalCapitalWriteService()" in source
+    assert "from .receipt_service import ReceiptService" not in source
+    assert "if ReceiptService is not CanonicalReceiptService" not in source
     assert CanonicalReceiptService.__mro__[1].__name__ == "ReceiptService"
     assert CanonicalCapitalWriteService.__mro__[1].__name__ == "CapitalWriteService"
