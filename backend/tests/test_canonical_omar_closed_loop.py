@@ -8,6 +8,8 @@ from victor_ai_bot.omar.real_learning import OmarRealLearner
 from victor_ai_bot.omar.runtime import OmarRuntime
 from victor_ai_bot.runtime_services.canonical_capital_write_service import CanonicalCapitalWriteService
 from victor_ai_bot.runtime_services.canonical_settlement_interface import canonical_settled_outcome
+from victor_ai_bot.persistence.db import PersistenceDB
+from victor_ai_bot.persistence.repositories.ledger_repository import LedgerRepository
 
 
 def _pending(decision_id="decision-1", correlation_id="corr-1", expected=100.0):
@@ -319,3 +321,123 @@ def test_settled_learning_record_preserves_operator_goal_ai_and_capital_context(
     assert context["wealth_goal_context"]["goal_gap_pct"] == 1.5
     assert context["ai_recommendation"]["confidence"] == 0.82
     assert context["capital_authority"]["capital_authority_source"] == "capital_engine_state"
+
+def test_production_shaped_physical_ledger_to_omar_learning_preserves_loss_and_lineage(tmp_path):
+    """Exercise the real settlement payload -> physical SQLite ledger -> resolver -> OMAR path."""
+    omar = _runtime(tmp_path, min_observations=1)
+    decision_id = "decision-production-69"
+    correlation_id = "corr-production-69"
+    pending = _pending(decision_id, correlation_id, expected=12.0)
+    pending["execution_id"] = "execution-production-69"
+    pending["sizing_id"] = "sizing-production-69"
+    pending["strategy_id"] = "strategy-production-69"
+    pending["canonical_lineage"].update({
+        "execution_id": "execution-production-69",
+        "sizing_id": "sizing-production-69",
+        "strategy_id": "strategy-production-69",
+    })
+    pending["context"].update({
+        "strategy_id": "strategy-production-69",
+        "wealth_goal_context": {"target_amount": 10000, "timeframe_days": 30},
+        "ai_recommendation": {"action": "EXECUTE", "confidence": 0.82},
+    })
+    pending["operator_intent"] = {
+        "aggression_mode": "balanced",
+        "risk_multiplier": 0.7,
+        "authority": "operator_intent_only",
+    }
+    pending["intent_fingerprint"] = "intent-production-69"
+    omar._pending_decisions[decision_id] = pending
+
+    writer = CanonicalCapitalWriteService()
+    runtime = SimpleNamespace(
+        _canonical_settlement_lineage={
+            **pending["canonical_lineage"],
+            "receipt_id": "receipt-production-69",
+            "expected_net_usd": 12.0,
+            "capital_authority": {"authority_id": "prime-production-69", "status": "authorized"},
+            "internal_prime_authority": {"authority_id": "prime-production-69", "available": True},
+            "prime_economics": {"borrow_cost_usd": 0.40},
+            "operator_intent": pending["operator_intent"],
+            "intent_fingerprint": pending["intent_fingerprint"],
+        }
+    )
+    payload = writer._annotate_settlement_payload(
+        runtime,
+        {"metadata": {"status": 1}},
+        receipt_id="receipt-production-69",
+        status=1,
+        amount_in=500,
+        submit_to_receipt_ms=81,
+        route_id="route-1",
+        gas_cost_wei=123,
+        realized_after_usd=-0.80,
+        net_realized_usd=-1.20,
+        borrowing={"provider": "prime"},
+        outcome_truth_verified=True,
+    )
+    metadata = payload["metadata"]
+    metadata.update({
+        "status": "settled",
+        "source": "phase2_canonical_outcome_ledger",
+        "expected_net_usd": 12.0,
+        "realized_net_usd": -1.20,
+        "settlement_verified": True,
+        "truth_verified": True,
+        "strategy_id": "strategy-production-69",
+        "strategy_family": "flash_arb",
+        "gas_cost_usd": 0.20,
+        "canonical_lineage": {
+            **metadata["canonical_lineage"],
+            "strategy_id": "strategy-production-69",
+        },
+    })
+
+    # Use the same top-level ledger envelope consumed by the production writer.
+    payload.update({
+        "transaction_id": "ledger-production-69",
+        "ts_ms": 1234,
+        "tx_type": "receipt_settlement",
+        "receipt_id": "receipt-production-69",
+    })
+    ledger_repo = LedgerRepository(PersistenceDB(str(tmp_path / "state.sqlite3")))
+    ledger_repo.append_transaction(chain="ethereum", payload=payload)
+
+    ledger_runtime = SimpleNamespace(
+        cfg=SimpleNamespace(chain=SimpleNamespace(name="ethereum")),
+        _ledger_repo=ledger_repo,
+    )
+    settled = canonical_settled_outcome(
+        ledger_runtime,
+        tx_hash="receipt-production-69",
+        decision_id=decision_id,
+        correlation_id=correlation_id,
+        opportunity_id="opp-1",
+        execution_id="execution-production-69",
+    )
+    assert settled is not None
+    assert settled["status"] == "settled"
+    assert settled["truth_verified"] is True
+    assert settled["settlement_verified"] is True
+    assert settled["expected_net_usd"] == 12.0
+    assert settled["realized_net_usd"] == -1.20
+    assert settled["gas_cost_usd"] == 0.20
+    assert settled["canonical_lineage"]["sizing_id"] == "sizing-production-69"
+    assert settled["canonical_lineage"]["outcome_id"]
+
+    learning_runtime = SimpleNamespace(_omar=omar)
+    result = _observe_settled_outcome(learning_runtime, pending=pending, outcome=settled)
+    assert result["learned"] is True
+    assert result["decision_id"] == decision_id
+    assert result["execution_id"] == "execution-production-69"
+    assert result["outcome_id"] == settled["outcome_id"]
+    assert result["sizing_id"] == "sizing-production-69"
+    assert result["strategy_id"] == "strategy-production-69"
+    assert result["expected_net_usd"] == 12.0
+    assert result["realized_net_usd"] == -1.20
+    assert result["expectation_error"] == -13.20
+    assert result["gas_cost_usd"] == 0.20
+    assert omar._real_learner.total_observations == 1
+
+    event = omar._real_learner.last_recommendation
+    assert event == {} or isinstance(event, dict)
