@@ -272,6 +272,12 @@ contract VictorArbExecutor {
     ) external onlyOwner {
         if (block.timestamp > deadline) revert Deadline();
         if (!withdrawalAllowed[profitTo]) revert MinProfit(); // reuse error as deny
+        if (legs.length == 0) revert("empty_route");
+        if (legs[0].tokenIn != borrowToken) revert("route_start_mismatch");
+        for (uint256 i = 1; i < legs.length; i++) {
+            if (legs[i].tokenIn != legs[i - 1].tokenOut) revert("route_continuity");
+        }
+        if (_computeRouteId(legs) != routeId) revert("route_id_mismatch");
 
         bytes memory userData = abi.encode(provider, borrowToken, amountBorrow, minProfit, profitTo, deadline, routeId, legs);
 
