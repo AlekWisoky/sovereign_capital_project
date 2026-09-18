@@ -98,8 +98,6 @@ def initialize_runtime_institutional_stack(runtime: Any, cfg: Any, data_dir: str
     runtime._decision_service = DecisionService()
     runtime._admission_service = AdmissionService()
     runtime._receipt_service = CanonicalReceiptService()
-    if ReceiptService is not CanonicalReceiptService:
-        runtime._receipt_service = ReceiptService()
     runtime._runtime_control_service = RuntimeControlService()
     runtime._capital_explanation_service = CapitalExplanationService()
     runtime._agent_service = AgentService()
