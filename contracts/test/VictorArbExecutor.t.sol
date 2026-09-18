@@ -54,6 +54,41 @@ contract VictorArbExecutorTest {
         });
     }
 
+    function _routeId(VictorArbExecutor.Leg[] memory legs) internal pure returns (bytes32) {
+        bytes memory encoded = abi.encodePacked(uint8(1), uint8(legs.length));
+        for (uint256 i = 0; i < legs.length; i++) {
+            encoded = abi.encodePacked(
+                encoded,
+                legs[i].dex,
+                legs[i].venue,
+                legs[i].tokenIn,
+                legs[i].tokenOut,
+                legs[i].aux
+            );
+        }
+        return keccak256(encoded);
+    }
+
+    function _twoLegs() internal view returns (VictorArbExecutor.Leg[] memory legs) {
+        legs = new VictorArbExecutor.Leg[](2);
+        legs[0] = VictorArbExecutor.Leg({
+            dex: 1,
+            venue: address(router),
+            tokenIn: address(token),
+            tokenOut: address(usdc),
+            minOut: 1,
+            aux: bytes32(uint256(3000))
+        });
+        legs[1] = VictorArbExecutor.Leg({
+            dex: 1,
+            venue: address(router),
+            tokenIn: address(usdc),
+            tokenOut: address(token),
+            minOut: 1,
+            aux: bytes32(uint256(3000))
+        });
+    }
+
     function test_onlyOwner_withdraw_and_allowlist() public {
         token.mint(address(ex), 1000 ether);
 
@@ -121,7 +156,7 @@ contract VictorArbExecutorTest {
         router.setOutBps(10200);
         aave.setPremiumBps(50);
         VictorArbExecutor.Leg[] memory legs = _uniLeg(101 ether);
-        ex.execute(1, address(token), 100 ether, 1 ether, DEST, block.timestamp + 100, bytes32(uint256(1)), legs);
+        ex.execute(1, address(token), 100 ether, 1 ether, DEST, block.timestamp + 100, _routeId(legs), legs);
         require(token.balanceOf(DEST) == 15 ether / 10, "profit should be paid to destination");
     }
 
@@ -129,7 +164,7 @@ contract VictorArbExecutorTest {
         balancer.setOutBps(10300);
         balancer.setFeeBps(50);
         VictorArbExecutor.Leg[] memory legs = _balLeg(101 ether);
-        ex.execute(2, address(token), 100 ether, 1 ether, DEST, block.timestamp + 100, bytes32(uint256(2)), legs);
+        ex.execute(2, address(token), 100 ether, 1 ether, DEST, block.timestamp + 100, _routeId(legs), legs);
         require(token.balanceOf(DEST) == 25 ether / 10, "balancer profit should be paid to destination");
     }
 
