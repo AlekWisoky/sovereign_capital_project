@@ -254,7 +254,7 @@ class RuntimeReceiptFacade:
                                 preference=usd_pref,
                             )
                             if usd_profit is not None and usd_gas is not None:
-                                usd_net = int(max(0, int(usd_profit) - int(usd_gas)))
+                                usd_net = int(usd_profit) - int(usd_gas)
                         except _SAFE_RECEIPT_EXCEPTIONS:
                             usd_profit = None
                             usd_gas = None
