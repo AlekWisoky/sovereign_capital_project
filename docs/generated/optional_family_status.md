@@ -7,7 +7,7 @@
 
 | Family | Status | Py files | Refs | Primary evidence | Mounted | Runtime init | Imports | Gating |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| alpha_marketplace | live | 5 | 9 | 8 | 1 | 1 | 5 | 1 |
+| alpha_marketplace | live | 6 | 10 | 8 | 1 | 1 | 5 | 1 |
 
 Mounted routes or ungated runtime initialization establish live reachability.
 
