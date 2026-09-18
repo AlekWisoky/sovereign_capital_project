@@ -39,6 +39,7 @@ class PrimeLoanPosition:
     settled_ts_ms: int = 0
     disputed_ts_ms: int = 0
     dispute_reason_code: str = ""
+    strategy_id: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

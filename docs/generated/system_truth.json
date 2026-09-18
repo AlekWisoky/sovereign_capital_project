@@ -55,12 +55,13 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 339,
+  "backend_test_file_count": 340,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
     "test_agent_hub_maintenance.py",
     "test_agents_system.py",
+    "test_alpha_marketplace_sleeves.py",
     "test_analytics_query_surface_hardening_maintenance.py",
     "test_analytics_read_surface_sync_maintenance.py",
     "test_analytics_route_ownership_maintenance.py",
@@ -453,7 +454,7 @@
       "hedge_policy": "cross_exchange_net",
       "leverage_cap": 1.5,
       "liquidity_bucket": "medium",
-      "max_drawdown_pct": 5.0,
+      "max_drawdown_pct": 5,
       "promotion_status": "capped_live",
       "stage_restrictions": [
         "pilot_capital",
@@ -480,7 +481,7 @@
       "hedge_policy": "cross_venue_hedge",
       "leverage_cap": 1.2,
       "liquidity_bucket": "medium",
-      "max_drawdown_pct": 5.0,
+      "max_drawdown_pct": 5,
       "promotion_status": "capped_live",
       "stage_restrictions": [
         "internal_capital",
@@ -505,9 +506,9 @@
       "expected_turnover": "very_high",
       "family": "flash_arb",
       "hedge_policy": "atomic_exit",
-      "leverage_cap": 1.0,
+      "leverage_cap": 1,
       "liquidity_bucket": "deep",
-      "max_drawdown_pct": 4.0,
+      "max_drawdown_pct": 4,
       "promotion_status": "production",
       "stage_restrictions": [
         "internal_capital",
@@ -533,9 +534,9 @@
       "expected_turnover": "medium",
       "family": "funding_arb",
       "hedge_policy": "hedged",
-      "leverage_cap": 2.0,
+      "leverage_cap": 2,
       "liquidity_bucket": "medium",
-      "max_drawdown_pct": 6.0,
+      "max_drawdown_pct": 6,
       "promotion_status": "production",
       "stage_restrictions": [
         "pilot_capital",
@@ -561,9 +562,9 @@
       "expected_turnover": "burst",
       "family": "liquidation_capture",
       "hedge_policy": "immediate_exit",
-      "leverage_cap": 1.0,
+      "leverage_cap": 1,
       "liquidity_bucket": "deep",
-      "max_drawdown_pct": 5.0,
+      "max_drawdown_pct": 5,
       "promotion_status": "shadow_live",
       "stage_restrictions": [
         "internal_capital",
@@ -586,9 +587,9 @@
       "expected_turnover": "burst",
       "family": "mev_search",
       "hedge_policy": "protected_only",
-      "leverage_cap": 1.0,
+      "leverage_cap": 1,
       "liquidity_bucket": "deep",
-      "max_drawdown_pct": 3.0,
+      "max_drawdown_pct": 3,
       "promotion_status": "shadow_live",
       "stage_restrictions": [
         "internal_capital",
@@ -614,7 +615,7 @@
       "hedge_policy": "pair_hedge",
       "leverage_cap": 1.5,
       "liquidity_bucket": "medium",
-      "max_drawdown_pct": 5.0,
+      "max_drawdown_pct": 5,
       "promotion_status": "paper",
       "stage_restrictions": [
         "pilot_capital",
@@ -636,9 +637,9 @@
       "expected_turnover": "low",
       "family": "treasury_yield",
       "hedge_policy": "duration_limit",
-      "leverage_cap": 1.0,
+      "leverage_cap": 1,
       "liquidity_bucket": "shallow",
-      "max_drawdown_pct": 2.0,
+      "max_drawdown_pct": 2,
       "promotion_status": "production",
       "stage_restrictions": [
         "internal_capital",
@@ -667,7 +668,7 @@
       "hedge_policy": "inventory_rebalance",
       "leverage_cap": 1.5,
       "liquidity_bucket": "medium",
-      "max_drawdown_pct": 4.0,
+      "max_drawdown_pct": 4,
       "promotion_status": "paper",
       "stage_restrictions": [
         "pilot_capital",

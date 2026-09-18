@@ -894,6 +894,7 @@ class InternalPrimeAllocator:
             loan_id=effective_loan_id,
             family=req.family,
             asset=req.asset,
+            strategy_id=str((req.metadata or {}).get("strategy_id") or (req.metadata or {}).get("strategyId") or ""),
             notional_usd=float(req.notional_usd),
             borrow_cost_usd=float((decision.details or {}).get("borrowCostUsd") or 0.0),
             opened_ts_ms=int(time.time() * 1000),
