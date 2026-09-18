@@ -152,6 +152,43 @@ contract VictorArbExecutorTest {
         require(usdc.balanceOf(DEST) == 101 ether / 10, "converted stable should be withdrawn");
     }
 
+    function test_execute_rejects_route_id_mismatch() public {
+        VictorArbExecutor.Leg[] memory legs = _uniLeg(1);
+        (bool ok,) = address(ex).call(
+            abi.encodeWithSelector(
+                ex.execute.selector,
+                uint8(1),
+                address(token),
+                1 ether,
+                0,
+                DEST,
+                block.timestamp + 100,
+                bytes32(uint256(0x1234)),
+                legs
+            )
+        );
+        require(!ok, "route id mismatch should revert");
+    }
+
+    function test_execute_rejects_non_contiguous_route() public {
+        VictorArbExecutor.Leg[] memory legs = _twoLegs();
+        legs[1].tokenIn = address(token);
+        (bool ok,) = address(ex).call(
+            abi.encodeWithSelector(
+                ex.execute.selector,
+                uint8(1),
+                address(token),
+                1 ether,
+                0,
+                DEST,
+                block.timestamp + 100,
+                _routeId(legs),
+                legs
+            )
+        );
+        require(!ok, "non-contiguous route should revert");
+    }
+
     function test_aave_success_path() public {
         router.setOutBps(10200);
         aave.setPremiumBps(50);
