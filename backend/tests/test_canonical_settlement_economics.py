@@ -66,6 +66,7 @@ def test_canonical_writer_passes_settled_economics_to_bankroll(monkeypatch):
             "opportunity_id": "opportunity-test",
             "route_id": "route",
             "action": "flash_arb",
+            "expected_net_usd": 0.0,
         },
     )
     tx = _tx("loss", 0, -0.35)
