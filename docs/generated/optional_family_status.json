@@ -30,8 +30,8 @@
       "family": "alpha_marketplace",
       "path": "backend/victor_ai_bot/alpha_marketplace",
       "primaryEvidenceCount": 8,
-      "pythonFileCount": 5,
-      "referenceCount": 9,
+      "pythonFileCount": 6,
+      "referenceCount": 10,
       "status": "live",
       "statusInputs": {
         "gatingConditions": 1,
@@ -39,7 +39,7 @@
         "mountedRoutes": 1,
         "runtimeInitialization": 1
       },
-      "supplementalReferenceCount": 1,
+      "supplementalReferenceCount": 2,
       "why": "Mounted routes or ungated runtime initialization establish live reachability."
     },
     {
