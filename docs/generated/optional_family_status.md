@@ -241,7 +241,7 @@ Explicit lifecycle policy keeps this family staged until production authority is
 No mounted-route, runtime-init, or external import reachability was found outside the subsystem tree.
 
 
-| research_pipeline | live | 8 | 12 | 9 | 1 | 2 | 6 | 0 |
+| research_pipeline | live | 8 | 15 | 11 | 1 | 2 | 8 | 0 |
 
 Mounted routes or ungated runtime initialization establish live reachability.
 
@@ -251,13 +251,16 @@ Mounted routes or ungated runtime initialization establish live reachability.
   - backend/victor_ai_bot/runtime_services/fund_service.py
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
 - **research_pipeline importReachability**
+  - backend/tests/test_alpha_marketplace_sleeves.py
   - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_fund_research_routes_maintenance.py
   - backend/tests/test_research_workspace.py
+  - backend/victor_ai_bot/alpha_marketplace/submissions.py
   - backend/victor_ai_bot/api_routes/fund_routes.py
   - backend/victor_ai_bot/runtime_services/fund_service.py
   - backend/victor_ai_bot/runtime_services/runtime_institutional_init.py
 - **research_pipeline tests**
+  - backend/tests/test_alpha_marketplace_sleeves.py
   - backend/tests/test_fund_os_upgrade.py
   - backend/tests/test_fund_research_routes_maintenance.py
   - backend/tests/test_research_workspace.py
