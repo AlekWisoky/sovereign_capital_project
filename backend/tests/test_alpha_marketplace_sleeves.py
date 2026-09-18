@@ -63,6 +63,21 @@ def test_strategy_sleeve_projects_verified_settlement_and_prime_commitment():
     assert sleeve["verifiedSettlementCount"] == 1
 
 
+def test_strategy_sleeve_reports_settled_unfunded_without_prime_commitment():
+    runtime = _runtime([_settlement("strategy-1", realized=1.0)], {
+        "stateReady": True,
+        "capacityUsd": 100000.0,
+        "borrowedUsd": 0.0,
+        "utilization": 0.0,
+        "openLoans": [],
+        "disputedLoans": [],
+    })
+    out = project_strategy_sleeves(runtime, strategy_ids=["strategy-1"])
+    assert out["ok"] is True
+    assert out["sleeves"]["strategy-1"]["capitalSleeveStatus"] == "settled_unfunded"
+    assert out["sleeves"]["strategy-1"]["primeCommittedUsd"] == 0.0
+
+
 def test_strategy_sleeve_fails_closed_when_prime_state_is_unavailable():
     runtime = _runtime([_settlement("strategy-1", realized=1.0)], {"stateReady": False, "stateReasonCode": "prime_state_unavailable"})
     out = project_strategy_sleeves(runtime, strategy_ids=["strategy-1"])
