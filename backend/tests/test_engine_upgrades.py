@@ -5,6 +5,7 @@ from victor_ai_bot.aqe.mev.flash_arb_adapter import opportunity_from_engine_cand
 from victor_ai_bot.aqe.mev.simulator import AnvilForkExecutor, ForkSimulationUnavailable, validate_deterministic_simulation_evidence, validate_simulation_economics
 from victor_ai_bot.aqe.mev.search_engine import MEVSearchEngine
 from victor_ai_bot.engine_control.models import EngineOpportunity
+from victor_ai_bot.calldata_builder import build_execute_calldata
 from victor_ai_bot.runtime_services.engine_service import EngineService
 
 
@@ -323,3 +324,27 @@ def test_mev_flash_arb_adapter_rejects_mempool_only_candidate():
         metadata={'tx_hash': '0xplain'},
     )
     assert opportunity_from_engine_candidate(candidate) is None
+
+
+def test_flash_arb_calldata_preserves_two_and_three_leg_topologies():
+    base = {
+        "provider": "aave",
+        "borrow_token": "0x1111111111111111111111111111111111111111",
+        "amount_borrow": 10**18,
+        "min_profit": 1,
+        "profit_to": "0x2222222222222222222222222222222222222222",
+        "deadline": 9999999999,
+    }
+    leg1 = {"dex": "univ3", "venue": "0x3333333333333333333333333333333333333333", "token_in": base["borrow_token"], "token_out": "0x4444444444444444444444444444444444444444", "min_out": 1, "aux": "0x" + "00" * 29 + "0bb8"}
+    leg2 = {"dex": "univ3", "venue": "0x5555555555555555555555555555555555555555", "token_in": leg1["token_out"], "token_out": base["borrow_token"], "min_out": 1, "aux": "0x" + "00" * 29 + "0bb8"}
+    leg3 = {"dex": "univ3", "venue": "0x6666666666666666666666666666666666666666", "token_in": leg2["token_out"], "token_out": "0x7777777777777777777777777777777777777777", "min_out": 1, "aux": "0x" + "00" * 29 + "0bb8"}
+
+    for legs, expected_len in [([leg1, leg2], 2), ([leg1, leg2, leg3], 3)]:
+        calldata, route_id = build_execute_calldata(legs=legs, **base)
+        raw = bytes.fromhex(calldata[2:])
+        assert len(raw) > 4 + 8 * 32
+        offset = int.from_bytes(raw[4 + 7 * 32:4 + 8 * 32], "big")
+        assert offset == 8 * 32
+        length_pos = 4 + offset
+        assert int.from_bytes(raw[length_pos:length_pos + 32], "big") == expected_len
+        assert route_id.startswith("0x") and len(route_id) == 66
