@@ -310,38 +310,28 @@ def test_market_price_evidence_uses_explicit_decimals_and_usd_price(monkeypatch)
     assert evidence['0x' + '1' * 40]['role'] == 'profit'
 
 
-def test_search_engine_consumes_runtime_supplied_simulation_request():
+def test_search_engine_consumes_runtime_supplied_simulation_request(monkeypatch):
     tx_hash = '0x' + '7' * 64
-    context = _strategy_context(tx_hash)
-    context['simulation_request']['transaction']['hash'] = tx_hash
-    address = context['borrow_token']
-    candidate = MEVSearchEngine(
-        fork_executor=None,
-        router='0x' + '9' * 40,
-        provider='aave',
-        profit_to=address,
-    ).search(
-        mev_state={
-            'sample_pending': [{
-                'hash': tx_hash,
-                'to': '0x' + '9' * 40,
-                'value_wei': 0,
-                'input_0x': context['simulation_request']['transaction']['data'],
-                'tags': ['dex_like'],
-                'sel': context['simulation_request']['transaction']['data'][:10],
-            }],
-            'high_risk_ratio': 0.0,
-            'simulation_requests': {tx_hash: context['simulation_request']},
-        },
-        base_opportunities=[SimpleNamespace(
-            id='opp-1',
-            strategy='flash_arb',
-            expected_profit_raw='50000',
-            route_id='route-1',
-            route=SimpleNamespace(legs=[
-                SimpleNamespace(dex='univ3', venue=address, token_in=address, token_out='0x' + '2' * 40, amount_in='1000000', min_out='900000', data='0x01'),
-                SimpleNamespace(dex='univ3', venue=address, token_in='0x' + '2' * 40, token_out=address, amount_in='900000', min_out='1005000', data='0x01'),
-            ]),
-        )],
+    request = {'fork_url': 'https://example.invalid/rpc', 'fork_block': 123, 'transaction': {'hash': tx_hash, 'to': '0x' + '9' * 40, 'data': '0xabcdef12'}, 'scenarios': []}
+    captured = {}
+
+    def fake_producer(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(
+        'victor_ai_bot.aqe.mev.search_engine.produce_flash_arb_context_from_router',
+        fake_producer,
     )
-    assert candidate == [] or all(row.expected_profit_usd >= 0.0 for row in candidate)
+    engine = MEVSearchEngine(router='0x' + '9' * 40, provider='aave', profit_to='0x' + '1' * 40)
+    engine._prepare_pending_tx(
+        {
+            'hash': tx_hash,
+            'to': '0x' + '9' * 40,
+            'input_0x': '0xabcdef12',
+        },
+        [],
+        {tx_hash: request},
+    )
+    assert captured['simulation_request'] == request
+    assert captured['tx']['hash'] == tx_hash
