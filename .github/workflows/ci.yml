@@ -131,4 +131,4 @@ jobs:
           version: nightly
       - run: |
           cd contracts
-          forge test -q
+          forge test
