@@ -8,6 +8,8 @@ from victor_ai_bot.omar.real_learning import OmarRealLearner
 from victor_ai_bot.omar.runtime import OmarRuntime
 from victor_ai_bot.runtime_services.canonical_capital_write_service import CanonicalCapitalWriteService
 from victor_ai_bot.runtime_services.canonical_settlement_interface import canonical_settled_outcome
+from victor_ai_bot.persistence.db import PersistenceDB
+from victor_ai_bot.persistence.repositories.ledger_repository import LedgerRepository
 
 
 def _pending(decision_id="decision-1", correlation_id="corr-1", expected=100.0):
