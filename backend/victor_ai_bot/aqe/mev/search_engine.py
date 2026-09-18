@@ -137,7 +137,7 @@ class MEVSearchEngine:
             return None, 'non_positive'
         return value, 'simulation_evidence'
 
-    def _prepare_pending_tx(self, tx: Mapping[str, Any], base_opportunities: List[Any]) -> dict[str, Any]:
+    def _prepare_pending_tx(self, tx: Mapping[str, Any], base_opportunities: List[Any], simulation_requests: Mapping[str, Any] | None = None) -> dict[str, Any]:
         prepared = dict(tx)
         explicit_context = tx.get('strategy_context')
         if isinstance(explicit_context, Mapping):
@@ -148,13 +148,17 @@ class MEVSearchEngine:
         else:
             context = None
             if self._router and self._provider and self._profit_to:
+                requests = simulation_requests if isinstance(simulation_requests, Mapping) else {}
+                request = tx.get('simulation_request')
+                if not isinstance(request, Mapping):
+                    request = requests.get(str(tx.get('hash') or ''))
                 context = produce_flash_arb_context_from_router(
                     tx=tx,
                     router=self._router,
                     base_opportunities=base_opportunities,
                     provider=self._provider,
                     profit_to=self._profit_to,
-                    simulation_request=tx.get('simulation_request'),
+                    simulation_request=request,
                 )
         if context is not None:
             prepared['simulation_request'] = context['simulation_request']
@@ -168,7 +172,7 @@ class MEVSearchEngine:
         for raw_tx in pending[:8]:
             if not isinstance(raw_tx, Mapping):
                 continue
-            tx = self._prepare_pending_tx(raw_tx, base_opportunities)
+            tx = self._prepare_pending_tx(raw_tx, base_opportunities, mev_state.get('simulation_requests'))
             tags = set(tx.get('tags') or [])
             if 'dex_like' not in tags and not str(tx.get('sel') or '').startswith('0x'):
                 continue
