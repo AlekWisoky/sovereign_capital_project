@@ -148,7 +148,7 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
           engines = [];
         }
         try {
-          const fund = await canonicalFundSummary(baseUrl, adminKey);
+          const fund = (await canonicalFundSummary(baseUrl, adminKey)) as any;
           const fundHealth = (fund?.health ?? {}) as Record<string, unknown>;
           const fundSummaryContract = normalizeSummaryContract(fund?.summaryContract ?? fund?.summary_contract);
           const fundProjectionCompatibility = evaluateProjectionCompatibility(
