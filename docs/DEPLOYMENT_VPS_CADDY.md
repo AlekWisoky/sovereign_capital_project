@@ -2,54 +2,78 @@
 
 This is the recommended path for stable production hosting.
 
-## 1) Run backend bound to localhost
+## 1) Host layout
 
-On the VPS:
+Use:
+
+```text
+/opt/sovereign_capital/
+  repo/
+  env/
+    backend.env
+    caddy.env
+  backend-data/
+  backups/
+  logs/
+```
+
+The runtime data directory is deliberately outside the Git working tree. The Compose bind mount maps `/opt/sovereign_capital/backend-data` to `/app/backend/data`.
+
+## 2) Environment files
+
+Copy the tracked examples and edit the real files on the server:
 
 ```bash
-export VICTOR_CONFIG=/opt/vdex/backend/config/ethereum.yaml
-export VICTOR_ADMIN_KEY='change-me-long-random'
-export VICTOR_AUTOSTART=1
-export VICTOR_DEPLOYMENT_MODE=private
-
-uvicorn victor_ai_bot.server:app --host 127.0.0.1 --port 8000
+mkdir -p /opt/sovereign_capital/env /opt/sovereign_capital/backend-data
+cp /opt/sovereign_capital/repo/env/backend.env.example /opt/sovereign_capital/env/backend.env
+cp /opt/sovereign_capital/repo/env/caddy.env.example /opt/sovereign_capital/env/caddy.env
+chmod 600 /opt/sovereign_capital/env/backend.env /opt/sovereign_capital/env/caddy.env
 ```
 
-## 2) Put Caddy in front (TLS termination)
+`backend.env` contains the privileged `VICTOR_ADMIN_KEY` and exact frontend CORS origin. Never commit the real files.
 
-Create a `Caddyfile`:
+## 3) Backend
 
-```caddy
-api.yourdomain.com {
-  reverse_proxy 127.0.0.1:8000
-}
-```
+The production Compose file binds the backend to `127.0.0.1:8000` and exposes it only through Caddy. Public port 8000 must remain closed.
 
-Then run Caddy (systemd or container). With a real hostname, Caddy will automatically provision HTTPS.
+## 4) Caddy / TLS
 
-This repo includes a production compose template:
+Set `API_HOST` in `env/caddy.env` to the real API hostname, for example `api.example.com`. Point the DNS A/AAAA records at the UpCloud server before starting Caddy.
 
-- `deploy/docker-compose.prod.yml`
-- `deploy/Caddyfile`
+Caddy reads `API_HOST` from the environment and provisions HTTPS for the hostname.
 
-## 3) Firewall (open only what you need)
+## 5) Firewall
 
-If using UFW:
+Allow only:
+
+- SSH (22), preferably restricted to trusted administration sources
+- HTTP (80)
+- HTTPS (443)
+
+Do not publish 8000. The application already binds that port to loopback.
+
+If using both UpCloud L3 firewall and UFW, configure and verify both before enabling restrictive defaults so SSH access is not lost.
+
+## 6) Deployment identity
+
+Deploy the exact verified Git SHA, then record:
 
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80
-sudo ufw allow 443
-sudo ufw enable
+git rev-parse HEAD
+docker compose -f deploy/docker-compose.prod.yml ps
+curl -fsS https://YOUR_API_HOST/api/deploy/info
 ```
 
-Keep port 8000 closed publicly (bind backend to 127.0.0.1).
+The returned deployment identity must match the deployed Git SHA before proceeding to safe-mode smoke gates.
 
-## 4) Mobile connection
+## 7) Safe mode
 
-In app Setup:
+Keep the current Ethereum configuration non-live:
 
-- Backend URL: `https://api.yourdomain.com`
-- Admin Key: matches server
+- `dry_run=true`
+- `auto_trading=false`
+- no `VICTOR_PRIVATE_KEY`
+- no live signer configuration
+- no live-authority activation
 
-Because the base URL is HTTPS, the app uses **WSS** for WebSockets automatically.
+Infrastructure readiness does not authorize live trading. Issue #89 remains the explicit live-authority gate.

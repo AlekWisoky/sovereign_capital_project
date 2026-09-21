@@ -24,7 +24,10 @@ Thumbs.db
 
 # Local runtime data
 backend/data/
+backend-data/
 data/
+env/*.env
+!env/*.env.example
 *.log
 
 # Additional cleanup hygiene
