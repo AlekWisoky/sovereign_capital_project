@@ -160,7 +160,7 @@ export async function getXaiLatest(baseUrl: string, limit = 20, adminKey?: strin
 
 export async function getXaiDecision(baseUrl: string, decisionId: string, adminKey?: string): Promise<DecisionSnapshot> {
   const raw = await canonicalXaiDecision(baseUrl, decisionId, adminKey);
-  const r = record(raw.item ?? raw.decision ?? raw);
+  const r = record(raw.item ?? raw);
   const lifecycle = record(r.lifecycle);
   const admission = record(lifecycle.admission);
   const sizing = record(lifecycle.sizing);
