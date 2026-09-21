@@ -36,6 +36,21 @@ export function CanonicalDecisionDetailScreen() {
       {decision ? (
         <>
           <View style={{ height: theme.spacing.md }} />
+      <SurfaceCard glow="none">
+        <Text style={{ color: theme.colors.text, ...theme.typography.h1 }}>Canonical lifecycle</Text>
+        <Text style={{ color: theme.colors.textFaint, marginTop: 6 }}>
+          Decision → Admission → Sizing → Execution → Receipt → Settlement → Learning
+        </Text>
+        <LifecycleRow label="Decision" value={decision?.lifecycle?.decision.decisionId ?? decision?.decisionId ?? "—"} theme={theme} />
+        <LifecycleRow label="Admission" value={decision?.lifecycle?.admission.allowed === undefined ? "—" : decision.lifecycle.admission.allowed ? "allowed" : "blocked"} theme={theme} />
+        <LifecycleRow label="Sizing" value={decision?.lifecycle?.sizing.sizingId ?? "—"} theme={theme} />
+        <LifecycleRow label="Execution" value={decision?.lifecycle?.execution.executionId ?? "—"} theme={theme} />
+        <LifecycleRow label="Receipt" value={decision?.lifecycle?.receipt.receiptId ?? decision?.receiptId ?? "—"} theme={theme} />
+        <LifecycleRow label="Settlement" value={decision?.lifecycle?.settlement.outcomeId ? `${decision.lifecycle.settlement.outcomeId}${decision.lifecycle.settlement.verified ? " · verified" : " · unverified"}` : "—"} theme={theme} />
+        <LifecycleRow label="Learning" value={decision?.lifecycle?.learning.recorded === undefined ? "—" : decision.lifecycle.learning.recorded ? "recorded" : "not recorded"} theme={theme} />
+      </SurfaceCard>
+
+      <View style={{ height: theme.spacing.md }} />
           <SurfaceCard glow="cyan">
             <Text style={{ color: theme.colors.text, ...theme.typography.h1 }}>{decision.action ?? 'decision'} · {decision.strategyFamily ?? 'unknown family'}</Text>
             <Text style={{ color: theme.colors.textMuted, marginTop: 8 }}>Expected net: {decision.expectedNetProfitUsd == null ? '—' : `$${decision.expectedNetProfitUsd.toFixed(2)}`} · ROI: {decision.expectedRoiPct == null ? '—' : `${decision.expectedRoiPct.toFixed(2)}%`}</Text>
@@ -78,4 +93,13 @@ export function CanonicalDecisionDetailScreen() {
 
 function Line({ label, value, theme }: { label: string; value: unknown; theme: ReturnType<typeof useTheme> }) {
   return <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}><Text style={{ color: theme.colors.textFaint }}>{label}</Text><Text style={{ color: theme.colors.text, fontWeight: '800', flex: 1, textAlign: 'right' }}>{String(value ?? '—')}</Text></View>;
+}
+
+function LifecycleRow({ label, value, theme }: { label: string; value: string; theme: ReturnType<typeof useTheme> }) {
+  return (
+    <View style={{ marginTop: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+      <Text style={{ color: theme.colors.textFaint, fontSize: 11, fontWeight: "800" }}>{label}</Text>
+      <Text style={{ color: theme.colors.text, marginTop: 3, ...theme.typography.mono }}>{value}</Text>
+    </View>
+  );
 }
