@@ -1,4 +1,12 @@
 import { apiGet } from './client';
+import {
+  canonicalCommandCenterSnapshot,
+  canonicalFundSummary,
+  canonicalSpreadOpportunities,
+  canonicalWealthGoal,
+  canonicalXaiDecision,
+  canonicalXaiLatest,
+} from './canonicalContracts';
 import type {
   ActivityFeed,
   CapitalTruth,
@@ -127,7 +135,7 @@ function liveState(tx: TransactionRecord): LiveTrade['state'] {
 }
 
 export async function getCommandCenterSnapshot(baseUrl: string, adminKey?: string): Promise<Record<string, any>> {
-  return record(await apiGet(baseUrl, '/api/commandcenter/snapshot', adminKey ? { 'X-Admin-Key': adminKey } : undefined));
+  return record(await canonicalCommandCenterSnapshot(baseUrl, adminKey));
 }
 
 export async function getRuntimeHealth(baseUrl: string): Promise<RuntimeHealth> {
@@ -135,24 +143,24 @@ export async function getRuntimeHealth(baseUrl: string): Promise<RuntimeHealth> 
 }
 
 export async function getFundSummary(baseUrl: string, adminKey?: string): Promise<Record<string, any>> {
-  return record(await apiGet(baseUrl, '/api/fund/summary', adminKey ? { 'X-Admin-Key': adminKey } : undefined));
+  return record(await canonicalFundSummary(baseUrl, adminKey));
 }
 
 export async function getSpreadOpportunities(baseUrl: string, adminKey?: string): Promise<Opportunity[]> {
-  const raw = record(await apiGet(baseUrl, '/api/spread/opportunities', adminKey ? { 'X-Admin-Key': adminKey } : undefined));
+  const raw = record(await canonicalSpreadOpportunities(baseUrl, adminKey));
   const rows = Array.isArray(raw.opps) ? raw.opps : Array.isArray(raw.items) ? raw.items : [];
   return rows.map(normalizeOpportunity);
 }
 
 export async function getXaiLatest(baseUrl: string, limit = 20, adminKey?: string): Promise<DecisionSnapshot[]> {
-  const raw = await apiGet(baseUrl, `/api/xai/latest?limit=${encodeURIComponent(String(limit))}`, adminKey ? { 'X-Admin-Key': adminKey } : undefined);
-  const rows = Array.isArray(raw) ? raw : Array.isArray(record(raw).items) ? record(raw).items : [];
+  const raw = await canonicalXaiLatest(baseUrl, limit, adminKey);
+  const rows = Array.isArray(raw.items) ? raw.items : [];
   return rows.map((row) => ({ ...lineage(record(row)), ...record(row) })) as DecisionSnapshot[];
 }
 
 export async function getXaiDecision(baseUrl: string, decisionId: string, adminKey?: string): Promise<DecisionSnapshot> {
-  const raw = record(await apiGet(baseUrl, `/api/xai/decision/${encodeURIComponent(decisionId)}`, adminKey ? { 'X-Admin-Key': adminKey } : undefined));
-  const r = record(raw.decision ?? raw);
+  const raw = canonicalXaiDecision ? await canonicalXaiDecision(baseUrl, decisionId, adminKey) : {};
+  const r = record(raw.item ?? raw.decision ?? raw);
   return {
     ...lineage(r),
     expectedNetProfitUsd: num(r.expected_net_profit_usd ?? r.expectedNetProfitUsd ?? r.expected_net),
@@ -198,7 +206,7 @@ export async function getCanonicalSystemSnapshot(baseUrl: string, adminKey?: str
   const capital = normalizeCapitalTruth(fund);
   const summary = record(fund.summary ?? fund);
   const internalPrimeRaw = record(fund.internalPrime ?? fund.internal_prime);
-  const goalRaw = record(await apiGet(baseUrl, '/api/wealth/goal', adminKey ? { 'X-Admin-Key': adminKey } : undefined));
+  const goalRaw = record(await canonicalWealthGoal(baseUrl, adminKey));
   const goal = record(goalRaw.goal ?? goalRaw);
   const activity = await getActivityFeed(baseUrl, adminKey);
   const observedTsMs = Date.now();

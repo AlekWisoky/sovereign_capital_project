@@ -1,6 +1,18 @@
 import type { CapitalTruthHealth, CommandCenterSnapshot, ControlPatch, EngineSnapshot, ExplainResponse } from "./types";
 import { DEMO_SNAPSHOT } from "./demoSeed";
-import { apiGet, apiPost, deployInfo, launchState, fetchWealthGoal } from "../api/client";
+import { apiGet, deployInfo, launchState, fetchWealthGoal } from "../api/client";
+import {
+  canonicalCapitalExplain,
+  canonicalCommandCenterAuditTail,
+  canonicalCommandCenterControl,
+  canonicalCommandCenterExplain,
+  canonicalCommandCenterSnapshot,
+  canonicalEngineState,
+  canonicalExecutionQuality,
+  canonicalFundSummary,
+  canonicalRiskLiveState,
+  canonicalServiceHealth,
+} from "../api/canonicalContracts";
 import { commandCenterHoldLine, commandCenterHoldReasonCodes } from "../utils/command";
 import { capitalTruthHealthLegacyFields, normalizeCapitalTruthHealth, usesCapitalTruthHealthLegacyFallback } from "./capitalTruthHealth";
 import { evaluateProjectionCompatibility, mergeProjectionCompatibility, normalizeSummaryContract, projectionCompatibilityAlert } from "./projectionContract";
@@ -111,7 +123,7 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
         deploy = {};
       }
       try {
-        const snap = (await apiGet(baseUrl, "/api/commandcenter/snapshot", headers)) as CommandCenterSnapshot;
+        const snap = await canonicalCommandCenterSnapshot(baseUrl, adminKey);
         let engines: EngineSnapshot[] = [];
         let fundSummary: any = undefined;
         let launch: any = undefined;
@@ -119,7 +131,7 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
         let execution: any = undefined;
         let services: any = undefined;
         try {
-          const engineState = (await apiGet(baseUrl, "/api/engines/state", headers)) as any;
+          const engineState = await canonicalEngineState(baseUrl, adminKey);
           engines = ((engineState?.summary?.engines ?? []) as any[]).map((row) => ({
             engineId: String(row.engine_type ?? row.engineId ?? "engine"),
             title: String(row.engine_type ?? row.title ?? "Engine").replace(/_/g, " "),
@@ -136,7 +148,7 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
           engines = [];
         }
         try {
-          const fund = (await apiGet(baseUrl, '/api/fund/summary', headers)) as any;
+          const fund = (await canonicalFundSummary(baseUrl, adminKey)) as any;
           const fundHealth = (fund?.health ?? {}) as Record<string, unknown>;
           const fundSummaryContract = normalizeSummaryContract(fund?.summaryContract ?? fund?.summary_contract);
           const fundProjectionCompatibility = evaluateProjectionCompatibility(
@@ -270,9 +282,9 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
           launch = undefined;
         }
         try {
-          const eq = (await apiGet(baseUrl, '/api/system/execution/quality', headers)) as any;
-          const riskLive = (await apiGet(baseUrl, '/api/risk/live-state', headers)) as any;
-          services = (await apiGet(baseUrl, '/api/system/services', headers)) as any;
+          const eq = await canonicalExecutionQuality(baseUrl, adminKey);
+          const riskLive = await canonicalRiskLiveState(baseUrl, adminKey);
+          services = await canonicalServiceHealth(baseUrl, adminKey);
           execution = {
             endpointQuality: eq?.endpoint_quality ?? {},
             endpointUniverse: eq?.endpoint_universe ?? riskLive?.endpoint_universe ?? {},
@@ -556,7 +568,7 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
       }
     },
     setControls: async (patch: ControlPatch, reason: string) => {
-      return (await apiPost(baseUrl, "/api/commandcenter/control", { patch, reason }, headers)) as any;
+      return await canonicalCommandCenterControl(baseUrl, patch as any, reason, adminKey);
     },
     explain: async () => {
       try {
@@ -566,7 +578,7 @@ export function createBackendCommandCenterProvider(baseUrl: string, adminKey?: s
       }
     },
     auditTail: async (limit: number) => {
-      return (await apiGet(baseUrl, `/api/commandcenter/audit/tail?limit=${encodeURIComponent(String(limit))}`, headers)) as any;
+      return await canonicalCommandCenterAuditTail(baseUrl, limit, adminKey);
     },
   };
 }
