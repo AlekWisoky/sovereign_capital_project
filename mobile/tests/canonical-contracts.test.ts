@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   CANONICAL_READ_CONTRACTS,
@@ -147,4 +148,17 @@ test("canonical engine adapter uses GET and its declared engine projection ident
   } finally {
     restore();
   }
+});
+
+
+test("command-center provider routes canonical reads through the typed contract layer", () => {
+  const source = readFileSync(new URL("../src/commandCenter/provider.ts", import.meta.url), "utf8");
+  assert.match(source, /canonicalCommandCenterSnapshot/);
+  assert.match(source, /canonicalEngineState/);
+  assert.match(source, /canonicalFundSummary/);
+  assert.match(source, /canonicalExecutionQuality/);
+  assert.match(source, /canonicalRiskLiveState/);
+  assert.match(source, /canonicalServiceHealth/);
+  assert.match(source, /canonicalCommandCenterControl/);
+  assert.doesNotMatch(source, /apiGet\(baseUrl,\s*["']\/api\/(commandcenter\/snapshot|engines\/state|fund\/summary|system\/execution\/quality|risk\/live-state|system\/services)/);
 });
