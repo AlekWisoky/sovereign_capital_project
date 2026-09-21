@@ -72,17 +72,25 @@ Mobile currently uses `mobile/src/api/mutationGuard.ts` and `mobile/src/api/guar
 
 **Contract-gap:** `backendLiveAuthority` is currently a coarse mobile-side decision. Phase A must map individual mutations to the backend capability semantics and canonical backend response/state rather than treating the boolean as the complete authority model.
 
-## Typed-contract gap
+## Typed-contract gap — corrected after current-source audit
 
-`mobile/src/api/client.ts` still exposes a large surface through `JsonObject`, `unknown`, and generic `Record<string, unknown>` request bodies. `mobile/src/utils/types.ts` contains only a small runtime/opportunity model.
+The earlier assumption that mobile had no canonical summary/read-model type was too broad and is corrected here. Current main already contains a partial canonical contract layer:
 
-This is the demonstrated #90 implementation gap. The next code slice should:
+- `mobile/src/commandCenter/types.ts` defines `SummaryReadContract` and projection domain types.
+- `mobile/src/commandCenter/projectionContract.ts` normalizes `summaryContract` and evaluates canonical truth-family/read-model compatibility.
+- `mobile/src/commandCenter/provider.ts` already consumes those contracts.
+- `mobile/src/api/wsSummary.ts` also uses `SummaryReadContract`.
 
-1. add one shared typed summary/read-model envelope;
-2. add typed adapters for the verified contract inventory above;
-3. preserve existing low-level wrappers for compatibility until callers migrate;
-4. add contract tests for path, HTTP method, auth header/capability class, and required response identity;
-5. only then consolidate screens/providers around those adapters.
+Therefore Phase B must **extend and consolidate the existing contract layer**, not create a duplicate envelope. The remaining gap is broader endpoint coverage and explicit capability/mutation contracts: `mobile/src/api/client.ts` still exposes many `JsonObject`, `unknown`, and generic `Record<string, unknown>` calls, while the existing typed contract layer is concentrated around Command Center projections.
+
+The next code slice should:
+
+1. reuse `SummaryReadContract` rather than introducing a second envelope;
+2. extend typed adapters from the existing Command Center contract layer to the verified endpoint inventory;
+3. define explicit mutation/capability metadata for guarded commands;
+4. preserve existing low-level wrappers for compatibility until callers migrate;
+5. add contract tests for path, HTTP method, auth/capability class, and required response identity;
+6. only then consolidate screens/providers around those adapters.
 
 No endpoint should be invented to satisfy a UI design.
 
