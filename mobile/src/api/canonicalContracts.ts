@@ -225,7 +225,7 @@ function headers(adminKey?: string): Record<string, string> {
   return adminKey ? { "X-Admin-Key": adminKey } : {};
 }
 
-function requireSummaryContract<T extends JsonObject>(
+function requireSummaryContract<T extends object>(
   payload: T,
   contract: CanonicalReadContract,
 ): T & { summaryContract: SummaryReadContract } {
