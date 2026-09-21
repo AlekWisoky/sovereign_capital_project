@@ -7,6 +7,7 @@ import {
   canonicalCommandCenterAuditTail,
   canonicalCommandCenterControl,
   canonicalEngineState,
+  canonicalSpreadOpportunities,
   canonicalLaunchFamilyDetail,
   canonicalXaiDecision,
 } from "../src/api/canonicalContracts";
@@ -67,6 +68,25 @@ test("parameterized canonical adapters encode path parameters and validate read-
   }
 });
 
+test("canonical spread-opportunity adapter enforces the declared projection identity", async () => {
+  const response = {
+    ...canonical(
+      CANONICAL_READ_CONTRACTS.spreadOpportunities.truthFamily,
+      CANONICAL_READ_CONTRACTS.spreadOpportunities.readModel,
+    ),
+    items: [],
+  };
+  const { calls, restore } = installFetch(response);
+  try {
+    const out = await canonicalSpreadOpportunities("https://api.example.test", "secret");
+    assert.deepEqual(out.items, []);
+    assert.equal(calls[0].url, "https://api.example.test/api/spread/opportunities");
+    assert.equal(calls[0].init?.method, undefined);
+  } finally {
+    restore();
+  }
+});
+
 test("canonical adapter rejects a mismatched backend truth family", async () => {
   const response = canonical("wrong_family", CANONICAL_READ_CONTRACTS.xaiDecision.readModel);
   const { restore } = installFetch(response);
@@ -82,6 +102,12 @@ test("mutation contracts encode backend capability and preserve admin-key author
   assert.equal(MUTATION_CONTRACTS.commandCenterControl.path, "/api/commandcenter/control");
   assert.equal(MUTATION_CONTRACTS.commandCenterControl.capability, "admin:write");
   assert.equal(MUTATION_CONTRACTS.launchMode.capability, "admin:write");
+  assert.equal(MUTATION_CONTRACTS.tradeOpportunity.capability, "execute");
+  assert.equal(MUTATION_CONTRACTS.tradeOpportunity.authority, "execution");
+  assert.equal(MUTATION_CONTRACTS.tradeOpportunity.requiresLiveAuthority, true);
+  assert.equal(MUTATION_CONTRACTS.withdrawExecute.capability, "admin:write");
+  assert.equal(MUTATION_CONTRACTS.withdrawExecute.authority, "capital_write");
+  assert.equal(MUTATION_CONTRACTS.withdrawExecute.requiresLiveAuthority, true);
 
   const response = { ok: true };
   const { calls, restore } = installFetch(response);
