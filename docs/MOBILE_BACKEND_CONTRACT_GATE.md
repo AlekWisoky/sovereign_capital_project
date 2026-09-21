@@ -38,6 +38,20 @@ Scope: Issues #40 and #90 only. This document is a contract audit, not a new exe
 | `/api/kds/state` | GET | none | needs canonical typed adapter | `backend/victor_ai_bot/api_routes/intelligence_routes.py` |
 | `/api/risk/live-state` | GET | none | backend exists; mobile contract needs formalization | `backend/victor_ai_bot/api_routes/risk_routes.py` |
 
+
+Additional active Command Center provider projections included in the Phase B adapter/test gate:
+
+| Surface | Method | Backend auth/capability | Canonical source |
+|---|---|---|---|
+| `/api/engines/state` | GET | none | `backend/victor_ai_bot/api_routes/engine_routes.py` |
+| `/api/system/execution/quality` | GET | none | `backend/victor_ai_bot/api_routes/system_routes.py` |
+| `/api/risk/live-state` | GET | none | `backend/victor_ai_bot/api_routes/risk_routes.py` |
+| `/api/system/services` | GET | none | `backend/victor_ai_bot/api_routes/system_routes.py` |
+| `/api/system/capital/explain` | GET | none | `backend/victor_ai_bot/api_routes/system_routes.py` |
+| `/api/state` | GET | none | `backend/victor_ai_bot/api_routes/runtime_routes.py` (legacy fallback only) |
+
+These surfaces are now represented by the typed adapter registry/tests; `/api/state` remains compatibility-only and is not treated as a replacement for canonical projections.
+
 ## Canonical read-model envelope
 
 The backend already emits `summaryContract` for several operator projections. Its stable contract is defined by:
