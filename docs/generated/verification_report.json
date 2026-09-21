@@ -522,7 +522,7 @@
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
-    "test_file_count": 14,
+    "test_file_count": 15,
     "test_files": [
       "mobile/tests/amounts.test.ts",
       "mobile/tests/capital-truth-health.test.ts",
@@ -537,7 +537,8 @@
       "mobile/tests/projection-compatibility.test.ts",
       "mobile/tests/reconciliation.test.ts",
       "mobile/tests/wealth-goal-summary.test.ts",
-      "mobile/tests/ws-summary.test.ts"
+      "mobile/tests/ws-summary.test.ts",
+      "mobile/tests/canonical-contracts.test.ts"
     ],
     "verification_status": "inventory_and_ci_script"
   },
