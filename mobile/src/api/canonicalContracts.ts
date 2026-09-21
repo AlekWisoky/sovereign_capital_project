@@ -24,10 +24,14 @@ export type CanonicalReadContract = {
   readModel: string;
 };
 
+export type MutationAuthority = "control" | "execution" | "capital_write" | "chain_control";
+
 export type MutationContract = {
   method: "POST";
   path: string;
   capability: Exclude<BackendCapability, "none">;
+  authority: MutationAuthority;
+  requiresLiveAuthority: boolean;
 };
 
 export type CanonicalProjection<T extends JsonObject = JsonObject> = T & {
@@ -52,6 +56,11 @@ export type ServiceHealthResponse = CanonicalProjection<JsonObject>;
 export type CapitalExplainResponse = CanonicalProjection<JsonObject>;
 export type WealthGoalResponse = CanonicalProjection<JsonObject>;
 export type CommandCenterAuditResponse = CanonicalProjection<JsonObject>;
+export type SpreadOpportunitiesResponse = CanonicalProjection<{
+  ok?: boolean;
+  opps?: JsonObject[];
+  items?: JsonObject[];
+}>;
 
 export const CANONICAL_READ_CONTRACTS = {
   commandCenterSnapshot: {
@@ -88,6 +97,13 @@ export const CANONICAL_READ_CONTRACTS = {
     capability: "none",
     truthFamily: "fund",
     readModel: "fund_summary_projection_v1",
+  },
+  spreadOpportunities: {
+    method: "GET",
+    path: "/api/spread/opportunities",
+    capability: "none",
+    truthFamily: "spread_opportunities",
+    readModel: "spread_opportunities_projection_v1",
   },
   launchState: {
     method: "GET",
@@ -169,56 +185,26 @@ export const CANONICAL_READ_CONTRACTS = {
 } as const satisfies Record<string, CanonicalReadContract>;
 
 export const MUTATION_CONTRACTS = {
-  commandCenterControl: {
-    method: "POST",
-    path: "/api/commandcenter/control",
-    capability: "admin:write",
-  },
-  runtimeStart: {
-    method: "POST",
-    path: "/api/runtime/start",
-    capability: "admin:write",
-  },
-  runtimeStop: {
-    method: "POST",
-    path: "/api/runtime/stop",
-    capability: "admin:write",
-  },
-  settings: {
-    method: "POST",
-    path: "/api/settings",
-    capability: "admin:write",
-  },
-  wealthGoal: {
-    method: "POST",
-    path: "/api/wealth/goal",
-    capability: "admin:write",
-  },
-  launchMode: {
-    method: "POST",
-    path: "/api/launch/mode",
-    capability: "admin:write",
-  },
-  launchEnableNext: {
-    method: "POST",
-    path: "/api/launch/enable-next",
-    capability: "admin:write",
-  },
-  launchPauseFamily: {
-    method: "POST",
-    path: "/api/launch/pause-family",
-    capability: "admin:write",
-  },
-  launchRevertFamily: {
-    method: "POST",
-    path: "/api/launch/revert-family",
-    capability: "admin:write",
-  },
-  launchQuarantineFamily: {
-    method: "POST",
-    path: "/api/launch/quarantine-family",
-    capability: "admin:write",
-  },
+  commandCenterControl: { method: "POST", path: "/api/commandcenter/control", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  runtimeStart: { method: "POST", path: "/api/runtime/start", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  runtimeStop: { method: "POST", path: "/api/runtime/stop", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  settings: { method: "POST", path: "/api/settings", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  safety: { method: "POST", path: "/api/safety", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  tradeOpportunity: { method: "POST", path: "/api/opportunities/trade", capability: "execute", authority: "execution", requiresLiveAuthority: true },
+  simulateOpportunity: { method: "POST", path: "/api/opportunities/simulate", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  withdrawExecute: { method: "POST", path: "/api/withdraw/execute", capability: "admin:write", authority: "capital_write", requiresLiveAuthority: true },
+  withdrawAllExecute: { method: "POST", path: "/api/withdraw/all/execute", capability: "admin:write", authority: "capital_write", requiresLiveAuthority: true },
+  convertWithdrawExecute: { method: "POST", path: "/api/withdraw/convert/execute", capability: "admin:write", authority: "capital_write", requiresLiveAuthority: true },
+  rpcPreferences: { method: "POST", path: "/api/system/rpc/preferences", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  applyPreset: { method: "POST", path: "/api/presets/apply", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  selectChain: { method: "POST", path: "/api/multichain/select", capability: "admin:write", authority: "chain_control", requiresLiveAuthority: false },
+  metaApply: { method: "POST", path: "/api/meta/apply", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  wealthGoal: { method: "POST", path: "/api/wealth/goal", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  launchMode: { method: "POST", path: "/api/launch/mode", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  launchEnableNext: { method: "POST", path: "/api/launch/enable-next", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  launchPauseFamily: { method: "POST", path: "/api/launch/pause-family", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  launchRevertFamily: { method: "POST", path: "/api/launch/revert-family", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
+  launchQuarantineFamily: { method: "POST", path: "/api/launch/quarantine-family", capability: "admin:write", authority: "control", requiresLiveAuthority: false },
 } as const satisfies Record<string, MutationContract>;
 
 function headers(adminKey?: string): Record<string, string> {
@@ -275,6 +261,13 @@ export async function canonicalFundSummary(baseUrl: string, adminKey?: string): 
   return requireSummaryContract(
     (await apiGet(baseUrl, CANONICAL_READ_CONTRACTS.fundSummary.path, headers(adminKey))) as FundHealthSummary,
     CANONICAL_READ_CONTRACTS.fundSummary,
+  );
+}
+
+export async function canonicalSpreadOpportunities(baseUrl: string, adminKey?: string): Promise<SpreadOpportunitiesResponse> {
+  return requireSummaryContract(
+    (await apiGet(baseUrl, CANONICAL_READ_CONTRACTS.spreadOpportunities.path, headers(adminKey))) as SpreadOpportunitiesResponse,
+    CANONICAL_READ_CONTRACTS.spreadOpportunities,
   );
 }
 
@@ -372,4 +365,15 @@ export async function canonicalSetLaunchMode(baseUrl: string, mode: string, admi
 
 export async function canonicalSetWealthGoal(baseUrl: string, patch: JsonObject, adminKey: string): Promise<JsonObject> {
   return (await apiPost(baseUrl, MUTATION_CONTRACTS.wealthGoal.path, patch, headers(adminKey))) as JsonObject;
+}
+
+export async function canonicalTradeOpportunity(
+  baseUrl: string,
+  id: string,
+  adminKey: string,
+  amountInOverride?: string,
+): Promise<JsonObject> {
+  const body: JsonObject = { id };
+  if (amountInOverride !== undefined) body.amount_in_override = String(amountInOverride);
+  return (await apiPost(baseUrl, MUTATION_CONTRACTS.tradeOpportunity.path, body, headers(adminKey))) as JsonObject;
 }
