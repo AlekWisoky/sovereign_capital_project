@@ -1,12 +1,12 @@
 services:
   victor-backend:
     build:
-      context: ..
-      dockerfile: backend/Dockerfile
+      context: ../backend
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:8000:8000"
     env_file:
-      - ../env/backend.env
+      - ../../env/backend.env
     environment:
       VICTOR_CONFIG: /app/backend/config/ethereum.yaml
       VICTOR_LOG_JSON: "1"
@@ -14,13 +14,13 @@ services:
       VICTOR_DEPLOYMENT_MODE: private
     volumes:
       - ../backend/config:/app/backend/config:ro
-      - ../backend-data:/app/backend/data
+      - ../../backend-data:/app/backend/data
     restart: unless-stopped
 
   caddy:
     image: caddy:2
     env_file:
-      - ../env/caddy.env
+      - ../../env/caddy.env
     ports:
       - "80:80"
       - "443:443"
