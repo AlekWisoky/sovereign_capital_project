@@ -86,6 +86,16 @@ export type Opportunity = CanonicalLineage & {
   reasonCodes?: string[];
 };
 
+export type CanonicalLifecycle = {
+  decision: { decisionId?: string };
+  admission: { allowed?: boolean; reasonCodes?: string[] };
+  sizing: { sizingId?: string; requiredCapitalUsd?: number; proposedBorrowAmount?: string; borrowMult?: number; sizeMult?: number };
+  execution: { executionId?: string };
+  receipt: { receiptId?: string; txHash?: string };
+  settlement: { outcomeId?: string; verified?: boolean; realizedNetProfitUsd?: number };
+  learning: { recorded?: boolean; expectationErrorUsd?: number };
+};
+
 export type DecisionSnapshot = CanonicalLineage & {
   expectedNetProfitUsd?: number;
   expectedRoiPct?: number;
@@ -103,6 +113,7 @@ export type DecisionSnapshot = CanonicalLineage & {
   realizedNetProfitUsd?: number;
   expectationErrorUsd?: number;
   learningRecorded?: boolean;
+  lifecycle?: CanonicalLifecycle;
 };
 
 export type TransactionRecord = CanonicalLineage & {
