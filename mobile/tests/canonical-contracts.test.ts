@@ -12,6 +12,7 @@ import {
   canonicalLaunchFamilyDetail,
   canonicalXaiDecision,
 } from "../src/api/canonicalContracts";
+import { getXaiDecision } from "../src/api/canonical";
 
 type FetchCall = { url: string; init?: RequestInit };
 
@@ -161,4 +162,39 @@ test("command-center provider routes canonical reads through the typed contract 
   assert.match(source, /canonicalServiceHealth/);
   assert.match(source, /canonicalCommandCenterControl/);
   assert.doesNotMatch(source, /apiGet\(baseUrl,\s*["']\/api\/(commandcenter\/snapshot|engines\/state|fund\/summary|system\/execution\/quality|risk\/live-state|system\/services)/);
+});
+
+
+test("decision adapter preserves one canonical lifecycle lineage", async () => {
+  const response = {
+    ...canonical(CANONICAL_READ_CONTRACTS.xaiDecision.truthFamily, CANONICAL_READ_CONTRACTS.xaiDecision.readModel),
+    item: {
+      decision_id: "dec-1",
+      admission_allowed: true,
+      admission_reason_codes: [],
+      sizing_id: "size-1",
+      required_capital_usd: 25,
+      execution_id: "exec-1",
+      receipt_id: "rcpt-1",
+      tx_hash: "0xabc",
+      outcome_id: "out-1",
+      settlement_verified: true,
+      realized_net_profit_usd: 1.25,
+      learning_recorded: true,
+      expectation_error_usd: -0.25,
+    },
+  };
+  const { restore } = installFetch(response);
+  try {
+    const out = await getXaiDecision("https://api.example.test", "dec-1");
+    assert.equal(out.lifecycle?.decision.decisionId, "dec-1");
+    assert.equal(out.lifecycle?.sizing.sizingId, "size-1");
+    assert.equal(out.lifecycle?.execution.executionId, "exec-1");
+    assert.equal(out.lifecycle?.receipt.receiptId, "rcpt-1");
+    assert.equal(out.lifecycle?.settlement.outcomeId, "out-1");
+    assert.equal(out.lifecycle?.settlement.verified, true);
+    assert.equal(out.lifecycle?.learning.recorded, true);
+  } finally {
+    restore();
+  }
 });
