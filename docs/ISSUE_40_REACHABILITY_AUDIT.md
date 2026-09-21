@@ -2,7 +2,7 @@
 
 ## Audit basis
 
-- Main baseline: `7ae9128d29e9fcba471249a788c51129c4aa335f` (PR #187 squash merge).
+- Main baseline: `714acae2f1398e3c787a47a76504892a089e05f6` (PR #188 squash merge).
 - Audit branch: `feat/issue-40-90-typed-surfaces-audit`.
 - Generated system truth at the baseline reported 165 app routes, 161 HTTP routes excluding HEAD/OPTIONS, 340 backend test files, and 15 mobile test files.
 - No runtime authority, signer, broadcast, or capital-mutation behavior is introduced by this audit branch.
@@ -103,5 +103,5 @@ This audit proves the current reachability boundary rather than pretending the r
 
 - **#40 legacy deletion:** blocked by verified production reachability of `runtime_legacy.py` and facade mixins.
 - **#40 API shell retirement:** route ownership is retired; compatibility import remains.
-- **#90 typed mobile surface:** canonical reads and command-center control are now wired through the typed contract registry, with tests covering endpoint identity, method, truth-family/read-model identity, and mutation capability/authority metadata.
+- **#90 typed mobile surface:** canonical reads and command-center control are wired through the typed contract registry; decision detail now exposes the canonical lifecycle lineage without inventing missing truth; tests cover endpoint identity, method, truth-family/read-model identity, mutation capability/authority metadata, and lifecycle lineage preservation.
 - **Next safe gate:** run the full CI gate on this branch, then perform the remaining endpoint inventory against the actual mobile screens and close only the compatibility paths that have a verified zero-consumer graph.
