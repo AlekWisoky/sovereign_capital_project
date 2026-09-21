@@ -159,8 +159,15 @@ export async function getXaiLatest(baseUrl: string, limit = 20, adminKey?: strin
 }
 
 export async function getXaiDecision(baseUrl: string, decisionId: string, adminKey?: string): Promise<DecisionSnapshot> {
-  const raw = canonicalXaiDecision ? await canonicalXaiDecision(baseUrl, decisionId, adminKey) : {};
+  const raw = await canonicalXaiDecision(baseUrl, decisionId, adminKey);
   const r = record(raw.item ?? raw.decision ?? raw);
+  const lifecycle = record(r.lifecycle);
+  const admission = record(lifecycle.admission);
+  const sizing = record(lifecycle.sizing);
+  const execution = record(lifecycle.execution);
+  const receipt = record(lifecycle.receipt);
+  const settlement = record(lifecycle.settlement);
+  const learning = record(lifecycle.learning);
   return {
     ...lineage(r),
     expectedNetProfitUsd: num(r.expected_net_profit_usd ?? r.expectedNetProfitUsd ?? r.expected_net),
@@ -179,6 +186,40 @@ export async function getXaiDecision(baseUrl: string, decisionId: string, adminK
     realizedNetProfitUsd: num(r.realized_net_profit_usd ?? r.realizedNetProfitUsd ?? r.realized_net),
     expectationErrorUsd: num(r.expectation_error_usd ?? r.expectationErrorUsd ?? r.expectation_error),
     learningRecorded: bool(r.learning_recorded ?? r.learningRecorded ?? r.learned),
+    lifecycle: {
+      decision: {
+        decisionId: text(r.decision_id ?? r.decisionId),
+      },
+      admission: {
+        allowed: bool(admission.allowed ?? r.admission_allowed ?? r.admissionAllowed),
+        reasonCodes: Array.isArray(admission.reason_codes ?? admission.reasonCodes ?? r.admission_reason_codes ?? r.admissionReasonCodes)
+          ? (admission.reason_codes ?? admission.reasonCodes ?? r.admission_reason_codes ?? r.admissionReasonCodes).map(String)
+          : undefined,
+      },
+      sizing: {
+        sizingId: text(sizing.sizing_id ?? sizing.sizingId ?? r.sizing_id ?? r.sizingId),
+        requiredCapitalUsd: num(sizing.required_capital_usd ?? sizing.requiredCapitalUsd ?? r.required_capital_usd ?? r.requiredCapitalUsd),
+        proposedBorrowAmount: text(sizing.proposed_borrow_amount ?? sizing.proposedBorrowAmount ?? r.proposed_borrow_amount ?? r.proposedBorrowAmount ?? r.borrow_amount),
+        borrowMult: num(sizing.borrow_mult ?? sizing.borrowMult ?? r.borrow_mult ?? r.borrowMult),
+        sizeMult: num(sizing.size_mult ?? sizing.sizeMult ?? r.size_mult ?? r.sizeMult),
+      },
+      execution: {
+        executionId: text(execution.execution_id ?? execution.executionId ?? r.execution_id ?? r.executionId),
+      },
+      receipt: {
+        receiptId: text(receipt.receipt_id ?? receipt.receiptId ?? r.receipt_id ?? r.receiptId),
+        txHash: text(receipt.tx_hash ?? receipt.txHash ?? r.tx_hash ?? r.txHash),
+      },
+      settlement: {
+        outcomeId: text(settlement.outcome_id ?? settlement.outcomeId ?? r.outcome_id ?? r.outcomeId),
+        verified: bool(settlement.verified ?? settlement.settlement_verified ?? settlement.settlementVerified ?? r.settlement_verified ?? r.settlementVerified),
+        realizedNetProfitUsd: num(settlement.realized_net_profit_usd ?? settlement.realizedNetProfitUsd ?? r.realized_net_profit_usd ?? r.realizedNetProfitUsd ?? r.realized_net),
+      },
+      learning: {
+        recorded: bool(learning.recorded ?? learning.learning_recorded ?? learning.learningRecorded ?? r.learning_recorded ?? r.learningRecorded ?? r.learned),
+        expectationErrorUsd: num(learning.expectation_error_usd ?? learning.expectationErrorUsd ?? r.expectation_error_usd ?? r.expectationErrorUsd ?? r.expectation_error),
+      },
+    },
   };
 }
 
