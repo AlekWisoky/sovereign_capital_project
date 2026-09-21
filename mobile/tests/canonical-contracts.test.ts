@@ -152,7 +152,7 @@ test("canonical engine adapter uses GET and its declared engine projection ident
 
 
 test("command-center provider routes canonical reads through the typed contract layer", () => {
-  const source = readFileSync(new URL("../src/commandCenter/provider.ts", import.meta.url), "utf8");
+  const source = readFileSync("src/commandCenter/provider.ts", "utf8");
   assert.match(source, /canonicalCommandCenterSnapshot/);
   assert.match(source, /canonicalEngineState/);
   assert.match(source, /canonicalFundSummary/);
