@@ -197,6 +197,25 @@ class JsonRpcClient:
         tip_hex = last[0]
         return int(tip_hex, 16) if isinstance(tip_hex, str) else None
 
+    async def eth_get_logs(
+        self,
+        *,
+        address: str,
+        from_block: int,
+        to_block: int,
+        topics: List[str] | None = None,
+    ) -> List[dict]:
+        """Read bounded event logs without introducing a write-capable path."""
+        params: Dict[str, Any] = {
+            "address": address,
+            "fromBlock": hex(max(0, int(from_block))),
+            "toBlock": hex(max(0, int(to_block))),
+        }
+        if topics:
+            params["topics"] = list(topics)
+        r = await self.call("eth_getLogs", [params])
+        return list(r.result or []) if r.ok and isinstance(r.result, list) else []
+
     async def estimate_gas(self, tx: dict) -> Optional[int]:
         r = await self.call("eth_estimateGas", [tx])
         if not r.ok or not isinstance(r.result, str):
