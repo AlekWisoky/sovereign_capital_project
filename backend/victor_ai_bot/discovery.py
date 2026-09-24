@@ -389,8 +389,8 @@ class DiscoveryManager:
             ]
             if len(supported) < 2:
                 continue
-            for pos_a, (i, token_a) in enumerate(supported):
-                for j, token_b in supported[pos_a + 1:]:
+            for pos_a, (_i, token_a) in enumerate(supported):
+                for _j, token_b in supported[pos_a + 1:]:
                     if self._curve_key(pool, i, j) not in self._curve:
                         self._curve[self._curve_key(pool, i, j)] = DiscoveredCurve(pool, token_a, token_b, i, j, int(block_number), int(block_number))
                         changed = True
