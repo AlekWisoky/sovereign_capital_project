@@ -1022,6 +1022,8 @@ class LLMINLRuntime:
                 api_key_env=key_env,
                 timeout_s=max(0.1, timeout_s),
                 fallback_rank=0,
+                cost_per_1k_input_usd=max(0.0, _safe_float(getattr(self.cfg, "llm_cost_per_1k_input_usd", 0.0), 0.0)),
+                cost_per_1k_output_usd=max(0.0, _safe_float(getattr(self.cfg, "llm_cost_per_1k_output_usd", 0.0), 0.0)),
             )
         ]
         for index, raw in enumerate(list(getattr(self.cfg, "llm_fallbacks", []) or []), start=1):
