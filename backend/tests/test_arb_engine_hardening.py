@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb_engine_module
-from victor_ai_bot.arb_engine import Edge, quote_edge, requote_opportunity, _pool_keys_for_leg
+from victor_ai_bot.arb_engine import Edge, quote_edge, requote_opportunity, _pool_keys_for_leg, _classify_route_family
 from victor_ai_bot.cache import PerBlockCache
 from victor_ai_bot.models import Opportunity, Route, RouteLeg
 
@@ -159,3 +159,48 @@ def test_arb_engine_has_no_broad_exception_handlers():
         if isinstance(node.type, ast.Name) and node.type.id == 'Exception':
             broad.append('except Exception')
     assert broad == []
+
+
+def test_expanded_route_families_are_named_before_strategy_governance():
+    cfg = SimpleNamespace(chain=SimpleNamespace(usdc="0xUSDC", usdt="0xUSDT", weth="0xWETH"))
+    assert _classify_route_family(
+        cfg,
+        [
+            Edge("univ3", "router", "0xWETH", "0xUSDC", {"fee": 500}),
+            Edge("univ3", "router", "0xUSDC", "0xWETH", {"fee": 3000}),
+        ],
+        route_type="2leg",
+    ) == "univ3_fee_tier_arb"
+    assert _classify_route_family(
+        cfg,
+        [
+            Edge("curve", "0xcurve", "0xUSDC", "0xUSDT", {"i": 0, "j": 1}),
+            Edge("univ3", "router", "0xUSDT", "0xUSDC", {"fee": 500}),
+        ],
+        route_type="2leg",
+    ) == "stablecoin_dislocation"
+    assert _classify_route_family(
+        cfg,
+        [
+            Edge("curve", "0xcurve", "0xWETH", "0xDAI", {"i": 0, "j": 1}),
+            Edge("univ3", "router", "0xDAI", "0xWETH", {"fee": 500}),
+        ],
+        route_type="2leg",
+    ) == "univ3_curve"
+    assert _classify_route_family(
+        cfg,
+        [
+            Edge("balancer", "0xvault", "0xWETH", "0xUSDC", {"pool_id": "0x1"}),
+            Edge("univ3", "router", "0xUSDC", "0xWETH", {"fee": 500}),
+        ],
+        route_type="2leg",
+    ) == "univ3_balancer"
+    assert _classify_route_family(
+        cfg,
+        [
+            Edge("univ3", "router", "0xWETH", "0xUSDC", {"fee": 500}),
+            Edge("curve", "0xcurve", "0xUSDC", "0xUSDT", {"i": 0, "j": 1}),
+            Edge("univ3", "router", "0xUSDT", "0xWETH", {"fee": 3000}),
+        ],
+        route_type="3leg",
+    ) == "three_leg_stable_eth_loop"

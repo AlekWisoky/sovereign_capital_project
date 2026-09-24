@@ -1553,6 +1553,20 @@ class ReceiptService:
                     (getattr(runtime, "_market_regime", {}) or {}).get("regime") or "balanced"
                 ),
             )
+        if getattr(runtime, "_alpha_marketplace", None) is not None:
+            try:
+                runtime._alpha_marketplace.record_route_evidence(
+                    family=str(strategy_family_pending),
+                    route_family=str(route_family_pending),
+                    realized_pnl_usd=float(realized_usd),
+                    gas_cost_usd=0.0,
+                    ok=bool(status == 1),
+                    regime=str(
+                        (getattr(runtime, "_market_regime", {}) or {}).get("regime") or "balanced"
+                    ),
+                )
+            except _SAFE_EXCEPTIONS:
+                pass
         env = self._capture_envelope(pending)
         if getattr(runtime, "_endpoint_quality", None) is not None:
             ep = self._capture_endpoint_selection(pending)

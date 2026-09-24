@@ -39,3 +39,21 @@ def test_production_compose_wires_only_supported_shadow_chains():
     assert 'VICTOR_MULTI_MAX_CHAINS: "3"' in compose
     assert 'VICTOR_MULTI_ALLOW_AUTO_ALL: "0"' in compose
     assert 'polygon.yaml' not in compose
+
+
+def test_l2_opportunity_configs_are_shadow_safe_and_have_stable_universe():
+    root = Path(__file__).resolve().parents[2]
+    expected = {
+        "base.yaml": ("8453", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"),
+        "arbitrum.yaml": ("42161", "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"),
+    }
+    for name, (chain_id, usdc, usdt) in expected.items():
+        text = (root / "backend" / "config" / name).read_text()
+        assert f"chain_id: {chain_id}" in text
+        assert f"usdc: '{usdc}'" in text
+        assert f"usdt: '{usdt}'" in text
+        assert "enable_three_leg_loops: true" in text
+        assert "enable_v3_triangular: true" in text
+        assert "auto_trading: false" in text
+        assert "dry_run: true" in text
+        assert "base_borrow_amount: '10000000000000000'" in text
