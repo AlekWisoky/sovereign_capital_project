@@ -23,7 +23,7 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
         },
         "arbitrum.yaml": {
             "chain_id": 42161,
-            "weth": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+            "weth": "0x82aF49447D8A07e3bd95BD0d56f35241523fBab1",
             "quoter": "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
             "factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
             "router": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
