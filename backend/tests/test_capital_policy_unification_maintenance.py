@@ -220,7 +220,7 @@ def test_launch_gating_uses_same_capital_policy_for_enable_and_mode_widening():
 def test_fund_summary_preserves_zero_nav_instead_of_using_deployable_capital():
     rt = _Runtime(nav_usd=0.0, deployable_wei=int(6e18), paused=False)
 
-    summary = FundService(auxiliary_state=rt._aux).summary(rt)
+    summary = FundService().summary(rt)
 
     assert summary["fundOs"]["budgets"]["deployableCapitalUsd"] == 0.0
 
