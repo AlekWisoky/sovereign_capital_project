@@ -6,7 +6,6 @@ export const WRAPPED_NATIVE: Record<string, string> = {
   arbitrum: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // WETH
   optimism: "0x4200000000000000000000000000000000000006", // WETH
   base: "0x4200000000000000000000000000000000000006",     // WETH
-  polygon: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",  // WETH
 };
 
 export function defaultWrapped(chain: string): string {
