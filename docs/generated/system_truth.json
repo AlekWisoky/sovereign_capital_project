@@ -160,6 +160,7 @@
     "test_fund_routes.py",
     "test_fund_summary_component_sync_maintenance.py",
     "test_gmao_governance_maintenance.py",
+    "test_governed_ai_inference.py",
     "test_goal_read_surface_sync_maintenance.py",
     "test_governance_read_surface_auto_trade_sync.py",
     "test_imports.py",
