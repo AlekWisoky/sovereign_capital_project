@@ -201,6 +201,7 @@ class GovernedAIRouter:
                         "fallback_count": index,
                         "latency_ms": round(elapsed, 3),
                         "estimated_cost_usd": round(cost.estimated_usd, 8),
+                        "authority": "advisory_evidence_only",
                     },
                 )
                 confidence = _confidence_from_response(structured)
@@ -229,7 +230,11 @@ class GovernedAIRouter:
             latency=AgentLatency(float(req.max_latency_ms), req.max_latency_ms, True),
             provider=provider,
             fallback_count=max(0, len(candidates) - 1),
-            reason_code="all_providers_failed",
+            reason_code=(
+                "ai_http_client_unavailable"
+                if last_reason == "ai_http_client_unavailable"
+                else "all_providers_failed"
+            ),
         )
 
     async def _call_provider(
