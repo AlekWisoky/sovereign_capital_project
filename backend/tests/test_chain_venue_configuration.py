@@ -42,10 +42,13 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
         assert chain["univ3_factory"] == want["factory"]
         assert chain["univ3_swap_router"] == want["router"]
         assert chain["aave_v3_pool"] == want["aave"]
+        assert chain["balancer_vault"] == "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        assert chain["curve_address_provider"] == "0x0000000022D53366457F9d5E68Ec105046FC4383"
+        assert chain["enable_venue_discovery"] is True
         assert chain["token_universe"] == [want["weth"], want["usdc"], want["usdt"]]
         assert cfg["flags"]["enable_discovery"] is True
-        assert cfg["flags"]["enable_curve_autogen"] is False
-        assert cfg["flags"]["enable_balancer_autogen"] is False
+        assert cfg["flags"]["enable_curve_autogen"] is True
+        assert cfg["flags"]["enable_balancer_autogen"] is True
         assert cfg["execution"]["dry_run"] is True
         assert cfg["execution"]["auto_trading"] is False
         assert cfg["safety"]["max_borrow_amount"] == "0"
