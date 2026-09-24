@@ -962,11 +962,6 @@ class LLMINLRuntime:
     # -------------------------
     async def _llm_answer(self, rt: Any, *, agent_id: str, question: str) -> str:
         key_env = str(getattr(self.cfg, "llm_api_key_env", "VICTOR_LLM_API_KEY") or "VICTOR_LLM_API_KEY")
-        api_key = (os.environ.get(key_env, "") or "").strip()
-        if not api_key:
-            self._mark_llm_error("llm_api_key_missing", key_env)
-            return ""
-
         provider_name = str(getattr(self.cfg, "llm_provider", "openai") or "openai").lower()
         endpoint = str(getattr(self.cfg, "llm_endpoint", "") or "").strip()
         if not endpoint:
