@@ -37,8 +37,9 @@ class RuntimePrimaryScanFacade:
         extra_v3_pairs = await self._discover_extra_v3_pairs(rpc, current_block=int(current_block))
         venue_pools = {"curve": [], "balancer": []}
         discovery = getattr(self, "_discovery", None)
-        if discovery is not None:
-            venue_pools = await discovery.maybe_discover_venues(rpc, self.cfg, int(current_block))
+        discover_venues = getattr(discovery, "maybe_discover_venues", None) if discovery is not None else None
+        if callable(discover_venues):
+            venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
         extra_curve_pools = list(venue_pools.get("curve") or [])
         extra_balancer_pools = list(venue_pools.get("balancer") or [])
 
