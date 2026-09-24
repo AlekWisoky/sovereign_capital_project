@@ -174,36 +174,6 @@
         "docsAndScripts": [],
         "gatingConditions": [],
         "importReachability": [
-          "backend/tests/test_backtest_replay_maintenance.py",
-          "backend/tests/test_profitability_truth_selection_sync.py"
-        ],
-        "mountedRoutes": [],
-        "runtimeInitialization": [],
-        "tests": [
-          "backend/tests/test_backtest_replay_maintenance.py",
-          "backend/tests/test_profitability_truth_selection_sync.py"
-        ]
-      },
-      "family": "backtest",
-      "path": "backend/victor_ai_bot/backtest",
-      "primaryEvidenceCount": 2,
-      "pythonFileCount": 2,
-      "referenceCount": 4,
-      "status": "shadow",
-      "statusInputs": {
-        "gatingConditions": 0,
-        "importReachability": 2,
-        "mountedRoutes": 0,
-        "runtimeInitialization": 0
-      },
-      "supplementalReferenceCount": 2,
-      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
-    },
-    {
-      "evidence": {
-        "docsAndScripts": [],
-        "gatingConditions": [],
-        "importReachability": [
           "backend/tests/test_behaveagent_runtime_maintenance.py",
           "backend/victor_ai_bot/config.py",
           "backend/victor_ai_bot/runtime.py",
@@ -865,11 +835,11 @@
     "gatingConditions"
   ],
   "summary": {
-    "familyCount": 23,
+    "familyCount": 22,
     "statusCounts": {
-      "dead": 7,
       "live": 12,
-      "shadow": 3,
+      "dead": 7,
+      "shadow": 2,
       "staged": 1
     }
   }
