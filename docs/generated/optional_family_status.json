@@ -6,6 +6,35 @@
     {
       "evidence": {
         "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_governed_ai_inference.py",
+          "backend/victor_ai_bot/llm_inl/runtime.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_governed_ai_inference.py"
+        ]
+      },
+      "family": "ai_inference",
+      "path": "backend/victor_ai_bot/ai_inference",
+      "primaryEvidenceCount": 2,
+      "pythonFileCount": 3,
+      "referenceCount": 3,
+      "status": "shadow",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 2,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 1,
+      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
         "gatingConditions": [
           "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
         ],
@@ -865,11 +894,11 @@
     "gatingConditions"
   ],
   "summary": {
-    "familyCount": 23,
+    "familyCount": 24,
     "statusCounts": {
       "dead": 7,
       "live": 12,
-      "shadow": 3,
+      "shadow": 4,
       "staged": 1
     }
   }

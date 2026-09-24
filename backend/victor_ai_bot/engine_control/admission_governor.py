@@ -70,6 +70,20 @@ class EngineAdmissionGovernor:
                 calibration_points >= 10,
                 cap.maturity,
             )
+        research_required = bool((opportunity.metadata or {}).get("ai_research_required", False))
+        canonical_evidence = list((opportunity.metadata or {}).get("canonical_evidence") or [])
+        if research_required and not canonical_evidence:
+            return EngineAdmissionDecision(
+                False,
+                "observe_only",
+                "canonical_ai_evidence_required",
+                0.0,
+                0.0,
+                telemetry_points >= cap.required_telemetry_points,
+                calibration_points >= 10,
+                cap.maturity,
+                {"evidence_authority": "advisory_only"},
+            )
         if float(opportunity.confidence) < float(cap.required_confidence):
             return EngineAdmissionDecision(
                 False,

@@ -11,6 +11,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 from .config import LLMINLConfig
 from ..fioa.audit import AuditLogger
 from ..portfolio_optimizer import opportunity_route_ready
+from ..ai_inference import AgentProvider, AgentRequest, GovernedAIRouter
 from ..runtime_services.profitability_truth import (
     inspect_profit_after_costs_truth,
     opportunity_profit_after_costs_info,
@@ -260,6 +261,8 @@ class LLMINLRuntime:
             "last_error": "",
             "last_publish_ts": 0,
         }
+        self._ai_router: GovernedAIRouter | None = None
+
         self._llm_state: Dict[str, Any] = {
             "ok": True,
             "last_error_code": "",
@@ -959,16 +962,7 @@ class LLMINLRuntime:
     # -------------------------
     async def _llm_answer(self, rt: Any, *, agent_id: str, question: str) -> str:
         key_env = str(getattr(self.cfg, "llm_api_key_env", "VICTOR_LLM_API_KEY") or "VICTOR_LLM_API_KEY")
-        api_key = (os.environ.get(key_env, "") or "").strip()
-        if not api_key:
-            self._mark_llm_error("llm_api_key_missing", key_env)
-            return ""
-
-        provider = str(getattr(self.cfg, "llm_provider", "openai") or "openai").lower()
-        if provider != "openai":
-            self._mark_llm_error("llm_provider_unsupported", provider)
-            return ""
-
+        provider_name = str(getattr(self.cfg, "llm_provider", "openai") or "openai").lower()
         endpoint = str(getattr(self.cfg, "llm_endpoint", "") or "").strip()
         if not endpoint:
             self._mark_llm_error("llm_endpoint_missing", "")
@@ -976,7 +970,6 @@ class LLMINLRuntime:
 
         model = str(getattr(self.cfg, "llm_model", "") or "").strip() or "gpt-4o-mini"
         timeout_s = _safe_float(getattr(self.cfg, "llm_timeout_s", 10.0), 10.0)
-        temperature = _safe_float(getattr(self.cfg, "llm_temperature", 0.2), 0.2)
 
         ctx_lines = self._memory.as_lines(limit=min(50, _safe_int(getattr(self.cfg, "max_narrative_memory", 100), 100)))
         risk_profile, risk_score = self._risk_profile(rt)
@@ -1020,44 +1013,74 @@ class LLMINLRuntime:
             {"role": "user", "content": user_prompt},
         ]
 
-        try:
-            import aiohttp
-        except ImportError as exc:
-            self._mark_llm_error("llm_import_failed", exc)
+        providers = [
+            AgentProvider(
+                provider=provider_name,
+                model=model,
+                capability="general",
+                endpoint=endpoint,
+                api_key_env=key_env,
+                timeout_s=max(0.1, timeout_s),
+                fallback_rank=0,
+                cost_per_1k_input_usd=max(0.0, _safe_float(getattr(self.cfg, "llm_cost_per_1k_input_usd", 0.0), 0.0)),
+                cost_per_1k_output_usd=max(0.0, _safe_float(getattr(self.cfg, "llm_cost_per_1k_output_usd", 0.0), 0.0)),
+            )
+        ]
+        for index, raw in enumerate(list(getattr(self.cfg, "llm_fallbacks", []) or []), start=1):
+            if not isinstance(raw, dict):
+                continue
+            providers.append(
+                AgentProvider(
+                    provider=str(raw.get("provider") or "").lower(),
+                    model=str(raw.get("model") or "").strip(),
+                    capability=str(raw.get("capability") or "general"),
+                    endpoint=str(raw.get("endpoint") or "").strip(),
+                    api_key_env=str(raw.get("api_key_env") or "").strip(),
+                    timeout_s=max(0.1, _safe_float(raw.get("timeout_s"), timeout_s)),
+                    cost_per_1k_input_usd=max(0.0, _safe_float(raw.get("cost_per_1k_input_usd"), 0.0)),
+                    cost_per_1k_output_usd=max(0.0, _safe_float(raw.get("cost_per_1k_output_usd"), 0.0)),
+                    enabled=bool(raw.get("enabled", True)),
+                    fallback_rank=int(raw.get("fallback_rank", index)),
+                )
+            )
+        if not bool(getattr(self.cfg, "ai_router_enabled", True)):
+            self._mark_llm_error("ai_router_disabled", "")
             return ""
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {"model": model, "messages": messages, "temperature": temperature}
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout_s)) as sess:
-                async with sess.post(endpoint, headers=headers, json=payload) as resp:
-                    if resp.status != 200:
-                        txt = ""
-                        try:
-                            txt = await resp.text()
-                        except (aiohttp.ClientError, UnicodeError, ValueError, RuntimeError):
-                            txt = ""
-                        self._mark_llm_error(f"llm_http_{resp.status}", txt[:200])
-                        return ""
-                    obj = await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError, RuntimeError) as exc:
-            self._mark_llm_error("llm_request_failed", exc)
-            return ""
+        if self._ai_router is None:
+            self._ai_router = GovernedAIRouter(
+                providers,
+                failure_cooldown_s=max(0.5, _safe_float(getattr(self.cfg, "ai_failure_cooldown_s", 5.0), 5.0)),
+            )
 
-        choices = obj.get("choices") if isinstance(obj, dict) else None
-        if not choices:
-            self._mark_llm_error("llm_response_invalid", "missing_choices")
-            return ""
-        msg = choices[0].get("message") or {}
-        content = msg.get("content")
-        if not content:
-            self._mark_llm_error("llm_response_invalid", "missing_content")
+        request = AgentRequest(
+            agent_id=str(agent_id),
+            task="operator_query",
+            prompt=f"{sys_prompt}\n\n{user_prompt}",
+            capability="general",
+            max_latency_ms=max(50.0, _safe_float(getattr(self.cfg, "ai_max_latency_ms", 2000.0), 2000.0)),
+            max_cost_usd=max(0.0, _safe_float(getattr(self.cfg, "ai_max_cost_usd", 0.05), 0.05)),
+            preferred_provider=provider_name,
+            metadata={"chain": self.chain},
+        )
+        decision = await self._ai_router.infer(request)
+        self._llm_state.update(
+            {
+                "last_latency_ms": float(decision.latency.elapsed_ms),
+                "last_cost_usd": float(decision.cost.estimated_usd),
+                "last_provider": str(decision.provider.provider),
+                "last_model": str(decision.provider.model),
+                "last_fallback_count": int(decision.fallback_count),
+            }
+        )
+        if not decision.ok or decision.evidence is None:
+            reason = str(decision.reason_code or "ai_inference_failed")
+            if reason == "ai_http_client_unavailable":
+                reason = "llm_import_failed"
+            self._mark_llm_error(reason, "")
             return ""
         self._mark_llm_ok()
-        return str(content).strip()
+        return str(decision.evidence.content).strip()
 
     # -------------------------
     # state for API
@@ -1100,6 +1123,7 @@ class LLMINLRuntime:
                 "model": str(getattr(self.cfg, "llm_model", "")),
                 "last_error": str(self.last_llm_error or ""),
                 "status": dict(self._llm_state),
+                "router": self._ai_router.state() if self._ai_router is not None else {},
             },
             "audit": self.audit.state(),
         }

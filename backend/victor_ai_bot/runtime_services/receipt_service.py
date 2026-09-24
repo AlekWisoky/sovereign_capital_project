@@ -1359,6 +1359,8 @@ class ReceiptService:
                 expected_pnl_usd=self._realized_usd_from_wei(int(expected_after)),
                 quote_drift_bps=0.0,
                 latency_ms=float(submit_to_receipt_ms),
+                ai_latency_ms=float(metadata.get("ai_latency_ms") or 0.0),
+                ai_latency_cost_usd=float(metadata.get("ai_latency_decay_cost_usd") or 0.0),
             )
         except _SAFE_EXCEPTIONS:
             return

@@ -84,6 +84,9 @@ class ExecutionTelemetryStore:
                 "expected_pnl_usd_sum": 0.0,
                 "quote_drift_bps_sum": 0.0,
                 "latency_ms_sum": 0.0,
+                "ai_latency_ms_sum": 0.0,
+                "ai_latency_cost_usd_sum": 0.0,
+                "ai_latency_samples": 0,
                 "sample_count": 0,
             }
             sec[key] = item
@@ -117,6 +120,13 @@ class ExecutionTelemetryStore:
         bucket["latency_ms_sum"] = _safe_float(bucket.get("latency_ms_sum")) + _safe_float(
             row.get("latency_ms")
         )
+        ai_latency_ms = _safe_float(row.get("ai_latency_ms"))
+        if ai_latency_ms > 0.0:
+            bucket["ai_latency_samples"] = _safe_int(bucket.get("ai_latency_samples")) + 1
+        bucket["ai_latency_ms_sum"] = _safe_float(bucket.get("ai_latency_ms_sum")) + ai_latency_ms
+        bucket["ai_latency_cost_usd_sum"] = _safe_float(
+            bucket.get("ai_latency_cost_usd_sum")
+        ) + _safe_float(row.get("ai_latency_cost_usd"))
 
     def record(
         self,
@@ -136,6 +146,8 @@ class ExecutionTelemetryStore:
         expected_pnl_usd: float,
         quote_drift_bps: float,
         latency_ms: float,
+        ai_latency_ms: float = 0.0,
+        ai_latency_cost_usd: float = 0.0,
     ) -> None:
         row = {
             "success": bool(success),
@@ -148,6 +160,8 @@ class ExecutionTelemetryStore:
             "expected_pnl_usd": float(expected_pnl_usd),
             "quote_drift_bps": float(quote_drift_bps),
             "latency_ms": float(latency_ms),
+            "ai_latency_ms": max(0.0, float(ai_latency_ms)),
+            "ai_latency_cost_usd": max(0.0, float(ai_latency_cost_usd)),
         }
         self._update_bucket(self._bucket("route_family", str(route_family or "unknown")), row)
         self._update_bucket(self._bucket("lane", str(lane or "UNKNOWN")), row)
@@ -173,6 +187,17 @@ class ExecutionTelemetryStore:
         avg_slippage_delta_bps = _safe_float(item.get("slippage_delta_bps_sum")) / float(samples)
         avg_quote_drift_bps = _safe_float(item.get("quote_drift_bps_sum")) / float(samples)
         avg_latency_ms = _safe_float(item.get("latency_ms_sum")) / float(samples)
+        ai_latency_samples = max(0, _safe_int(item.get("ai_latency_samples")))
+        avg_ai_latency_ms = (
+            _safe_float(item.get("ai_latency_ms_sum")) / float(max(1, ai_latency_samples))
+            if ai_latency_samples > 0
+            else 0.0
+        )
+        avg_ai_latency_cost_usd = (
+            _safe_float(item.get("ai_latency_cost_usd_sum")) / float(max(1, ai_latency_samples))
+            if ai_latency_samples > 0
+            else 0.0
+        )
         avg_realized_pnl_usd = _safe_float(item.get("realized_pnl_usd_sum")) / float(samples)
         avg_expected_pnl_usd = _safe_float(item.get("expected_pnl_usd_sum")) / float(samples)
         venue_quality = max(
@@ -192,6 +217,9 @@ class ExecutionTelemetryStore:
             "avg_slippage_delta_bps": float(avg_slippage_delta_bps),
             "avg_quote_drift_bps": float(avg_quote_drift_bps),
             "avg_latency_ms": float(avg_latency_ms),
+            "avg_ai_latency_ms": float(avg_ai_latency_ms),
+            "avg_ai_latency_cost_usd": float(avg_ai_latency_cost_usd),
+            "ai_latency_samples": float(ai_latency_samples),
             "avg_realized_pnl_usd": float(avg_realized_pnl_usd),
             "avg_expected_pnl_usd": float(avg_expected_pnl_usd),
             "venue_quality": float(venue_quality),
@@ -228,6 +256,11 @@ class ExecutionTelemetryStore:
             "venue_quality": float(venue_quality),
             "venue_success_rate": float(venue_success),
             "venue_stale_rate": float(venue_stale),
+            "avg_ai_latency_ms": float(route.get("avg_ai_latency_ms", 0.0)),
+            "avg_ai_latency_cost_usd": float(route.get("avg_ai_latency_cost_usd", 0.0)),
+            "ai_latency_samples": float(route.get("ai_latency_samples", 0.0)),
+            "avg_expected_pnl_usd": float(route.get("avg_expected_pnl_usd", 0.0)),
+            "avg_realized_pnl_usd": float(route.get("avg_realized_pnl_usd", 0.0)),
         }
 
     def analytics_series(self) -> Dict[str, Any]:

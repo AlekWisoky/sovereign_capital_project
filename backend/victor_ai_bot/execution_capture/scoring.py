@@ -4,6 +4,7 @@ from typing import Dict
 
 from .models import OpportunityEnvelope, CaptureScore
 from ..fund_os.profit_doctrine import capital_efficiency_quality, executable_edge_objective
+from .ai_latency import ai_latency_cost_usd, ai_latency_learning_projection
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -27,6 +28,8 @@ def compute_capture_score(
     endpoint_quality = float(telemetry.get("endpoint_quality", 0.75) or 0.75)
     lane_avg_latency_ms = float(telemetry.get("lane_avg_latency_ms", 700.0) or 700.0)
     latency_pressure = float(telemetry.get("latency_pressure", 0.0) or 0.0)
+    ai_latency_ms = max(0.0, float(telemetry.get("ai_latency_ms", 0.0) or 0.0))
+    ai_learning = ai_latency_learning_projection(telemetry)
 
     success_probability = _clip(
         (0.40 * envelope.simulation_confidence)
@@ -71,12 +74,19 @@ def compute_capture_score(
         * 0.18
     )
     slippage_cost_estimate += max(0.0, quote_drift_bps) * 0.005
-    latency_decay_cost = (
+    market_latency_decay_cost = (
         envelope.expected_profit_usd
         * (1.0 - freshness_probability)
         * max(0.10, envelope.liquidity_fragility)
         * (0.10 + latency_pressure * 0.08)
     )
+    ai_latency_decay_cost = ai_latency_cost_usd(
+        expected_profit_usd=envelope.expected_profit_usd,
+        ai_latency_ms=ai_latency_ms,
+        latency_half_life_ms=float(envelope.latency_half_life_ms),
+        learned_factor=float(ai_learning.get("ai_latency_learned_factor", 1.0)),
+    )
+    latency_decay_cost = market_latency_decay_cost + ai_latency_decay_cost
     failure_probability = _clip(
         (1.0 - success_probability) + (revert_rate * 0.30) + (timeout_rate * 0.20), 0.0, 0.95
     )
@@ -162,6 +172,7 @@ def compute_capture_score(
         slippage_cost_estimate=float(slippage_cost_estimate),
         latency_decay_cost=float(latency_decay_cost),
         failure_cost_estimate=float(failure_cost_estimate),
+        ai_latency_decay_cost=float(ai_latency_decay_cost),
         telemetry_adjustments={
             "route_success_rate": float(route_success),
             "lane_success_rate": float(lane_success),
@@ -172,6 +183,10 @@ def compute_capture_score(
             "endpoint_quality": float(endpoint_quality),
             "lane_avg_latency_ms": float(lane_avg_latency_ms),
             "latency_pressure": float(latency_pressure),
+            "ai_latency_ms": float(ai_latency_ms),
+            "ai_latency_decay_cost_usd": float(ai_latency_decay_cost),
+            "ai_latency_learning_confidence": float(ai_learning.get("ai_latency_learning_confidence", 0.0)),
+            "ai_latency_realization_ratio": float(ai_learning.get("ai_latency_realization_ratio", 1.0)),
             "liquidity_quality": float(liquidity_quality),
             "executable_depth_usd": float(executable_depth_usd),
             "capital_required_usd": float(capital_required_usd),

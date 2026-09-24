@@ -12,7 +12,7 @@ Design goals:
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -61,6 +61,16 @@ class LLMINLConfig:
     llm_endpoint: str = "https://api.openai.com/v1/chat/completions"
     llm_timeout_s: float = 10.0
     llm_temperature: float = 0.2
+    llm_cost_per_1k_input_usd: float = 0.0
+    llm_cost_per_1k_output_usd: float = 0.0
+
+    # Governed inference routing. The primary provider reuses the legacy LLM fields;
+    # optional fallback entries use the AgentProvider-compatible dictionary shape.
+    ai_router_enabled: bool = True
+    ai_failure_cooldown_s: float = 5.0
+    ai_max_latency_ms: float = 2_000.0
+    ai_max_cost_usd: float = 0.05
+    llm_fallbacks: List[Dict[str, Any]] = field(default_factory=list)
 
     # Data segmentation levels (mirrors FIU-style semantics)
     data_access_levels: List[str] = field(default_factory=lambda: [
