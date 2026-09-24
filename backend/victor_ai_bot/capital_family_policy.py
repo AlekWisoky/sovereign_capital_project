@@ -133,7 +133,19 @@ def build_family_capital_plan(
         target = max(0.0, _safe_float(targets.get(target_key))) if target_key else 0.0
         allocation_wei = max(0, _safe_int(allocations.get(allocation_key))) if allocation_key else 0
         target_implied_capital_usd = round(max(0.0, float(deployable_usd)) * target, 6)
-        allocation_usd = round(allocation_wei / 1e18, 6) if allocation_key else 0.0
+        allocation_usd = (
+            round(
+                max(
+                    0.0,
+                    _safe_float(
+                        dict(engine.get("family_allocations_usd") or {}).get(allocation_key)
+                    ),
+                ),
+                6,
+            )
+            if allocation_key
+            else 0.0
+        )
         capital_usd = allocation_usd if allocation_key else target_implied_capital_usd
         if target_key and allocation_key:
             drift = abs(allocation_usd - target_implied_capital_usd)
