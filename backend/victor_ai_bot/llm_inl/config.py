@@ -61,6 +61,8 @@ class LLMINLConfig:
     llm_endpoint: str = "https://api.openai.com/v1/chat/completions"
     llm_timeout_s: float = 10.0
     llm_temperature: float = 0.2
+    llm_cost_per_1k_input_usd: float = 0.0
+    llm_cost_per_1k_output_usd: float = 0.0
 
     # Governed inference routing. The primary provider reuses the legacy LLM fields;
     # optional fallback entries use the AgentProvider-compatible dictionary shape.
