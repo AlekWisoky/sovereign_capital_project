@@ -23,9 +23,8 @@ chain:
   discovery_interval_blocks: 40
   discovery_max_calls: 8
   rpc_private: []
-v3_pairs:
-# Explicit v3 pairs are empty; bounded discovery populates verified pools.
 v3_pairs: []
+# Explicit v3 pairs are empty; bounded discovery populates verified pools.
 curve_pools: []
 balancer_pools: []
 safety:
