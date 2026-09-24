@@ -94,3 +94,19 @@ async def test_probe_one_does_not_swallow_unexpected_bug(monkeypatch):
     stats = EndpointStats('http://r')
     with pytest.raises(LookupError):
         await mgr._probe_one('http://r', stats)
+
+
+@pytest.mark.asyncio
+async def test_rpc_manager_loop_awaits_stop_event_without_leaking_coroutine():
+    mgr = RpcManager(
+        rpc_read=['http://r'],
+        rpc_send=['http://s'],
+        probe_interval_s=60.0,
+    )
+
+    async def _probe_and_stop(url, stats):
+        mgr._stop.set()
+
+    mgr._probe_one = _probe_and_stop
+    await mgr._loop()
+    assert mgr._stop.is_set()
