@@ -391,7 +391,7 @@ class FundService:
         )
         capital_eff = dict((capital or {}).get("capital_efficiency_metrics") or {})
         ledger_balances = ledger.get("balances") if isinstance(ledger, dict) else {}
-        if isinstance(ledger_balances, Mapping) and "USD" in ledger_balances:
+        if isinstance(ledger_balances, ABCMapping) and "USD" in ledger_balances:
             nav_usd = max(0.0, float(ledger_balances.get("USD") or 0.0))
         else:
             nav_usd = _explicit_capital_usd(
