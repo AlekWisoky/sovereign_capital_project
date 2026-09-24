@@ -292,8 +292,8 @@ def test_auxiliary_capital_summary_canonicalizes_treasury_bankroll_and_ledger():
     assert summary["navUsd"] == 12.5
     assert summary["navSource"] == "ledger_usd_balance"
     assert int(summary["bankroll"]["realizedProfitWei"]) == int(6e18)
-    assert summary["deployableUsd"] == 0.0
-    assert summary["estimatedCapitalUsd"] == 0.0
+    assert summary["deployableUsd"] == 10.0
+    assert summary["estimatedCapitalUsd"] == 20.0
     assert int(summary["treasury"]["meta"]["estimated_capital_wei"]) == int(20e18)
     assert summary["allocations"][0]["id"] == "flashloan_atomic"
     assert summary["capitalFlows"][0]["amountUsd"] == 12.5
