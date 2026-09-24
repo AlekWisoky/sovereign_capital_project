@@ -335,6 +335,41 @@ def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edg
     return out
 
 
+def _classify_route_family(cfg: Any, legs: List[Edge], *, route_type: str) -> str:
+    """Name the opportunity shape; downstream strategy governance remains authoritative."""
+    dexes = [str(e.dex) for e in legs]
+    stable_tokens = {
+        str(getattr(cfg.chain, "usdc", "") or "").lower(),
+        str(getattr(cfg.chain, "usdt", "") or "").lower(),
+    }
+    stable_tokens.discard("")
+    weth = str(getattr(cfg.chain, "weth", "") or "").lower()
+    tokens = {str(e.token_in).lower() for e in legs} | {str(e.token_out).lower() for e in legs}
+
+    if route_type == "2leg" and len(legs) == 2:
+        e1, e2 = legs
+        if (
+            e1.dex == "univ3"
+            and e2.dex == "univ3"
+            and int(e1.params.get("fee", 3000)) != int(e2.params.get("fee", 3000))
+            and {e1.token_in.lower(), e1.token_out.lower()}
+            == {e2.token_in.lower(), e2.token_out.lower()}
+        ):
+            return "univ3_fee_tier_arb"
+        if set(dexes) == {"univ3", "curve"}:
+            if stable_tokens and bool(tokens & stable_tokens):
+                return "stablecoin_dislocation"
+            return "univ3_curve"
+        if set(dexes) == {"univ3", "balancer"}:
+            return "univ3_balancer"
+
+    if route_type == "3leg" and len(legs) == 3:
+        if weth and weth in tokens and stable_tokens and bool(tokens & stable_tokens):
+            return "three_leg_stable_eth_loop"
+
+    return "flash_arb"
+
+
 def _pool_keys_for_leg(
     dex: str, token_in: str, token_out: str, params: Dict[str, Any], aux_hex: str
 ) -> str:
@@ -522,6 +557,7 @@ async def find_two_leg_opportunities(
                         "leg1": meta1,
                         "leg2": meta2,
                         "route_type": "2leg",
+                        "route_family": _classify_route_family(cfg, [e1, e2], route_type="2leg"),
                         "venues": [e1.dex, e2.dex],
                         "pool_keys": pool_keys,
                         "gas_estimate_units": str(
@@ -770,6 +806,7 @@ async def find_three_leg_opportunities(
                                 "leg2": meta2,
                                 "leg3": meta3,
                                 "route_type": "3leg",
+                                "route_family": _classify_route_family(cfg, [e1, e2, e3], route_type="3leg"),
                                 "venues": [e1.dex, e2.dex, e3.dex],
                                 "pool_keys": pool_keys,
                                 "gas_estimate_units": str(
