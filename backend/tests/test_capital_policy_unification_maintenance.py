@@ -222,7 +222,7 @@ def test_fund_summary_preserves_zero_nav_instead_of_using_deployable_capital():
 
     summary = FundService().summary(rt)
 
-    assert summary["fundOs"]["budgets"]["deployableCapitalUsd"] == 0.0
+    assert summary["fundMaster"]["budgets"]["deployableCapitalUsd"] == 0.0
 
 
 def test_treasury_and_launch_surfaces_advertise_shared_capital_policy_contract():
