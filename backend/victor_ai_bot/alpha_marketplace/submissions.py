@@ -204,6 +204,57 @@ class AlphaMarketplaceStore:
         self._save()
         return {"ok": True, "item": dict(item), "decision": decision}
 
+    @staticmethod
+    def _update_route_evidence(
+        item: Dict[str, Any],
+        *,
+        route_family: str,
+        realized_pnl_usd: float,
+        gas_cost_usd: float,
+        ok: bool,
+        regime: str,
+    ) -> None:
+        evidence = dict(item.get("evidence") or {})
+        count = int(evidence.get("telemetry_count") or 0) + 1
+        successes = int(evidence.get("success_count") or 0) + (1 if ok else 0)
+        evidence["telemetry_count"] = count
+        evidence["success_count"] = successes
+        evidence["success_rate"] = float(successes) / float(max(1, count))
+        evidence["realized_pnl_usd"] = float(evidence.get("realized_pnl_usd") or 0.0) + float(realized_pnl_usd)
+        evidence["gas_cost_usd"] = float(evidence.get("gas_cost_usd") or 0.0) + float(gas_cost_usd)
+        families = list(evidence.get("route_families") or [])
+        route_name = str(route_family or "")
+        if route_name and route_name not in families:
+            families.append(route_name)
+        evidence["route_families"] = families[-32:]
+        evidence["last_route_observation"] = {
+            "route_family": route_name,
+            "realized_pnl_usd": float(realized_pnl_usd),
+            "gas_cost_usd": float(gas_cost_usd),
+            "ok": bool(ok),
+            "regime": str(regime or "unknown"),
+            "ts": int(time.time()),
+        }
+        if "score" in evidence and "riskScore" in evidence:
+            try:
+                evidence["rollout_recommendation"] = promotion_allowed(
+                    score=float(evidence["score"]),
+                    risk_score=float(evidence["riskScore"]),
+                    stage=str(item.get("stage") or "sandbox"),
+                    evidence=evidence,
+                )
+            except (TypeError, ValueError):
+                evidence["rollout_recommendation"] = {
+                    "allowed": False,
+                    "reason": "invalid_score_or_risk_evidence",
+                }
+        else:
+            evidence["rollout_recommendation"] = {
+                "allowed": False,
+                "reason": "score_and_risk_evidence_required",
+            }
+        item["evidence"] = evidence
+
     def record_route_evidence(
         self,
         *,
@@ -221,39 +272,14 @@ class AlphaMarketplaceStore:
         for item in self._items.values():
             if str(item.get("family") or "") != str(family or ""):
                 continue
-            evidence = dict(item.get("evidence") or {})
-            count = int(evidence.get("telemetry_count") or 0) + 1
-            successes = int(evidence.get("success_count") or 0) + (1 if ok else 0)
-            evidence["telemetry_count"] = count
-            evidence["success_count"] = successes
-            evidence["success_rate"] = float(successes) / float(max(1, count))
-            evidence["realized_pnl_usd"] = float(evidence.get("realized_pnl_usd") or 0.0) + float(realized_pnl_usd)
-            evidence["gas_cost_usd"] = float(evidence.get("gas_cost_usd") or 0.0) + float(gas_cost_usd)
-            families = list(evidence.get("route_families") or [])
-            if str(route_family or "") and str(route_family) not in families:
-                families.append(str(route_family))
-            evidence["route_families"] = families[-32:]
-            evidence["last_route_observation"] = {
-                "route_family": str(route_family or ""),
-                "realized_pnl_usd": float(realized_pnl_usd),
-                "gas_cost_usd": float(gas_cost_usd),
-                "ok": bool(ok),
-                "regime": str(regime or "unknown"),
-                "ts": int(time.time()),
-            }
-            if "score" in evidence and "riskScore" in evidence:
-                try:
-                    evidence["rollout_recommendation"] = promotion_allowed(
-                        score=float(evidence["score"]),
-                        risk_score=float(evidence["riskScore"]),
-                        stage=str(item.get("stage") or "sandbox"),
-                        evidence=evidence,
-                    )
-                except (TypeError, ValueError):
-                    evidence["rollout_recommendation"] = {"allowed": False, "reason": "invalid_score_or_risk_evidence"}
-            else:
-                evidence["rollout_recommendation"] = {"allowed": False, "reason": "score_and_risk_evidence_required"}
-            item["evidence"] = evidence
+            self._update_route_evidence(
+                item,
+                route_family=route_family,
+                realized_pnl_usd=realized_pnl_usd,
+                gas_cost_usd=gas_cost_usd,
+                ok=ok,
+                regime=regime,
+            )
             self._items[item["submissionId"]] = item
             matched += 1
         if matched:

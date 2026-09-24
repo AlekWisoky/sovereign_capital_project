@@ -335,36 +335,42 @@ def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edg
     return out
 
 
+def _classify_two_leg_family(legs: List[Edge], stable_tokens: set[str]) -> str | None:
+    e1, e2 = legs
+    if (
+        e1.dex == "univ3"
+        and e2.dex == "univ3"
+        and int(e1.params.get("fee", 3000)) != int(e2.params.get("fee", 3000))
+        and {e1.token_in.lower(), e1.token_out.lower()}
+        == {e2.token_in.lower(), e2.token_out.lower()}
+    ):
+        return "univ3_fee_tier_arb"
+    dexes = {str(e1.dex), str(e2.dex)}
+    tokens = {str(e.token_in).lower() for e in legs} | {str(e.token_out).lower() for e in legs}
+    if dexes == {"univ3", "curve"}:
+        return "stablecoin_dislocation" if stable_tokens and tokens & stable_tokens else "univ3_curve"
+    if dexes == {"univ3", "balancer"}:
+        return "univ3_balancer"
+    return None
+
+
 def _classify_route_family(cfg: Any, legs: List[Edge], *, route_type: str) -> str:
     """Name the opportunity shape; downstream strategy governance remains authoritative."""
-    dexes = [str(e.dex) for e in legs]
     stable_tokens = {
         str(getattr(cfg.chain, "usdc", "") or "").lower(),
         str(getattr(cfg.chain, "usdt", "") or "").lower(),
     }
     stable_tokens.discard("")
-    weth = str(getattr(cfg.chain, "weth", "") or "").lower()
     tokens = {str(e.token_in).lower() for e in legs} | {str(e.token_out).lower() for e in legs}
 
     if route_type == "2leg" and len(legs) == 2:
-        e1, e2 = legs
-        if (
-            e1.dex == "univ3"
-            and e2.dex == "univ3"
-            and int(e1.params.get("fee", 3000)) != int(e2.params.get("fee", 3000))
-            and {e1.token_in.lower(), e1.token_out.lower()}
-            == {e2.token_in.lower(), e2.token_out.lower()}
-        ):
-            return "univ3_fee_tier_arb"
-        if set(dexes) == {"univ3", "curve"}:
-            if stable_tokens and bool(tokens & stable_tokens):
-                return "stablecoin_dislocation"
-            return "univ3_curve"
-        if set(dexes) == {"univ3", "balancer"}:
-            return "univ3_balancer"
+        family = _classify_two_leg_family(legs, stable_tokens)
+        if family:
+            return family
 
     if route_type == "3leg" and len(legs) == 3:
-        if weth and weth in tokens and stable_tokens and bool(tokens & stable_tokens):
+        weth = str(getattr(cfg.chain, "weth", "") or "").lower()
+        if weth and weth in tokens and stable_tokens and tokens & stable_tokens:
             return "three_leg_stable_eth_loop"
 
     return "flash_arb"
