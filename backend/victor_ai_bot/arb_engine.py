@@ -252,7 +252,7 @@ async def quote_edges_batch(
     return out
 
 
-def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edge]:
+def build_edges(\n    cfg,\n    *,\n    extra_v3_pairs: Optional[List[dict]] = None,\n    extra_curve_pools: Optional[List[dict]] = None,\n    extra_balancer_pools: Optional[List[dict]] = None,\n) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
         # For execution we prefer SwapRouter; for quoting we use QuoterV2.
@@ -284,7 +284,7 @@ def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edg
                 )
             )
     if bool(getattr(cfg.flags, "enable_curve_autogen", True)):
-        for p in cfg.chain.curve_pools:
+        curve_pools = list(cfg.chain.curve_pools or [])\n        if extra_curve_pools:\n            curve_pools.extend(list(extra_curve_pools))\n        for p in curve_pools:
             pool = p["pool"]
             edges.append(
                 Edge(
@@ -313,7 +313,7 @@ def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edg
                 )
             )
     if bool(getattr(cfg.flags, "enable_balancer_autogen", True)) and cfg.chain.balancer_vault:
-        for p in cfg.chain.balancer_pools:
+        balancer_pools = list(cfg.chain.balancer_pools or [])\n        if extra_balancer_pools:\n            balancer_pools.extend(list(extra_balancer_pools))\n        for p in balancer_pools:
             edges.append(
                 Edge(
                     "balancer",
@@ -436,7 +436,7 @@ async def find_two_leg_opportunities(
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
     metrics: Dict[str, int] = {}
-    edges = build_edges(cfg, extra_v3_pairs=extra_v3_pairs)
+    edges = build_edges(\n        cfg,\n        extra_v3_pairs=extra_v3_pairs,\n        extra_curve_pools=extra_curve_pools,\n        extra_balancer_pools=extra_balancer_pools,\n    )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
     for e in edges:
@@ -647,7 +647,7 @@ async def find_three_leg_opportunities(
     """
     t_start = time.perf_counter()
     metrics: Dict[str, int] = {}
-    edges = build_edges(cfg, extra_v3_pairs=extra_v3_pairs)
+    edges = build_edges(\n        cfg,\n        extra_v3_pairs=extra_v3_pairs,\n        extra_curve_pools=extra_curve_pools,\n        extra_balancer_pools=extra_balancer_pools,\n    )
     # adjacency: token_in -> edges
     adj: Dict[str, List[Edge]] = {}
     for e in edges:
