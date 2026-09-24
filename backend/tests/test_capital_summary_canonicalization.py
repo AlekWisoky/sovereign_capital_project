@@ -310,7 +310,8 @@ def test_operator_summary_uses_canonical_capital_summary_for_nav_and_flows():
     assert out["summaryContract"]["truthFamily"] == "operator"
     assert out["summaryContract"]["readModel"] == "operator_summary_projection_v1"
 
-def test_auxiliary_capital_summary_accepts_explicit_usd_authority_without_wei_inference():
+def test_auxiliary_capital_summary_accepts_explicit_usd_authority_without_wei_inference(
+):
 
     runtime = _Runtime()
     state = runtime.capital_engine_state()
