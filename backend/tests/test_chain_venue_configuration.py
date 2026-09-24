@@ -20,6 +20,7 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
             "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
             "aave": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
             "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "usdt": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
         },
         "arbitrum.yaml": {
             "chain_id": 42161,
@@ -29,6 +30,7 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
             "router": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
             "aave": "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
             "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+                "usdt": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
         },
     }
     for name, want in expected.items():
@@ -40,7 +42,7 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
         assert chain["univ3_factory"] == want["factory"]
         assert chain["univ3_swap_router"] == want["router"]
         assert chain["aave_v3_pool"] == want["aave"]
-        assert chain["token_universe"] == [want["weth"], want["usdc"]]
+        assert chain["token_universe"] == [want["weth"], want["usdc"], want["usdt"]]
         assert cfg["flags"]["enable_discovery"] is True
         assert cfg["flags"]["enable_curve_autogen"] is False
         assert cfg["flags"]["enable_balancer_autogen"] is False
