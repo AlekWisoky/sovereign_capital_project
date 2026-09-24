@@ -261,7 +261,7 @@ def fund_summary_unavailable_payload(runtime: Any | None = None) -> Dict[str, An
     return payload
 
 
-def _explicit_capital_usd(capital_engine: Mapping[str, Any], *keys: str) -> float:
+def _explicit_capital_usd(capital_engine: ABCMapping[str, Any], *keys: str) -> float:
     for key in keys:
         value = capital_engine.get(key)
         if value is None or value == "":
