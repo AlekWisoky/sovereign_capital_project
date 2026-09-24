@@ -104,6 +104,14 @@ class ExecutionDecisionEngine:
         telemetry = self.telemetry.combined_feedback(
             route_family=envelope.route_family, venues=envelope.venues, lane=lane_hint
         )
+        # AI evidence is advisory only. If an upstream research/quorum step
+        # annotated this opportunity, price its measured inference latency into
+        # the same capture economics as market/execution latency.
+        opp_meta = getattr(opp, "meta", {}) if isinstance(getattr(opp, "meta", {}), dict) else {}
+        ai_latency_ms = float(opp_meta.get("ai_latency_ms") or 0.0)
+        if ai_latency_ms > 0.0:
+            telemetry = dict(telemetry or {})
+            telemetry["ai_latency_ms"] = ai_latency_ms
 
         lane_endpoints: List[str] = []
         lane_relays: List[str] = []
