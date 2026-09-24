@@ -46,7 +46,7 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
         assert cfg["flags"]["enable_balancer_autogen"] is False
         assert cfg["execution"]["dry_run"] is True
         assert cfg["execution"]["auto_trading"] is False
-        assert cfg["execution"]["max_borrow_amount"] if "max_borrow_amount" in cfg["execution"] else True
+        assert cfg["safety"]["max_borrow_amount"] == "0"
 
 
 def test_polygon_is_removed_from_active_configuration_surface():
