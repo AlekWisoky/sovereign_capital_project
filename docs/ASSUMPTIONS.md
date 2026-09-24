@@ -72,7 +72,7 @@
 
 - **Triangle scanning bounds:** 3-hop scanning is strictly bounded by time budgets and adjacency capping (`VICTOR_MAX_EDGES_PER_TOKEN`, default 10). This is chosen to prevent combinatorial explosion and RPC storms.
 
-- **Bounded discovery is opt-in:** Discovery is disabled by default (`flags.enable_discovery=false`). When enabled, it runs infrequently (`chain.discovery_interval_blocks`, default 50 on mainnet template) and is hard-capped by `chain.discovery_max_calls` (default 24). Discovery only targets UniV3 via `univ3_factory.getPool(...)`.
+- **Bounded discovery is opt-in:** Discovery is disabled by default (`flags.enable_discovery=false`). When enabled, it runs infrequently (`chain.discovery_interval_blocks`, default 50 on mainnet template) and is hard-capped by `chain.discovery_max_calls` (default 24). Discovery targets UniV3 via `univ3_factory.getPool(...)`; Base/Arbitrum additionally use the canonical Curve AddressProvider registry and Balancer Vault `PoolRegistered` logs for bounded read-only pool discovery. Candidates are retained only when supported tokens and positive on-chain pool balances are verified; quote/economic filters remain in the existing edge/quote/execution-capture path.
 
 - **Conflict definition for portfolios:** A "non-conflicting" trade set is defined as disjoint **pool-level keys** derived from route legs:
   - UniV3: `univ3:<token0>:<token1>:<fee>`
