@@ -284,13 +284,17 @@ def build_wealth_goal_signals(runtime: Any) -> WealthGoalSignals:
     hard_stop = bool(_safe_dict(_safe_dict(drawdown).get("hardStop")).get("active"))
     kill_active = bool(_safe_dict(kill_switch).get("suppressions"))
 
-    capital_base_usd = 1000.0
+    capital_base_usd = 0.0
     try:
-        eff = _safe_dict(_safe_dict(capital).get("capital_efficiency_metrics"))
-        deployed = float(eff.get("deployedCapitalWei") or 0.0)
-        est = float(eff.get("estimatedCapitalWei") or 0.0)
-        raw = max(deployed, est)
-        capital_base_usd = raw / 1e18 if raw > 1e12 else max(raw, 1000.0)
+        engine = _safe_dict(_safe_dict(capital).get("capital_engine"))
+        for key in ("deployable_usd", "deployableUsd", "available_usd", "availableUsd"):
+            value = engine.get(key)
+            if value is None or value == "":
+                continue
+            parsed = float(value)
+            if parsed >= 0.0 and parsed == parsed and parsed not in {float("inf"), float("-inf")}:
+                capital_base_usd = parsed
+                break
     except (AttributeError, KeyError, TypeError, ValueError):
         pass
 

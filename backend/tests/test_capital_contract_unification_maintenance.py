@@ -68,7 +68,7 @@ class _CapitalContractRuntime:
         )
         self._treasury = SimpleNamespace(
             snapshot=lambda: {"ok": True, "enabled": True, "allocator": "treasury"},
-            cfg=SimpleNamespace(meta={"estimated_capital_wei": 22_000_000_000_000_000_000}),
+            cfg=SimpleNamespace(meta={"estimated_capital_wei": 22_000_000_000_000_000_000, "estimated_capital_usd": 22.0}),
         )
         self._ledger_repo = SimpleNamespace(
             tail=lambda chain, limit=50: [{"asset": "USD", "delta": 12.5}],
@@ -108,6 +108,12 @@ class _CapitalContractRuntime:
                 "experimental_bankroll_wei": 2_000_000_000_000_000_000,
                 "drawdown_buffer_wei": 3_000_000_000_000_000_000,
                 "treasury_offramp_wei": 1_000_000_000_000_000_000,
+                "deployable_usd": 10.0,
+                "reserve_usd": 4.0,
+                "experimental_usd": 2.0,
+                "drawdown_buffer_usd": 3.0,
+                "treasury_offramp_usd": 1.0,
+                "estimated_capital_usd": 22.0,
                 "family_targets": {"flashloan_atomic": 0.5},
                 "family_allocations_wei": {"flashloan_atomic": 6_000_000_000_000_000_000},
             },

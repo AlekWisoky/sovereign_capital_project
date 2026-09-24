@@ -467,10 +467,12 @@ class FundService:
         health = apply_recovery_reliability(health)
         fund_master = FundMasterOrchestrator().compose(
             stage=stage,
-            nav_usd=(
-                float((capital_eff or {}).get("deployedCapitalWei", 0.0) or 0.0) / 1e18
-                if float((capital_eff or {}).get("deployedCapitalWei", 0.0) or 0.0) > 1e9
-                else float((capital_eff or {}).get("deployedCapitalWei", 0.0) or 0.0)
+            nav_usd=float(
+                (capital or {}).get("capital_engine", {}).get("nav_usd")
+                or (capital or {}).get("capital_engine", {}).get("navUsd")
+                or (capital or {}).get("capital_engine", {}).get("deployable_usd")
+                or (capital or {}).get("capital_engine", {}).get("deployableUsd")
+                or 0.0
             ),
             family_targets=dict(
                 (capital or {}).get("capital_engine", {}).get("family_targets") or {}
@@ -478,7 +480,9 @@ class FundService:
             income_metrics=family_metrics,
             capital_metrics=capital_eff,
             fund_health={
-                "realizedPnlUsd": float(health.get("deployedCapitalWei") or 0.0),
+                "realizedPnlUsd": float(
+                    health.get("realizedPnlUsd") or health.get("realizedPnlUsdAfterGas") or 0.0
+                ),
                 "capitalEfficiency": float(
                     capital_eff.get("failureAdjustedCapitalEfficiency") or 0.0
                 ),

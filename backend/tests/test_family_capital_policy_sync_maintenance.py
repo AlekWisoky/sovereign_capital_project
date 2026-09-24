@@ -57,6 +57,8 @@ class _CapitalSummaryRuntime:
                 "treasury_offramp_wei": 0,
                 "family_targets": {"flashloan_atomic": 0.6},
                 "family_allocations_wei": {"flash_arb": int(6e18)},
+                "family_allocations_usd": {"flash_arb": 6.0},
+                "deployable_usd": 10.0,
             },
             "capital_efficiency_metrics": {"deployedCapitalWei": int(4e18)},
             "reinvestment_policy": {},

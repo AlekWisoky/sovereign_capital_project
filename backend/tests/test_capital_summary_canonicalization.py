@@ -227,6 +227,16 @@ class _Runtime:
                 "experimental_bankroll_wei": int(1e18),
                 "drawdown_buffer_wei": int(1e18),
                 "treasury_offramp_wei": int(1e18),
+                "deployable_usd": 10.0,
+                "reserve_usd": 5.0,
+                "experimental_usd": 1.0,
+                "drawdown_buffer_usd": 1.0,
+                "treasury_offramp_usd": 1.0,
+                "estimated_capital_usd": 20.0,
+                "family_allocations_usd": {
+                    "flashloan_atomic": 7.0,
+                    "funding_arb": 3.0,
+                },
                 "family_targets": {"flashloan_atomic": 0.7, "funding_arb": 0.3},
                 "family_allocations_wei": {
                     "flashloan_atomic": int(7e18),
@@ -282,6 +292,8 @@ def test_auxiliary_capital_summary_canonicalizes_treasury_bankroll_and_ledger():
     assert summary["navUsd"] == 12.5
     assert summary["navSource"] == "ledger_usd_balance"
     assert int(summary["bankroll"]["realizedProfitWei"]) == int(6e18)
+    assert summary["deployableUsd"] == 10.0
+    assert summary["estimatedCapitalUsd"] == 20.0
     assert int(summary["treasury"]["meta"]["estimated_capital_wei"]) == int(20e18)
     assert summary["allocations"][0]["id"] == "flashloan_atomic"
     assert summary["capitalFlows"][0]["amountUsd"] == 12.5
@@ -307,3 +319,24 @@ def test_operator_summary_uses_canonical_capital_summary_for_nav_and_flows():
     assert out["summaryContract"]["contractVersion"] == "canonical_summary_read_contract_v1"
     assert out["summaryContract"]["truthFamily"] == "operator"
     assert out["summaryContract"]["readModel"] == "operator_summary_projection_v1"
+
+def test_auxiliary_capital_summary_accepts_explicit_usd_authority_without_wei_inference(
+):
+
+    runtime = _Runtime()
+    state = runtime.capital_engine_state()
+    state["capital_engine"]["deployable_usd"] = 2500.0
+    state["capital_engine"]["reserve_usd"] = 500.0
+    state["capital_engine"]["estimated_capital_usd"] = 3000.0
+    state["capital_engine"]["family_allocations_usd"] = {
+        "flashloan_atomic": 1750.0,
+        "funding_arb": 750.0,
+    }
+    runtime.capital_engine_state = lambda: state
+    runtime._treasury.cfg.meta["estimated_capital_usd"] = 3000.0
+
+    summary = AuxiliaryStateService().capital_summary(runtime)
+    assert summary["deployableUsd"] == 2500.0
+    assert summary["reserveUsd"] == 500.0
+    assert summary["estimatedCapitalUsd"] == 3000.0
+    assert summary["allocations"][0]["capitalUsd"] == 1750.0

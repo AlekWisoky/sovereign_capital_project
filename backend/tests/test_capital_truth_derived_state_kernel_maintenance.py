@@ -54,7 +54,8 @@ def test_capital_truth_derived_state_kernel_computes_totals_exposure_and_family_
     assert bundle.total_capital_wei == 32 * 10**18
     assert bundle.retained_profit_wei == 2 * 10**18
     assert bundle.withdrawable_balance_wei == 3 * 10**18
-    assert bundle.locked_capital_wei == 8200 * 10**18
+    assert bundle.locked_capital_wei == 5 * 10**18
+    assert bundle.prime_locked_wei_estimate == 0
     assert bundle.prime_family_exposure == {"flash_arb": 5000.0}
     assert bundle.categories["reserved_capital_wei"] == str(5 * 10**18)
     assert bundle.family_allocations == {"flash_arb": 0.6, "funding_arb": 0.4}

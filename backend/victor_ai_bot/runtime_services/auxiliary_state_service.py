@@ -312,11 +312,17 @@ class AuxiliaryStateService:
                 return int(default)
 
     @staticmethod
-    def _wei_to_usd(value: Any) -> float:
-        try:
-            return float(int(str(value or 0))) / 1_000_000_000_000_000_000.0
-        except (TypeError, ValueError):
-            return 0.0
+    def _explicit_usd(*values: Any) -> float:
+        for value in values:
+            if value is None or value == "":
+                continue
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed == parsed and parsed not in {float("inf"), float("-inf")}:
+                return max(0.0, parsed)
+        return 0.0
 
     def _build_capital_summary(self, runtime: Any) -> Dict[str, Any]:
         ledger_state = self.ledger_state(runtime)
@@ -363,14 +369,30 @@ class AuxiliaryStateService:
         else:
             nav_usd = 0.0
             nav_source = "unavailable"
-        deployable_usd = self._wei_to_usd(capital_engine.get("deployable_bankroll_wei"))
-        reserve_usd = self._wei_to_usd(capital_engine.get("reserve_bankroll_wei"))
-        experimental_usd = self._wei_to_usd(capital_engine.get("experimental_bankroll_wei"))
-        drawdown_buffer_usd = self._wei_to_usd(capital_engine.get("drawdown_buffer_wei"))
-        treasury_offramp_usd = self._wei_to_usd(capital_engine.get("treasury_offramp_wei"))
-        deployed_capital_usd = self._wei_to_usd(capital_metrics.get("deployedCapitalWei"))
-        estimated_capital_usd = self._wei_to_usd(
-            treasury_meta.get("estimated_capital_wei") or treasury_meta.get("estimatedCapitalWei")
+        deployable_usd = self._explicit_usd(
+            capital_engine.get("deployable_usd"), capital_engine.get("deployableUsd")
+        )
+        reserve_usd = self._explicit_usd(
+            capital_engine.get("reserve_usd"), capital_engine.get("reserveUsd")
+        )
+        experimental_usd = self._explicit_usd(
+            capital_engine.get("experimental_usd"), capital_engine.get("experimentalUsd")
+        )
+        drawdown_buffer_usd = self._explicit_usd(
+            capital_engine.get("drawdown_buffer_usd"), capital_engine.get("drawdownBufferUsd")
+        )
+        treasury_offramp_usd = self._explicit_usd(
+            capital_engine.get("treasury_offramp_usd"), capital_engine.get("treasuryOfframpUsd")
+        )
+        deployed_capital_usd = self._explicit_usd(
+            capital_metrics.get("deployedCapitalUsd"),
+            capital_metrics.get("deployed_capital_usd"),
+        )
+        estimated_capital_usd = self._explicit_usd(
+            capital_engine.get("estimated_capital_usd"),
+            capital_engine.get("estimatedCapitalUsd"),
+            treasury_meta.get("estimated_capital_usd"),
+            treasury_meta.get("estimatedCapitalUsd"),
         )
         if estimated_capital_usd <= 0.0:
             estimated_capital_usd = max(
