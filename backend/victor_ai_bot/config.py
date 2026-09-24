@@ -338,6 +338,10 @@ class ChainConfig:
     univ3_factory: str = ""  # optional; enables bounded discovery
     univ3_swap_router: str = ""  # executor uses SwapRouter; quoting uses QuoterV2
     balancer_vault: str = ""
+    # Canonical protocol registries used only for bounded read-only discovery.
+    curve_address_provider: str = ""
+    discovery_pool_max_candidates: int = 24
+    discovery_log_window_blocks: int = 50_000
     aave_v3_pool: str = ""
     weth: str = ""
     # Optional stablecoins for USD accounting / off-ramp UX.
