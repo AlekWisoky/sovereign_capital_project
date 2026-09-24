@@ -123,7 +123,7 @@ async def test_bounded_curve_and_balancer_discovery_filters_to_supported_liquid_
     assert result["curve"]
     expected_curve_tokens = {
         "0x833589fcD6eDb6e08f4c7c32d4f71b54bda02913".lower(),
-        "0xfde4c96c8593536e31f229ea8f37b2ad2699bb2".lower(),
+        "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2".lower(),
     }
     assert any(
         {p["token_in"].lower(), p["token_out"].lower()} == expected_curve_tokens
