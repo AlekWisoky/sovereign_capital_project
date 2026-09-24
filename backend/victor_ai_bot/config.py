@@ -628,6 +628,11 @@ def load_config(path: str) -> AppConfig:
         llm_endpoint=str(inlraw.get("llm_endpoint", "https://api.openai.com/v1/chat/completions")),
         llm_timeout_s=float(inlraw.get("llm_timeout_s", 10.0)),
         llm_temperature=float(inlraw.get("llm_temperature", 0.2)),
+        ai_router_enabled=bool(inlraw.get("ai_router_enabled", True)),
+        ai_failure_cooldown_s=float(inlraw.get("ai_failure_cooldown_s", 5.0)),
+        ai_max_latency_ms=float(inlraw.get("ai_max_latency_ms", 2000.0)),
+        ai_max_cost_usd=float(inlraw.get("ai_max_cost_usd", 0.05)),
+        llm_fallbacks=list(inlraw.get("llm_fallbacks") or []),
         confidentiality_strict=bool(inlraw.get("confidentiality_strict", False)),
     )
 
