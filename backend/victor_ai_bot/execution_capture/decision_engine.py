@@ -599,6 +599,8 @@ class ExecutionDecisionEngine:
                     if c.get("endpoint")
                 ],
                 "execution_route_plan": execution_route_plan,
+                "ai_latency_ms": float((capture.telemetry_adjustments or {}).get("ai_latency_ms", 0.0)),
+                "ai_latency_decay_cost_usd": float((capture.telemetry_adjustments or {}).get("ai_latency_decay_cost_usd", 0.0)),
             },
         )
         provider_hint = (
@@ -646,6 +648,8 @@ class ExecutionDecisionEngine:
                 "adversarial_state": adversarial,
                 "endpoint_selection": endpoint_choice,
                 "pipeline_latency_ms": round(float(pipeline_latency_ms), 6),
+                "ai_latency_ms": float((capture.telemetry_adjustments or {}).get("ai_latency_ms", 0.0)),
+                "ai_latency_decay_cost_usd": float((capture.telemetry_adjustments or {}).get("ai_latency_decay_cost_usd", 0.0)),
                 "flashloan_resilience": flashloan,
                 "provider_hint": provider_hint,
                 "route_invalid_causes": list(adversarial.get("route_invalid_causes") or [])
