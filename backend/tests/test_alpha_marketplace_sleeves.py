@@ -115,3 +115,26 @@ def test_retirement_is_deterministic_and_uses_existing_promotion_module():
     assert decision["allowed"] is True
     assert decision["nextStage"] == "retired"
     assert promotion_allowed(score=0.62, risk_score=0.40, stage="sandbox")["allowed"] is True
+
+
+def test_marketplace_records_route_evidence_without_advancing_stage(tmp_path):
+    store = AlphaMarketplaceStore(data_dir=str(tmp_path), chain="test", enabled=True)
+    submitted = store.submit(title="Alpha", contributor="aqe", family="flash_arb", thesis="route")
+    sid = submitted["item"]["submissionId"]
+    out = store.record_route_evidence(
+        family="flash_arb",
+        route_family="univ3_fee_tier_arb",
+        realized_pnl_usd=4.25,
+        gas_cost_usd=0.30,
+        ok=True,
+        regime="balanced",
+    )
+    assert out == {"ok": True, "matched": 1}
+    item = store.snapshot()["items"][0]
+    assert item["submissionId"] == sid
+    assert item["stage"] == "sandbox"
+    assert item["evidence"]["telemetry_count"] == 1
+    assert item["evidence"]["success_rate"] == 1.0
+    assert item["evidence"]["realized_pnl_usd"] == 4.25
+    assert item["evidence"]["route_families"] == ["univ3_fee_tier_arb"]
+    assert item["evidence"]["rollout_recommendation"]["reason"] == "score_and_risk_evidence_required"
