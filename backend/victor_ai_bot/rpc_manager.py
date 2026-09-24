@@ -141,4 +141,4 @@ class RpcManager:
             for u, s in list(self._private.items()):
                 tasks.append(self._probe_one(u, s))
             await asyncio.gather(*tasks, return_exceptions=True)
-            await asyncio.wait([self._stop.wait()], timeout=self.probe_interval_s)
+            await asyncio.wait_for(self._stop.wait(), timeout=self.probe_interval_s)
