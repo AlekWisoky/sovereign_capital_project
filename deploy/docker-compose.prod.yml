@@ -9,6 +9,9 @@ services:
       - ../../env/backend.env
     environment:
       VICTOR_CONFIG: /app/backend/config/ethereum.yaml
+      VICTOR_MULTI_CONFIGS: /app/backend/config/ethereum.yaml,/app/backend/config/base.yaml,/app/backend/config/arbitrum.yaml
+      VICTOR_MULTI_MAX_CHAINS: "3"
+      VICTOR_MULTI_ALLOW_AUTO_ALL: "0"
       VICTOR_LOG_JSON: "1"
       VICTOR_AUTOSTART: "1"
       VICTOR_DEPLOYMENT_MODE: private
