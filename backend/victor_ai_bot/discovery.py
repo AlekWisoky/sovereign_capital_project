@@ -247,7 +247,10 @@ class DiscoveryManager:
         return [dv.to_pair() for dv in self._v3.values()]
 
     def curve_pools(self) -> List[Dict[str, Any]]:
-        return [dc.to_pool() for dc in self._curve.values()]
+        return sorted(
+            (dc.to_pool() for dc in self._curve.values()),
+            key=lambda p: (str(p.get("pool") or "").lower(), str(p.get("token_in") or "").lower(), str(p.get("token_out") or "").lower(), int(p.get("i") or 0), int(p.get("j") or 0)),
+        )
 
     def balancer_pools(self) -> List[Dict[str, Any]]:
         return [db.to_pool() for db in self._balancer.values()]
