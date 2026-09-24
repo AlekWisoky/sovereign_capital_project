@@ -261,6 +261,20 @@ def fund_summary_unavailable_payload(runtime: Any | None = None) -> Dict[str, An
     return payload
 
 
+def _explicit_capital_usd(capital_engine: ABCMapping[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = capital_engine.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed == parsed and parsed not in {float("inf"), float("-inf")}:
+            return max(0.0, parsed)
+    return 0.0
+
+
 class FundService:
     def summary(self, runtime: Any) -> Dict[str, Any]:
         stage = _summary_stage(runtime)
@@ -376,6 +390,15 @@ class FundService:
             unavailable_factory=family_hardening_unavailable_summary,
         )
         capital_eff = dict((capital or {}).get("capital_efficiency_metrics") or {})
+        ledger_balances = ledger.get("balances") if isinstance(ledger, dict) else {}
+        if isinstance(ledger_balances, ABCMapping) and "USD" in ledger_balances:
+            nav_usd = max(0.0, float(ledger_balances.get("USD") or 0.0))
+        else:
+            nav_usd = _explicit_capital_usd(
+                (capital or {}).get("capital_engine") or {},
+                "nav_usd",
+                "navUsd",
+            )
         family_metrics = {
             str(x.get("family")): {
                 "realizedPnlUsd": float(x.get("realizedPnlUsd") or 0.0),
@@ -467,13 +490,7 @@ class FundService:
         health = apply_recovery_reliability(health)
         fund_master = FundMasterOrchestrator().compose(
             stage=stage,
-            nav_usd=float(
-                (capital or {}).get("capital_engine", {}).get("nav_usd")
-                or (capital or {}).get("capital_engine", {}).get("navUsd")
-                or (capital or {}).get("capital_engine", {}).get("deployable_usd")
-                or (capital or {}).get("capital_engine", {}).get("deployableUsd")
-                or 0.0
-            ),
+            nav_usd=nav_usd,
             family_targets=dict(
                 (capital or {}).get("capital_engine", {}).get("family_targets") or {}
             ),

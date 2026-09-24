@@ -10,6 +10,7 @@ from victor_ai_bot.runtime_services.auxiliary_state_service import (
 )
 from victor_ai_bot.runtime_services.command_center_service import CommandCenterService
 from victor_ai_bot.runtime_services.launch_service import LaunchService
+from victor_ai_bot.runtime_services.fund_service import FundService
 
 
 class _Ledger:
@@ -214,6 +215,14 @@ def test_launch_gating_uses_same_capital_policy_for_enable_and_mode_widening():
     assert enable["reason_code"] == "capital_nav_unavailable"
     assert enable["capitalPolicy"]["contractVersion"] == CAPITAL_POLICY_VERSION
     assert mode["reason_code"] == "capital_nav_unavailable"
+
+
+def test_fund_summary_preserves_zero_nav_instead_of_using_deployable_capital():
+    rt = _Runtime(nav_usd=0.0, deployable_wei=int(6e18), paused=False)
+
+    summary = FundService().summary(rt)
+
+    assert summary["fundMaster"]["budgets"]["deployableCapitalUsd"] == 0.0
 
 
 def test_treasury_and_launch_surfaces_advertise_shared_capital_policy_contract():
