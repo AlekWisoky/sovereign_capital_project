@@ -153,6 +153,7 @@ class DiscoveryManager:
         self.data_dir = data_dir
         self.path = os.path.join(data_dir, "discovery", f"{chain_name}.json")
         self._last_run_block: int = 0
+        self._last_venue_run_block: int = 0
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
@@ -326,6 +327,10 @@ class DiscoveryManager:
     async def maybe_discover_venues(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> Dict[str, List[Dict[str, Any]]]:
         if not self._venue_discovery_enabled(cfg):
             return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+        interval = max(1, int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50))
+        if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
+            return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+        self._last_venue_run_block = int(block_number)
         changed = False
         try:
             curve_changed = await self._discover_curve(rpc, cfg, block_number)
@@ -356,6 +361,7 @@ class DiscoveryManager:
         start = max(0, count - max_pools)
         indices = list(range(start, count))
         # deterministic order, newest pools first.
+        changed = False
         for idx in reversed(indices):
             pool_r = await rpc.eth_call(
                 registry,
@@ -385,15 +391,13 @@ class DiscoveryManager:
                 continue
             for pos_a, (i, token_a) in enumerate(supported):
                 for j, token_b in supported[pos_a + 1:]:
-                    self._curve.setdefault(
-                        self._curve_key(pool, i, j),
-                        DiscoveredCurve(pool, token_a, token_b, i, j, int(block_number), int(block_number)),
-                    )
-                    self._curve.setdefault(
-                        self._curve_key(pool, j, i),
-                        DiscoveredCurve(pool, token_b, token_a, j, i, int(block_number), int(block_number)),
-                    )
-        return bool(self._curve)
+                    if self._curve_key(pool, i, j) not in self._curve:
+                        self._curve[self._curve_key(pool, i, j)] = DiscoveredCurve(pool, token_a, token_b, i, j, int(block_number), int(block_number))
+                        changed = True
+                    if self._curve_key(pool, j, i) not in self._curve:
+                        self._curve[self._curve_key(pool, j, i)] = DiscoveredCurve(pool, token_b, token_a, j, i, int(block_number), int(block_number))
+                        changed = True
+        return changed
 
     async def _discover_balancer(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         vault = str(getattr(cfg.chain, "balancer_vault", "") or "")
@@ -433,12 +437,10 @@ class DiscoveryManager:
                 continue
             for pos_a, (i, token_a) in enumerate(supported):
                 for j, token_b in supported[pos_a + 1:]:
-                    self._balancer.setdefault(
-                        self._balancer_key(pool_id, token_a, token_b),
-                        DiscoveredBalancer(pool_id, token_a, token_b, pool, int(block_number), int(block_number)),
-                    )
-                    self._balancer.setdefault(
-                        self._balancer_key(pool_id, token_b, token_a),
-                        DiscoveredBalancer(pool_id, token_b, token_a, pool, int(block_number), int(block_number)),
-                    )
-        return bool(self._balancer)
+                    if self._balancer_key(pool_id, token_a, token_b) not in self._balancer:
+                        self._balancer[self._balancer_key(pool_id, token_a, token_b)] = DiscoveredBalancer(pool_id, token_a, token_b, pool, int(block_number), int(block_number))
+                        changed = True
+                    if self._balancer_key(pool_id, token_b, token_a) not in self._balancer:
+                        self._balancer[self._balancer_key(pool_id, token_b, token_a)] = DiscoveredBalancer(pool_id, token_b, token_a, pool, int(block_number), int(block_number))
+                        changed = True
+        return changed
