@@ -120,9 +120,9 @@ def build_capital_truth_derived_state(
     )
     reserved_collateral_usd = _reserved_collateral_usd(internal_prime_state)
     collateralization_ratio = _float_like(internal_prime_state.get("collateralizationRatio"))
-    prime_locked_wei_estimate = int(max(0.0, reserved_collateral_usd or borrowed_usd) * 1e18)
-    if prime_locked_wei_estimate > 0:
-        locked_capital_wei = max(locked_capital_wei, prime_locked_wei_estimate)
+    # USD collateral cannot be converted to native asset units without an
+    # authoritative asset price and decimals contract. Keep the native-unit
+    # capital lock sourced only from native-unit fields.
 
     categories = {
         "total_capital_wei": str(total_capital_wei),
@@ -162,7 +162,7 @@ def build_capital_truth_derived_state(
         prime_open_loan_count=prime_open_loan_count,
         reserved_collateral_usd=reserved_collateral_usd,
         collateralization_ratio=collateralization_ratio,
-        prime_locked_wei_estimate=prime_locked_wei_estimate,
+        prime_locked_wei_estimate=0,
         categories=categories,
         family_allocations=family_allocations,
         family_capital_plan=family_capital_plan,
