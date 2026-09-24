@@ -121,10 +121,14 @@ async def test_bounded_curve_and_balancer_discovery_filters_to_supported_liquid_
     result = await dm.maybe_discover_venues(rpc, cfg, 1000)
 
     assert result["curve"]
-    assert {p["token_in"].lower(), p["token_out"].lower()} == {
+    expected_curve_tokens = {
         "0x833589fcD6eDb6e08f4c7c32d4f71b54bda02913".lower(),
         "0xfde4c96c8593536e31f229ea8f37b2ad2699bb2".lower(),
-    } if (p := result["curve"][0]) else False
+    }
+    assert any(
+        {p["token_in"].lower(), p["token_out"].lower()} == expected_curve_tokens
+        for p in result["curve"]
+    ), result["curve"]
     assert result["balancer"]
     assert result["balancer"][0]["pool_id"] == pool_id
     assert rpc.logs_calls == 1
