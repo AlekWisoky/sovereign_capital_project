@@ -135,9 +135,12 @@ def build_capital_truth_derived_state(
         "capital_locked_wei": str(max(0, locked_capital_wei)),
     }
     family_allocations = _family_allocations(capital_engine)
+    explicit_deployable_usd = _float_like(
+        capital_engine.get("deployable_usd") or capital_engine.get("deployableUsd")
+    )
     family_capital_plan = build_family_capital_plan(
         capital_engine=capital_engine,
-        deployable_usd=(max(0, deployed_capital_wei) / 1e18),
+        deployable_usd=max(0.0, explicit_deployable_usd),
     )
     return CapitalTruthDerivedStateBundle(
         realized_profit_wei=realized_profit_wei,
