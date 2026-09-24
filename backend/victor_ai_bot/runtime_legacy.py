@@ -11,6 +11,8 @@ import os
 import time
 from typing import Any, Dict, List
 
+from fastapi import Request
+
 from .rpc import JsonRpcClient
 from .execution import try_execute_opportunity
 from .runtime_services.runtime_agent_consensus_facade import RuntimeAgentConsensusFacade
@@ -70,7 +72,7 @@ class MultiRuntimeBundle(
     """Compatibility-shell multiruntime wrapper."""
 
     @staticmethod
-    def dep(request):
+    def dep(request: Request):
         try:
             return request.app.state.runtime  # type: ignore
         except AttributeError:
