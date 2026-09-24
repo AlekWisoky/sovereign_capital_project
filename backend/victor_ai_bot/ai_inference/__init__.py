@@ -1,3 +1,4 @@
+from .quorum import CanonicalEvidence, AIResearchQuorum, ResearchQuorumResult
 from .router import (
     AgentConfidence,
     AgentCost,
@@ -10,6 +11,9 @@ from .router import (
 )
 
 __all__ = [
+    "AIResearchQuorum",
+    "CanonicalEvidence",
+    "ResearchQuorumResult",
     "AgentConfidence",
     "AgentCost",
     "AgentDecision",
