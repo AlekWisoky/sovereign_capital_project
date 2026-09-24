@@ -182,8 +182,8 @@ def test_expanded_route_families_are_named_before_strategy_governance():
     assert _classify_route_family(
         cfg,
         [
-            Edge("curve", "0xcurve", "0xWETH", "0xUSDC", {"i": 0, "j": 1}),
-            Edge("univ3", "router", "0xUSDC", "0xWETH", {"fee": 500}),
+            Edge("curve", "0xcurve", "0xWETH", "0xDAI", {"i": 0, "j": 1}),
+            Edge("univ3", "router", "0xDAI", "0xWETH", {"fee": 500}),
         ],
         route_type="2leg",
     ) == "univ3_curve"
