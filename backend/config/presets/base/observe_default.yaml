@@ -11,14 +11,21 @@ chain:
   ws:
   - wss://base-rpc.publicnode.com
   weth: '0x4200000000000000000000000000000000000006'
+  usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  usdt: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'
   univ3_quoter_v2: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a'
   univ3_factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
   univ3_swap_router: '0x2626664c2603336E57B271c5C0b26F421741e481'
+  curve_address_provider: '0x0000000022D53366457F9d5E68Ec105046FC4383'
+  enable_venue_discovery: true
+  discovery_pool_max_candidates: 24
+  discovery_log_window_blocks: 50000
   aave_v3_pool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5'
-  balancer_vault: ''
+  balancer_vault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8'
   token_universe:
   - '0x4200000000000000000000000000000000000006'
   - '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  - '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'
   discovery_interval_blocks: 40
   discovery_max_calls: 8
   rpc_private: []
@@ -35,8 +42,8 @@ safety:
   require_simulation: false
 flags:
   enable_two_leg_loops: true
-  enable_curve_autogen: false
-  enable_balancer_autogen: false
+  enable_curve_autogen: true
+  enable_balancer_autogen: true
   enable_three_leg_loops: false
   enable_v3_triangular: false
   enable_discovery: true

@@ -35,6 +35,13 @@ class RuntimePrimaryScanFacade:
             return []
 
         extra_v3_pairs = await self._discover_extra_v3_pairs(rpc, current_block=int(current_block))
+        venue_pools = {"curve": [], "balancer": []}
+        discovery = getattr(self, "_discovery", None)
+        discover_venues = getattr(discovery, "maybe_discover_venues", None) if discovery is not None else None
+        if callable(discover_venues):
+            venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
+        extra_curve_pools = list(venue_pools.get("curve") or [])
+        extra_balancer_pools = list(venue_pools.get("balancer") or [])
 
         opps2: List[Opportunity] = []
         if bool(getattr(self.cfg.flags, "enable_two_leg_loops", True)):
@@ -48,6 +55,8 @@ class RuntimePrimaryScanFacade:
                 time_budget_ms=1500,
                 max_opps=60,
                 extra_v3_pairs=extra_v3_pairs,
+                extra_curve_pools=extra_curve_pools,
+                extra_balancer_pools=extra_balancer_pools,
             )
 
         opps3: List[Opportunity] = []
@@ -65,6 +74,8 @@ class RuntimePrimaryScanFacade:
                 time_budget_ms=1600,
                 max_opps=40,
                 extra_v3_pairs=extra_v3_pairs,
+                extra_curve_pools=extra_curve_pools,
+                extra_balancer_pools=extra_balancer_pools,
             )
 
         opps = list(opps2) + list(opps3)

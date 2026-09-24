@@ -9,6 +9,7 @@ from .quote_curve import quote_curve, quote_curve_many
 from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_many
 from .gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from .route_encoding import EncLeg, route_id_hex
+from .opportunity_density import scan_efficiency_snapshot
 
 
 _SAFE_EDGE_QUOTE_EXCEPTIONS = (
@@ -132,6 +133,7 @@ async def quote_edges_batch(
     cache: PerBlockCache,
     edges: List[Edge],
     amount_in: int,
+    metrics: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Optional[Tuple[int, Dict[str, Any]]]]:
     """Batch-quote many edges for the same amount_in.
 
@@ -140,6 +142,8 @@ async def quote_edges_batch(
     Returns a mapping edge_key(edge) -> (amount_out, meta) or None
     """
     out: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+    if metrics is None:
+        metrics = {}
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
     missing_bal: List[Tuple[int, Edge]] = []
@@ -151,6 +155,7 @@ async def quote_edges_batch(
         hit = cache.get(ck)
         if hit is not None:
             out[ek] = hit
+            metrics["cache_hits"] = int(metrics.get("cache_hits", 0)) + 1
             continue
         if e.dex == "univ3":
             missing_univ3.append((idx, e))
@@ -160,6 +165,9 @@ async def quote_edges_batch(
             missing_bal.append((idx, e))
         else:
             out[ek] = None
+
+    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal)
+    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal))
 
     # UniV3 batch
     if missing_univ3 and getattr(cfg.chain, "univ3_quoter_v2", ""):
@@ -174,6 +182,7 @@ async def quote_edges_batch(
             ek = edge_key(e)
             ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
             if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (
                     int(q.amount_out),
                     {"gas_estimate": int(q.gas_estimate), "fee": int(e.params.get("fee", 3000))},
@@ -200,6 +209,7 @@ async def quote_edges_batch(
             ek = edge_key(e)
             ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
             if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (
                     int(q.amount_out),
                     {
@@ -227,6 +237,7 @@ async def quote_edges_batch(
             ek = edge_key(e)
             ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
             if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (int(q.amount_out), {"pool_id": str(e.params.get("pool_id") or "")})
                 out[ek] = val
                 cache.set(ck, val)
@@ -241,7 +252,13 @@ async def quote_edges_batch(
     return out
 
 
-def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edge]:
+def build_edges(
+    cfg,
+    *,
+    extra_v3_pairs: Optional[List[dict]] = None,
+    extra_curve_pools: Optional[List[dict]] = None,
+    extra_balancer_pools: Optional[List[dict]] = None,
+) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
         # For execution we prefer SwapRouter; for quoting we use QuoterV2.
@@ -273,7 +290,10 @@ def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edg
                 )
             )
     if bool(getattr(cfg.flags, "enable_curve_autogen", True)):
-        for p in cfg.chain.curve_pools:
+        curve_pools = list(cfg.chain.curve_pools or [])
+        if extra_curve_pools:
+            curve_pools.extend(list(extra_curve_pools))
+        for p in curve_pools:
             pool = p["pool"]
             edges.append(
                 Edge(
@@ -302,7 +322,10 @@ def build_edges(cfg, *, extra_v3_pairs: Optional[List[dict]] = None) -> List[Edg
                 )
             )
     if bool(getattr(cfg.flags, "enable_balancer_autogen", True)) and cfg.chain.balancer_vault:
-        for p in cfg.chain.balancer_pools:
+        balancer_pools = list(cfg.chain.balancer_pools or [])
+        if extra_balancer_pools:
+            balancer_pools.extend(list(extra_balancer_pools))
+        for p in balancer_pools:
             edges.append(
                 Edge(
                     "balancer",
@@ -422,9 +445,17 @@ async def find_two_leg_opportunities(
     time_budget_ms: int = 2000,
     max_opps: int = 50,
     extra_v3_pairs: Optional[List[dict]] = None,
+    extra_curve_pools: Optional[List[dict]] = None,
+    extra_balancer_pools: Optional[List[dict]] = None,
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
-    edges = build_edges(cfg, extra_v3_pairs=extra_v3_pairs)
+    metrics: Dict[str, int] = {}
+    edges = build_edges(
+        cfg,
+        extra_v3_pairs=extra_v3_pairs,
+        extra_curve_pools=extra_curve_pools,
+        extra_balancer_pools=extra_balancer_pools,
+    )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
     for e in edges:
@@ -432,7 +463,7 @@ async def find_two_leg_opportunities(
 
     opps: List[Opportunity] = []
     # Batch quote all first-leg edges at base amount (biggest ROI speedup)
-    qmap1 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in)
+    qmap1 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in, metrics=metrics)
     for e1 in edges:
         if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
             break
@@ -440,12 +471,13 @@ async def find_two_leg_opportunities(
         revs = by_pair.get((e1.token_out, e1.token_in), [])
         if not revs:
             continue
+        metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
         q1 = qmap1.get(edge_key(e1))
         if not q1:
             continue
         out1, meta1 = q1
         # Batch quote all candidate second legs for this out1
-        qmap2 = await quote_edges_batch(rpc, cfg, cache, revs, out1)
+        qmap2 = await quote_edges_batch(rpc, cfg, cache, revs, out1, metrics=metrics)
         for e2 in revs:
             if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
                 break
@@ -597,6 +629,17 @@ async def find_two_leg_opportunities(
                 break
         if len(opps) >= max_opps:
             break
+    snapshot = scan_efficiency_snapshot(
+        elapsed_ms=(time.perf_counter() - t_start) * 1000.0,
+        candidate_count=int(metrics.get("candidate_count", 0)),
+        quote_requests=int(metrics.get("quote_requests", 0)),
+        quote_successes=int(metrics.get("quote_successes", 0)),
+        opportunity_count=len(opps),
+        cache_hits=int(metrics.get("cache_hits", 0)),
+        network_batches=int(metrics.get("network_batches", 0)),
+    )
+    for opportunity in opps:
+        opportunity.meta["scan_efficiency"] = dict(snapshot)
     # rank by gross profit desc
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
     return opps
@@ -613,6 +656,8 @@ async def find_three_leg_opportunities(
     time_budget_ms: int = 2200,
     max_opps: int = 40,
     extra_v3_pairs: Optional[List[dict]] = None,
+    extra_curve_pools: Optional[List[dict]] = None,
+    extra_balancer_pools: Optional[List[dict]] = None,
 ) -> List[Opportunity]:
     """Triangle / 3-hop cycle search A->B->C->A.
 
@@ -622,7 +667,13 @@ async def find_three_leg_opportunities(
     - no discovery here; pass extra_v3_pairs from DiscoveryManager
     """
     t_start = time.perf_counter()
-    edges = build_edges(cfg, extra_v3_pairs=extra_v3_pairs)
+    metrics: Dict[str, int] = {}
+    edges = build_edges(
+        cfg,
+        extra_v3_pairs=extra_v3_pairs,
+        extra_curve_pools=extra_curve_pools,
+        extra_balancer_pools=extra_balancer_pools,
+    )
     # adjacency: token_in -> edges
     adj: Dict[str, List[Edge]] = {}
     for e in edges:
@@ -640,7 +691,7 @@ async def find_three_leg_opportunities(
 
     opps: List[Opportunity] = []
     # Batch quote all edges for base amount_in (used for first leg)
-    qmap1_3 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in)
+    qmap1_3 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in, metrics=metrics)
 
     # iterate first edge; use time budget
     for a_in, outs in adj.items():
@@ -656,7 +707,8 @@ async def find_three_leg_opportunities(
             out1, meta1 = q1
             # second leg candidates from token_out
             e2_cands = [e2 for e2 in adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
-            qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1)
+            metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
+            qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
             for e2 in e2_cands:
                 if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
                     break
@@ -669,7 +721,8 @@ async def find_three_leg_opportunities(
                 if not revs:
                     continue
                 e3_cands = list(revs[:3])
-                qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2)
+                metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
+                qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
                 for e3 in e3_cands:
                     if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
                         break
@@ -866,6 +919,17 @@ async def find_three_leg_opportunities(
         if len(opps) >= max_opps:
             break
 
+    snapshot = scan_efficiency_snapshot(
+        elapsed_ms=(time.perf_counter() - t_start) * 1000.0,
+        candidate_count=int(metrics.get("candidate_count", 0)),
+        quote_requests=int(metrics.get("quote_requests", 0)),
+        quote_successes=int(metrics.get("quote_successes", 0)),
+        opportunity_count=len(opps),
+        cache_hits=int(metrics.get("cache_hits", 0)),
+        network_batches=int(metrics.get("network_batches", 0)),
+    )
+    for opportunity in opps:
+        opportunity.meta["scan_efficiency"] = dict(snapshot)
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
     return opps
 

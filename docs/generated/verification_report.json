@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 342,
+    "test_file_count": 344,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -150,6 +150,7 @@
       "backend/tests/test_operator_command_routes_maintenance.py",
       "backend/tests/test_operator_execution_lifecycle_projection_maintenance.py",
       "backend/tests/test_operator_receipt_closed_loop_projection_maintenance.py",
+      "backend/tests/test_opportunity_density.py",
       "backend/tests/test_ops_read_surface_auto_trade_sync.py",
       "backend/tests/test_ops_routes_maintenance.py",
       "backend/tests/test_optional_family_status_script_check.py",
@@ -250,6 +251,7 @@
       "backend/tests/test_safety.py",
       "backend/tests/test_sentry_config.py",
       "backend/tests/test_server_boot_maintenance.py",
+      "backend/tests/test_shadow_venue_discovery.py",
       "backend/tests/test_smmae_engine.py",
       "backend/tests/test_spread_engine_hardening.py",
       "backend/tests/test_spread_formulas.py",
