@@ -108,7 +108,7 @@ def test_intelligence_routes_use_canonical_module(monkeypatch):
     app.dependency_overrides[RuntimeBundle.dep] = lambda request=None: runtime
     client = TestClient(app)
     try:
-        latest = client.get("/api/xai/latest?limit=2")
+        latest = client.get("/api/xai/latest")
         decision = client.get("/api/xai/decision/dec-1")
         reliability = client.get("/api/reliability/state")
         kds = client.get("/api/kds/state")
@@ -151,7 +151,7 @@ def test_intelligence_multichain_routes_use_canonical_module(monkeypatch):
     app.dependency_overrides[MultiRuntimeBundle.dep] = lambda request=None: runtime
     client = TestClient(app)
     try:
-        latest = client.get("/api/xai/multichain/latest?limit=4")
+        latest = client.get("/api/xai/multichain/latest")
         reliability = client.get("/api/reliability/multichain/state")
         kds = client.get("/api/kds/multichain/state")
 
@@ -164,3 +164,26 @@ def test_intelligence_multichain_routes_use_canonical_module(monkeypatch):
         assert kds.json()["states"]["arbitrum"]["chain"] == "arbitrum"
     finally:
         app.dependency_overrides.pop(MultiRuntimeBundle.dep, None)
+
+
+def test_runtime_request_dependencies_are_not_query_parameters():
+    schema = app.openapi()
+    paths = schema["paths"]
+    targets = [
+        "/api/xai/latest",
+        "/api/xai/multichain/latest",
+        "/api/reliability/state",
+        "/api/reliability/multichain/state",
+        "/api/kds/state",
+        "/api/kds/multichain/state",
+        "/api/treasury/goal",
+    ]
+
+    for path in targets:
+        get_operation = paths[path]["get"]
+        request_params = [
+            parameter
+            for parameter in get_operation.get("parameters", [])
+            if parameter.get("name") == "request" and parameter.get("in") == "query"
+        ]
+        assert request_params == [], path
