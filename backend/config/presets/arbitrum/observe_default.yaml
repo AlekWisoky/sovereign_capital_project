@@ -11,14 +11,14 @@ chain:
   - https://arb-one.api.pocket.network
   ws:
   - wss://arbitrum-one-rpc.publicnode.com
-  weth: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
+  weth: '0x82aF49447D8A07e3bd95BD0d56f35241523fBab1'
   univ3_quoter_v2: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e'
   univ3_factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984'
   univ3_swap_router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
   aave_v3_pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD'
   balancer_vault: ''
   token_universe:
-  - '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
+  - '0x82aF49447D8A07e3bd95BD0d56f35241523fBab1'
   - '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
   discovery_interval_blocks: 40
   discovery_max_calls: 8
