@@ -147,7 +147,7 @@ class RuntimeBundle(
     """
 
     @staticmethod
-    def dep(request):
+    def dep(request: Request):
         try:
             return request.app.state.runtime  # type: ignore
         except AttributeError:
