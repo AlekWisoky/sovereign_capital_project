@@ -140,10 +140,6 @@ class ReceiptService:
         return metadata
 
     @staticmethod
-    def _realized_usd_from_wei(value: int) -> float:
-        return float(value) / 1_000_000.0 if abs(float(value)) > 1000 else float(value)
-
-    @staticmethod
     def _safe_dict(value: Any) -> Dict[str, Any]:
         return dict(value or {}) if isinstance(value, Mapping) else {}
 
