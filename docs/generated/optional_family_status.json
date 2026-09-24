@@ -6,6 +6,35 @@
     {
       "evidence": {
         "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_governed_ai_inference.py",
+          "backend/victor_ai_bot/llm_inl/runtime.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_governed_ai_inference.py"
+        ]
+      },
+      "family": "ai_inference",
+      "path": "backend/victor_ai_bot/ai_inference",
+      "primaryEvidenceCount": 2,
+      "pythonFileCount": 3,
+      "referenceCount": 3,
+      "status": "shadow",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 2,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 1,
+      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
         "gatingConditions": [
           "backend/victor_ai_bot/runtime_services/runtime_institutional_init.py"
         ],
@@ -168,6 +197,36 @@
       },
       "supplementalReferenceCount": 28,
       "why": "Mounted routes or ungated runtime initialization establish live reachability."
+    },
+    {
+      "evidence": {
+        "docsAndScripts": [],
+        "gatingConditions": [],
+        "importReachability": [
+          "backend/tests/test_backtest_replay_maintenance.py",
+          "backend/tests/test_profitability_truth_selection_sync.py"
+        ],
+        "mountedRoutes": [],
+        "runtimeInitialization": [],
+        "tests": [
+          "backend/tests/test_backtest_replay_maintenance.py",
+          "backend/tests/test_profitability_truth_selection_sync.py"
+        ]
+      },
+      "family": "backtest",
+      "path": "backend/victor_ai_bot/backtest",
+      "primaryEvidenceCount": 2,
+      "pythonFileCount": 2,
+      "referenceCount": 4,
+      "status": "shadow",
+      "statusInputs": {
+        "gatingConditions": 0,
+        "importReachability": 2,
+        "mountedRoutes": 0,
+        "runtimeInitialization": 0
+      },
+      "supplementalReferenceCount": 2,
+      "why": "External imports establish reachability, but no mounted-route or runtime-init proof was found."
     },
     {
       "evidence": {
@@ -835,11 +894,11 @@
     "gatingConditions"
   ],
   "summary": {
-    "familyCount": 22,
+    "familyCount": 24,
     "statusCounts": {
-      "live": 12,
       "dead": 7,
-      "shadow": 2,
+      "live": 12,
+      "shadow": 4,
       "staged": 1
     }
   }
