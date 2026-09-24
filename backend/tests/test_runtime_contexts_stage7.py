@@ -48,7 +48,14 @@ class _Runtime:
         return {'suppressions': {}}
 
     def capital_engine_state(self):
-        return {'capital_engine': {'family_targets': {'flashloan_atomic': 0.4}}, 'capital_efficiency_metrics': {'deployedCapitalWei': 2_500 * 10**18}}
+        return {
+            'capital_engine': {
+                'family_targets': {'flashloan_atomic': 0.4},
+                'deployable_usd': 2500.0,
+                'deployable_bankroll_wei': 2_500 * 10**18,
+            },
+            'capital_efficiency_metrics': {'deployedCapitalWei': 2_500 * 10**18},
+        }
 
     def fund_summary_state(self):
         return {'health': {'fundStage': 'staging', 'riskPosture': 'balanced', 'riskScore': 0.2, 'falseAdmissionRate': 0.02, 'falseDropRate': 0.03}}
@@ -83,7 +90,7 @@ def test_build_admission_context_collects_structured_inputs():
 def test_build_wealth_goal_signals_uses_canonical_runtime_summaries():
     rt = _Runtime()
     sig = build_wealth_goal_signals(rt)
-    assert sig.capital_base_usd >= 2500
+    assert sig.capital_base_usd == 2500.0
     assert sig.execution_realism_score > 0.5
     assert sig.stability_score > 0.5
     assert sig.fund_stage == 'staging'
