@@ -1074,7 +1074,10 @@ class LLMINLRuntime:
             }
         )
         if not decision.ok or decision.evidence is None:
-            self._mark_llm_error(str(decision.reason_code or "ai_inference_failed"), "")
+            reason = str(decision.reason_code or "ai_inference_failed")
+            if reason == "ai_http_client_unavailable":
+                reason = "llm_import_failed"
+            self._mark_llm_error(reason, "")
             return ""
         self._mark_llm_ok()
         return str(decision.evidence.content).strip()
