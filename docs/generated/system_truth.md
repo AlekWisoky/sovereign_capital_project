@@ -15,7 +15,7 @@
 - framework_route_count: 4
 - app_route_count: 165
 - websocket_route_count: 4
-- runtime_legacy_lines: 181
+- runtime_legacy_lines: 183
 - api_legacy_lines: 83
 - runtime_bundle_definition_count: 1
 - runtime_legacy_broad_except_count: 0
