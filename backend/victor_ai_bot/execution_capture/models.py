@@ -63,8 +63,8 @@ class CaptureScore:
     expected_realized_value: float
     slippage_cost_estimate: float
     latency_decay_cost: float
-    ai_latency_decay_cost: float = 0.0
     failure_cost_estimate: float
+    ai_latency_decay_cost: float = 0.0
     telemetry_adjustments: Dict[str, float] = field(default_factory=dict)
     realized_edge: float = 0.0
     objective_components: Dict[str, float] = field(default_factory=dict)
