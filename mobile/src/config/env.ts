@@ -29,11 +29,16 @@ function resolveDefaultBackendUrl(): string {
     return '';
   }
 
+  const appEnv = String(process.env.EXPO_PUBLIC_APP_ENV || 'development').trim().toLowerCase();
+  if (appEnv === 'production') {
+    return 'https://api.sovereigncapital.live';
+  }
+
   return 'http://localhost:8000';
 }
 
 export const ENV = {
-  appEnv: String(process.env.EXPO_PUBLIC_APP_ENV || 'development'),
+  appEnv: String(process.env.EXPO_PUBLIC_APP_ENV || 'development').trim().toLowerCase(),
   defaultBackendUrl: resolveDefaultBackendUrl(),
   walletConnectProjectId: String(process.env.EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID || '').trim(),
   defaultChain: String(process.env.EXPO_PUBLIC_DEFAULT_CHAIN || 'ethereum').trim(),
