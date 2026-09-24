@@ -340,6 +340,7 @@ class ChainConfig:
     balancer_vault: str = ""
     # Canonical protocol registries used only for bounded read-only discovery.
     curve_address_provider: str = ""
+    enable_venue_discovery: bool = False
     discovery_pool_max_candidates: int = 24
     discovery_log_window_blocks: int = 50_000
     aave_v3_pool: str = ""
