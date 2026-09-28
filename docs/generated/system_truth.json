@@ -42,8 +42,8 @@
     "withdraw_all_routes",
     "withdraw_routes"
   ],
-  "app_route_count": 163,
-  "application_route_count": 153,
+  "app_route_count": 167,
+  "application_route_count": 157,
   "backend_broad_except_count": 1,
   "backend_broad_exception_sites": [
     {
