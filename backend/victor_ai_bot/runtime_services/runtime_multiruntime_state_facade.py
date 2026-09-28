@@ -4,6 +4,7 @@ import asyncio
 from typing import Any, Optional
 
 from .summary_read_contract import build_summary_read_contract
+from .multiruntime_opportunity_selector import MultiRuntimeOpportunitySelector
 
 
 class RuntimeMultiruntimeStateFacade:
@@ -86,6 +87,11 @@ class RuntimeMultiruntimeStateFacade:
 
     def brain_state(self) -> dict:
         return self._runtimes[self._active_chain].brain_state()
+
+    async def select_best_opportunity_readonly(self) -> dict:
+        """Return global opportunity-selection evidence without changing runtime state."""
+        selector = MultiRuntimeOpportunitySelector()
+        return await selector.select(self._runtimes)
 
     async def summary_all(self) -> dict:
         """Return a lightweight per-chain summary (bounded, fast)."""
