@@ -66,8 +66,8 @@ def _candidate(
                             "requested_notional_usd": required_usd,
                             "capital_authority_available": bool(capital_available),
                         },
-                        "flashloan": {
-                            "eligible": bool(flashloan_eligible),
+                        "flashloanSizing": {
+                            "allowed": bool(flashloan_eligible),
                         },
                     }
                 },
