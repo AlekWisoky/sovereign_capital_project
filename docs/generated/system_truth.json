@@ -700,7 +700,7 @@
     "disabled",
     "quarantined"
   ],
-  "http_route_count": 159,
+  "http_route_count": 163,
   "http_route_count_basis": "http_methods_excluding_head_options",
   "launch_modes": [
     "V1_ONLY",
