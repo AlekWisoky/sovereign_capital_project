@@ -332,10 +332,30 @@ class MultiRuntimeOpportunitySelector:
             or ""
         )
 
-        gate_allowed = bool(gate.get("allowed", False))
-        gate_reason = str(gate.get("reason_code") or gate.get("reason") or "auto_trade_gate_unavailable")
-        recovery_ready = bool(recovery.get("ready", False)) and not bool(
-            recovery.get("blocked", False)
+        candidate_gate = _first_nested(meta, "auto_trade_gate", "autoTradeGate")
+        candidate_recovery = _first_nested(
+            meta, "auto_trade_recovery", "autoTradeRecovery"
+        )
+        gate_allowed = bool(gate.get("allowed", False)) and (
+            not candidate_gate or bool(candidate_gate.get("allowed", False))
+        )
+        gate_reason = str(
+            candidate_gate.get("reason_code")
+            or candidate_gate.get("reason")
+            or gate.get("reason_code")
+            or gate.get("reason")
+            or "auto_trade_gate_unavailable"
+        )
+        recovery_ready = (
+            bool(recovery.get("ready", False))
+            and not bool(recovery.get("blocked", False))
+            and (
+                not candidate_recovery
+                or (
+                    bool(candidate_recovery.get("ready", False))
+                    and not bool(candidate_recovery.get("blocked", False))
+                )
+            )
         )
         admission_allowed = _bool(
             admission,
