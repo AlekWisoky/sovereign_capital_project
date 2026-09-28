@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from victor_ai_bot.api import get_runtime
 from victor_ai_bot.runtime import RuntimeBundle
 from victor_ai_bot.server import app
 
@@ -57,6 +58,7 @@ def test_governance_and_treasury_routes_use_canonical_modules(monkeypatch):
     monkeypatch.setenv("VICTOR_ADMIN_KEY", "secret")
     runtime = _FakeRuntime()
     app.dependency_overrides[RuntimeBundle.dep] = lambda request=None: runtime
+    app.dependency_overrides[get_runtime] = lambda request=None: runtime
     client = TestClient(app)
     try:
         intent = client.get("/api/governance/intent/intent-1")
@@ -101,6 +103,7 @@ def test_governance_and_treasury_routes_use_canonical_modules(monkeypatch):
             ("reject", "intent-1", "human"),
         ]
     finally:
+        app.dependency_overrides.pop(get_runtime, None)
         app.dependency_overrides.pop(RuntimeBundle.dep, None)
 
 
