@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 348,
+    "test_file_count": 349,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -594,7 +594,7 @@
   "runtime_surface": {
     "api_legacy_lines": 83,
     "backend_broad_except_count": 1,
-    "route_count": 165,
+    "route_count": 167,
     "runtime_legacy_lines": 183,
     "websocket_route_count": 4
   },

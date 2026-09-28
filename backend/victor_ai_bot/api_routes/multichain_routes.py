@@ -9,6 +9,7 @@ from ..jsonsafe import json_safe
 from ._route_helpers import invalid_request_payload
 from ..runtime import MultiRuntimeBundle
 from ..runtime_services.runtime_routes_service import RuntimeRoutesService
+from ..runtime_services.multiruntime_opportunity_selector import MultiRuntimeOpportunitySelector
 from ..runtime_services.summary_read_contract import build_summary_read_contract
 
 router = APIRouter(tags=["multichain"])
@@ -55,6 +56,29 @@ async def multichain_state(request: Request):
         return await rt.snapshot_all()
     chain = getattr(rt.cfg.chain, "name", "")
     return {"active": chain, "chains": {chain: await rt.snapshot()}}
+
+
+@router.get("/api/multichain/market-pipeline")
+async def multichain_market_pipeline(request: Request):
+    rt = request.app.state.runtime  # type: ignore[attr-defined]
+    if isinstance(rt, MultiRuntimeBundle):
+        return json_safe(await rt.market_pipeline_telemetry_readonly())
+    chain = getattr(rt.cfg.chain, "name", "")
+    return json_safe({
+        "ok": True,
+        "active": chain,
+        "chains": {chain: rt.market_pipeline_telemetry_state()},
+        "active_chain_changed": False,
+    })
+
+
+@router.get("/api/multichain/opportunity-selection")
+async def multichain_opportunity_selection(request: Request):
+    rt = request.app.state.runtime  # type: ignore[attr-defined]
+    if isinstance(rt, MultiRuntimeBundle):
+        return json_safe(await rt.select_best_opportunity_readonly())
+    chain = str(getattr(rt.cfg.chain, "name", "") or "")
+    return json_safe(await MultiRuntimeOpportunitySelector().select({chain: rt}))
 
 
 @router.get("/api/multichain/summary")
