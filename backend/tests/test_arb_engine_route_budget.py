@@ -9,8 +9,8 @@ import victor_ai_bot.arb_engine as arb
 
 @pytest.mark.asyncio
 async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypatch):
-    e1 = arb.Edge("univ3", "router", "A", "B", {"fee": 3000})
-    e2 = arb.Edge("univ3", "router", "B", "A", {"fee": 3000})
+    e1 = arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333", {"fee": 3000})
+    e2 = arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x3333333333333333333333333333333333333333", "0x2222222222222222222222222222222222222222", {"fee": 3000})
 
     monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: [e1, e2])
 
@@ -67,10 +67,10 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
 @pytest.mark.asyncio
 async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatch):
     edges = [
-        arb.Edge("univ3", "router", "A", "B", {"fee": 3000}),
-        arb.Edge("univ3", "router", "B", "A", {"fee": 3000}),
-        arb.Edge("univ3", "router", "A", "C", {"fee": 3000}),
-        arb.Edge("univ3", "router", "C", "A", {"fee": 3000}),
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333", {"fee": 3000}),
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x3333333333333333333333333333333333333333", "0x2222222222222222222222222222222222222222", {"fee": 3000}),
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", "0x4444444444444444444444444444444444444444", {"fee": 3000}),
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x4444444444444444444444444444444444444444", "0x2222222222222222222222222222222222222222", {"fee": 3000}),
     ]
 
     monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: edges)
@@ -81,7 +81,7 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
             metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
         return {
             arb.edge_key(edge): (
-                120 if edge.token_out in {"B", "C"} else 100,
+                120 if edge.token_out in {"0x3333333333333333333333333333333333333333", "0x4444444444444444444444444444444444444444"} else 100,
                 {"gas_estimate": 1, "fee": 3000},
             )
             for edge in requested_edges
