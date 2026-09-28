@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from ..api import get_runtime
 from ..runtime_services.summary_read_contract import build_summary_read_contract
 
 from ._route_helpers import (
@@ -368,10 +369,6 @@ def _auto_trade_recovery_payload(rt):
         phase="auto_trade_recovery_summary",
         read_model="auto_trade_recovery_summary_projection_v1",
     )
-
-
-def get_runtime(request: Request):
-    return request.app.state.runtime  # type: ignore[attr-defined]
 
 
 @router.get("/api/telemetry/summary")
