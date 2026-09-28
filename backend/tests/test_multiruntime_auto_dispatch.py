@@ -158,6 +158,11 @@ def test_active_auto_dispatch_hands_off_to_global_selector_when_enabled():
     active = _ActiveRuntime(owner)
     owner._runtimes["base"] = active
 
+    async def dispatch_selected_auto_trade(*, current_block):
+        return current_block == 789
+
+    owner.dispatch_selected_auto_trade = dispatch_selected_auto_trade
+
     dispatched = active._maybe_dispatch_auto_trade(current_block=789, decision=None)
 
     assert dispatched is True
