@@ -58,6 +58,83 @@ class RuntimeStateFacade:
             return to_json_safe(dict(fallback()))
         return to_json_safe(payload)
 
+    def market_pipeline_telemetry_state(self) -> Dict[str, Any]:
+        """Read-only market-pipeline observability; never grants execution authority."""
+        telemetry = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
+        opportunities = list(getattr(self, "_opps", []) or [])
+        verified = 0
+        positive = 0
+        route_ready = 0
+        route_degraded = 0
+        for opportunity in opportunities:
+            meta = dict(getattr(opportunity, "meta", {}) or {})
+            profitability = meta.get("profitability") if isinstance(meta.get("profitability"), dict) else {}
+            if bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
+                verified += 1
+                try:
+                    if int(profitability.get("profitAfterCostsUsdMicroInt") or profitability.get("profit_after_costs_usd_micro") or 0) > 0:
+                        positive += 1
+                except (TypeError, ValueError):
+                    pass
+            runtime = meta.get("execution_route_runtime") if isinstance(meta.get("execution_route_runtime"), dict) else {}
+            if bool(runtime.get("ready")):
+                route_ready += 1
+            if bool(runtime.get("degraded")):
+                route_degraded += 1
+        quotes = dict(telemetry.get("quotes") or {})
+        requests = int(quotes.get("requests") or 0)
+        successes = int(quotes.get("successes") or 0)
+        discovery = dict(telemetry.get("discovery") or {})
+        return to_json_safe({
+            "ok": True,
+            "chain": str(getattr(getattr(self, "cfg", None), "chain", None) and getattr(self.cfg.chain, "name", "") or ""),
+            "scanner": {
+                "alive": bool(telemetry.get("last_scan")),
+                "last_scan": telemetry.get("last_scan"),
+                "last_block": telemetry.get("last_block"),
+                "scan_latency_ms": telemetry.get("scan_latency_ms"),
+                "scan_error": str(telemetry.get("scan_error") or ""),
+            },
+            "discovery": {
+                "pools_seen": int(discovery.get("pools_seen") or 0),
+                "routes_considered": int(telemetry.get("routes_considered") or 0),
+                "edges_generated": int(telemetry.get("edges_generated") or 0),
+                "v3_pairs": int(discovery.get("v3_pairs") or 0),
+                "curve_pools": int(discovery.get("curve_pools") or 0),
+                "balancer_pools": int(discovery.get("balancer_pools") or 0),
+            },
+            "quotes": {
+                "requests": requests,
+                "successes": successes,
+                "failures": max(0, requests - successes),
+                "success_rate": (float(successes) / float(requests)) if requests else 0.0,
+            },
+            "economics": {
+                "gross_candidates": int(len(opportunities)),
+                "after_fee_candidates": int(verified),
+                "after_fee_positive_candidates": int(positive),
+            },
+            "liquidity": {
+                "status": "candidate_scoped",
+                "executable_depth": None,
+                "max_size": None,
+                "constrained_candidates": None,
+            },
+            "quality": {
+                "route_quality": {"ready_candidates": route_ready, "degraded_candidates": route_degraded},
+                "venue_quality": {"status": "candidate_scoped"},
+                "provider_quality": {"status": "candidate_scoped"},
+            },
+            "admission": {
+                "status": "see_canonical_execution_quality",
+                "capital": None,
+                "family": None,
+                "treasury": None,
+                "flashloan": None,
+                "execution": None,
+            },
+        })
+
     def execution_capture_analytics(self) -> Dict[str, Any]: return self._state_summary_payload("execution_capture_analytics", default={"laneSuccess": [], "venueQuality": []})
     def telemetry_summary(self) -> Dict[str, Any]: return self._service_payload("_telemetry_service", method_name="summary", default={"realization": {"families": []}, "agents": {"agents": []}})
     def execution_calibration_state(self) -> Dict[str, Any]: return self._state_summary_payload("execution_calibration", default={"items": []})
