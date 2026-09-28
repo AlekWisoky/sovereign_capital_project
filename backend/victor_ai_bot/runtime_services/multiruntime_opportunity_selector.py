@@ -293,7 +293,13 @@ class MultiRuntimeOpportunitySelector:
         )
         admission_flashloan_details = _nested(admission_for_flashloan, "details")
         flashloan = {}
-        for key in ("flashloan", "flashloanEligibility", "flashloan_eligibility"):
+        for key in (
+            "flashloanSizing",
+            "flashloan_sizing",
+            "flashloan",
+            "flashloanEligibility",
+            "flashloan_eligibility",
+        ):
             value = admission_flashloan_details.get(key)
             if isinstance(value, Mapping):
                 flashloan = dict(value)
