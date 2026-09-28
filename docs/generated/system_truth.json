@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 345,
+  "backend_test_file_count": 346,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -380,6 +380,7 @@
     "test_system_routes_active_runtime.py",
     "test_system_truth.py",
     "test_system_truth_script_check.py",
+    "test_telemetry_active_runtime.py",
     "test_telemetry_feedback.py",
     "test_telemetry_route_error_surface_hardening_maintenance.py",
     "test_thin_shell_architecture.py",
