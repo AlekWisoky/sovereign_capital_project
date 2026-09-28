@@ -27,6 +27,8 @@ def test_generated_docs_match_live_truth():
     assert docs_truth['route_count'] == truth['route_count']
     assert docs_truth['duplicate_route_count'] == truth['duplicate_route_count']
     assert docs_truth['backend_test_file_count'] == truth['backend_test_file_count']
+    assert docs_truth['route_inventory'] == truth['route_inventory']
+    assert docs_truth['backend_test_files'] == truth['backend_test_files']
 
 
 def test_system_truth_test_inventory_preserves_all_pytest_paths():
