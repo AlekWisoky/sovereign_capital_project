@@ -81,7 +81,15 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
             metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
         return {
             arb.edge_key(edge): (
-                120 if edge.token_out in {"0x3333333333333333333333333333333333333333", "0x4444444444444444444444444444444444444444"} else 100,
+                121
+                if edge.token_out == "0x2222222222222222222222222222222222222222"
+                else 120
+                if edge.token_out
+                in {
+                    "0x3333333333333333333333333333333333333333",
+                    "0x4444444444444444444444444444444444444444",
+                }
+                else 100,
                 {"gas_estimate": 1, "fee": 3000},
             )
             for edge in requested_edges
@@ -103,8 +111,8 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
     )
 
     # Force the route-evaluation clock to advance after the first group.
-    clock = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0])
-    monkeypatch.setattr(arb.time, "perf_counter", lambda: next(clock))
+    clock = iter([0.0, 0.0, 0.0, 0.0, 2.0])
+    monkeypatch.setattr(arb.time, "perf_counter", lambda: next(clock, 2.0))
 
     cfg = SimpleNamespace(
         chain=SimpleNamespace(name="ethereum"),
