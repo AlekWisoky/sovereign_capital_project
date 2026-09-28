@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from victor_ai_bot.api import get_runtime
 from victor_ai_bot.api_routes.treasury_extra import router as treasury_router
-from victor_ai_bot.runtime import RuntimeBundle
 
 
 class _FakeGoal:
@@ -33,7 +33,7 @@ class _FakeRuntime:
 def _client(runtime: _FakeRuntime) -> TestClient:
     app = FastAPI()
     app.include_router(treasury_router)
-    app.dependency_overrides[RuntimeBundle.dep] = lambda request=None: runtime
+    app.dependency_overrides[get_runtime] = lambda request=None: runtime
     return TestClient(app)
 
 
