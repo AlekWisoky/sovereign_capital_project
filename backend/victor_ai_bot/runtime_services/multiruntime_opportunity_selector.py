@@ -294,9 +294,15 @@ class MultiRuntimeOpportunitySelector:
             "flashloanEligibility",
             "flashloan_eligibility",
         )
+        # Candidate admission evidence is the authoritative local fallback when
+        # the runtime summary does not project flashloan eligibility.
         if not flashloan:
+            candidate_admission = _first_nested(
+                meta, "capitalAdmission", "capital_admission", "admission"
+            )
+            candidate_details = _nested(candidate_admission, "details")
             flashloan = _first_nested(
-                meta,
+                candidate_details,
                 "flashloan",
                 "flashloanEligibility",
                 "flashloan_eligibility",
