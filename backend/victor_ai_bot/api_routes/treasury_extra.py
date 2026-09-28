@@ -151,7 +151,7 @@ def treasury_goal(rt=Depends(get_runtime)):
 
 
 @router.post("/api/treasury/goal", dependencies=[Depends(require_admin)])
-def set_treasury_goal(payload: dict[str, object], rt=Depends(RuntimeBundle.dep)):
+def set_treasury_goal(payload: dict[str, object], rt=Depends(get_runtime)):
     if getattr(rt, "_treasury", None) is None:
         return json_safe(_treasury_unavailable())
     rejected = _invalid_set_goal_payload(payload)
