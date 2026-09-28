@@ -269,6 +269,22 @@ class RuntimeDecisionFacade:
             return opp, decision
 
     def _maybe_dispatch_auto_trade(self, *, current_block: int, decision: Any = None) -> bool:
+        owner = getattr(self, "_multiruntime_owner", None)
+        if (
+            owner is not None
+            and bool(getattr(owner, "GLOBAL_AUTO_SELECT", False))
+            and self is owner._runtimes.get(getattr(owner, "_active_chain", ""))
+        ):
+            if not self._auto_trading or not self._cb.allow_auto_trading():
+                return False
+            existing_global_task = getattr(owner, "_global_auto_task", None)
+            if existing_global_task is not None and not existing_global_task.done():
+                return False
+            owner._global_auto_task = asyncio.create_task(
+                owner.dispatch_selected_auto_trade(current_block=int(current_block))
+            )
+            return True
+
         if not self._auto_trading or not self._opps or not self._cb.allow_auto_trading():
             return False
         if self._exec_task is not None and not self._exec_task.done():
