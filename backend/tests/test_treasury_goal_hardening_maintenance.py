@@ -131,7 +131,7 @@ def test_treasury_goal_and_capital_unavailable_payloads_are_canonical() -> None:
     app = FastAPI()
     app.include_router(treasury_router)
     app.state.runtime = _NoCapitalRuntime()
-    app.dependency_overrides[RuntimeBundle.dep] = lambda request=None: _NoTreasuryRuntime()
+    app.dependency_overrides[get_runtime] = lambda request=None: _NoTreasuryRuntime()
     client = TestClient(app)
 
     capital = client.get('/api/treasury/capital').json()
