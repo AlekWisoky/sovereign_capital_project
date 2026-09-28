@@ -292,15 +292,12 @@ class MultiRuntimeOpportunitySelector:
             meta, "capitalAdmission", "capital_admission", "admission"
         )
         admission_flashloan_details = _nested(admission_for_flashloan, "details")
-        flashloan = _nested(admission_flashloan_details, "flashloan")
-        if not flashloan:
-            flashloan = _nested(admission_flashloan_details, "flashloanEligibility")
-        if not flashloan:
-            flashloan = _nested(admission_flashloan_details, "flashloan_eligibility")
-        if not flashloan:
-            flashloan = _first_nested(
-                meta, "flashloan", "flashloanEligibility", "flashloan_eligibility"
-            )
+        flashloan = {}
+        for key in ("flashloan", "flashloanEligibility", "flashloan_eligibility"):
+            value = admission_flashloan_details.get(key)
+            if isinstance(value, Mapping):
+                flashloan = dict(value)
+                break
         flashloan_eligible = _bool(
             flashloan,
             "eligible",
@@ -315,8 +312,9 @@ class MultiRuntimeOpportunitySelector:
                 "flashloanEligible",
             )
         if flashloan_eligible is None:
-            # Unknown flashloan eligibility is not execution-safe; fail closed.
-            flashloan_eligible = False
+            # Flash loans are optional for strategies that do not declare one.
+            # An explicitly declared eligibility value is authoritative.
+            flashloan_eligible = True
 
         route_ready = bool(route.get("ready", False))
         route_degraded = bool(route.get("runtime_degraded", False))
