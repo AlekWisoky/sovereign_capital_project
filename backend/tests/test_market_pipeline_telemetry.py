@@ -68,6 +68,14 @@ def test_market_pipeline_telemetry_counts_canonical_profitability_when_candidate
     assert out["economics"]["gross_candidates"] == 2
     assert out["economics"]["after_fee_candidates"] == 2
     assert out["economics"]["after_fee_positive_candidates"] == 1
+    assert all(
+        isinstance(out["economics"][key], int)
+        for key in (
+            "gross_candidates",
+            "after_fee_candidates",
+            "after_fee_positive_candidates",
+        )
+    )
     assert out["quality"]["route_quality"] == {
         "ready_candidates": 1,
         "degraded_candidates": 1,
