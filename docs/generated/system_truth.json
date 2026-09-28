@@ -1867,8 +1867,8 @@
   "runtime_bundle_definition_count": 1,
   "runtime_legacy_broad_except_count": 0,
   "runtime_legacy_lines": 183,
-  "runtime_service_count": 103,
-  "runtime_service_module_count": 103,
+  "runtime_service_count": 104,
+  "runtime_service_module_count": 104,
   "runtime_services": [
     "admission_service",
     "agent_service",
@@ -1907,6 +1907,7 @@
     "institutional_sizing_runtime",
     "launch_service",
     "lifecycle_service",
+    "multiruntime_opportunity_selector",
     "omar_receipt_facade",
     "operator_summary_service",
     "opportunity_service",
