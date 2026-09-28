@@ -57,6 +57,42 @@ async def multichain_state(request: Request):
     return {"active": chain, "chains": {chain: await rt.snapshot()}}
 
 
+@router.get("/api/multichain/market-pipeline")
+async def multichain_market_pipeline(request: Request):
+    rt = request.app.state.runtime  # type: ignore[attr-defined]
+    if isinstance(rt, MultiRuntimeBundle):
+        return json_safe(await rt.market_pipeline_telemetry_readonly())
+    chain = getattr(rt.cfg.chain, "name", "")
+    return json_safe({
+        "ok": True,
+        "active": chain,
+        "chains": {chain: rt.market_pipeline_telemetry_state()},
+        "active_chain_changed": False,
+    })
+
+
+@router.get("/api/multichain/opportunity-selection")
+async def multichain_opportunity_selection(request: Request):
+    rt = request.app.state.runtime  # type: ignore[attr-defined]
+    if isinstance(rt, MultiRuntimeBundle):
+        return json_safe(await rt.select_best_opportunity_readonly())
+    return json_safe({
+        "ok": True,
+        "selected_runtime": getattr(rt.cfg.chain, "name", ""),
+        "selected_opportunity_id": "",
+        "selected": None,
+        "runtime_count": 1,
+        "runtimes_inspected": [getattr(rt.cfg.chain, "name", "")],
+        "candidates": [],
+        "blocked_candidates": [],
+        "runtime_errors": {},
+        "selection_authority": "read_only_evidence",
+        "active_chain_changed": False,
+        "auto_trade_enabled": False,
+        "broadcast_attempted": False,
+    })
+
+
 @router.get("/api/multichain/summary")
 async def multichain_summary(request: Request):
     rt = request.app.state.runtime  # type: ignore[attr-defined]
