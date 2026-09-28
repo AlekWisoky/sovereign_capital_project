@@ -184,7 +184,7 @@ async def test_profitable_candidate_cannot_win_when_admission_or_capital_is_bloc
         item["opportunity_id"]: item["blocking_reason"] for item in out["candidates"]
     }
     assert reasons["eth-blocked"] == "capital_admission_blocked"
-    assert reasons["base-capital-blocked"] == "sizing_unavailable"
+    assert reasons["base-capital-blocked"] == "capital_authority_unavailable"
 
 
 @pytest.mark.asyncio
