@@ -22,6 +22,12 @@ class _Runtime(RuntimeStateFacade):
             "quotes": {"requests": 10, "successes": 8},
             "routes_considered": 12,
             "edges_generated": 20,
+            "route_evaluation": {
+                "quote_phase_ms": 125.0,
+                "route_evaluation_ms": 17.5,
+                "route_groups_evaluated": 3,
+                "budget_exhausted_after_quote": False,
+            },
         }
         self._opps = [
             SimpleNamespace(meta={
@@ -55,6 +61,12 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "successes": 8,
         "failures": 2,
         "success_rate": 0.8,
+    }
+    assert out["route_evaluation"] == {
+        "quote_phase_ms": 125.0,
+        "route_evaluation_ms": 17.5,
+        "route_groups_evaluated": 3,
+        "budget_exhausted_after_quote": False,
     }
     assert out["economics"] == {
         "gross_candidates": 0,

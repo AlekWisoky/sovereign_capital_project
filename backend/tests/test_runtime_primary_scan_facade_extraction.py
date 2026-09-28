@@ -55,12 +55,12 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
 
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
         calls['two'] = {'rpc': rpc, 'cfg': cfg, 'cache': cache, 'block_number': block_number, **kwargs}
-        kwargs['telemetry'].update({'quote_requests': 10, 'quote_successes': 8, 'routes_considered': 12, 'edges_generated': 6})
+        kwargs['telemetry'].update({'quote_requests': 10, 'quote_successes': 8, 'routes_considered': 12, 'edges_generated': 6, 'quote_phase_ms': 100.0, 'route_evaluation_ms': 20.0, 'route_groups_evaluated': 2, 'budget_exhausted_after_quote': True})
         return [_opp(5), _opp(20), _opp(-1, expected=11)]
 
     async def fake_three(rpc, cfg, cache, block_number, **kwargs):
         calls['three'] = {'rpc': rpc, 'cfg': cfg, 'cache': cache, 'block_number': block_number, **kwargs}
-        kwargs['telemetry'].update({'quote_requests': 4, 'quote_successes': 4, 'routes_considered': 5, 'edges_generated': 3})
+        kwargs['telemetry'].update({'quote_requests': 4, 'quote_successes': 4, 'routes_considered': 5, 'edges_generated': 3, 'quote_phase_ms': 30.0, 'route_evaluation_ms': 7.5, 'route_groups_evaluated': 1, 'budget_exhausted_after_quote': False})
         return [_opp(15)]
 
     monkeypatch.setattr(scan_mod, 'find_two_leg_opportunities', fake_two)
@@ -76,6 +76,7 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12}
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
+    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'budget_exhausted_after_quote': True}
     assert runtime._market_pipeline_telemetry['gross_candidates'] == 4
     assert [int((o.meta or {}).get('profit_after_gas_estimate_wei') or o.expected_profit_raw) for o in opps] == [20, 15, 11, 5]
 
