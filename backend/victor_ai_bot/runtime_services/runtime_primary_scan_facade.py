@@ -118,6 +118,21 @@ class RuntimePrimaryScanFacade:
             telemetry["edges_generated"] = int(
                 two_leg_telemetry.get("edges_generated", 0)
             ) + int(three_leg_telemetry.get("edges_generated", 0))
+            telemetry["route_evaluation"] = {
+                "quote_phase_ms": float(
+                    two_leg_telemetry.get("quote_phase_ms", 0.0)
+                ) + float(three_leg_telemetry.get("quote_phase_ms", 0.0)),
+                "route_evaluation_ms": float(
+                    two_leg_telemetry.get("route_evaluation_ms", 0.0)
+                ) + float(three_leg_telemetry.get("route_evaluation_ms", 0.0)),
+                "route_groups_evaluated": int(
+                    two_leg_telemetry.get("route_groups_evaluated", 0)
+                ) + int(three_leg_telemetry.get("route_groups_evaluated", 0)),
+                "budget_exhausted_after_quote": bool(
+                    two_leg_telemetry.get("budget_exhausted_after_quote", False)
+                    or three_leg_telemetry.get("budget_exhausted_after_quote", False)
+                ),
+            }
             telemetry["gross_candidates"] = len(opps)
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
