@@ -1466,17 +1466,17 @@
       "route_type": "APIRoute"
     },
     {
-      "handler": "presets_get",
-      "method": "GET",
-      "module": "victor_ai_bot.api_routes.ops_routes",
-      "path": "/api/presets/{chain}/{name}",
-      "route_type": "APIRoute"
-    },
-    {
       "handler": "presets_apply",
       "method": "POST",
       "module": "victor_ai_bot.api_routes.ops_routes",
       "path": "/api/presets/apply",
+      "route_type": "APIRoute"
+    },
+    {
+      "handler": "presets_get",
+      "method": "GET",
+      "module": "victor_ai_bot.api_routes.ops_routes",
+      "path": "/api/presets/{chain}/{name}",
       "route_type": "APIRoute"
     },
     {
