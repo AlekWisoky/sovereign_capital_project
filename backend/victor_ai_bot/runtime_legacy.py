@@ -81,6 +81,7 @@ class MultiRuntimeBundle(
     MAX_CHAINS = int(os.environ.get("VICTOR_MULTI_MAX_CHAINS", "4"))
     SNAPSHOT_TIMEOUT_S = float(os.environ.get("VICTOR_MULTI_SNAPSHOT_TIMEOUT_S", "2.0"))
     ALLOW_AUTO_ALL = bool(int(os.environ.get("VICTOR_MULTI_ALLOW_AUTO_ALL", "0")))
+    GLOBAL_AUTO_SELECT = bool(int(os.environ.get("VICTOR_MULTI_GLOBAL_AUTO_SELECT", "0")))
 
     def __init__(self, cfgs: List[Any]):
         if not cfgs:
@@ -89,6 +90,9 @@ class MultiRuntimeBundle(
             cfgs = cfgs[: self.MAX_CHAINS]
         self._runtimes: Dict[str, RuntimeBundle] = {c.chain.name: RuntimeBundle(c) for c in cfgs}
         self._active_chain = cfgs[0].chain.name
+        self._global_auto_task: asyncio.Task | None = None
+        for runtime in self._runtimes.values():
+            runtime._multiruntime_owner = self
         self._ws_clients: List[asyncio.Queue] = []
         self._fan_tasks: List[asyncio.Task] = []
         self._fan_stop = asyncio.Event()
