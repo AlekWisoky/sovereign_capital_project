@@ -13,7 +13,6 @@ from typing import Any, Mapping
 from ..profitability_state import profitability_state_view
 from .profitability_truth import inspect_profit_after_costs_truth
 from .route_runtime_truth import execution_route_truth
-from .state_service import select_top_opportunity
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -459,17 +458,15 @@ class MultiRuntimeOpportunitySelector:
                 runtime_errors[str(runtime_name)] = f"summary_failed:{exc}"
 
             opportunities = list(getattr(runtime, "_opps", []) or [])
-            candidate = select_top_opportunity(opportunities)
-            if candidate is None:
-                continue
-            evidence.append(
-                self._candidate_evidence(
-                    str(runtime_name),
-                    len(opportunities),
-                    candidate,
-                    _mapping(summary),
+            for candidate in opportunities:
+                evidence.append(
+                    self._candidate_evidence(
+                        str(runtime_name),
+                        len(opportunities),
+                        candidate,
+                        _mapping(summary),
+                    )
                 )
-            )
 
         eligible = [item for item in evidence if item.eligible]
         selected = max(eligible, key=lambda item: item.selection_score) if eligible else None
