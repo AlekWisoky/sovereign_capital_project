@@ -34,26 +34,17 @@ def _bool(mapping: Mapping[str, Any], *keys: str) -> bool | None:
     return None
 
 
-def _float(mapping: Mapping[str, Any], *keys: str) -> float | None:
+def _number(
+    mapping: Mapping[str, Any], *keys: str, as_int: bool = False
+) -> float | int | None:
     for key in keys:
         if key not in mapping or mapping.get(key) in (None, ""):
             continue
         try:
-            value = float(mapping.get(key))
+            value = int(str(mapping.get(key))) if as_int else float(mapping.get(key))
         except (TypeError, ValueError):
             continue
         return value
-    return None
-
-
-def _int(mapping: Mapping[str, Any], *keys: str) -> int | None:
-    for key in keys:
-        if key not in mapping or mapping.get(key) in (None, ""):
-            continue
-        try:
-            return int(str(mapping.get(key)))
-        except (TypeError, ValueError):
-            continue
     return None
 
 
@@ -63,6 +54,54 @@ def _first_nested(mapping: Mapping[str, Any], *parents: str) -> dict[str, Any]:
         if isinstance(value, Mapping):
             return dict(value)
     return {}
+
+
+def _profitability_blocking_reason(
+    truth: Any, after_fee_usd_micro: int | None
+) -> str:
+    if not truth.verified:
+        return str(truth.reason_code)
+    if not truth.positive:
+        return str(truth.reason_code)
+    if after_fee_usd_micro is None:
+        return "cross_runtime_usd_profit_unavailable"
+    if after_fee_usd_micro <= 0:
+        return "profit_after_costs_usd_not_positive"
+    return ""
+
+
+def _execution_blocking_reason(state: Mapping[str, Any]) -> str:
+    liquidity_capacity = state.get("liquidity_capacity")
+    required_notional = state.get("required_notional")
+    if not state.get("route_ready"):
+        return str(state.get("route_reason") or "execution_route_not_ready")
+    if state.get("route_degraded"):
+        return "execution_route_runtime_degraded"
+    if (
+        liquidity_capacity is not None
+        and required_notional is not None
+        and liquidity_capacity < required_notional
+    ):
+        return "insufficient_liquidity_capacity"
+    if not state.get("sizing_available"):
+        return "sizing_unavailable"
+    if not state.get("capital_authority"):
+        return "capital_authority_unavailable"
+    if not state.get("flashloan_eligible"):
+        return "flashloan_ineligible"
+    return ""
+
+
+def _governance_blocking_reason(state: Mapping[str, Any]) -> str:
+    if not state.get("admission_allowed"):
+        return str(state.get("admission_reason") or "capital_admission_blocked")
+    if not state.get("gate_allowed"):
+        return str(state.get("gate_reason") or "auto_trade_gate_unavailable")
+    if not state.get("recovery_ready"):
+        return str(state.get("recovery_reason") or "auto_trade_recovery_blocked")
+    if not state.get("execution_ready"):
+        return str(state.get("execution_reason") or "execution_not_ready")
+    return ""
 
 
 @dataclass(frozen=True)
@@ -205,22 +244,22 @@ class MultiRuntimeOpportunitySelector:
             or meta.get("selected_provider")
             or ""
         )
-        provider_capacity = _float(
+        provider_capacity = _number(
             capture,
             "provider_capacity_usd",
             "providerCapacityUsd",
         )
         if provider_capacity is None:
-            provider_capacity = _float(liquidity, "provider_capacity_usd", "providerCapacityUsd")
+            provider_capacity = _number(liquidity, "provider_capacity_usd", "providerCapacityUsd")
 
-        route_capacity = _float(
+        route_capacity = _number(
             capture,
             "route_capacity_usd",
             "routeCapacityUsd",
             "executable_depth_usd",
             "executableDepthUsd",
         )
-        liquidity_capacity = _float(
+        liquidity_capacity = _number(
             liquidity,
             "available_usd",
             "availableUsd",
@@ -235,7 +274,7 @@ class MultiRuntimeOpportunitySelector:
         if capacities:
             liquidity_capacity = min(capacities)
 
-        required_notional = _float(
+        required_notional = _number(
             sizing_body,
             "requested_notional_usd",
             "requestedNotionalUsd",
@@ -243,7 +282,7 @@ class MultiRuntimeOpportunitySelector:
             "targetNotionalUsd",
         )
         if required_notional is None:
-            required_notional = _float(
+            required_notional = _number(
                 admission_details,
                 "capital_required_usd",
                 "capitalRequiredUsd",
@@ -251,7 +290,7 @@ class MultiRuntimeOpportunitySelector:
                 "requestedNotionalUsd",
             )
         if required_notional is None:
-            required_notional = _float(
+            required_notional = _number(
                 capture,
                 "capital_required_usd",
                 "capitalRequiredUsd",
@@ -379,52 +418,39 @@ class MultiRuntimeOpportunitySelector:
         if admission_allowed is None:
             admission_allowed = gate_allowed
 
-        after_fee_usd_micro = _int(
+        after_fee_usd_micro = _number(
             profitability,
             "profitAfterCostsUsdMicroInt",
+            as_int=True,
         )
-        projected_profit_usd = _float(
+        projected_profit_usd = _number(
             profitability,
             "expectedProfitUsd",
         )
 
-        blocking_reason = ""
-        if not truth.verified:
-            blocking_reason = str(truth.reason_code)
-        elif not truth.positive:
-            blocking_reason = str(truth.reason_code)
-        elif after_fee_usd_micro is None:
-            blocking_reason = "cross_runtime_usd_profit_unavailable"
-        elif after_fee_usd_micro <= 0:
-            blocking_reason = "profit_after_costs_usd_not_positive"
-        elif not route_ready:
-            blocking_reason = route_reason
-        elif route_degraded:
-            blocking_reason = "execution_route_runtime_degraded"
-        elif (
-            liquidity_capacity is not None
-            and required_notional is not None
-            and liquidity_capacity < required_notional
-        ):
-            blocking_reason = "insufficient_liquidity_capacity"
-        elif not sizing_available:
-            blocking_reason = "sizing_unavailable"
-        elif not capital_authority:
-            blocking_reason = "capital_authority_unavailable"
-        elif not flashloan_eligible:
-            blocking_reason = "flashloan_ineligible"
-        elif not admission_allowed:
-            blocking_reason = str(admission.get("reason_code") or "capital_admission_blocked")
-        elif not gate_allowed:
-            blocking_reason = gate_reason
-        elif not recovery_ready:
-            blocking_reason = str(
-                recovery.get("reason_code")
-                or recovery.get("reason")
-                or "auto_trade_recovery_blocked"
-            )
-        elif not execution_ready:
-            blocking_reason = execution_block_reason or "execution_not_ready"
+        blocking_state = {
+            "route_ready": route_ready,
+            "route_degraded": route_degraded,
+            "route_reason": route_reason,
+            "liquidity_capacity": liquidity_capacity,
+            "required_notional": required_notional,
+            "sizing_available": sizing_available,
+            "capital_authority": capital_authority,
+            "flashloan_eligible": flashloan_eligible,
+            "admission_allowed": admission_allowed,
+            "admission_reason": admission.get("reason_code"),
+            "gate_allowed": gate_allowed,
+            "gate_reason": gate_reason,
+            "recovery_ready": recovery_ready,
+            "recovery_reason": recovery.get("reason_code") or recovery.get("reason"),
+            "execution_ready": execution_ready,
+            "execution_reason": execution_block_reason,
+        }
+        blocking_reason = _profitability_blocking_reason(truth, after_fee_usd_micro)
+        if not blocking_reason:
+            blocking_reason = _execution_blocking_reason(blocking_state)
+        if not blocking_reason:
+            blocking_reason = _governance_blocking_reason(blocking_state)
 
         eligible = not bool(blocking_reason)
 
@@ -461,8 +487,8 @@ class MultiRuntimeOpportunitySelector:
             provider=provider,
             provider_capacity_usd=provider_capacity,
             sizing_available=bool(sizing_available),
-            size_multiplier=_float(meta, "size_multiplier", "sizeMultiplier"),
-            borrow_multiplier=_float(meta, "borrow_multiplier", "borrowMultiplier"),
+            size_multiplier=_number(meta, "size_multiplier", "sizeMultiplier"),
+            borrow_multiplier=_number(meta, "borrow_multiplier", "borrowMultiplier"),
             capital_authority_available=bool(capital_authority),
             flashloan_eligible=bool(flashloan_eligible),
             admission_allowed=bool(admission_allowed),
@@ -476,6 +502,29 @@ class MultiRuntimeOpportunitySelector:
             selection_score=selection_score,
         )
 
+    async def _runtime_evidence(
+        self, runtime_name: str, runtime: Any
+    ) -> tuple[list[RuntimeOpportunityEvidence], str | None]:
+        try:
+            summary = await runtime.summary()
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            summary = {}
+            error = f"summary_failed:{exc}"
+        else:
+            error = None
+
+        opportunities = list(getattr(runtime, "_opps", []) or [])
+        evidence = [
+            self._candidate_evidence(
+                runtime_name,
+                len(opportunities),
+                candidate,
+                _mapping(summary),
+            )
+            for candidate in opportunities
+        ]
+        return evidence, error
+
     async def select(self, runtimes: Mapping[str, Any]) -> dict[str, Any]:
         """Inspect every configured runtime without changing active-chain state."""
 
@@ -483,22 +532,12 @@ class MultiRuntimeOpportunitySelector:
         runtime_errors: dict[str, str] = {}
 
         for runtime_name, runtime in runtimes.items():
-            try:
-                summary = await runtime.summary()
-            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                summary = {}
-                runtime_errors[str(runtime_name)] = f"summary_failed:{exc}"
-
-            opportunities = list(getattr(runtime, "_opps", []) or [])
-            for candidate in opportunities:
-                evidence.append(
-                    self._candidate_evidence(
-                        str(runtime_name),
-                        len(opportunities),
-                        candidate,
-                        _mapping(summary),
-                    )
-                )
+            runtime_evidence, runtime_error = await self._runtime_evidence(
+                str(runtime_name), runtime
+            )
+            evidence.extend(runtime_evidence)
+            if runtime_error:
+                runtime_errors[str(runtime_name)] = runtime_error
 
         eligible = [item for item in evidence if item.eligible]
         selected = max(eligible, key=lambda item: item.selection_score) if eligible else None

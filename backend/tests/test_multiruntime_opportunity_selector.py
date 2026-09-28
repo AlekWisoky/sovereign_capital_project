@@ -12,36 +12,39 @@ from victor_ai_bot.runtime_services.multiruntime_opportunity_selector import (
 def _candidate(
     oid: str,
     profit_usd: int,
-    *,
-    verified: bool = True,
-    route_ready: bool = True,
-    liquidity_usd: float = 10_000.0,
-    required_usd: float = 1_000.0,
-    gate_allowed: bool = True,
-    admission_allowed: bool = True,
-    capital_available: bool = True,
-    flashloan_eligible: bool = True,
+    **overrides: object,
 ) -> SimpleNamespace:
+    options = {
+        "verified": True,
+        "route_ready": True,
+        "liquidity_usd": 10_000.0,
+        "required_usd": 1_000.0,
+        "gate_allowed": True,
+        "admission_allowed": True,
+        "capital_available": True,
+        "flashloan_eligible": True,
+    }
+    options.update(overrides)
     return SimpleNamespace(
         id=oid,
         route_id=f"route-{oid}",
         strategy="flash_arb",
-        can_execute=route_ready,
+        can_execute=bool(options["route_ready"]),
         meta={
             "profitability": {
                 "stage": "execution_preflight",
                 "source": "test",
-                "reason": "ok" if verified else "profitability_contract_invalid",
-                "revalidated": bool(verified),
-                "stale": not verified,
-                "valid": bool(verified),
-                "authoritative": bool(verified),
+                "reason": "ok" if options["verified"] else "profitability_contract_invalid",
+                "revalidated": bool(options["verified"]),
+                "stale": not bool(options["verified"]),
+                "valid": bool(options["verified"]),
+                "authoritative": bool(options["verified"]),
                 "profit_after_costs_wei": str(max(1, profit_usd)),
                 "profit_after_costs_usd_micro": int(profit_usd * 1_000_000),
                 "expected_profit_usd": float(profit_usd),
             },
             "execution_route_plan": {
-                "executable": bool(route_ready),
+                "executable": bool(options["route_ready"]),
                 "selected_venues": ["univ3"],
             },
             "execution_route_runtime": {
@@ -49,37 +52,37 @@ def _candidate(
                 "reason_codes": [],
             },
             "execution_capture": {
-                "execution_ready": bool(route_ready),
-                "route_capacity_usd": liquidity_usd,
-                "capital_required_usd": required_usd,
+                "execution_ready": bool(options["route_ready"]),
+                "route_capacity_usd": options["liquidity_usd"],
+                "capital_required_usd": options["required_usd"],
                 "selected_provider": "provider-a",
-                "provider_capacity_usd": liquidity_usd,
+                "provider_capacity_usd": options["liquidity_usd"],
             },
             "capital_admission": {
-                "allowed": bool(admission_allowed),
-                "reason_code": "ok" if admission_allowed else "capital_admission_blocked",
+                "allowed": bool(options["admission_allowed"]),
+                "reason_code": "ok" if options["admission_allowed"] else "capital_admission_blocked",
                 "details": {
                     "institutionalSizing": {
                         "valid": True,
                         "sizing": {
                             "execution_allowed": True,
-                            "requested_notional_usd": required_usd,
-                            "capital_authority_available": bool(capital_available),
+                            "requested_notional_usd": options["required_usd"],
+                            "capital_authority_available": bool(options["capital_available"]),
                         },
                     },
                     "flashloanSizing": {
-                            "allowed": bool(flashloan_eligible),
+                            "allowed": bool(options["flashloan_eligible"]),
                     },
                 },
             },
             "auto_trade_gate": {
-                "allowed": bool(gate_allowed),
-                "reason_code": "ok" if gate_allowed else "telemetry_insufficient",
+                "allowed": bool(options["gate_allowed"]),
+                "reason_code": "ok" if options["gate_allowed"] else "telemetry_insufficient",
             },
             "auto_trade_recovery": {
-                "ready": bool(gate_allowed),
-                "blocked": not bool(gate_allowed),
-                "reason_code": "ok" if gate_allowed else "telemetry_insufficient",
+                "ready": bool(options["gate_allowed"]),
+                "blocked": not bool(options["gate_allowed"]),
+                "reason_code": "ok" if options["gate_allowed"] else "telemetry_insufficient",
             },
         },
     )
@@ -104,30 +107,26 @@ class _Runtime:
         }
 
 
+@pytest.mark.parametrize(
+    ("ethereum_profit", "base_profit", "expected_runtime", "expected_id"),
+    [
+        (30, 20, "ethereum", "eth-best"),
+        (10, 40, "base", "base-best"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_global_selector_prefers_higher_explicit_usd_after_fee_profit():
+async def test_global_selector_prefers_higher_explicit_usd_after_fee_profit(
+    ethereum_profit, base_profit, expected_runtime, expected_id
+):
     selector = MultiRuntimeOpportunitySelector()
     out = await selector.select(
         {
-            "ethereum": _Runtime(_candidate("eth-best", 30)),
-            "base": _Runtime(_candidate("base-best", 20)),
+            "ethereum": _Runtime(_candidate("eth-best", ethereum_profit)),
+            "base": _Runtime(_candidate("base-best", base_profit)),
         }
     )
-    assert out["selected_runtime"] == "ethereum"
-    assert out["selected_opportunity_id"] == "eth-best"
-
-
-@pytest.mark.asyncio
-async def test_global_selector_can_choose_base_when_base_is_more_profitable():
-    selector = MultiRuntimeOpportunitySelector()
-    out = await selector.select(
-        {
-            "ethereum": _Runtime(_candidate("eth", 10)),
-            "base": _Runtime(_candidate("base", 40)),
-        }
-    )
-    assert out["selected_runtime"] == "base"
-    assert out["selected_opportunity_id"] == "base"
+    assert out["selected_runtime"] == expected_runtime
+    assert out["selected_opportunity_id"] == expected_id
 
 
 @pytest.mark.asyncio
