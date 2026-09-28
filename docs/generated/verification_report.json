@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 344,
+    "test_file_count": 345,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -59,6 +59,7 @@
       "backend/tests/test_capital_write_service_atomicity.py",
       "backend/tests/test_caq_kds_intelligence_maintenance.py",
       "backend/tests/test_caq_kds_self_evolution_maintenance.py",
+      "backend/tests/test_chain_venue_configuration.py",
       "backend/tests/test_chaos_breakers.py",
       "backend/tests/test_command_center_overlay_maintenance.py",
       "backend/tests/test_config_validation_maintenance.py",
@@ -108,6 +109,7 @@
       "backend/tests/test_gmao_governance_maintenance.py",
       "backend/tests/test_goal_read_surface_sync_maintenance.py",
       "backend/tests/test_governance_read_surface_auto_trade_sync.py",
+      "backend/tests/test_governed_ai_inference.py",
       "backend/tests/test_imports.py",
       "backend/tests/test_income_helper.py",
       "backend/tests/test_institutional_sizing_runtime_wiring.py",
@@ -321,6 +323,7 @@
       "backend/tests/test_system_auxiliary_routes_auto_trade_sync.py",
       "backend/tests/test_system_control_surface_auto_trade_sync.py",
       "backend/tests/test_system_execution_quality_auto_trade_sync.py",
+      "backend/tests/test_system_routes_active_runtime.py",
       "backend/tests/test_system_truth.py",
       "backend/tests/test_system_truth_script_check.py",
       "backend/tests/test_telemetry_feedback.py",

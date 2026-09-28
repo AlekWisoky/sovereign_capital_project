@@ -5,7 +5,7 @@
 - generated_at_iso: 2026-09-21T20:24:37.421Z
 - thin_shell_runtime_py_lines: 47
 - thin_shell_api_py_lines: 21
-- backend_test_file_count: 340
+- backend_test_file_count: 345
 - mobile_test_file_count: 15
 - route_count: 165
 - route_count_basis: app_routes

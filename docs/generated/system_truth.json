@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 344,
+  "backend_test_file_count": 345,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -377,6 +377,7 @@
     "test_system_auxiliary_routes_auto_trade_sync.py",
     "test_system_control_surface_auto_trade_sync.py",
     "test_system_execution_quality_auto_trade_sync.py",
+    "test_system_routes_active_runtime.py",
     "test_system_truth.py",
     "test_system_truth_script_check.py",
     "test_telemetry_feedback.py",
@@ -2428,6 +2429,7 @@
       "test_system_auxiliary_routes_auto_trade_sync.py",
       "test_system_control_surface_auto_trade_sync.py",
       "test_system_execution_quality_auto_trade_sync.py",
+      "test_system_routes_active_runtime.py",
       "test_system_truth.py",
       "test_system_truth_script_check.py",
       "test_telemetry_feedback.py",
@@ -2770,6 +2772,7 @@
       "test_system_auxiliary_routes_auto_trade_sync.py",
       "test_system_control_surface_auto_trade_sync.py",
       "test_system_execution_quality_auto_trade_sync.py",
+      "test_system_routes_active_runtime.py",
       "test_system_truth.py",
       "test_system_truth_script_check.py",
       "test_telemetry_feedback.py",
@@ -2828,7 +2831,8 @@
       "reconciliation.test.ts",
       "wealth-goal-summary.test.ts",
       "ws-summary.test.ts"
-    ]
+    ],
+    "backend_test_file_count": 341
   },
   "thin_shell_api_py_lines": 21,
   "thin_shell_runtime_py_lines": 47,

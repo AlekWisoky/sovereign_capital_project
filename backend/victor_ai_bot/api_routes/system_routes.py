@@ -14,6 +14,7 @@ from ..runtime_services.summary_read_contract import build_summary_read_contract
 from ..degraded_state_contract import aggregate_state_contracts, contract_from_surface
 from ..security.auth import require_capability
 from ..security.permissions import Capability
+from ..api import get_runtime
 from ._route_helpers import (
     degraded_payload,
     invalid_request_payload,
@@ -37,10 +38,6 @@ _SYSTEM_READ_FAILURES = (
     TypeError,
     ValueError,
 )
-
-
-def get_runtime(request: Request):
-    return request.app.state.runtime  # type: ignore[attr-defined]
 
 
 def _read_surface_payload(
