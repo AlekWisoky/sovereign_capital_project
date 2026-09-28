@@ -60,9 +60,9 @@ def _candidate(
                 "reason_code": "ok" if admission_allowed else "capital_admission_blocked",
                 "details": {
                     "institutionalSizing": {
-                        "valid": bool(capital_available),
+                        "valid": True,
                         "sizing": {
-                            "execution_allowed": bool(capital_available),
+                            "execution_allowed": True,
                             "requested_notional_usd": required_usd,
                             "capital_authority_available": bool(capital_available),
                         },
