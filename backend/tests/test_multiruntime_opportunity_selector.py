@@ -82,7 +82,7 @@ def _candidate(
             "auto_trade_recovery": {
                 "ready": bool(options["gate_allowed"]),
                 "blocked": not bool(options["gate_allowed"]),
-                "reason_code": "ok" if gate_allowed else "telemetry_insufficient",
+                "reason_code": "ok" if options["gate_allowed"] else "telemetry_insufficient",
             },
         },
     )
