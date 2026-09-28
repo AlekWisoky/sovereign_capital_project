@@ -5,7 +5,7 @@ Generated at: `2026-09-17T11:06:48.408000Z`
 Generator: `scripts/render_verification_report.py`
 
 ## Backend verification inventory
-- Backend test files: **339**
+- Backend test files: **343**
 - Repro command: `cd backend && pytest -q`
 
 ## Critical hardening tests
