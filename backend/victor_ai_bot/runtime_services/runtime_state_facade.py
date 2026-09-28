@@ -85,7 +85,7 @@ class RuntimeStateFacade:
         requests = int(quotes.get("requests") or 0)
         successes = int(quotes.get("successes") or 0)
         discovery = dict(telemetry.get("discovery") or {})
-        return to_json_safe({
+        payload = to_json_safe({
             "ok": True,
             "chain": str(getattr(getattr(self, "cfg", None), "chain", None) and getattr(self.cfg.chain, "name", "") or ""),
             "scanner": {
@@ -134,6 +134,10 @@ class RuntimeStateFacade:
                 "execution": None,
             },
         })
+        economics = payload.get("economics", {})
+        for key in ("gross_candidates", "after_fee_candidates", "after_fee_positive_candidates"):
+            economics[key] = int(economics.get(key) or 0)
+        return payload
 
     def execution_capture_analytics(self) -> Dict[str, Any]: return self._state_summary_payload("execution_capture_analytics", default={"laneSuccess": [], "venueQuality": []})
     def telemetry_summary(self) -> Dict[str, Any]: return self._service_payload("_telemetry_service", method_name="summary", default={"realization": {"families": []}, "agents": {"agents": []}})
