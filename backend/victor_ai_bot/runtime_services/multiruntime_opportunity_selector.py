@@ -370,9 +370,12 @@ class MultiRuntimeOpportunitySelector:
             blocking_reason = route_reason
         elif route_degraded:
             blocking_reason = "execution_route_runtime_degraded"
-        elif liquidity_capacity is not None and required_notional is not None:
-            if liquidity_capacity < required_notional:
-                blocking_reason = "insufficient_liquidity_capacity"
+        elif (
+            liquidity_capacity is not None
+            and required_notional is not None
+            and liquidity_capacity < required_notional
+        ):
+            blocking_reason = "insufficient_liquidity_capacity"
         elif not sizing_available:
             blocking_reason = "sizing_unavailable"
         elif not capital_authority:
