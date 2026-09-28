@@ -463,10 +463,21 @@ async def find_two_leg_opportunities(
         by_pair.setdefault((e.token_in, e.token_out), []).append(e)
 
     opps: List[Opportunity] = []
-    # Batch quote all first-leg edges at base amount (biggest ROI speedup)
+    # Batch quote all first-leg edges at base amount (biggest ROI speedup).
+    # Quote acquisition can legitimately exceed the route-evaluation budget on a
+    # slow provider. The old wall-clock check immediately after this await could
+    # therefore discard every route before considering even one successful quote.
+    quote_phase_started = time.perf_counter()
     qmap1 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in, metrics=metrics)
+    route_eval_started = time.perf_counter()
+    route_groups_evaluated = 0
     for e1 in edges:
-        if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+        # Preserve the bounded route-evaluation budget, but always allow the
+        # first viable reverse-pair group after first-leg quote acquisition.
+        if (
+            route_groups_evaluated > 0
+            and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
+        ):
             break
         # look for e2 that returns to start
         revs = by_pair.get((e1.token_out, e1.token_in), [])
@@ -477,11 +488,12 @@ async def find_two_leg_opportunities(
         if not q1:
             continue
         out1, meta1 = q1
-        # Batch quote all candidate second legs for this out1
+        # Batch quote all candidate second legs for this out1.
+        # This batch is part of the selected route group; process its returned
+        # quotes even if the provider consumed the remaining wall-clock budget.
         qmap2 = await quote_edges_batch(rpc, cfg, cache, revs, out1, metrics=metrics)
+        route_groups_evaluated += 1
         for e2 in revs:
-            if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
-                break
             q2 = qmap2.get(edge_key(e2))
             if not q2:
                 continue
@@ -630,6 +642,20 @@ async def find_two_leg_opportunities(
                 break
         if len(opps) >= max_opps:
             break
+    if telemetry is not None:
+        telemetry["quote_phase_ms"] = float(
+            (route_eval_started - quote_phase_started) * 1000.0
+        )
+        telemetry["route_evaluation_ms"] = float(
+            (time.perf_counter() - route_eval_started) * 1000.0
+        )
+        telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
+        telemetry["budget_exhausted_after_quote"] = bool(
+            route_groups_evaluated == 0
+            and bool(edges)
+            and bool(qmap1)
+        )
+
     snapshot = scan_efficiency_snapshot(
         elapsed_ms=(time.perf_counter() - t_start) * 1000.0,
         candidate_count=int(metrics.get("candidate_count", 0)),
