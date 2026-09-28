@@ -670,6 +670,7 @@ async def find_three_leg_opportunities(
     slippage_bps: int,
     time_budget_ms: int = 2200,
     max_opps: int = 40,
+    telemetry: Optional[Dict[str, Any]] = None,
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
@@ -945,6 +946,20 @@ async def find_three_leg_opportunities(
     )
     for opportunity in opps:
         opportunity.meta["scan_efficiency"] = dict(snapshot)
+    if telemetry is not None:
+        telemetry.update({
+            "elapsed_ms": float(snapshot["elapsed_ms"]),
+            "candidate_count": int(snapshot["candidate_count"]),
+            "quote_requests": int(snapshot["quote_requests"]),
+            "quote_successes": int(snapshot["quote_successes"]),
+            "quote_success_rate": float(snapshot["quote_success_rate"]),
+            "cache_hits": int(snapshot["cache_hits"]),
+            "network_batches": int(snapshot["network_batches"]),
+            "routes_considered": int(snapshot["candidate_count"]),
+            "edges_generated": len(edges),
+            "gross_candidates": len(opps),
+            "opportunity_count": len(opps),
+        })
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
     return opps
 
