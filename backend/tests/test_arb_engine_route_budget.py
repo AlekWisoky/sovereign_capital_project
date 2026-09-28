@@ -81,7 +81,7 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
             metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
         return {
             arb.edge_key(edge): (
-                120 if edge.token_out in {"B", "C"} else 100,
+                120 if edge.token_out in {"0x3333333333333333333333333333333333333333", "0x4444444444444444444444444444444444444444"} else 100,
                 {"gas_estimate": 1, "fee": 3000},
             )
             for edge in requested_edges
