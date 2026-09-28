@@ -367,12 +367,13 @@
   },
   "critical_hardening": {
     "counts": {
-      "capital_and_fund_truth": 44,
+      "capital_and_fund_truth": 45,
       "execution_hardening": 24,
       "runtime_compatibility": 75
     },
     "files": {
       "capital_and_fund_truth": [
+        "backend/tests/test_capital_admission_active_runtime.py",
         "backend/tests/test_capital_commit_lineage_sync.py",
         "backend/tests/test_capital_contract_unification_maintenance.py",
         "backend/tests/test_capital_event_bus_unification.py",
