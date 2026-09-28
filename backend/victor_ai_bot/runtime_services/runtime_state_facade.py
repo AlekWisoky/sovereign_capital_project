@@ -109,6 +109,7 @@ class RuntimeStateFacade:
                 "failures": max(0, requests - successes),
                 "success_rate": (float(successes) / float(requests)) if requests else 0.0,
             },
+            "route_evaluation": dict(telemetry.get("route_evaluation") or {}),
             "economics": {
                 "gross_candidates": int(len(opportunities)),
                 "after_fee_candidates": int(verified),
