@@ -275,6 +275,8 @@ class RuntimeDecisionFacade:
             and bool(getattr(owner, "GLOBAL_AUTO_SELECT", False))
             and self is owner._runtimes.get(getattr(owner, "_active_chain", ""))
         ):
+            if not self._auto_trading or not self._cb.allow_auto_trading():
+                return False
             existing_global_task = getattr(owner, "_global_auto_task", None)
             if existing_global_task is not None and not existing_global_task.done():
                 return False
