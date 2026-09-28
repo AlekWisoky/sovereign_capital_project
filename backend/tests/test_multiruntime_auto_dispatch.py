@@ -148,7 +148,8 @@ class _ActiveRuntime(RuntimeDecisionFacade):
         self._exec_task = None
 
 
-def test_active_auto_dispatch_hands_off_to_global_selector_when_enabled():
+@pytest.mark.asyncio
+async def test_active_auto_dispatch_hands_off_to_global_selector_when_enabled():
     owner = SimpleNamespace(
         GLOBAL_AUTO_SELECT=True,
         _active_chain="base",
@@ -167,6 +168,7 @@ def test_active_auto_dispatch_hands_off_to_global_selector_when_enabled():
 
     assert dispatched is True
     assert owner._global_auto_task is not None
+    await asyncio.sleep(0)
     owner._global_auto_task.cancel()
 
 
