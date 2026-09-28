@@ -308,7 +308,8 @@ class MultiRuntimeOpportunitySelector:
                 "flashloanEligible",
             )
         if flashloan_eligible is None:
-            flashloan_eligible = True if not flashloan else False
+            # Unknown flashloan eligibility is not execution-safe; fail closed.
+            flashloan_eligible = False
 
         route_ready = bool(route.get("ready", False))
         route_degraded = bool(route.get("runtime_degraded", False))
