@@ -294,6 +294,13 @@ class MultiRuntimeOpportunitySelector:
             "flashloanEligibility",
             "flashloan_eligibility",
         )
+        if not flashloan:
+            flashloan = _first_nested(
+                meta,
+                "flashloan",
+                "flashloanEligibility",
+                "flashloan_eligibility",
+            )
         flashloan_eligible = _bool(
             flashloan,
             "eligible",
