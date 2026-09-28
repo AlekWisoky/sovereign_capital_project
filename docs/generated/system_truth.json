@@ -42,8 +42,8 @@
     "withdraw_all_routes",
     "withdraw_routes"
   ],
-  "app_route_count": 165,
-  "application_route_count": 157,
+  "app_route_count": 163,
+  "application_route_count": 153,
   "backend_broad_except_count": 1,
   "backend_broad_exception_sites": [
     {
@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 348,
+  "backend_test_file_count": 349,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -189,6 +189,7 @@
     "test_lifecycle_terminal_profitability_persistence.py",
     "test_llm_inl_runtime_maintenance.py",
     "test_logging_utils.py",
+    "test_market_pipeline_telemetry.py",
     "test_meta_memory_persistence_hardening.py",
     "test_mev_guard_helper.py",
     "test_mev_mempool_hardening.py",
@@ -699,7 +700,7 @@
     "disabled",
     "quarantined"
   ],
-  "http_route_count": 161,
+  "http_route_count": 159,
   "http_route_count_basis": "http_methods_excluding_head_options",
   "launch_modes": [
     "V1_ONLY",
@@ -733,7 +734,7 @@
     "wealth-goal-summary.test.ts",
     "ws-summary.test.ts"
   ],
-  "route_count": 165,
+  "route_count": 163,
   "route_count_basis": "app_routes",
   "route_inventory": [
     {
@@ -1304,10 +1305,24 @@
       "route_type": "APIRoute"
     },
     {
+      "handler": "multichain_market_pipeline",
+      "method": "GET",
+      "module": "victor_ai_bot.api_routes.multichain_routes",
+      "path": "/api/multichain/market-pipeline",
+      "route_type": "APIRoute"
+    },
+    {
       "handler": "multichain_narrative_state",
       "method": "GET",
       "module": "victor_ai_bot.api_routes.overlay_routes",
       "path": "/api/multichain/narrative/state",
+      "route_type": "APIRoute"
+    },
+    {
+      "handler": "multichain_opportunity_selection",
+      "method": "GET",
+      "module": "victor_ai_bot.api_routes.multichain_routes",
+      "path": "/api/multichain/opportunity-selection",
       "route_type": "APIRoute"
     },
     {
@@ -1451,17 +1466,17 @@
       "route_type": "APIRoute"
     },
     {
-      "handler": "presets_apply",
-      "method": "POST",
-      "module": "victor_ai_bot.api_routes.ops_routes",
-      "path": "/api/presets/apply",
-      "route_type": "APIRoute"
-    },
-    {
       "handler": "presets_get",
       "method": "GET",
       "module": "victor_ai_bot.api_routes.ops_routes",
       "path": "/api/presets/{chain}/{name}",
+      "route_type": "APIRoute"
+    },
+    {
+      "handler": "presets_apply",
+      "method": "POST",
+      "module": "victor_ai_bot.api_routes.ops_routes",
+      "path": "/api/presets/apply",
       "route_type": "APIRoute"
     },
     {
@@ -2844,5 +2859,8 @@
     "api_py_lines": 21,
     "runtime_py_lines": 47
   },
-  "websocket_route_count": 4
+  "websocket_route_count": 4,
+  "backend_test_names": [
+    "test_market_pipeline_telemetry.py"
+  ]
 }
