@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from victor_ai_bot.api import get_runtime
 from victor_ai_bot.api_routes.treasury_extra import router as treasury_router
-from victor_ai_bot.runtime import RuntimeBundle
 
 
 class _FakeGoal:
@@ -33,7 +33,7 @@ class _FakeRuntime:
 def _client(runtime: _FakeRuntime) -> TestClient:
     app = FastAPI()
     app.include_router(treasury_router)
-    app.dependency_overrides[RuntimeBundle.dep] = lambda request=None: runtime
+    app.dependency_overrides[get_runtime] = lambda request=None: runtime
     return TestClient(app)
 
 
@@ -131,7 +131,7 @@ def test_treasury_goal_and_capital_unavailable_payloads_are_canonical() -> None:
     app = FastAPI()
     app.include_router(treasury_router)
     app.state.runtime = _NoCapitalRuntime()
-    app.dependency_overrides[RuntimeBundle.dep] = lambda request=None: _NoTreasuryRuntime()
+    app.dependency_overrides[get_runtime] = lambda request=None: _NoTreasuryRuntime()
     client = TestClient(app)
 
     capital = client.get('/api/treasury/capital').json()

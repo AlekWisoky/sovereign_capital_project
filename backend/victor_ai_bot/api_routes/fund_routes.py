@@ -7,6 +7,7 @@ from ..research_pipeline.workspace import ResearchWorkspace
 
 from fastapi import APIRouter, Body, Depends, Header, Request
 
+from ..api import get_runtime
 from ..jsonsafe import to_json_safe as json_safe
 from ..research_pipeline.candidates import _ALLOWED as _ALLOWED_RESEARCH_STAGES
 from ..runtime_services.control_state import unavailable_state
@@ -155,9 +156,6 @@ def _coerce_optional_non_negative_float(
         None,
     )
 
-
-def get_runtime(request: Request):
-    return request.app.state.runtime  # type: ignore[attr-defined]
 
 
 def _runtime_component_payload(

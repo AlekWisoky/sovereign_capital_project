@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, Request
 
 from ..auth import require_admin
 from ..jsonsafe import to_json_safe as json_safe
-from ..runtime import RuntimeBundle
 from ..runtime_services.control_state import unavailable_state
 from ..runtime_services.auxiliary_state_service import AuxiliaryStateService
 from ..wealth_goals import goal_patch_changes_state, goal_patch_requested, resolve_goal_patch_payload
+from ..api import get_runtime
 from ._route_helpers import (
     coerce_non_empty_string,
     coerce_non_negative_float,
@@ -114,9 +114,6 @@ def _treasury_state_projection(rt: object) -> dict[str, object]:
     )
 
 
-def get_runtime(request: Request):
-    return request.app.state.runtime  # type: ignore[attr-defined]
-
 
 @router.get("/api/treasury/capital")
 def treasury_capital(rt=Depends(get_runtime)):
@@ -138,7 +135,7 @@ def treasury_state(rt=Depends(get_runtime)):
 
 
 @router.get("/api/treasury/goal")
-def treasury_goal(rt=Depends(RuntimeBundle.dep)):
+def treasury_goal(rt=Depends(get_runtime)):
     return safe_json_route_call(
         lambda: with_auto_trade_route_projection(
             attach_summary_contract(
@@ -154,7 +151,7 @@ def treasury_goal(rt=Depends(RuntimeBundle.dep)):
 
 
 @router.post("/api/treasury/goal", dependencies=[Depends(require_admin)])
-def set_treasury_goal(payload: dict[str, object], rt=Depends(RuntimeBundle.dep)):
+def set_treasury_goal(payload: dict[str, object], rt=Depends(get_runtime)):
     if getattr(rt, "_treasury", None) is None:
         return json_safe(_treasury_unavailable())
     rejected = _invalid_set_goal_payload(payload)
