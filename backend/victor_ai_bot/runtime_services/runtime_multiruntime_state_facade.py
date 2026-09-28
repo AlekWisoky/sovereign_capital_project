@@ -116,6 +116,77 @@ class RuntimeMultiruntimeStateFacade:
         selector = MultiRuntimeOpportunitySelector()
         return await selector.select(self._runtimes)
 
+    async def dispatch_selected_auto_trade(self, *, current_block: int) -> bool:
+        """Dispatch the globally selected candidate to its owning runtime.
+
+        This is the only bridge from global selection to execution authority.
+        It is disabled by default, never changes the active chain, and delegates
+        the selected candidate through that runtime's canonical decision and
+        execution-preparation path.
+        """
+        if not bool(getattr(self, "GLOBAL_AUTO_SELECT", False)):
+            return False
+
+        selection = await self.select_best_opportunity_readonly()
+        runtime_name = str(selection.get("selected_runtime") or "")
+        opportunity_id = str(selection.get("selected_opportunity_id") or "")
+        if not runtime_name or not opportunity_id:
+            return False
+
+        target = self._runtimes.get(runtime_name)
+        if target is None:
+            return False
+        try:
+            existing_task = getattr(target, "_exec_task", None)
+            if existing_task is not None and not existing_task.done():
+                return False
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+
+        candidate = next(
+            (
+                opp
+                for opp in list(getattr(target, "_opps", []) or [])
+                if str(getattr(opp, "id", "") or "") == opportunity_id
+            ),
+            None,
+        )
+        if candidate is None:
+            return False
+
+        # Re-enter the canonical decision engine on the selected runtime so
+        # decision identity, portfolio policy, and downstream sizing context
+        # belong to the runtime that will actually execute.
+        try:
+            decision = target._safe_decide_opportunities(
+                [candidate],
+                current_block=int(current_block),
+                pending_txs=int(len(getattr(target, "_pending", {}) or {})),
+                auto_enabled=True,
+                gas_budget_remaining_wei=int(target._gas_budget_remaining_wei()),
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+
+        if decision is None or str(getattr(decision, "action", "skip")) != "trade":
+            return False
+
+        try:
+            candidate, decision = target._apply_omar_to_candidate(
+                candidate, decision, current_block=int(current_block)
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+        if candidate is None or decision is None:
+            return False
+        if str(getattr(decision, "action", "skip")) != "trade":
+            return False
+
+        target._exec_task = asyncio.create_task(
+            target._execute_auto(candidate, int(current_block), decision=decision)
+        )
+        return True
+
     async def summary_all(self) -> dict:
         """Return a lightweight per-chain summary (bounded, fast)."""
 
