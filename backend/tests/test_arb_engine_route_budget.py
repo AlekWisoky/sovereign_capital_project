@@ -111,7 +111,7 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
     )
 
     # Force the route-evaluation clock to advance after the first group.
-    clock = iter([0.0, 0.0, 0.0, 0.0, 2.0])
+    clock = iter([0.0, 0.0, 0.0, 2.0])
     monkeypatch.setattr(arb.time, "perf_counter", lambda: next(clock, 2.0))
 
     cfg = SimpleNamespace(
