@@ -7,6 +7,8 @@ from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunitie
 from ..models import Opportunity
 from .profitability_truth import opportunity_profit_sort_key
 
+_SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+
 
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
@@ -125,7 +127,7 @@ class RuntimePrimaryScanFacade:
             )
             self._market_pipeline_telemetry = telemetry
             return opps[:80]
-        except Exception as exc:
+        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
             telemetry["scan_error"] = f"{type(exc).__name__}: {exc}"
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
