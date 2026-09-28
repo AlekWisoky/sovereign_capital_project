@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 349,
+  "backend_test_file_count": 350,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -71,6 +71,7 @@
     "test_aqe_core_actions.py",
     "test_aqe_import_boundary.py",
     "test_arb_engine_hardening.py",
+    "test_arb_engine_route_budget.py",
     "test_arbitrage_adapters_hardening.py",
     "test_arbitrage_runtime_hardening.py",
     "test_arbitrage_screener_helper.py",
@@ -2861,6 +2862,7 @@
   },
   "websocket_route_count": 4,
   "backend_test_names": [
+    "test_arb_engine_route_budget.py",
     "test_market_pipeline_telemetry.py"
   ]
 }
