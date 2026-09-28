@@ -62,6 +62,14 @@ def _candidate(oid: str, profit_usd: int) -> SimpleNamespace:
     )
 
 
+class _Bundle(RuntimeMultiruntimeStateFacade):
+    def __init__(self, runtimes, active="base"):
+        self._runtimes = runtimes
+        self._active_chain = active
+        self.GLOBAL_AUTO_SELECT = True
+        self._global_auto_task = None
+
+
 class _Runtime:
     def __init__(self, candidate, *, action="trade", auto=True):
         self._opps = [candidate]
@@ -102,12 +110,7 @@ class _Runtime:
 async def test_global_dispatch_targets_selected_runtime_without_changing_active_chain():
     ethereum = _Runtime(_candidate("eth-best", 40))
     base = _Runtime(_candidate("base", 20))
-    bundle = SimpleNamespace(
-        _runtimes={"ethereum": ethereum, "base": base},
-        _active_chain="base",
-        GLOBAL_AUTO_SELECT=True,
-        _global_auto_task=None,
-    )
+    bundle = _Bundle({"ethereum": ethereum, "base": base})
 
     dispatched = await RuntimeMultiruntimeStateFacade.dispatch_selected_auto_trade(
         bundle, current_block=123
@@ -124,12 +127,7 @@ async def test_global_dispatch_targets_selected_runtime_without_changing_active_
 async def test_global_dispatch_never_selects_blocked_or_unavailable_candidate():
     ethereum = _Runtime(_candidate("eth", 40), action="skip")
     base = _Runtime(_candidate("base", 20))
-    bundle = SimpleNamespace(
-        _runtimes={"ethereum": ethereum, "base": base},
-        _active_chain="base",
-        GLOBAL_AUTO_SELECT=True,
-        _global_auto_task=None,
-    )
+    bundle = _Bundle({"ethereum": ethereum, "base": base})
 
     dispatched = await RuntimeMultiruntimeStateFacade.dispatch_selected_auto_trade(
         bundle, current_block=456
