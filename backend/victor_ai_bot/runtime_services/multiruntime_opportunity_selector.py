@@ -288,24 +288,18 @@ class MultiRuntimeOpportunitySelector:
                 "capitalAuthorityAvailable",
             )
 
-        flashloan = _first_nested(
-            admission_details,
-            "flashloan",
-            "flashloanEligibility",
-            "flashloan_eligibility",
+        admission_for_flashloan = _first_nested(
+            meta, "capitalAdmission", "capital_admission", "admission"
         )
-        # Candidate admission evidence is the authoritative local fallback when
-        # the runtime summary does not project flashloan eligibility.
+        admission_flashloan_details = _nested(admission_for_flashloan, "details")
+        flashloan = _nested(admission_flashloan_details, "flashloan")
         if not flashloan:
-            candidate_admission = _first_nested(
-                meta, "capitalAdmission", "capital_admission", "admission"
-            )
-            candidate_details = _nested(candidate_admission, "details")
+            flashloan = _nested(admission_flashloan_details, "flashloanEligibility")
+        if not flashloan:
+            flashloan = _nested(admission_flashloan_details, "flashloan_eligibility")
+        if not flashloan:
             flashloan = _first_nested(
-                candidate_details,
-                "flashloan",
-                "flashloanEligibility",
-                "flashloan_eligibility",
+                meta, "flashloan", "flashloanEligibility", "flashloan_eligibility"
             )
         flashloan_eligible = _bool(
             flashloan,
