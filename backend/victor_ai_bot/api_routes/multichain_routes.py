@@ -9,6 +9,7 @@ from ..jsonsafe import json_safe
 from ._route_helpers import invalid_request_payload
 from ..runtime import MultiRuntimeBundle
 from ..runtime_services.runtime_routes_service import RuntimeRoutesService
+from ..runtime_services.multiruntime_opportunity_selector import MultiRuntimeOpportunitySelector
 from ..runtime_services.summary_read_contract import build_summary_read_contract
 
 router = APIRouter(tags=["multichain"])
@@ -76,21 +77,8 @@ async def multichain_opportunity_selection(request: Request):
     rt = request.app.state.runtime  # type: ignore[attr-defined]
     if isinstance(rt, MultiRuntimeBundle):
         return json_safe(await rt.select_best_opportunity_readonly())
-    return json_safe({
-        "ok": True,
-        "selected_runtime": getattr(rt.cfg.chain, "name", ""),
-        "selected_opportunity_id": "",
-        "selected": None,
-        "runtime_count": 1,
-        "runtimes_inspected": [getattr(rt.cfg.chain, "name", "")],
-        "candidates": [],
-        "blocked_candidates": [],
-        "runtime_errors": {},
-        "selection_authority": "read_only_evidence",
-        "active_chain_changed": False,
-        "auto_trade_enabled": False,
-        "broadcast_attempted": False,
-    })
+    chain = str(getattr(rt.cfg.chain, "name", "") or "")
+    return json_safe(await MultiRuntimeOpportunitySelector().select({chain: rt}))
 
 
 @router.get("/api/multichain/summary")
