@@ -88,6 +88,29 @@ class RuntimeMultiruntimeStateFacade:
     def brain_state(self) -> dict:
         return self._runtimes[self._active_chain].brain_state()
 
+    async def market_pipeline_telemetry_readonly(self) -> dict:
+        """Return per-runtime market-pipeline telemetry without changing active state."""
+        async def one(name: str, rt: Any):
+            try:
+                telemetry = dict(rt.market_pipeline_telemetry_state())
+                summary = await asyncio.wait_for(rt.summary(), timeout=self.SNAPSHOT_TIMEOUT_S)
+                gate = dict(summary.get("auto_trade_gate") or {}) if isinstance(summary, dict) else {}
+                recovery = dict(summary.get("auto_trade_recovery") or {}) if isinstance(summary, dict) else {}
+                telemetry["admission"] = {
+                    "capital": None,
+                    "family": str(gate.get("stage") or ""),
+                    "treasury": None,
+                    "flashloan": None,
+                    "execution": {"allowed": bool(gate.get("allowed", False)), "reason_code": str(gate.get("reason_code") or "")},
+                    "auto_trade_gate": gate,
+                    "recovery": recovery,
+                }
+                return name, telemetry
+            except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                return name, {"ok": False, "status": "unavailable", "reason_code": "market_pipeline_telemetry_unavailable", "error": str(exc)}
+        pairs = await asyncio.gather(*[one(name, rt) for name, rt in self._runtimes.items()])
+        return {"ok": True, "active": self._active_chain, "chains": {k: v for k, v in pairs}, "active_chain_changed": False}
+
     async def select_best_opportunity_readonly(self) -> dict:
         """Return global opportunity-selection evidence without changing runtime state."""
         selector = MultiRuntimeOpportunitySelector()
