@@ -250,16 +250,16 @@ class MultiRuntimeOpportunitySelector:
             "providerCapacityUsd",
         )
         if provider_capacity is None:
-            provider_capacity = _float(liquidity, "provider_capacity_usd", "providerCapacityUsd")
+            provider_capacity = _number(liquidity, "provider_capacity_usd", "providerCapacityUsd")
 
-        route_capacity = _float(
+        route_capacity = _number(
             capture,
             "route_capacity_usd",
             "routeCapacityUsd",
             "executable_depth_usd",
             "executableDepthUsd",
         )
-        liquidity_capacity = _float(
+        liquidity_capacity = _number(
             liquidity,
             "available_usd",
             "availableUsd",
@@ -274,7 +274,7 @@ class MultiRuntimeOpportunitySelector:
         if capacities:
             liquidity_capacity = min(capacities)
 
-        required_notional = _float(
+        required_notional = _number(
             sizing_body,
             "requested_notional_usd",
             "requestedNotionalUsd",
@@ -282,7 +282,7 @@ class MultiRuntimeOpportunitySelector:
             "targetNotionalUsd",
         )
         if required_notional is None:
-            required_notional = _float(
+            required_notional = _number(
                 admission_details,
                 "capital_required_usd",
                 "capitalRequiredUsd",
@@ -290,7 +290,7 @@ class MultiRuntimeOpportunitySelector:
                 "requestedNotionalUsd",
             )
         if required_notional is None:
-            required_notional = _float(
+            required_notional = _number(
                 capture,
                 "capital_required_usd",
                 "capitalRequiredUsd",
@@ -423,7 +423,7 @@ class MultiRuntimeOpportunitySelector:
             "profitAfterCostsUsdMicroInt",
             as_int=True,
         )
-        projected_profit_usd = _float(
+        projected_profit_usd = _number(
             profitability,
             "expectedProfitUsd",
         )
@@ -487,8 +487,8 @@ class MultiRuntimeOpportunitySelector:
             provider=provider,
             provider_capacity_usd=provider_capacity,
             sizing_available=bool(sizing_available),
-            size_multiplier=_float(meta, "size_multiplier", "sizeMultiplier"),
-            borrow_multiplier=_float(meta, "borrow_multiplier", "borrowMultiplier"),
+            size_multiplier=_number(meta, "size_multiplier", "sizeMultiplier"),
+            borrow_multiplier=_number(meta, "borrow_multiplier", "borrowMultiplier"),
             capital_authority_available=bool(capital_authority),
             flashloan_eligible=bool(flashloan_eligible),
             admission_allowed=bool(admission_allowed),
