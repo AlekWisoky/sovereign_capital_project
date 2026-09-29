@@ -20,6 +20,16 @@ class _Runtime(RuntimeStateFacade):
                 "balancer_pools": 1,
             },
             "quotes": {"requests": 10, "successes": 8},
+            "rpc": {
+                "endpoint": "https://rpc.example",
+                "provider": "rpc.example",
+                "score": 123.4,
+                "ok": True,
+                "quote_failures": 2,
+                "quote_successes": 8,
+                "quote_last_error": "rpc_rate_limited",
+                "quote_unhealthy_until": 999.0,
+            },
             "routes_considered": 12,
             "edges_generated": 20,
             "route_evaluation": {
@@ -62,6 +72,16 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "failures": 2,
         "success_rate": 0.8,
         "failure_reasons": {},
+    }
+    assert out["rpc"] == {
+        "endpoint": "https://rpc.example",
+        "provider": "rpc.example",
+        "score": 123.4,
+        "ok": True,
+        "quote_failures": 2,
+        "quote_successes": 8,
+        "quote_last_error": "rpc_rate_limited",
+        "quote_unhealthy_until": 999.0,
     }
     assert out["route_evaluation"] == {
         "quote_phase_ms": 125.0,
