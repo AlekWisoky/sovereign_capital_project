@@ -486,40 +486,10 @@ class RuntimePrimaryScanFacade:
                 current_block=int(current_block),
                 cache=scan_cache,
             )
-            # Preserve the established scan ordering while ranking canonical
-            # after-cost truth above legacy gas/gross estimates.
-            def _scan_sort_key(candidate: Opportunity) -> tuple[int, int, str]:
-                meta = getattr(candidate, "meta", {}) or {}
-                route_id = str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or "")
-                if isinstance(meta, dict):
-                    profitability = meta.get("profitability")
-                    if isinstance(profitability, dict) and bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
-                        try:
-                            return (3, int(profitability.get("profit_after_costs_wei") or 0), route_id)
-                        except (TypeError, ValueError):
-                            pass
-                    # Legacy canonical after-cost fields remain authoritative for
-                    # compatibility when the revalidation adapter cannot enrich them.
-                    try:
-                        meta_after = meta.get("profit_after_costs")
-                        safety = meta.get("safety") if isinstance(meta.get("safety"), dict) else {}
-                        safety_after = safety.get("profit_after_costs_wei")
-                        if meta_after is not None or safety_after is not None:
-                            values = [int(v) for v in (meta_after, safety_after) if v is not None]
-                            if values and len(set(values)) == 1:
-                                return (3, values[0], route_id)
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        legacy_value = meta.get("profit_after_gas_estimate_wei")
-                        if legacy_value is not None:
-                            return (2, int(legacy_value), route_id)
-                    except (TypeError, ValueError):
-                        pass
-                fallback = opportunity_profit_sort_key(candidate)
-                return (int(fallback[0]), int(fallback[1]), str(fallback[2]))
-
-            opps.sort(key=_scan_sort_key, reverse=True)
+            # Use the canonical profitability truth helper for final scan ordering.
+            # It already preserves the legacy after-gas/gross fallback precedence while
+            # giving verified after-cost profitability priority when available.
+            opps.sort(key=opportunity_profit_sort_key, reverse=True)
             requests = int(two_leg_telemetry.get("quote_requests", 0)) + int(
                 three_leg_telemetry.get("quote_requests", 0)
             )
