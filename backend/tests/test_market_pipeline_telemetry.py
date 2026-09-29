@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+    _canonical_route_universe_telemetry,
+)
 from victor_ai_bot.runtime_services.runtime_state_facade import RuntimeStateFacade
 
 
@@ -127,3 +130,24 @@ def test_market_pipeline_telemetry_counts_canonical_profitability_when_candidate
         "ready_candidates": 1,
         "degraded_candidates": 1,
     }
+
+
+def test_canonical_route_universe_prefers_three_leg_snapshot_without_double_counting():
+    two_leg = {
+        "route_universe": {
+            "configured_token_count": 3,
+            "univ3_unique_pool_count": 12,
+        }
+    }
+    three_leg = {
+        "route_universe": {
+            "configured_token_count": 3,
+            "univ3_unique_pool_count": 12,
+            "three_leg_max_edges_per_token": 10,
+            "three_leg_edges_pruned_by_token_cap": 4,
+        }
+    }
+
+    out = _canonical_route_universe_telemetry(two_leg, three_leg)
+
+    assert out == three_leg["route_universe"]
