@@ -747,7 +747,7 @@ async def find_three_leg_opportunities(
     # iterate first edge; use time budget
     for a_in, outs in adj.items():
         for e1 in outs:
-            if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+            if (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms:
                 break
             if e1.token_in != a_in:
                 continue
@@ -982,7 +982,7 @@ async def find_three_leg_opportunities(
         telemetry["budget_exhausted_after_quote"] = bool(
             route_groups_evaluated == 0
             and bool(edges)
-            and bool(qmap1)
+            and bool(qmap1_3)
         )
 
     snapshot = scan_efficiency_snapshot(
