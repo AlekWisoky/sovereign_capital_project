@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..models import Opportunity
+from ..profitability_state import revalidate_profitability_state
+from ..usd_pricing import token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
@@ -26,6 +28,71 @@ class RuntimePrimaryScanFacade:
             return []
         pairs = await discovery.maybe_discover_univ3(rpc, self.cfg, int(current_block))
         return list(pairs or [])
+
+    async def _annotate_canonical_after_fee_usd(
+        self,
+        *,
+        opps: List[Opportunity],
+        rpc: Any,
+        current_block: int,
+    ) -> None:
+        """Attach explicit USD value for canonical scan-time after-fee truth.
+
+        The global selector must compare like-for-like USD economics across
+        runtime bundles. Scan-time gross/gas USD projections are not sufficient
+        because they omit the canonical flashloan/gas after-fee contract.
+        This enrichment is fail-closed and only writes an explicit USD value
+        when the canonical after-fee state is valid and a quote-derived USD
+        conversion is available.
+        """
+        execution = getattr(self.cfg, "execution", None)
+        if not bool(getattr(execution, "usd_accounting_enabled", False)):
+            return
+        preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
+        for opportunity in list(opps[:80]):
+            meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
+            gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
+            state = revalidate_profitability_state(
+                opportunity,
+                self.cfg,
+                stage="scan_after_fee_revalidation",
+                source="runtime_primary_scan",
+                gas_cost_wei=gas_cost_wei,
+            )
+            if not bool(state.get("valid")):
+                continue
+            profit_after_wei = int(state.get("profit_after_costs_wei") or 0)
+            if profit_after_wei <= 0:
+                continue
+            try:
+                profit_token = str(opportunity.route.legs[0].token_in)
+            except (AttributeError, IndexError, TypeError, ValueError):
+                continue
+            usd_after = await token_to_usd_micro(
+                rpc,
+                chain=self.cfg.chain,
+                token=profit_token,
+                amount_wei=profit_after_wei,
+                block_number=int(current_block),
+                cache=self.cache,
+                preference=preference,
+            )
+            if usd_after is None or int(usd_after) <= 0:
+                continue
+            state["profit_after_costs_usd_micro"] = int(usd_after)
+            meta["profitability"] = dict(state)
+            safety = meta.get("safety") if isinstance(meta.get("safety"), dict) else {}
+            safety["profit_after_costs_usd_micro"] = str(int(usd_after))
+            safety["profit_after_costs_usd_source"] = "quote_derived_canonical_after_fee"
+            meta["safety"] = safety
+            meta["canonical_after_fee_usd"] = {
+                "verified": True,
+                "source": "quote_derived_canonical_after_fee",
+                "profit_token": profit_token,
+                "profit_after_costs_wei": str(profit_after_wei),
+                "profit_after_costs_usd_micro": str(int(usd_after)),
+                "block_number": int(current_block),
+            }
 
     async def _scan_primary_opportunities(
         self,
@@ -98,6 +165,11 @@ class RuntimePrimaryScanFacade:
                 )
 
             opps = list(opps2) + list(opps3)
+            await self._annotate_canonical_after_fee_usd(
+                opps=opps,
+                rpc=rpc,
+                current_block=int(current_block),
+            )
             opps.sort(key=opportunity_profit_sort_key, reverse=True)
             requests = int(two_leg_telemetry.get("quote_requests", 0)) + int(
                 three_leg_telemetry.get("quote_requests", 0)

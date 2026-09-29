@@ -144,3 +144,45 @@ async def test_scan_primary_opportunities_prefers_verified_after_cost_truth_over
     opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=10)
 
     assert [getattr(o, 'id', '') for o in opps] == ['net-verified', 'gross-only']
+
+
+@pytest.mark.asyncio
+async def test_scan_enriches_canonical_after_fee_profit_with_explicit_usd(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.chain = SimpleNamespace(name="ethereum", usdc="0xusdc", usdt="")
+    runtime.cfg.execution = SimpleNamespace(
+        usd_accounting_enabled=True,
+        usd_stable_preference="usdc",
+        flashloan_fee_bps=0,
+    )
+    runtime.cfg.safety.minProfitAbs = 0
+    runtime.cfg.safety.minProfitBps = 0
+    opportunity = SimpleNamespace(
+        id="canonical-usd",
+        expected_profit_raw="100",
+        expected_profit_usd="0",
+        min_outs=["210"],
+        route=SimpleNamespace(legs=[SimpleNamespace(token_in="0xtoken", amount_in="100")]),
+        meta={"gas_cost_estimate_wei": "10"},
+    )
+
+    async def fake_usd(*args, **kwargs):
+        assert kwargs["token"] == "0xtoken"
+        assert kwargs["amount_wei"] == 100
+        assert kwargs["block_number"] == 321
+        return 5_000_000
+
+    monkeypatch.setattr(scan_mod, "token_to_usd_micro", fake_usd)
+
+    await runtime._annotate_canonical_after_fee_usd(
+        opps=[opportunity],
+        rpc=object(),
+        current_block=321,
+    )
+
+    profitability = opportunity.meta["profitability"]
+    assert profitability["authoritative"] is True
+    assert profitability["profit_after_costs_wei"] == "100"
+    assert profitability["profit_after_costs_usd_micro"] == 5_000_000
+    assert opportunity.meta["safety"]["profit_after_costs_usd_micro"] == "5000000"
+    assert opportunity.meta["canonical_after_fee_usd"]["source"] == "quote_derived_canonical_after_fee"
