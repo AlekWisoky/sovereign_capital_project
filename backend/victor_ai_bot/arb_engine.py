@@ -127,6 +127,52 @@ def edge_key(e: Edge) -> str:
     return f"{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}"
 
 
+def _route_universe_snapshot(
+    cfg: Any,
+    edges: List[Edge],
+    *,
+    adjacency: Optional[Dict[str, List[Edge]]] = None,
+    max_edges_per_token: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Describe the candidate graph before quote/economic filtering."""
+    by_dex: Dict[str, int] = {}
+    undirected_v3: set[tuple[str, str, int]] = set()
+    directed_pairs: set[tuple[str, str]] = set()
+    tokens: set[str] = set()
+    for edge in edges:
+        dex = str(edge.dex)
+        by_dex[dex] = int(by_dex.get(dex, 0)) + 1
+        a = str(edge.token_in).lower()
+        b = str(edge.token_out).lower()
+        tokens.update((a, b))
+        directed_pairs.add((a, b))
+        if dex == "univ3":
+            lo, hi = sorted((a, b))
+            undirected_v3.add((lo, hi, int(edge.params.get("fee", 3000))))
+    reverse_pairs = sum(1 for a, b in directed_pairs if (b, a) in directed_pairs)
+    token_universe = {str(token).lower() for token in (getattr(getattr(cfg, "chain", None), "token_universe", []) or []) if token}
+    possible_v3 = (len(token_universe) * (len(token_universe) - 1) // 2) * 4
+    actual_v3 = len(undirected_v3)
+    snapshot: Dict[str, Any] = {
+        "configured_token_count": len(token_universe),
+        "active_token_count": len(tokens),
+        "active_tokens": sorted(tokens),
+        "edges_by_dex": dict(sorted(by_dex.items())),
+        "unique_directed_pairs": len(directed_pairs),
+        "directed_pairs_with_reverse": int(reverse_pairs),
+        "reverse_pair_coverage_ratio": float(reverse_pairs) / float(len(directed_pairs)) if directed_pairs else 0.0,
+        "univ3_unique_pool_count": actual_v3,
+        "univ3_possible_configured_pair_fee_count": int(possible_v3),
+        "univ3_configured_pair_fee_coverage_ratio": float(actual_v3) / float(possible_v3) if possible_v3 else 0.0,
+    }
+    if adjacency is not None:
+        active = sum(len(items) for items in adjacency.values())
+        snapshot["three_leg_adjacency_edges"] = int(active)
+        snapshot["three_leg_max_edges_per_token"] = int(max_edges_per_token or 0)
+        snapshot["three_leg_edges_pruned_by_token_cap"] = max(0, len(edges) - active)
+    return snapshot
+
+
 async def quote_edges_batch(
     rpc,
     cfg,
@@ -465,6 +511,7 @@ async def find_two_leg_opportunities(
     )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
+    route_universe = _route_universe_snapshot(cfg, edges)
     for e in edges:
         by_pair.setdefault((e.token_in, e.token_out), []).append(e)
 
@@ -688,6 +735,7 @@ async def find_two_leg_opportunities(
             "network_batches": int(snapshot["network_batches"]),
             "routes_considered": int(snapshot["candidate_count"]),
             "edges_generated": len(edges),
+            "route_universe": dict(route_universe),
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
             "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
@@ -743,6 +791,7 @@ async def find_three_leg_opportunities(
     max_edges_per_token = int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "10"))
     for k in list(adj.keys()):
         adj[k] = adj[k][:max_edges_per_token]
+    route_universe = _route_universe_snapshot(cfg, edges, adjacency=adj, max_edges_per_token=max_edges_per_token)
 
     # quick lookup for final leg candidates
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
@@ -1027,6 +1076,7 @@ async def find_three_leg_opportunities(
             "network_batches": int(snapshot["network_batches"]),
             "routes_considered": int(snapshot["candidate_count"]),
             "edges_generated": len(edges),
+            "route_universe": dict(route_universe),
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
         })
