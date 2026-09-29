@@ -186,3 +186,23 @@ async def test_scan_enriches_canonical_after_fee_profit_with_explicit_usd(monkey
     assert profitability["profit_after_costs_usd_micro"] == 5_000_000
     assert opportunity.meta["safety"]["profit_after_costs_usd_micro"] == "5000000"
     assert opportunity.meta["canonical_after_fee_usd"]["source"] == "quote_derived_canonical_after_fee"
+
+
+def test_adaptive_scan_amounts_returns_bounded_size_ladder(monkeypatch):
+    runtime = _Runtime()
+
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0,0.5,invalid")
+
+    amounts = runtime._adaptive_scan_amounts(1000)
+
+    assert amounts == [1000, 500, 2000]
+    assert runtime._adaptive_size_min_opportunities == 2
+
+
+def test_adaptive_scan_amounts_can_be_disabled(monkeypatch):
+    runtime = _Runtime()
+
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
+
+    assert runtime._adaptive_scan_amounts(1000) == [1000]
