@@ -201,7 +201,11 @@ class RuntimePrimaryScanFacade:
             else {
                 "execution_universe": [
                     str(token).lower()
-                    for token in (getattr(self.cfg.chain, "token_universe", []) or [])
+                    for token in (
+                        getattr(getattr(self, "cfg", None), "chain", None)
+                        and getattr(self.cfg.chain, "token_universe", [])
+                        or []
+                    )
                     if token
                 ],
                 "observed_tokens": [],
