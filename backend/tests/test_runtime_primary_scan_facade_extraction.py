@@ -160,7 +160,7 @@ async def test_scan_enriches_canonical_after_fee_profit_with_explicit_usd(monkey
         id="canonical-usd",
         expected_profit_raw="100",
         expected_profit_usd="0",
-        min_outs=["110"],
+        min_outs=["210"],
         route=SimpleNamespace(legs=[SimpleNamespace(token_in="0xtoken", amount_in="100")]),
         meta={"gas_cost_estimate_wei": "10"},
     )
