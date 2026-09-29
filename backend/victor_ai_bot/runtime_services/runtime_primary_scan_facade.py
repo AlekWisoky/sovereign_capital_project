@@ -289,3 +289,200 @@ class RuntimePrimaryScanFacade:
             else:
                 self._market_pipeline_telemetry = telemetry
             raise
+
+    async def _select_rpc_and_scan(
+        self,
+        *,
+        bootstrap_rpc: Any,
+        current_block: int,
+        amount_in: int,
+    ) -> Dict[str, Any]:
+        """Race healthy read RPCs on the same route universe using read-only economics."""
+        manager = self.rpc_manager
+        candidates = list(manager.read_candidates() or [])
+        bootstrap_url = str(getattr(bootstrap_rpc, "url", "") or "")
+        if bootstrap_url and bootstrap_url not in candidates:
+            candidates.insert(0, bootstrap_url)
+        candidates = list(dict.fromkeys(candidates))
+        max_providers = max(
+            1,
+            int(os.environ.get("VICTOR_RPC_ECONOMIC_MAX_PROVIDERS", "8") or 8),
+        )
+        candidates = candidates[:max_providers]
+        if not candidates:
+            return {
+                "selected_endpoint": bootstrap_url,
+                "opps": [],
+                "cache": self.cache,
+                "telemetry": dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
+                "evidence": [],
+            }
+
+        discovery_context = await self._build_discovery_context(
+            bootstrap_rpc,
+            current_block=int(current_block),
+        )
+
+        async def scan_one(url: str) -> tuple[str, List[Opportunity], PerBlockCache, Dict[str, Any], RpcEconomicEvidence]:
+            scan_cache = PerBlockCache()
+            telemetry: Dict[str, Any] = {}
+            started = time.perf_counter()
+            try:
+                if url == bootstrap_url:
+                    opps = await self._scan_primary_opportunities(
+                        bootstrap_rpc,
+                        current_block=int(current_block),
+                        amount_in=int(amount_in),
+                        cache=scan_cache,
+                        discovery_context=discovery_context,
+                        telemetry_sink=telemetry,
+                    )
+                else:
+                    async with JsonRpcClient(
+                        url, timeout_s=10.0, max_concurrency=30, max_batch=80
+                    ) as provider_rpc:
+                        opps = await self._scan_primary_opportunities(
+                            provider_rpc,
+                            current_block=int(current_block),
+                            amount_in=int(amount_in),
+                            cache=scan_cache,
+                            discovery_context=discovery_context,
+                            telemetry_sink=telemetry,
+                        )
+            except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
+                telemetry["scan_latency_ms"] = float((time.perf_counter() - started) * 1000.0)
+                opps = []
+
+            snapshot = {}
+            try:
+                snapshot = dict(manager.snapshot() or {})
+            except (AttributeError, KeyError, TypeError, ValueError):
+                snapshot = {}
+            row = next(
+                (dict(item) for item in list(snapshot.get("read") or []) if str(item.get("url") or "") == url),
+                {},
+            )
+            profit_micro = max(
+                (
+                    int(
+                        ((getattr(opp, "meta", {}) or {}).get("canonical_after_fee_usd") or {}).get(
+                            "profit_after_costs_usd_micro"
+                        )
+                        or 0
+                    )
+                    for opp in opps
+                ),
+                default=0,
+            )
+            profitable_count = sum(
+                1
+                for opp in opps
+                if int(
+                    ((getattr(opp, "meta", {}) or {}).get("canonical_after_fee_usd") or {}).get(
+                        "profit_after_costs_usd_micro"
+                    )
+                    or 0
+                )
+                > 0
+            )
+            quotes = dict(telemetry.get("quotes") or {})
+            quote_requests = int(quotes.get("requests", 0) or 0)
+            quote_successes = int(quotes.get("successes", 0) or 0)
+            quote_quarantined = float(row.get("quote_unhealthy_until", 0.0) or 0.0) > time.time()
+            evidence = RpcEconomicEvidence(
+                endpoint=url,
+                provider=str(urlsplit(url).hostname or ""),
+                profit_after_costs_usd_micro=int(profit_micro),
+                profitable_opportunity_count=int(profitable_count),
+                quote_requests=quote_requests,
+                quote_successes=quote_successes,
+                operational_score=float(row.get("score") or 1e18),
+                block_number=int(current_block),
+                scan_latency_ms=float(telemetry.get("scan_latency_ms") or 0.0),
+                healthy=bool(row.get("ok", True)),
+                quote_quarantined=quote_quarantined,
+            )
+            telemetry["rpc"] = dict(telemetry.get("rpc") or {})
+            telemetry["rpc"].update(
+                {
+                    "endpoint": url,
+                    "provider": str(urlsplit(url).hostname or ""),
+                    "score": row.get("score"),
+                    "ok": row.get("ok"),
+                    "quote_failures": row.get("quote_failures", 0),
+                    "quote_successes": row.get("quote_successes", 0),
+                    "quote_last_error": row.get("quote_last_error"),
+                    "quote_unhealthy_until": row.get("quote_unhealthy_until", 0.0),
+                }
+            )
+            return url, list(opps or []), scan_cache, telemetry, evidence
+
+        results = await asyncio.gather(*(scan_one(url) for url in candidates))
+        evidence = [item[4] for item in results]
+        selected, ordered = select_best_rpc_evidence(evidence)
+        if selected is None:
+            selected_url = bootstrap_url or candidates[0]
+            selected_result = next(item for item in results if item[0] == selected_url)
+        else:
+            selected_url = selected.endpoint
+            selected_result = next(item for item in results if item[0] == selected_url)
+
+        _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
+        selected_telemetry["rpc"]["economic_selection"] = {
+            "mode": "read_only_economic",
+            "selected_endpoint": selected_url,
+            "selected_provider": str(urlsplit(selected_url).hostname or ""),
+            "candidates": [
+                {
+                    "endpoint": item.endpoint,
+                    "provider": item.provider,
+                    "profit_after_costs_usd_micro": item.profit_after_costs_usd_micro,
+                    "profitable_opportunity_count": item.profitable_opportunity_count,
+                    "quote_requests": item.quote_requests,
+                    "quote_successes": item.quote_successes,
+                    "quote_success_rate": item.quote_success_rate,
+                    "operational_score": item.operational_score,
+                    "block_number": item.block_number,
+                    "scan_latency_ms": item.scan_latency_ms,
+                    "healthy": item.healthy,
+                    "quote_quarantined": item.quote_quarantined,
+                    "selected": item.endpoint == selected_url,
+                }
+                for item in ordered
+            ],
+            "active_chain_changed": False,
+            "broadcast_attempted": False,
+            "auto_trade_enabled": False,
+        }
+        return {
+            "selected_endpoint": selected_url,
+            "opps": selected_opps,
+            "cache": selected_cache,
+            "telemetry": selected_telemetry,
+            "evidence": evidence,
+        }
+
+    async def _build_discovery_context(
+        self,
+        rpc: Any,
+        *,
+        current_block: int,
+    ) -> Dict[str, List[Any]]:
+        extra_v3_pairs = await self._discover_extra_v3_pairs(
+            rpc, current_block=int(current_block)
+        )
+        venue_pools = {"curve": [], "balancer": []}
+        discovery = getattr(self, "_discovery", None)
+        discover_venues = (
+            getattr(discovery, "maybe_discover_venues", None)
+            if discovery is not None
+            else None
+        )
+        if callable(discover_venues):
+            venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
+        return {
+            "v3_pairs": list(extra_v3_pairs),
+            "curve_pools": list(venue_pools.get("curve") or []),
+            "balancer_pools": list(venue_pools.get("balancer") or []),
+        }
