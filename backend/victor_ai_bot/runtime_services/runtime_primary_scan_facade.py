@@ -5,7 +5,6 @@ import os
 import time
 from typing import Any, Dict, List
 from urllib.parse import urlsplit
-from urllib.parse import urlsplit
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..cache import PerBlockCache
