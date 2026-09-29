@@ -356,7 +356,11 @@ class RuntimePrimaryScanFacade:
                         "amount_in": _candidate_amount_in(candidate),
                         "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
                     }
-                    for candidate in list(opps)[:80]
+                    for candidate in sorted(
+                        list(opps),
+                        key=lambda item: int(getattr(item, "expected_profit_raw", 0) or 0),
+                        reverse=True,
+                    )[:80]
                 ],
             }
             await self._annotate_canonical_after_fee_usd(
