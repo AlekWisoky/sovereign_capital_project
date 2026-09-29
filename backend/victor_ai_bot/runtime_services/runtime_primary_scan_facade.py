@@ -108,6 +108,12 @@ class RuntimePrimaryScanFacade:
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
+                "failure_reasons": {
+                    str(k): int(v)
+                    for source in (two_leg_telemetry, three_leg_telemetry)
+                    for k, v in dict(source.get("quote_failure_reasons") or {}).items()
+                    for _ in [0]
+                },
             }
             telemetry["discovery"]["pools_seen"] = (
                 len(extra_v3_pairs) + len(extra_curve_pools) + len(extra_balancer_pools)
@@ -134,6 +140,11 @@ class RuntimePrimaryScanFacade:
                 ),
             }
             telemetry["gross_candidates"] = len(opps)
+            telemetry["route_rejections"] = {
+                str(k): int(v)
+                for source in (two_leg_telemetry, three_leg_telemetry)
+                for k, v in dict(source.get("route_rejections") or {}).items()
+            }
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
