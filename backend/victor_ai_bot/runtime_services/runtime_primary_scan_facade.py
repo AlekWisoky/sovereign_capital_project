@@ -400,7 +400,7 @@ class RuntimePrimaryScanFacade:
                 operational_score=float(row.get("score") or 1e18),
                 block_number=int(current_block),
                 scan_latency_ms=float(telemetry.get("scan_latency_ms") or 0.0),
-                healthy=bool(row.get("ok", True)),
+                healthy=bool(row.get("ok", True)) and not bool(telemetry.get("scan_error")),
                 quote_quarantined=quote_quarantined,
             )
             telemetry["rpc"] = dict(telemetry.get("rpc") or {})
