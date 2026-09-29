@@ -161,6 +161,7 @@ class DiscoveryManager:
         self._candidate_token_observation_cap = max(
             1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
         )
+        self._candidate_token_observation_truncated = False
         self._load()
 
     def _observe_candidate_tokens(self, tokens: List[str], *, source: str) -> None:
@@ -170,6 +171,7 @@ class DiscoveryManager:
                 continue
             if normalized not in self._candidate_tokens_observed:
                 if len(self._candidate_tokens_observed) >= self._candidate_token_observation_cap:
+                    self._candidate_token_observation_truncated = True
                     break
                 self._candidate_tokens_observed[normalized] = set()
             self._candidate_tokens_observed[normalized].add(str(source))
@@ -189,9 +191,7 @@ class DiscoveryManager:
             "observed_count": len(observed),
             "observed_not_admitted_count": len(not_admitted),
             "observation_cap": int(self._candidate_token_observation_cap),
-            "observation_truncated": bool(
-                len(self._candidate_tokens_observed) >= self._candidate_token_observation_cap
-            ),
+            "observation_truncated": bool(self._candidate_token_observation_truncated),
             "admission_mutated": False,
             "sources": {
                 token: sorted(self._candidate_tokens_observed[token])
