@@ -30,18 +30,40 @@ class RuntimeLoopEntryFacade:
             if bn is None:
                 return
             current_block = int(bn)
-            try:
-                amount_in = int(self._resolve_amount_in())
-                selection = await self._select_rpc_and_scan(
-                    bootstrap_rpc=bootstrap_rpc,
+
+            if hasattr(self, "_resolve_amount_in"):
+                try:
+                    amount_in = int(self._resolve_amount_in())
+                    selection = await self._select_rpc_and_scan(
+                        bootstrap_rpc=bootstrap_rpc,
+                        current_block=current_block,
+                        amount_in=amount_in,
+                    )
+                    selected_url = str(selection.get("selected_endpoint") or bootstrap_url)
+                    preselected_scan = selection
+                except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+                    selected_url = bootstrap_url
+                    preselected_scan = None
+
+            if preselected_scan is None:
+                await self._run_contained_tick_iteration(
+                    rpc=bootstrap_rpc,
                     current_block=current_block,
-                    amount_in=amount_in,
+                    loop_started_at=loop_started_at,
                 )
-                selected_url = str(selection.get("selected_endpoint") or bootstrap_url)
-                preselected_scan = selection
-            except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
-                selected_url = bootstrap_url
-                preselected_scan = None
+                telemetry = getattr(self, "_market_pipeline_telemetry", {}) or {}
+                if isinstance(telemetry, dict):
+                    quotes = telemetry.get("quotes") or {}
+                    try:
+                        self.rpc_manager.observe_quote_telemetry(
+                            bootstrap_url,
+                            requests=int(quotes.get("requests", 0) or 0),
+                            successes=int(quotes.get("successes", 0) or 0),
+                            failure_reasons=dict(quotes.get("failure_reasons") or {}),
+                        )
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                return
 
         async with JsonRpcClient(
             selected_url, timeout_s=10.0, max_concurrency=30, max_batch=80
@@ -63,8 +85,6 @@ class RuntimeLoopEntryFacade:
                         failure_reasons=dict(quotes.get("failure_reasons") or {}),
                     )
                 except (AttributeError, TypeError, ValueError):
-                    # Quote telemetry is observational; never let health feedback
-                    # interrupt the existing scan/execution containment path.
                     pass
 
     async def _sleep(self, seconds: float) -> None:
