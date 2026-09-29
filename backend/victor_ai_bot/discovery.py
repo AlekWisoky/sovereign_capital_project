@@ -157,7 +157,47 @@ class DiscoveryManager:
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
+        self._candidate_tokens_observed: Dict[str, set[str]] = {}
+        self._candidate_token_observation_cap = max(
+            1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
+        )
         self._load()
+
+    def _observe_candidate_tokens(self, tokens: List[str], *, source: str) -> None:
+        for token in tokens:
+            normalized = str(token or "").lower()
+            if not normalized or normalized == _ZERO_ADDRESS.lower():
+                continue
+            if normalized not in self._candidate_tokens_observed:
+                if len(self._candidate_tokens_observed) >= self._candidate_token_observation_cap:
+                    break
+                self._candidate_tokens_observed[normalized] = set()
+            self._candidate_tokens_observed[normalized].add(str(source))
+
+    def candidate_token_telemetry(self, cfg: Any) -> Dict[str, Any]:
+        execution_universe = sorted({
+            str(token).lower()
+            for token in (getattr(cfg.chain, "token_universe", []) or [])
+            if token
+        })
+        observed = sorted(self._candidate_tokens_observed.keys())
+        not_admitted = [token for token in observed if token not in set(execution_universe)]
+        return {
+            "execution_universe": execution_universe,
+            "observed_tokens": observed,
+            "observed_not_admitted": not_admitted,
+            "observed_count": len(observed),
+            "observed_not_admitted_count": len(not_admitted),
+            "observation_cap": int(self._candidate_token_observation_cap),
+            "observation_truncated": bool(
+                len(self._candidate_tokens_observed) >= self._candidate_token_observation_cap
+            ),
+            "admission_mutated": False,
+            "sources": {
+                token: sorted(self._candidate_tokens_observed[token])
+                for token in not_admitted[:64]
+            },
+        }
 
     def _load(self) -> None:
         try:
@@ -380,6 +420,7 @@ class DiscoveryManager:
             )
             coins = _decode_fixed_addresses(coins_r.result, 8) if coins_r.ok else []
             balances = _decode_fixed_uints(balances_r.result, 8) if balances_r.ok else []
+            self._observe_candidate_tokens(coins, source="curve_pool_candidate")
             if not coins or not balances:
                 continue
             supported = [
@@ -428,6 +469,7 @@ class DiscoveryManager:
             if not r.ok:
                 continue
             tokens, balances = _decode_balancer_pool_tokens(r.result)
+            self._observe_candidate_tokens(tokens, source="balancer_pool_candidate")
             supported = [
                 (i, token)
                 for i, token in self._supported(cfg, tokens)
