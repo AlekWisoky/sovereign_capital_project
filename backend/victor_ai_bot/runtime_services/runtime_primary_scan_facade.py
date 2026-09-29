@@ -18,6 +18,18 @@ from .profitability_truth import opportunity_profit_sort_key
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
+def _canonical_route_universe_telemetry(
+    two_leg: Dict[str, Any],
+    three_leg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Return one graph snapshot without double-counting two/three-leg scans."""
+    return dict(
+        three_leg.get("route_universe")
+        or two_leg.get("route_universe")
+        or {}
+    )
+
+
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
 
@@ -416,10 +428,9 @@ class RuntimePrimaryScanFacade:
             # pre-quote universe snapshot rather than summing duplicate edges.
             # Prefer the three-leg snapshot because it also carries adjacency
             # pruning telemetry, falling back to two-leg when unavailable.
-            telemetry["route_universe"] = dict(
-                three_leg_telemetry.get("route_universe")
-                or two_leg_telemetry.get("route_universe")
-                or {}
+            telemetry["route_universe"] = _canonical_route_universe_telemetry(
+                two_leg_telemetry,
+                three_leg_telemetry,
             )
             telemetry["gross_candidates"] = len(opps)
             telemetry["route_rejections"] = route_rejections
