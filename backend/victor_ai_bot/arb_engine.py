@@ -652,6 +652,20 @@ async def find_two_leg_opportunities(
                 break
         if len(opps) >= max_opps:
             break
+    if telemetry is not None:
+        telemetry["quote_phase_ms"] = float(
+            (route_eval_started - quote_phase_started) * 1000.0
+        )
+        telemetry["route_evaluation_ms"] = float(
+            (time.perf_counter() - route_eval_started) * 1000.0
+        )
+        telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
+        telemetry["budget_exhausted_after_quote"] = bool(
+            route_groups_evaluated == 0
+            and bool(edges)
+            and bool(qmap1)
+        )
+
     snapshot = scan_efficiency_snapshot(
         elapsed_ms=(time.perf_counter() - t_start) * 1000.0,
         candidate_count=int(metrics.get("candidate_count", 0)),
