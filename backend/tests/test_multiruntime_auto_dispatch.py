@@ -124,7 +124,7 @@ async def test_global_dispatch_targets_selected_runtime_without_changing_active_
 
 
 @pytest.mark.asyncio
-async def test_global_dispatch_respects_selected_runtime_auto_authority():
+async def test_global_dispatch_does_not_require_selected_runtime_active_auto_flag():
     ethereum = _Runtime(_candidate("eth-best", 40), auto=False)
     base = _Runtime(_candidate("base-safe", 20), auto=True)
     bundle = _Bundle({"ethereum": ethereum, "base": base})
@@ -134,8 +134,9 @@ async def test_global_dispatch_respects_selected_runtime_auto_authority():
     )
     await asyncio.sleep(0)
 
-    assert dispatched is False
-    assert ethereum.calls == []
+    assert dispatched is True
+    assert bundle._active_chain == "base"
+    assert ethereum.calls == [("eth-best", 321, "eth-best")]
     assert base.calls == []
 
 
@@ -188,7 +189,7 @@ async def test_active_auto_dispatch_hands_off_to_global_selector_when_enabled():
     owner._global_auto_task.cancel()
 
 
-def test_global_handoff_requires_active_auto_authority():
+def test_global_handoff_still_requires_active_runtime_auto_authority():
     owner = SimpleNamespace(
         GLOBAL_AUTO_SELECT=True,
         _active_chain="base",

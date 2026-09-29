@@ -137,11 +137,16 @@ class RuntimeMultiruntimeStateFacade:
         if target is None:
             return False
 
-        # Global selection never overrides the selected runtime's own
-        # auto-trading authority. The active runtime may authorize global
-        # selection, but the runtime that owns the selected opportunity must
-        # still explicitly allow automatic execution.
-        if not bool(getattr(target, "_auto_trading", False)):
+        # In global-selection mode, the selected runtime does not need to be
+        # the active runtime. Global authority is established by the active
+        # runtime's canonical auto-trade control and the selector has already
+        # required the selected runtime's gate/recovery/admission/execution
+        # evidence. Keep the selected runtime's defensive callback as a final
+        # execution-preparation control.
+        try:
+            if not bool(target._cb.allow_auto_trading()):
+                return False
+        except (AttributeError, RuntimeError, TypeError, ValueError):
             return False
 
         try:
@@ -170,7 +175,11 @@ class RuntimeMultiruntimeStateFacade:
                 [candidate],
                 current_block=int(current_block),
                 pending_txs=int(len(getattr(target, "_pending", {}) or {})),
-                auto_enabled=bool(getattr(target, "_auto_trading", False)),
+                # Global selection is the auto-trading authority for the
+                # selected runtime; the selected runtime itself may remain
+                # inactive because active-chain state is not execution
+                # ownership in global-selection mode.
+                auto_enabled=True,
                 gas_budget_remaining_wei=int(target._gas_budget_remaining_wei()),
             )
         except (AttributeError, RuntimeError, TypeError, ValueError):
