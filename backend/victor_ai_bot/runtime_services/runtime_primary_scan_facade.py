@@ -71,13 +71,21 @@ class RuntimePrimaryScanFacade:
         for opportunity in list(opps[:80]):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
             gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
-            state = revalidate_profitability_state(
-                opportunity,
-                self.cfg,
-                stage="scan_after_fee_revalidation",
-                source="runtime_primary_scan",
-                gas_cost_wei=gas_cost_wei,
-            )
+            existing_profitability = meta.get("profitability")
+            if (
+                isinstance(existing_profitability, dict)
+                and bool(existing_profitability.get("revalidated"))
+                and bool(existing_profitability.get("authoritative"))
+            ):
+                state = dict(existing_profitability)
+            else:
+                state = revalidate_profitability_state(
+                    opportunity,
+                    self.cfg,
+                    stage="scan_after_fee_revalidation",
+                    source="runtime_primary_scan",
+                    gas_cost_wei=gas_cost_wei,
+                )
             # Persist canonical flash-loan + gas revalidation even when optional
             # USD accounting is disabled. USD is enrichment, not the safety gate.
             meta["profitability"] = dict(state)
@@ -394,6 +402,23 @@ class RuntimePrimaryScanFacade:
                     int(after_cost) if after_cost is not None else -1,
                     int(getattr(candidate, "expected_profit_raw", 0) or 0),
                 )
+
+            # Preserve the full diagnostic sizing matrix before route-level
+            # deduplication. This is evidence only; it never grants execution authority.
+            telemetry["size_economic_evidence"] = [
+                {
+                    "route_id": _candidate_route_key(candidate),
+                    "amount_in": _candidate_amount_in(candidate),
+                    "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+                    "revalidated": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("revalidated")),
+                    "authoritative": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("authoritative")),
+                    "reason": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("reason") or "unavailable"),
+                    "flashloan_fee_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("flashloan_fee_wei") or "0"),
+                    "gas_cost_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("gas_cost_wei") or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei") or "0"),
+                    "after_cost_profit_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("profit_after_costs_wei") or "0"),
+                }
+                for candidate in [*opps2, *opps3]
+            ]
 
             # A route at different sizes is a sizing variant, not a separate
             # venue/route opportunity. Prefer the highest verified after-cost
