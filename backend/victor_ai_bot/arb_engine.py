@@ -796,7 +796,7 @@ async def find_three_leg_opportunities(
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
                 qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
                 for e3 in e3_cands:
-                    if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+                    if (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms:
                         break
                     q3 = qmap3_3.get(edge_key(e3))
                     if not q3:
