@@ -32,6 +32,17 @@ class _Runtime(RuntimeStateFacade):
             },
             "routes_considered": 12,
             "edges_generated": 20,
+            "route_universe": {
+                "configured_token_count": 3,
+                "active_token_count": 3,
+                "edges_by_dex": {"univ3": 20},
+                "unique_directed_pairs": 6,
+                "directed_pairs_with_reverse": 6,
+                "reverse_pair_coverage_ratio": 1.0,
+                "univ3_unique_pool_count": 10,
+                "univ3_possible_configured_pair_fee_count": 12,
+                "univ3_configured_pair_fee_coverage_ratio": 10.0 / 12.0,
+            },
             "route_evaluation": {
                 "quote_phase_ms": 125.0,
                 "route_evaluation_ms": 17.5,
@@ -83,6 +94,9 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "quote_last_error": "rpc_rate_limited",
         "quote_unhealthy_until": 999.0,
     }
+    assert out["route_universe"]["configured_token_count"] == 3
+    assert out["route_universe"]["univ3_unique_pool_count"] == 10
+    assert out["route_universe"]["univ3_configured_pair_fee_coverage_ratio"] == 10.0 / 12.0
     assert out["route_evaluation"] == {
         "quote_phase_ms": 125.0,
         "route_evaluation_ms": 17.5,
