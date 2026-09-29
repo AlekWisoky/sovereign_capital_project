@@ -136,6 +136,14 @@ class RuntimeMultiruntimeStateFacade:
         target = self._runtimes.get(runtime_name)
         if target is None:
             return False
+
+        # Global selection never overrides the selected runtime's own
+        # auto-trading authority. The active runtime may authorize global
+        # selection, but the runtime that owns the selected opportunity must
+        # still explicitly allow automatic execution.
+        if not bool(getattr(target, "_auto_trading", False)):
+            return False
+
         try:
             existing_task = getattr(target, "_exec_task", None)
             if existing_task is not None and not existing_task.done():
@@ -162,7 +170,7 @@ class RuntimeMultiruntimeStateFacade:
                 [candidate],
                 current_block=int(current_block),
                 pending_txs=int(len(getattr(target, "_pending", {}) or {})),
-                auto_enabled=True,
+                auto_enabled=bool(getattr(target, "_auto_trading", False)),
                 gas_budget_remaining_wei=int(target._gas_budget_remaining_wei()),
             )
         except (AttributeError, RuntimeError, TypeError, ValueError):
