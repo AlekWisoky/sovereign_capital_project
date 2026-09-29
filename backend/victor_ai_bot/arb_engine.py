@@ -761,7 +761,10 @@ async def find_three_leg_opportunities(
     # iterate first edge; use time budget
     for a_in, outs in adj.items():
         for e1 in outs:
-            if (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms:
+            if (
+                route_groups_evaluated > 0
+                and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
+            ):
                 break
             if e1.token_in != a_in:
                 continue
@@ -776,7 +779,10 @@ async def find_three_leg_opportunities(
             qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
             route_groups_evaluated += 1
             for e2 in e2_cands:
-                if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+                if (
+                    route_groups_evaluated > 0
+                    and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
+                ):
                     break
                 q2 = qmap2_3.get(edge_key(e2))
                 if not q2:
