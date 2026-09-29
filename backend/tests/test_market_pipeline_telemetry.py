@@ -151,3 +151,24 @@ def test_canonical_route_universe_prefers_three_leg_snapshot_without_double_coun
     out = _canonical_route_universe_telemetry(two_leg, three_leg)
 
     assert out == three_leg["route_universe"]
+
+
+def test_market_pipeline_telemetry_exposes_candidate_tokens_separately_from_execution_universe():
+    runtime = _Runtime()
+    runtime._market_pipeline_telemetry["candidate_token_discovery"] = {
+        "execution_universe": ["0x" + "11" * 20],
+        "observed_tokens": ["0x" + "11" * 20, "0x" + "22" * 20],
+        "observed_not_admitted": ["0x" + "22" * 20],
+        "observed_count": 2,
+        "observed_not_admitted_count": 1,
+        "observation_cap": 64,
+        "observation_truncated": False,
+        "admission_mutated": False,
+        "sources": {"0x" + "22" * 20: ["balancer_pool_candidate"]},
+    }
+    out = runtime.market_pipeline_telemetry_state()
+    candidate = out["candidate_token_discovery"]
+    assert candidate["execution_universe"] == ["0x" + "11" * 20]
+    assert candidate["observed_not_admitted"] == ["0x" + "22" * 20]
+    assert candidate["observed_not_admitted_count"] == 1
+    assert candidate["admission_mutated"] is False
