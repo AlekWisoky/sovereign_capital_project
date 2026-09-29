@@ -110,3 +110,43 @@ async def test_rpc_manager_loop_awaits_stop_event_without_leaking_coroutine():
     mgr._probe_one = _probe_and_stop
     await mgr._loop()
     assert mgr._stop.is_set()
+
+
+def test_quote_rate_limit_temporarily_demotes_selected_read_provider():
+    mgr = RpcManager(
+        rpc_read=["https://rpc-a.example", "https://rpc-b.example"],
+        rpc_send=["https://rpc-a.example"],
+    )
+    mgr._read["https://rpc-a.example"].last_seen_block = 100
+    mgr._read["https://rpc-b.example"].last_seen_block = 100
+    assert mgr.best_read() == "https://rpc-a.example"
+    mgr.observe_quote_telemetry(
+        "https://rpc-a.example",
+        requests=10,
+        successes=2,
+        failure_reasons={"rpc_rate_limited": 8},
+    )
+    assert mgr.best_read() == "https://rpc-b.example"
+    snap = mgr.snapshot()
+    row = next(x for x in snap["read"] if x["url"] == "https://rpc-a.example")
+    assert row["quote_failures"] == 8
+    assert row["quote_last_error"] == "rpc_rate_limited"
+
+
+def test_quote_reverts_do_not_demote_rpc_provider():
+    mgr = RpcManager(
+        rpc_read=["https://rpc-a.example", "https://rpc-b.example"],
+        rpc_send=["https://rpc-a.example"],
+    )
+    mgr._read["https://rpc-a.example"].last_seen_block = 100
+    mgr._read["https://rpc-b.example"].last_seen_block = 100
+    mgr.observe_quote_telemetry(
+        "https://rpc-a.example",
+        requests=10,
+        successes=2,
+        failure_reasons={"rpc_revert": 8},
+    )
+    assert mgr.best_read() == "https://rpc-a.example"
+    row = next(x for x in mgr.snapshot()["read"] if x["url"] == "https://rpc-a.example")
+    assert row["quote_failures"] == 0
+    assert row["quote_last_error"] is None
