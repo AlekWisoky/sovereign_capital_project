@@ -178,6 +178,7 @@
       "backend/tests/test_quicksight_dashboards_maintenance.py",
       "backend/tests/test_quicksight_datasets_maintenance.py",
       "backend/tests/test_quicksight_runtime_maintenance.py",
+      "backend/tests/test_quote_diagnostics.py",
       "backend/tests/test_ratelimit_env.py",
       "backend/tests/test_receipt_settlement_truth_path.py",
       "backend/tests/test_receipt_terminal_profitability_chain.py",
