@@ -29,7 +29,7 @@ def test_candidate_token_observation_is_read_only_and_respects_admission_boundar
 def test_candidate_token_observation_hard_cap_does_not_expand_execution_universe(tmp_path):
     manager = DiscoveryManager(chain_name="test", data_dir=str(tmp_path))
     manager._candidate_token_observation_cap = 2
-    tokens = ["0x" + f"{i:040x}" for i in range(3)]
+    tokens = ["0x" + f"{i:040x}" for i in range(1, 4)]
 
     manager._observe_candidate_tokens(tokens, source="curve_pool_candidate")
 
