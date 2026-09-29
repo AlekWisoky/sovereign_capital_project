@@ -149,6 +149,7 @@ async def test_scan_primary_opportunities_prefers_verified_after_cost_truth_over
 @pytest.mark.asyncio
 async def test_scan_enriches_canonical_after_fee_profit_with_explicit_usd(monkeypatch):
     runtime = _Runtime()
+    runtime.cfg.chain = SimpleNamespace(name="ethereum", usdc="0xusdc", usdt="")
     runtime.cfg.execution = SimpleNamespace(
         usd_accounting_enabled=True,
         usd_stable_preference="usdc",
