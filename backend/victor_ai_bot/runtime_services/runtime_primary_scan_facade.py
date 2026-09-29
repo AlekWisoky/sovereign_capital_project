@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Dict, List
+from urllib.parse import urlsplit
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..models import Opportunity
@@ -221,6 +222,31 @@ class RuntimePrimaryScanFacade:
             telemetry["quote_success_rate"] = (
                 float(successes) / float(requests) if requests else 0.0
             )
+            rpc_url = str(getattr(rpc, "url", "") or "")
+            rpc_host = str(urlsplit(rpc_url).hostname or "") if rpc_url else ""
+            rpc_snapshot = {}
+            try:
+                rpc_snapshot = dict(self.rpc_manager.snapshot() or {})
+            except (AttributeError, KeyError, TypeError, ValueError):
+                rpc_snapshot = {}
+            selected_rpc = next(
+                (
+                    dict(row)
+                    for row in list(rpc_snapshot.get("read") or [])
+                    if str(row.get("url") or "") == rpc_url
+                ),
+                {},
+            )
+            telemetry["rpc"] = {
+                "endpoint": rpc_url,
+                "provider": rpc_host,
+                "score": selected_rpc.get("score"),
+                "ok": selected_rpc.get("ok"),
+                "quote_failures": selected_rpc.get("quote_failures", 0),
+                "quote_successes": selected_rpc.get("quote_successes", 0),
+                "quote_last_error": selected_rpc.get("quote_last_error"),
+                "quote_unhealthy_until": selected_rpc.get("quote_unhealthy_until", 0.0),
+            }
             self._market_pipeline_telemetry = telemetry
             return opps[:80]
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
