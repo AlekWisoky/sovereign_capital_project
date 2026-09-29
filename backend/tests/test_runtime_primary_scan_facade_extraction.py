@@ -73,7 +73,7 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert calls['two']['amount_in'] == 10
     assert calls['two']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_v3_pairs'] == ['v3-a', 'v3-b']
-    assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12}
+    assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12, 'failure_reasons': {}}
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
     assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'budget_exhausted_after_quote': True}
