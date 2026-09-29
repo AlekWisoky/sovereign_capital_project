@@ -354,6 +354,19 @@ class RuntimePrimaryScanFacade:
                 telemetry["scan_latency_ms"] = float((time.perf_counter() - started) * 1000.0)
                 opps = []
 
+            quotes = dict(telemetry.get("quotes") or {})
+            quote_requests = int(quotes.get("requests", 0) or 0)
+            quote_successes = int(quotes.get("successes", 0) or 0)
+            try:
+                manager.observe_quote_telemetry(
+                    url,
+                    requests=quote_requests,
+                    successes=quote_successes,
+                    failure_reasons=dict(quotes.get("failure_reasons") or {}),
+                )
+            except (AttributeError, TypeError, ValueError):
+                pass
+
             snapshot = {}
             try:
                 snapshot = dict(manager.snapshot() or {})
@@ -386,9 +399,6 @@ class RuntimePrimaryScanFacade:
                 )
                 > 0
             )
-            quotes = dict(telemetry.get("quotes") or {})
-            quote_requests = int(quotes.get("requests", 0) or 0)
-            quote_successes = int(quotes.get("successes", 0) or 0)
             quote_quarantined = float(row.get("quote_unhealthy_until", 0.0) or 0.0) > time.time()
             evidence = RpcEconomicEvidence(
                 endpoint=url,
