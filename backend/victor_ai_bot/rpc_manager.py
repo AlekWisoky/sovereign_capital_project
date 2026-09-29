@@ -61,7 +61,8 @@ class RpcManager:
         timeout_s: float = 8.0,
         probe_interval_s: float = 15.0,
     ):
-        self.rpc_read = list(dict.fromkeys(rpc_read))
+        self._configured_read = list(dict.fromkeys(rpc_read))
+        self.rpc_read = list(self._configured_read)
         self.rpc_send = list(dict.fromkeys(rpc_send or rpc_read))
         self.rpc_private = list(dict.fromkeys((rpc_private or [])))
         self.timeout_s = timeout_s
@@ -85,6 +86,35 @@ class RpcManager:
                 await asyncio.wait_for(self._task, timeout=3.0)
             except _SAFE_RPC_MANAGER_STOP_EXCEPTIONS:
                 pass
+
+    def sync_read_preferences(self, preferred: List[str] | None = None) -> List[str]:
+        """Synchronize operator read preferences into the live quote-provider universe.
+
+        Configured endpoints remain authoritative defaults; preferences add
+        operator-selected read endpoints and can be removed without disturbing
+        configured endpoints. Existing health/quote telemetry is retained for
+        endpoints that remain in the universe.
+        """
+        preferred_urls = list(
+            dict.fromkeys(
+                str(url).strip()
+                for url in list(preferred or [])
+                if str(url).strip()
+            )
+        )
+        merged = list(dict.fromkeys([*self._configured_read, *preferred_urls]))
+        existing = self._read
+        self._read = {url: existing.get(url) or EndpointStats(url) for url in merged}
+        self.rpc_read = list(merged)
+        return list(merged)
+
+    def read_candidates(self) -> List[str]:
+        """Return read endpoints in operational-score order for quote comparison."""
+        return [
+            stats.url
+            for stats in sorted(self._read.values(), key=lambda item: item.score())
+            if stats.ok and float(stats.quote_unhealthy_until or 0.0) <= time.time()
+        ]
 
     def best_read(self) -> str:
         return min(self._read.values(), key=lambda s: s.score()).url if self._read else ""

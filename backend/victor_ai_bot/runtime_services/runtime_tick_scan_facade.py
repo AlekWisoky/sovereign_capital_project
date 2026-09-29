@@ -185,6 +185,7 @@ class RuntimeTickScanFacade:
         rpc: Any,
         current_block: int,
         loop_started_at: float,
+        preselected_scan: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         opps = []
         regime_label = "balanced"
@@ -192,11 +193,18 @@ class RuntimeTickScanFacade:
         mev_snap: Dict[str, Any] = {}
 
         amount_in = self._resolve_amount_in()
-        opps = await self._scan_primary_opportunities(
-            rpc,
-            current_block=int(current_block),
-            amount_in=int(amount_in),
-        )
+        if preselected_scan is not None:
+            self.cache = preselected_scan.get("cache") or self.cache
+            self._market_pipeline_telemetry = dict(
+                preselected_scan.get("telemetry") or {}
+            )
+            opps = list(preselected_scan.get("opps") or [])
+        else:
+            opps = await self._scan_primary_opportunities(
+                rpc,
+                current_block=int(current_block),
+                amount_in=int(amount_in),
+            )
 
         gas_signals = await self._gas_signal_snapshot(rpc)
         basefee_gwei = float(gas_signals.get("basefee_gwei", 0.0) or 0.0)

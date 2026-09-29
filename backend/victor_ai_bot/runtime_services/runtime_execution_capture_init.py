@@ -119,6 +119,10 @@ def initialize_execution_capture_stack(runtime: Any, cfg: Any, data_dir: str) ->
     try:
         if getattr(runtime, "_endpoint_universe", None) is not None:
             runtime._endpoint_universe.rpc_preferences = runtime._rpc_preferences
+        if getattr(runtime, "_rpc_preferences", None) is not None:
+            runtime.rpc_manager.sync_read_preferences(
+                (runtime._rpc_preferences.snapshot() or {}).get("read") or []
+            )
     except _SAFE_RUNTIME_EXCEPTIONS:
         pass
     try:

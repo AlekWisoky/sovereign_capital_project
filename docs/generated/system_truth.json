@@ -47,15 +47,15 @@
   "backend_broad_except_count": 1,
   "backend_broad_exception_sites": [
     {
-      "end_lineno": 54,
+      "end_lineno": 56,
       "handler_form": "typed",
       "handler_type": "Exception",
       "line": "except Exception as e:",
-      "lineno": 45,
+      "lineno": 47,
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 353,
+  "backend_test_file_count": 354,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -255,6 +255,7 @@
     "test_route_helpers_auto_trade_projection.py",
     "test_route_runtime_truth_consistency.py",
     "test_route_surface_truth_stage4.py",
+    "test_rpc_economic_selection.py",
     "test_runtime_after_tick_facade_extraction.py",
     "test_runtime_agent_consensus_facade_extraction.py",
     "test_runtime_api_decomposition.py",
@@ -414,11 +415,11 @@
   "broad_exception_inventory": {
     "backend_sites": [
       {
-        "end_lineno": 54,
+        "end_lineno": 56,
         "handler_form": "typed",
         "handler_type": "Exception",
         "line": "except Exception as e:",
-        "lineno": 45,
+        "lineno": 47,
         "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
       }
     ],

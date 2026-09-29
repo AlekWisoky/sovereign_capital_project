@@ -19,6 +19,7 @@ class RuntimeTickIterationFacade:
         rpc: Any,
         current_block: int,
         loop_started_at: float,
+        preselected_scan: Dict[str, Any] | None = None,
     ) -> None:
         decision = None
         tick_failed = False
@@ -36,6 +37,7 @@ class RuntimeTickIterationFacade:
                 rpc=rpc,
                 current_block=int(current_block),
                 loop_started_at=loop_started_at,
+                preselected_scan=preselected_scan,
             )
             opps = list(tick_state.get("opps") or [])
             regime_label = str(tick_state.get("regime_label") or "balanced")

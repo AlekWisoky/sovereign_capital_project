@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from victor_ai_bot.rpc_manager import RpcManager
+from victor_ai_bot.rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
+from victor_ai_bot.runtime_services.runtime_primary_scan_facade import RuntimePrimaryScanFacade
+
+
+def test_rpc_preferences_extend_live_read_provider_universe():
+    manager = RpcManager(
+        rpc_read=["https://rpc-config.example"],
+        rpc_send=["https://rpc-config.example"],
+    )
+    manager._read["https://rpc-config.example"].last_seen_block = 100
+    urls = manager.sync_read_preferences(["https://premium.example"])
+    assert urls == ["https://rpc-config.example", "https://premium.example"]
+    assert "https://premium.example" in manager.read_candidates()
+    manager.sync_read_preferences([])
+    assert "https://premium.example" not in manager.read_candidates()
+    assert "https://rpc-config.example" in manager.read_candidates()
+    manager.sync_read_preferences(["https://premium.example"])
+    manager._read["https://premium.example"].quote_unhealthy_until = 9_999_999_999.0
+    assert "https://premium.example" not in manager.read_candidates()
+
+
+def test_rpc_economic_selector_prefers_higher_after_fee_profit_and_ignores_unhealthy():
+    evidence = [
+        RpcEconomicEvidence(
+            endpoint="https://rpc-a.example",
+            provider="rpc-a.example",
+            profit_after_costs_usd_micro=120,
+            profitable_opportunity_count=1,
+            quote_requests=10,
+            quote_successes=10,
+            operational_score=10.0,
+        ),
+        RpcEconomicEvidence(
+            endpoint="https://rpc-b.example",
+            provider="rpc-b.example",
+            profit_after_costs_usd_micro=240,
+            profitable_opportunity_count=2,
+            quote_requests=10,
+            quote_successes=10,
+            operational_score=20.0,
+        ),
+        RpcEconomicEvidence(
+            endpoint="https://rpc-c.example",
+            provider="rpc-c.example",
+            profit_after_costs_usd_micro=999,
+            profitable_opportunity_count=9,
+            quote_requests=10,
+            quote_successes=10,
+            operational_score=1.0,
+            healthy=False,
+        ),
+    ]
+    selected, ordered = select_best_rpc_evidence(evidence)
+    assert selected is not None
+    assert selected.endpoint == "https://rpc-b.example"
+    assert [item.endpoint for item in ordered] == [
+        "https://rpc-b.example",
+        "https://rpc-a.example",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadcast(monkeypatch):
+    class _Manager:
+        def __init__(self):
+            self.telemetry = []
+
+        def read_candidates(self):
+            return ["https://rpc-a.example", "https://rpc-b.example"]
+
+        def observe_quote_telemetry(self, url, **kwargs):
+            self.telemetry.append((url, kwargs))
+
+        def snapshot(self):
+            return {
+                "read": [
+                    {"url": "https://rpc-a.example", "ok": True, "score": 10.0},
+                    {"url": "https://rpc-b.example", "ok": True, "score": 20.0},
+                ]
+            }
+
+    class _Rpc:
+        def __init__(self, url):
+            self.url = url
+
+    class _Client:
+        def __init__(self, url, **kwargs):
+            self.url = url
+
+        async def __aenter__(self):
+            return _Rpc(self.url)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    runtime = RuntimePrimaryScanFacade()
+    runtime.rpc_manager = _Manager()
+    runtime.cfg = SimpleNamespace()
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_scan(
+        rpc,
+        *,
+        current_block,
+        amount_in,
+        cache,
+        discovery_context,
+        telemetry_sink,
+    ):
+        profit = 100 if rpc.url.endswith("a.example") else 300
+        telemetry_sink.update(
+            {
+                "quotes": {"requests": 10, "successes": 10, "failure_reasons": {}},
+                "scan_latency_ms": 1.0,
+            }
+        )
+        return [
+            SimpleNamespace(
+                meta={
+                    "canonical_after_fee_usd": {
+                        "verified": True,
+                        "profit_after_costs_usd_micro": profit,
+                    }
+                }
+            )
+        ]
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.JsonRpcClient",
+        _Client,
+    )
+    monkeypatch.setattr(runtime, "_build_discovery_context", fake_discovery)
+    monkeypatch.setattr(runtime, "_scan_primary_opportunities", fake_scan)
+
+    result = await runtime._select_rpc_and_scan(
+        bootstrap_rpc=_Rpc("https://rpc-a.example"),
+        current_block=123,
+        amount_in=1_000,
+    )
+
+    assert result["selected_endpoint"] == "https://rpc-b.example"
+    assert result["opps"][0].meta["canonical_after_fee_usd"]["profit_after_costs_usd_micro"] == 300
+    selection = result["telemetry"]["rpc"]["economic_selection"]
+    assert selection["selected_endpoint"] == "https://rpc-b.example"
+    assert selection["broadcast_attempted"] is False
+    assert selection["auto_trade_enabled"] is False
+    assert {url for url, _ in runtime.rpc_manager.telemetry} == {
+        "https://rpc-a.example",
+        "https://rpc-b.example",
+    }

@@ -14,35 +14,77 @@ class RuntimeLoopEntryFacade:
     """
 
     async def _run_loop_entry_iteration(self, *, loop_started_at: float) -> None:
-        read_url = self.rpc_manager.best_read()
-        if not read_url:
+        bootstrap_url = self.rpc_manager.best_read()
+        if not bootstrap_url:
             await self._sleep(1.0)
             return
 
+        preselected_scan = None
+        selected_url = bootstrap_url
+        current_block = None
+
         async with JsonRpcClient(
-            read_url, timeout_s=10.0, max_concurrency=30, max_batch=80
-        ) as rpc:
-            bn = await self._prepare_tick_iteration(rpc=rpc)
+            bootstrap_url, timeout_s=10.0, max_concurrency=30, max_batch=80
+        ) as bootstrap_rpc:
+            bn = await self._prepare_tick_iteration(rpc=bootstrap_rpc)
             if bn is None:
                 return
+            current_block = int(bn)
+
+            if hasattr(self, "_resolve_amount_in"):
+                try:
+                    amount_in = int(self._resolve_amount_in())
+                    selection = await self._select_rpc_and_scan(
+                        bootstrap_rpc=bootstrap_rpc,
+                        current_block=current_block,
+                        amount_in=amount_in,
+                    )
+                    selected_url = str(selection.get("selected_endpoint") or bootstrap_url)
+                    preselected_scan = selection
+                except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+                    selected_url = bootstrap_url
+                    preselected_scan = None
+
+            if preselected_scan is None:
+                await self._run_contained_tick_iteration(
+                    rpc=bootstrap_rpc,
+                    current_block=current_block,
+                    loop_started_at=loop_started_at,
+                )
+                telemetry = getattr(self, "_market_pipeline_telemetry", {}) or {}
+                if isinstance(telemetry, dict):
+                    quotes = telemetry.get("quotes") or {}
+                    try:
+                        self.rpc_manager.observe_quote_telemetry(
+                            bootstrap_url,
+                            requests=int(quotes.get("requests", 0) or 0),
+                            successes=int(quotes.get("successes", 0) or 0),
+                            failure_reasons=dict(quotes.get("failure_reasons") or {}),
+                        )
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                return
+
+        async with JsonRpcClient(
+            selected_url, timeout_s=10.0, max_concurrency=30, max_batch=80
+        ) as rpc:
             await self._run_contained_tick_iteration(
                 rpc=rpc,
-                current_block=int(bn),
+                current_block=int(current_block),
                 loop_started_at=loop_started_at,
+                preselected_scan=preselected_scan,
             )
             telemetry = getattr(self, "_market_pipeline_telemetry", {}) or {}
             if isinstance(telemetry, dict):
                 quotes = telemetry.get("quotes") or {}
                 try:
                     self.rpc_manager.observe_quote_telemetry(
-                        read_url,
+                        selected_url,
                         requests=int(quotes.get("requests", 0) or 0),
                         successes=int(quotes.get("successes", 0) or 0),
                         failure_reasons=dict(quotes.get("failure_reasons") or {}),
                     )
                 except (AttributeError, TypeError, ValueError):
-                    # Quote telemetry is observational; never let health feedback
-                    # interrupt the existing scan/execution containment path.
                     pass
 
     async def _sleep(self, seconds: float) -> None:
