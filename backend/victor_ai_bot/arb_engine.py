@@ -133,7 +133,7 @@ async def quote_edges_batch(
     cache: PerBlockCache,
     edges: List[Edge],
     amount_in: int,
-    metrics: Optional[Dict[str, int]] = None,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Optional[Tuple[int, Dict[str, Any]]]]:
     """Batch-quote many edges for the same amount_in.
 
@@ -144,6 +144,8 @@ async def quote_edges_batch(
     out: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
     if metrics is None:
         metrics = {}
+    quote_diagnostics: Dict[str, Any] = {}
+    metrics.setdefault("quote_failure_reasons", {})
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
     missing_bal: List[Tuple[int, Edge]] = []
@@ -177,7 +179,7 @@ async def quote_edges_batch(
             fee = int(e.params.get("fee", 3000))
             reqs.append((e.token_in, e.token_out, fee, int(amount_in), 0))
             order.append(e)
-        quotes = await quote_exact_input_single_batch(rpc, cfg.chain.univ3_quoter_v2, reqs)
+        quotes = await quote_exact_input_single_batch(rpc, cfg.chain.univ3_quoter_v2, reqs, diagnostics=quote_diagnostics)
         for e, q in zip(order, quotes):
             ek = edge_key(e)
             ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
@@ -204,7 +206,7 @@ async def quote_edges_batch(
             underlying = bool(e.params.get("underlying", False))
             reqs.append((pool, i, j, int(amount_in), underlying))
             order.append(e)
-        quotes = await quote_curve_many(rpc, reqs)
+        quotes = await quote_curve_many(rpc, reqs, diagnostics=quote_diagnostics)
         for e, q in zip(order, quotes):
             ek = edge_key(e)
             ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
@@ -232,7 +234,7 @@ async def quote_edges_batch(
             pool_id = str(e.params.get("pool_id") or "")
             reqs.append((pool_id, e.token_in, e.token_out, int(amount_in)))
             order.append(e)
-        quotes = await quote_balancer_given_in_many(rpc, cfg.chain.balancer_vault, reqs)
+        quotes = await quote_balancer_given_in_many(rpc, cfg.chain.balancer_vault, reqs, diagnostics=quote_diagnostics)
         for e, q in zip(order, quotes):
             ek = edge_key(e)
             ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
@@ -245,6 +247,8 @@ async def quote_edges_batch(
                 out[ek] = None
                 cache.set(ck, None)
 
+    failure_counts = quote_diagnostics.get("failure_reasons") or {}
+    metrics["quote_failure_reasons"] = {str(k): int(v) for k, v in failure_counts.items()}
     # ensure all are present
     for e in edges:
         ek = edge_key(e)
@@ -482,10 +486,12 @@ async def find_two_leg_opportunities(
         # look for e2 that returns to start
         revs = by_pair.get((e1.token_out, e1.token_in), [])
         if not revs:
+            metrics["route_rejections_no_reverse_route"] = int(metrics.get("route_rejections_no_reverse_route", 0)) + 1
             continue
         metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
         q1 = qmap1.get(edge_key(e1))
         if not q1:
+            metrics["route_rejections_first_leg_quote_unavailable"] = int(metrics.get("route_rejections_first_leg_quote_unavailable", 0)) + 1
             continue
         out1, meta1 = q1
         # Batch quote all candidate second legs for this out1.
@@ -496,6 +502,7 @@ async def find_two_leg_opportunities(
         for e2 in revs:
             q2 = qmap2.get(edge_key(e2))
             if not q2:
+                metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
                 continue
             out2, meta2 = q2
             gross_profit = out2 - amount_in
@@ -503,6 +510,7 @@ async def find_two_leg_opportunities(
             # We'll fill meta after aux construction; here keep gross filter.
             # Filter unprofitable routes unless explicitly debugging.
             if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
+                metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
                 continue
             # min_outs for legs include slippage haircut
             min1 = _apply_slippage(out1, slippage_bps)
@@ -680,6 +688,12 @@ async def find_two_leg_opportunities(
             "edges_generated": len(edges),
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
+            "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
+            "route_rejections": {
+                str(k).replace("route_rejections_", ""): int(v)
+                for k, v in metrics.items()
+                if str(k).startswith("route_rejections_")
+            },
         })
     # rank by gross profit desc
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
