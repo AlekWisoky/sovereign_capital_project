@@ -124,6 +124,22 @@ async def test_global_dispatch_targets_selected_runtime_without_changing_active_
 
 
 @pytest.mark.asyncio
+async def test_global_dispatch_respects_selected_runtime_auto_authority():
+    ethereum = _Runtime(_candidate("eth-best", 40), auto=False)
+    base = _Runtime(_candidate("base-safe", 20), auto=True)
+    bundle = _Bundle({"ethereum": ethereum, "base": base})
+
+    dispatched = await RuntimeMultiruntimeStateFacade.dispatch_selected_auto_trade(
+        bundle, current_block=321
+    )
+    await asyncio.sleep(0)
+
+    assert dispatched is False
+    assert ethereum.calls == []
+    assert base.calls == []
+
+
+@pytest.mark.asyncio
 async def test_global_dispatch_never_selects_blocked_or_unavailable_candidate():
     ethereum = _Runtime(_candidate("eth", 40), action="skip")
     base = _Runtime(_candidate("base", 20))
