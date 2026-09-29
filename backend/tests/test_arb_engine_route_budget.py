@@ -62,6 +62,9 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
     assert any(item.expected_profit_raw == "20" for item in out)
     assert telemetry["route_groups_evaluated"] >= 1
     assert telemetry["budget_exhausted_after_quote"] is False
+    assert telemetry["route_universe"]["edges_by_dex"] == {"univ3": 2}
+    assert telemetry["route_universe"]["unique_directed_pairs"] == 2
+    assert telemetry["route_universe"]["directed_pairs_with_reverse"] == 2
 
 
 @pytest.mark.asyncio
