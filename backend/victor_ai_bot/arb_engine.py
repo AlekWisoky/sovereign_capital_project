@@ -133,6 +133,7 @@ def _route_universe_snapshot(
     *,
     adjacency: Optional[Dict[str, List[Edge]]] = None,
     max_edges_per_token: Optional[int] = None,
+    pruned_edges: Optional[List[Edge]] = None,
 ) -> Dict[str, Any]:
     """Describe the candidate graph before quote/economic filtering."""
     by_dex: Dict[str, int] = {}
@@ -169,7 +170,32 @@ def _route_universe_snapshot(
         active = sum(len(items) for items in adjacency.values())
         snapshot["three_leg_adjacency_edges"] = int(active)
         snapshot["three_leg_max_edges_per_token"] = int(max_edges_per_token or 0)
-        snapshot["three_leg_edges_pruned_by_token_cap"] = max(0, len(edges) - active)
+        pruned = list(pruned_edges or [])
+        snapshot["three_leg_edges_pruned_by_token_cap"] = int(max(0, len(pruned)))
+        snapshot["three_leg_pruned_edges"] = [
+            {
+                "edge_id": edge_key(edge),
+                "dex": str(edge.dex),
+                "venue": str(edge.venue),
+                "token_in": str(edge.token_in),
+                "token_out": str(edge.token_out),
+                "pool": (
+                    str(edge.params.get("pool"))
+                    if edge.params.get("pool")
+                    else (
+                        str(edge.params.get("pool_id"))
+                        if edge.params.get("pool_id")
+                        else None
+                    )
+                ),
+                "params": {
+                    str(k): v for k, v in dict(edge.params or {}).items()
+                    if str(k) in {"fee", "pool", "pool_id", "i", "j", "underlying"}
+                },
+            }
+            for edge in pruned[:80]
+        ]
+        snapshot["three_leg_pruned_edges_truncated"] = bool(len(pruned) > 80)
     return snapshot
 
 
@@ -328,7 +354,10 @@ def build_edges(
                     v3_exec_venue,
                     p["token_in"],
                     p["token_out"],
-                    {"fee": int(p.get("fee", 3000))},
+                    {
+                        "fee": int(p.get("fee", 3000)),
+                        **({"pool": str(p.get("pool"))} if p.get("pool") else {}),
+                    },
                 )
             )
             # auto reverse
@@ -787,11 +816,24 @@ async def find_three_leg_opportunities(
     for e in edges:
         adj.setdefault(e.token_in, []).append(e)
 
-    # cap per token to avoid combinatorial explosion
-    max_edges_per_token = int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "10"))
+    # cap per token to avoid combinatorial explosion. Keep the exact
+    # rejected identities for diagnostics only; the cap itself is unchanged.
+    max_edges_per_token = max(
+        1, int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "10") or 10)
+    )
+    active_edge_ids: set[int] = set()
     for k in list(adj.keys()):
-        adj[k] = adj[k][:max_edges_per_token]
-    route_universe = _route_universe_snapshot(cfg, edges, adjacency=adj, max_edges_per_token=max_edges_per_token)
+        kept = adj[k][:max_edges_per_token]
+        adj[k] = kept
+        active_edge_ids.update(id(edge) for edge in kept)
+    pruned_edges = [edge for edge in edges if id(edge) not in active_edge_ids]
+    route_universe = _route_universe_snapshot(
+        cfg,
+        edges,
+        adjacency=adj,
+        max_edges_per_token=max_edges_per_token,
+        pruned_edges=pruned_edges,
+    )
 
     # quick lookup for final leg candidates
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
