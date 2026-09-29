@@ -415,11 +415,11 @@
   "broad_exception_inventory": {
     "backend_sites": [
       {
-        "end_lineno": 54,
+        "end_lineno": 56,
         "handler_form": "typed",
         "handler_type": "Exception",
         "line": "except Exception as e:",
-        "lineno": 45,
+        "lineno": 47,
         "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
       }
     ],
