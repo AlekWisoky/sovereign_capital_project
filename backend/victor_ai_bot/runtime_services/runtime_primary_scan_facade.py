@@ -409,6 +409,16 @@ class RuntimePrimaryScanFacade:
                 cache=scan_cache,
             )
 
+            def _candidate_profitability(candidate: Opportunity) -> Dict[str, Any]:
+                meta = getattr(candidate, "meta", {}) or {}
+                if not isinstance(meta, dict):
+                    return {}
+                state = meta.get("profitability")
+                if isinstance(state, dict):
+                    return state
+                diagnostic = meta.get("profitability_diagnostic")
+                return diagnostic if isinstance(diagnostic, dict) else {}
+
             def _candidate_selection_key(candidate: Opportunity) -> tuple[int, int]:
                 after_cost = _candidate_after_cost(candidate)
                 return (
@@ -423,12 +433,18 @@ class RuntimePrimaryScanFacade:
                     "route_id": _candidate_route_key(candidate),
                     "amount_in": _candidate_amount_in(candidate),
                     "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
-                    "revalidated": bool((((getattr(candidate, "meta", {}) or {}).get("profitability") or (getattr(candidate, "meta", {}) or {}).get("profitability_diagnostic") or {}).get("revalidated")),
-                    "authoritative": bool((((getattr(candidate, "meta", {}) or {}).get("profitability") or (getattr(candidate, "meta", {}) or {}).get("profitability_diagnostic") or {}).get("authoritative")),
-                    "reason": str((((getattr(candidate, "meta", {}) or {}).get("profitability") or (getattr(candidate, "meta", {}) or {}).get("profitability_diagnostic") or {}).get("reason") or "unavailable")),
-                    "flashloan_fee_wei": str((((getattr(candidate, "meta", {}) or {}).get("profitability") or (getattr(candidate, "meta", {}) or {}).get("profitability_diagnostic") or {}).get("flashloan_fee_wei") or "0"),
-                    "gas_cost_wei": str((((getattr(candidate, "meta", {}) or {}).get("profitability") or (getattr(candidate, "meta", {}) or {}).get("profitability_diagnostic") or {}).get("gas_cost_wei") or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei") or "0"),
-                    "after_cost_profit_wei": str((((getattr(candidate, "meta", {}) or {}).get("profitability") or (getattr(candidate, "meta", {}) or {}).get("profitability_diagnostic") or {}).get("profit_after_costs_wei") or "0"),
+                    "revalidated": bool(_candidate_profitability(candidate).get("revalidated")),
+                    "authoritative": bool(_candidate_profitability(candidate).get("authoritative")),
+                    "reason": str(_candidate_profitability(candidate).get("reason") or "unavailable"),
+                    "flashloan_fee_wei": str(_candidate_profitability(candidate).get("flashloan_fee_wei") or "0"),
+                    "gas_cost_wei": str(
+                        _candidate_profitability(candidate).get("gas_cost_wei")
+                        or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei")
+                        or "0"
+                    ),
+                    "after_cost_profit_wei": str(
+                        _candidate_profitability(candidate).get("profit_after_costs_wei") or "0"
+                    ),
                 }
                 for candidate in [*opps2, *opps3]
             ]
