@@ -102,6 +102,48 @@ class RuntimePrimaryScanFacade:
                 "block_number": int(current_block),
             }
 
+    def _adaptive_scan_amounts(self, amount_in: int) -> List[int]:
+        """Return a bounded size ladder for discovery without changing execution sizing.
+
+        The base amount is always scanned first. Alternative sizes are only probed
+        when the base scan yields fewer than the configured minimum number of
+        opportunities. This keeps normal scans cheap while preventing a single
+        fixed notional from defining the entire opportunity universe.
+        """
+        base = max(1, int(amount_in))
+        enabled = str(os.environ.get("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")).strip().lower()
+        if enabled in {"0", "false", "no", "off"}:
+            return [base]
+
+        try:
+            min_opportunities = max(
+                1, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_MIN_OPPORTUNITIES", "2") or 2)
+            )
+        except (TypeError, ValueError):
+            min_opportunities = 2
+
+        # Keep the public helper deterministic; the caller decides whether probes
+        # are needed after the base scan. These are deliberately coarse probes.
+        raw = os.environ.get("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+        multipliers: List[float] = []
+        for item in str(raw).split(","):
+            try:
+                value = float(item.strip())
+            except (TypeError, ValueError):
+                continue
+            if value > 0.0 and value != 1.0:
+                multipliers.append(value)
+        multipliers = list(dict.fromkeys(multipliers))[:4]
+
+        amounts: List[int] = [base]
+        for multiplier in multipliers:
+            candidate = max(1, int(round(float(base) * multiplier)))
+            if candidate not in amounts:
+                amounts.append(candidate)
+        # The attribute is intentionally stored only for diagnostics/tests.
+        self._adaptive_size_min_opportunities = min_opportunities
+        return amounts
+
     async def _scan_primary_opportunities(
         self,
         rpc: Any,
@@ -154,42 +196,139 @@ class RuntimePrimaryScanFacade:
         opps2: List[Opportunity] = []
         opps3: List[Opportunity] = []
         try:
-            if bool(getattr(self.cfg.flags, "enable_two_leg_loops", True)):
-                opps2 = await find_two_leg_opportunities(
-                    rpc,
-                    self.cfg,
-                    scan_cache,
-                    current_block,
-                    amount_in=int(amount_in),
-                    slippage_bps=self.cfg.safety.slippage_bps,
-                    time_budget_ms=1500,
-                    max_opps=60,
-                    telemetry=two_leg_telemetry,
-                    extra_v3_pairs=extra_v3_pairs,
-                    extra_curve_pools=extra_curve_pools,
-                    extra_balancer_pools=extra_balancer_pools,
+            size_amounts = [int(amount_in)]
+            adaptive_amounts = self._adaptive_scan_amounts(int(amount_in))
+            try:
+                min_opportunities = int(
+                    getattr(self, "_adaptive_size_min_opportunities", 2) or 2
                 )
+            except (TypeError, ValueError):
+                min_opportunities = 2
 
-            if bool(
-                getattr(self.cfg.flags, "enable_three_leg_loops", False)
-                or getattr(self.cfg.flags, "enable_v3_triangular", False)
+            async def _run_size_scan(size_amount: int) -> tuple[List[Opportunity], List[Opportunity], Dict[str, Any], Dict[str, Any]]:
+                two: List[Opportunity] = []
+                three: List[Opportunity] = []
+                two_metrics: Dict[str, Any] = {}
+                three_metrics: Dict[str, Any] = {}
+
+                if bool(getattr(self.cfg.flags, "enable_two_leg_loops", True)):
+                    two = await find_two_leg_opportunities(
+                        rpc,
+                        self.cfg,
+                        scan_cache,
+                        current_block,
+                        amount_in=int(size_amount),
+                        slippage_bps=self.cfg.safety.slippage_bps,
+                        time_budget_ms=1500,
+                        max_opps=60,
+                        telemetry=two_metrics,
+                        extra_v3_pairs=extra_v3_pairs,
+                        extra_curve_pools=extra_curve_pools,
+                        extra_balancer_pools=extra_balancer_pools,
+                    )
+
+                if bool(
+                    getattr(self.cfg.flags, "enable_three_leg_loops", False)
+                    or getattr(self.cfg.flags, "enable_v3_triangular", False)
+                ):
+                    three = await find_three_leg_opportunities(
+                        rpc,
+                        self.cfg,
+                        scan_cache,
+                        current_block,
+                        amount_in=int(size_amount),
+                        slippage_bps=self.cfg.safety.slippage_bps,
+                        time_budget_ms=1600,
+                        max_opps=40,
+                        telemetry=three_metrics,
+                        extra_v3_pairs=extra_v3_pairs,
+                        extra_curve_pools=extra_curve_pools,
+                        extra_balancer_pools=extra_balancer_pools,
+                    )
+                return list(two), list(three), two_metrics, three_metrics
+
+            # Base-size scan is authoritative for the normal path.
+            base_two, base_three, base_two_metrics, base_three_metrics = await _run_size_scan(
+                int(amount_in)
+            )
+            opps2.extend(base_two)
+            opps3.extend(base_three)
+            two_leg_telemetry.update(base_two_metrics)
+            three_leg_telemetry.update(base_three_metrics)
+
+            # Only expand the discovery universe when the base notional does not
+            # provide enough candidates. Alternative sizes are discovery probes,
+            # not execution decisions, and are never broadcast automatically.
+            if (
+                len(opps2) + len(opps3) < min_opportunities
+                and len(adaptive_amounts) > 1
             ):
-                opps3 = await find_three_leg_opportunities(
-                    rpc,
-                    self.cfg,
-                    scan_cache,
-                    current_block,
-                    amount_in=int(amount_in),
-                    slippage_bps=self.cfg.safety.slippage_bps,
-                    time_budget_ms=1600,
-                    max_opps=40,
-                    telemetry=three_leg_telemetry,
-                    extra_v3_pairs=extra_v3_pairs,
-                    extra_curve_pools=extra_curve_pools,
-                    extra_balancer_pools=extra_balancer_pools,
-                )
+                size_amounts.extend(adaptive_amounts[1:])
+                for probe_amount in adaptive_amounts[1:]:
+                    probe_two, probe_three, probe_two_metrics, probe_three_metrics = await _run_size_scan(
+                        int(probe_amount)
+                    )
+                    opps2.extend(probe_two)
+                    opps3.extend(probe_three)
 
-            opps = list(opps2) + list(opps3)
+                    for target, source in (
+                        (two_leg_telemetry, probe_two_metrics),
+                        (three_leg_telemetry, probe_three_metrics),
+                    ):
+                        for key in (
+                            "quote_requests",
+                            "quote_successes",
+                            "routes_considered",
+                            "edges_generated",
+                            "gross_candidates",
+                            "candidate_count",
+                            "route_groups_evaluated",
+                            "quote_phase_ms",
+                            "route_evaluation_ms",
+                        ):
+                            if key in source:
+                                target[key] = (
+                                    float(target.get(key, 0) or 0) + float(source.get(key, 0) or 0)
+                                )
+                        for key in ("quote_failure_reasons", "route_rejections"):
+                            merged = dict(target.get(key) or {})
+                            for reason, count in dict(source.get(key) or {}).items():
+                                merged[str(reason)] = int(merged.get(str(reason), 0)) + int(count)
+                            if merged:
+                                target[key] = merged
+                        target["budget_exhausted_after_quote"] = bool(
+                            target.get("budget_exhausted_after_quote", False)
+                            or source.get("budget_exhausted_after_quote", False)
+                        )
+
+            # A route at different sizes is a sizing variant, not a separate
+            # venue/route opportunity. Keep the most profitable verified raw
+            # variant per route_id while preserving distinct routes.
+            best_by_route: Dict[str, Opportunity] = {}
+            for candidate in [*opps2, *opps3]:
+                route_key = str(
+                    getattr(candidate, "route_id", "")
+                    or getattr(candidate, "id", "")
+                    or ""
+                )
+                current = best_by_route.get(route_key)
+                if current is None or int(candidate.expected_profit_raw) > int(current.expected_profit_raw):
+                    best_by_route[route_key] = candidate
+            all_opps = list(best_by_route.values())
+            opps2 = [o for o in all_opps if str(getattr(o, "strategy", "")).startswith("two-leg:")]
+            opps3 = [o for o in all_opps if str(getattr(o, "strategy", "")).startswith("tri:")]
+            other_opps = [
+                o for o in all_opps
+                if o not in opps2 and o not in opps3
+            ]
+            opps = list(opps2) + list(opps3) + other_opps
+            telemetry["adaptive_size_discovery"] = {
+                "enabled": bool(len(adaptive_amounts) > 1),
+                "base_amount_in": str(int(amount_in)),
+                "amounts_scanned": [str(int(x)) for x in size_amounts],
+                "probe_triggered": bool(len(size_amounts) > 1),
+                "minimum_opportunities": int(min_opportunities),
+            }
             await self._annotate_canonical_after_fee_usd(
                 opps=opps,
                 rpc=rpc,

@@ -36,6 +36,8 @@ class _Runtime(RuntimePrimaryScanFacade):
 
 def _opp(profit: int, *, expected: int | None = None):
     return SimpleNamespace(
+        id=f"opp-{profit}-{expected}",
+        route_id=f"route-{profit}-{expected}",
         meta={'profit_after_gas_estimate_wei': profit} if profit >= 0 else {},
         expected_profit_raw=expected if expected is not None else max(0, profit),
     )
@@ -186,3 +188,57 @@ async def test_scan_enriches_canonical_after_fee_profit_with_explicit_usd(monkey
     assert profitability["profit_after_costs_usd_micro"] == 5_000_000
     assert opportunity.meta["safety"]["profit_after_costs_usd_micro"] == "5000000"
     assert opportunity.meta["canonical_after_fee_usd"]["source"] == "quote_derived_canonical_after_fee"
+
+
+def test_adaptive_scan_amounts_returns_bounded_size_ladder(monkeypatch):
+    runtime = _Runtime()
+
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0,0.5,invalid")
+
+    amounts = runtime._adaptive_scan_amounts(1000)
+
+    assert amounts == [1000, 500, 2000]
+    assert runtime._adaptive_size_min_opportunities == 2
+
+
+def test_adaptive_scan_amounts_can_be_disabled(monkeypatch):
+    runtime = _Runtime()
+
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
+
+    assert runtime._adaptive_scan_amounts(1000) == [1000]
+
+
+@pytest.mark.asyncio
+async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has_too_few(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    calls = []
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        calls.append(int(kwargs["amount_in"]))
+        kwargs["telemetry"].update({
+            "quote_requests": 1,
+            "quote_successes": 1,
+            "routes_considered": 1,
+            "edges_generated": 1,
+            "quote_phase_ms": 1.0,
+            "route_evaluation_ms": 1.0,
+            "route_groups_evaluated": 1,
+        })
+        amount = int(kwargs["amount_in"])
+        return [
+            _opp(amount - 10, expected=amount - 10),
+        ]
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
+
+    assert calls == [100, 50, 200]
+    assert len(opps) == 3
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200"]
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["probe_triggered"] is True
