@@ -65,24 +65,34 @@ class RuntimePrimaryScanFacade:
         conversion is available.
         """
         execution = getattr(self.cfg, "execution", None)
-        if not bool(getattr(execution, "usd_accounting_enabled", False)):
-            return
+        usd_enabled = bool(getattr(execution, "usd_accounting_enabled", False))
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
         scan_cache = cache or self.cache
         for opportunity in list(opps[:80]):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
             gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
-            state = revalidate_profitability_state(
-                opportunity,
-                self.cfg,
-                stage="scan_after_fee_revalidation",
-                source="runtime_primary_scan",
-                gas_cost_wei=gas_cost_wei,
-            )
+            existing_profitability = meta.get("profitability")
+            if (
+                isinstance(existing_profitability, dict)
+                and bool(existing_profitability.get("revalidated"))
+                and bool(existing_profitability.get("authoritative"))
+            ):
+                state = dict(existing_profitability)
+            else:
+                state = revalidate_profitability_state(
+                    opportunity,
+                    self.cfg,
+                    stage="scan_after_fee_revalidation",
+                    source="runtime_primary_scan",
+                    gas_cost_wei=gas_cost_wei,
+                )
+            # Persist canonical flash-loan + gas revalidation even when optional
+            # USD accounting is disabled. USD is enrichment, not the safety gate.
+            meta["profitability"] = dict(state)
             if not bool(state.get("valid")):
                 continue
             profit_after_wei = int(state.get("profit_after_costs_wei") or 0)
-            if profit_after_wei <= 0:
+            if profit_after_wei <= 0 or not usd_enabled:
                 continue
             try:
                 profit_token = str(opportunity.route.legs[0].token_in)
@@ -136,7 +146,24 @@ class RuntimePrimaryScanFacade:
 
         # Keep the public helper deterministic; the caller decides whether probes
         # are needed after the base scan. These are deliberately coarse probes.
-        raw = os.environ.get("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+        raw = os.environ.get("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
+        borrow_cap = 0
+        try:
+            borrow_cap = int(
+                getattr(getattr(self, "_bankroll", None), "cfg", None)
+                and getattr(self._bankroll.cfg, "max_borrow_amount_wei", 0)
+                or 0
+            )
+        except (AttributeError, TypeError, ValueError):
+            borrow_cap = 0
+        if borrow_cap <= 0:
+            try:
+                borrow_cap = int(getattr(getattr(self.cfg, "safety", None), "max_borrow_amount", 0) or 0)
+            except (AttributeError, TypeError, ValueError):
+                borrow_cap = 0
+        borrow_cap = max(0, borrow_cap)
+        if borrow_cap > 0:
+            base = min(base, borrow_cap)
         multipliers: List[float] = []
         for item in str(raw).split(","):
             try:
@@ -150,6 +177,8 @@ class RuntimePrimaryScanFacade:
         amounts: List[int] = [base]
         for multiplier in multipliers:
             candidate = max(1, int(round(float(base) * multiplier)))
+            if borrow_cap > 0:
+                candidate = min(candidate, borrow_cap)
             if candidate not in amounts:
                 amounts.append(candidate)
         # The attribute is intentionally stored only for diagnostics/tests.
@@ -356,14 +385,49 @@ class RuntimePrimaryScanFacade:
                 except (AttributeError, IndexError, TypeError, ValueError):
                     return ""
 
+            def _candidate_after_cost(candidate: Opportunity) -> int | None:
+                profitability = (getattr(candidate, "meta", {}) or {}).get("profitability")
+                if not isinstance(profitability, dict):
+                    return None
+                if not bool(profitability.get("revalidated")) or not bool(profitability.get("authoritative")):
+                    return None
+                try:
+                    return int(profitability.get("profit_after_costs_wei") or 0)
+                except (TypeError, ValueError):
+                    return None
+
+            def _candidate_selection_key(candidate: Opportunity) -> tuple[int, int]:
+                after_cost = _candidate_after_cost(candidate)
+                return (
+                    int(after_cost) if after_cost is not None else -1,
+                    int(getattr(candidate, "expected_profit_raw", 0) or 0),
+                )
+
+            # Preserve the full diagnostic sizing matrix before route-level
+            # deduplication. This is evidence only; it never grants execution authority.
+            telemetry["size_economic_evidence"] = [
+                {
+                    "route_id": _candidate_route_key(candidate),
+                    "amount_in": _candidate_amount_in(candidate),
+                    "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+                    "revalidated": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("revalidated")),
+                    "authoritative": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("authoritative")),
+                    "reason": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("reason") or "unavailable"),
+                    "flashloan_fee_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("flashloan_fee_wei") or "0"),
+                    "gas_cost_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("gas_cost_wei") or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei") or "0"),
+                    "after_cost_profit_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("profit_after_costs_wei") or "0"),
+                }
+                for candidate in [*opps2, *opps3]
+            ]
+
             # A route at different sizes is a sizing variant, not a separate
-            # venue/route opportunity. Keep the most profitable verified raw
-            # variant per route_id while preserving distinct routes.
+            # venue/route opportunity. Prefer the highest verified after-cost
+            # result; gross profit is only a deterministic fallback.
             best_by_route: Dict[str, Opportunity] = {}
             for candidate in [*opps2, *opps3]:
                 route_key = _candidate_route_key(candidate)
                 current = best_by_route.get(route_key)
-                if current is None or int(candidate.expected_profit_raw) > int(current.expected_profit_raw):
+                if current is None or _candidate_selection_key(candidate) > _candidate_selection_key(current):
                     best_by_route[route_key] = candidate
             all_opps = list(best_by_route.values())
             opps2 = [o for o in all_opps if str(getattr(o, "strategy", "")).startswith("two-leg:")]
@@ -393,13 +457,28 @@ class RuntimePrimaryScanFacade:
                         "route_id": _candidate_route_key(candidate),
                         "amount_in": _candidate_amount_in(candidate),
                         "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+                        "revalidated": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("revalidated")),
+                        "after_cost_profit_wei": str(_candidate_after_cost(candidate) or 0),
+                        "selection_basis": "after_cost_profit" if _candidate_after_cost(candidate) is not None else "gross_profit_fallback",
                     }
                     for candidate in sorted(
-                        list(opps),
-                        key=lambda item: int(getattr(item, "expected_profit_raw", 0) or 0),
+                        [*opps2, *opps3, *other_opps],
+                        key=_candidate_selection_key,
                         reverse=True,
                     )[:80]
                 ],
+                "borrow_cap_wei": str(
+                    max(
+                        0,
+                        int(
+                            getattr(getattr(self, "_bankroll", None), "cfg", None)
+                            and getattr(self._bankroll.cfg, "max_borrow_amount_wei", 0)
+                            or getattr(getattr(self.cfg, "safety", None), "max_borrow_amount", 0)
+                            or 0
+                        ),
+                    )
+                ),
+                "size_economic_evidence": list(telemetry.get("size_economic_evidence") or []),
             }
             await self._annotate_canonical_after_fee_usd(
                 opps=opps,
@@ -407,7 +486,42 @@ class RuntimePrimaryScanFacade:
                 current_block=int(current_block),
                 cache=scan_cache,
             )
-            opps.sort(key=opportunity_profit_sort_key, reverse=True)
+            # Rank authoritative after-cost truth first. For legacy/unverified
+            # candidates, preserve the established after-gas-then-gross numeric ordering
+            # so diagnostic scan ordering remains deterministic.
+            def _scan_sort_key(candidate: Opportunity) -> tuple[int, int, str]:
+                meta = getattr(candidate, "meta", {}) or {}
+                route_id = str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or "")
+                profitability = meta.get("profitability") if isinstance(meta, dict) else None
+                if isinstance(profitability, dict) and bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
+                    try:
+                        return (3, int(profitability.get("profit_after_costs_wei") or 0), route_id)
+                    except (TypeError, ValueError):
+                        pass
+                if isinstance(meta, dict):
+                    try:
+                        meta_after = meta.get("profit_after_costs")
+                        safety = meta.get("safety") if isinstance(meta.get("safety"), dict) else {}
+                        safety_after = safety.get("profit_after_costs_wei")
+                        if meta_after is not None or safety_after is not None:
+                            values = [int(v) for v in (meta_after, safety_after) if v is not None]
+                            if values and len(set(values)) == 1:
+                                return (3, values[0], route_id)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        legacy_value = meta.get("profit_after_gas_estimate_wei")
+                        if legacy_value is not None:
+                            return (2, int(legacy_value), route_id)
+                    except (TypeError, ValueError):
+                        pass
+                try:
+                    gross_value = int(getattr(candidate, "expected_profit_raw", 0) or 0)
+                except (TypeError, ValueError):
+                    gross_value = 0
+                return (2, gross_value, route_id)
+
+            opps.sort(key=_scan_sort_key, reverse=True)
             requests = int(two_leg_telemetry.get("quote_requests", 0)) + int(
                 three_leg_telemetry.get("quote_requests", 0)
             )

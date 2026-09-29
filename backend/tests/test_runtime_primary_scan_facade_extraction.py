@@ -260,3 +260,75 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
     assert adaptive["distinct_route_ids_before_probe"] == 1
     assert adaptive["distinct_route_ids_after_probe"] == 3
     assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["200", "100", "50"]
+
+
+def test_adaptive_scan_amounts_respects_borrow_cap(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.safety.max_borrow_amount = "1500"
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
+
+    assert runtime._adaptive_scan_amounts(1000) == [1000, 500, 1500]
+
+
+@pytest.mark.asyncio
+async def test_scan_selects_same_route_variant_by_verified_after_cost(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    runtime.cfg.execution = SimpleNamespace(
+        usd_accounting_enabled=False,
+        flashloan_fee_bps=9,
+    )
+    runtime.cfg.safety.minProfitAbs = 0
+    runtime.cfg.safety.minProfitBps = 0
+
+    def sized_opp(amount: int, gross: int, net: int):
+        return SimpleNamespace(
+            id=f"opp-{amount}",
+            route_id="same-route",
+            expected_profit_raw=str(gross),
+            route=SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+            ),
+            min_outs=[str(amount + gross)],
+            meta={
+                "gas_cost_estimate_wei": "10",
+                "profitability": {
+                    "revalidated": True,
+                    "authoritative": True,
+                    "valid": True,
+                    "reason": "ok",
+                    "profit_after_costs_wei": str(net),
+                    "flashloan_fee_wei": str(amount * 9 // 10000),
+                    "gas_cost_wei": "10",
+                },
+            },
+        )
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        amount = int(kwargs["amount_in"])
+        kwargs["telemetry"].update({
+            "quote_requests": 1,
+            "quote_successes": 1,
+            "routes_considered": 1,
+            "edges_generated": 1,
+            "quote_phase_ms": 1.0,
+            "route_evaluation_ms": 1.0,
+            "route_groups_evaluated": 1,
+        })
+        if amount == 100:
+            return [sized_opp(100, 150, 20)]
+        if amount == 50:
+            return [sized_opp(50, 80, 30)]
+        return [sized_opp(amount, 220, 60)]
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
+
+    assert len(opps) == 1
+    assert int(opps[0].route.legs[0].amount_in) == 200
+    assert runtime._market_pipeline_telemetry["size_economic_evidence"]
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["best_sizing_variants"][0]["amount_in"] == "200"
