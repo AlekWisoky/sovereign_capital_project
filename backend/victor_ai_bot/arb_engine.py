@@ -750,13 +750,21 @@ async def find_three_leg_opportunities(
         by_pair.setdefault((e.token_in, e.token_out), []).append(e)
 
     opps: List[Opportunity] = []
-    # Batch quote all edges for base amount_in (used for first leg)
+    # Quote acquisition can legitimately consume most of the scan wall clock on
+    # a slow provider. Start the bounded route-evaluation clock only after the
+    # first-leg quote phase, matching the two-leg scanner.
+    quote_phase_started = time.perf_counter()
     qmap1_3 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in, metrics=metrics)
+    route_eval_started = time.perf_counter()
+    route_groups_evaluated = 0
 
     # iterate first edge; use time budget
     for a_in, outs in adj.items():
         for e1 in outs:
-            if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+            if (
+                route_groups_evaluated > 0
+                and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
+            ):
                 break
             if e1.token_in != a_in:
                 continue
@@ -769,8 +777,12 @@ async def find_three_leg_opportunities(
             e2_cands = [e2 for e2 in adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
             metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
             qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
+            route_groups_evaluated += 1
             for e2 in e2_cands:
-                if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+                if (
+                    route_groups_evaluated > 0
+                    and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
+                ):
                     break
                 q2 = qmap2_3.get(edge_key(e2))
                 if not q2:
@@ -784,7 +796,7 @@ async def find_three_leg_opportunities(
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
                 qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
                 for e3 in e3_cands:
-                    if (time.perf_counter() - t_start) * 1000.0 > time_budget_ms:
+                    if (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms:
                         break
                     q3 = qmap3_3.get(edge_key(e3))
                     if not q3:
@@ -978,6 +990,20 @@ async def find_three_leg_opportunities(
                 break
         if len(opps) >= max_opps:
             break
+
+    if telemetry is not None:
+        telemetry["quote_phase_ms"] = float(
+            (route_eval_started - quote_phase_started) * 1000.0
+        )
+        telemetry["route_evaluation_ms"] = float(
+            (time.perf_counter() - route_eval_started) * 1000.0
+        )
+        telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
+        telemetry["budget_exhausted_after_quote"] = bool(
+            route_groups_evaluated == 0
+            and bool(edges)
+            and bool(qmap1_3)
+        )
 
     snapshot = scan_efficiency_snapshot(
         elapsed_ms=(time.perf_counter() - t_start) * 1000.0,

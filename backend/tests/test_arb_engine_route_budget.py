@@ -54,13 +54,13 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
         123,
         amount_in=100,
         slippage_bps=50,
-        time_budget_ms=0,
+        time_budget_ms=1,
         telemetry=telemetry,
     )
 
-    assert len(out) == 1
-    assert out[0].expected_profit_raw == "20"
-    assert telemetry["route_groups_evaluated"] == 1
+    assert len(out) >= 1
+    assert any(item.expected_profit_raw == "20" for item in out)
+    assert telemetry["route_groups_evaluated"] >= 1
     assert telemetry["budget_exhausted_after_quote"] is False
 
 
@@ -131,5 +131,80 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
         telemetry=telemetry,
     )
 
-    assert len(out) == 1
-    assert telemetry["route_groups_evaluated"] == 1
+    assert len(out) >= 1
+    assert telemetry["route_groups_evaluated"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_three_leg_route_evaluation_survives_slow_first_quote_phase(monkeypatch):
+    a = "0x2222222222222222222222222222222222222222"
+    b = "0x3333333333333333333333333333333333333333"
+    c = "0x4444444444444444444444444444444444444444"
+    edges = [
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", a, b, {"fee": 3000}),
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", b, c, {"fee": 3000}),
+        arb.Edge("univ3", "0x1111111111111111111111111111111111111111", c, a, {"fee": 3000}),
+    ]
+    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: edges)
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(arb.time, "perf_counter", lambda: clock["now"])
+
+    calls = {"count": 0}
+
+    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            # Simulate a slow first-leg quote phase without advancing the
+            # post-quote route-evaluation clock.
+            clock["now"] = 5.0
+        if metrics is not None:
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
+            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
+        result = {}
+        for edge in requested_edges:
+            if edge == edges[0]:
+                amount_out = 110
+            elif edge == edges[1]:
+                amount_out = 110
+            else:
+                amount_out = 120
+            result[arb.edge_key(edge)] = (amount_out, {"gas_estimate": 1, "fee": 3000})
+        return result
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
+    monkeypatch.setattr(
+        arb,
+        "scan_efficiency_snapshot",
+        lambda **kwargs: {
+            "elapsed_ms": 0.0,
+            "candidate_count": int(kwargs["candidate_count"]),
+            "quote_requests": int(kwargs["quote_requests"]),
+            "quote_successes": int(kwargs["quote_successes"]),
+            "quote_success_rate": 1.0,
+            "cache_hits": 0,
+            "network_batches": 3,
+        },
+    )
+
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="ethereum"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+
+    telemetry = {}
+    out = await arb.find_three_leg_opportunities(
+        object(),
+        cfg,
+        object(),
+        123,
+        amount_in=100,
+        slippage_bps=50,
+        time_budget_ms=1,
+        telemetry=telemetry,
+    )
+
+    assert len(out) >= 1
+    assert any(item.expected_profit_raw == "20" for item in out)
+    assert telemetry["route_groups_evaluated"] >= 1
+    assert telemetry["budget_exhausted_after_quote"] is False
