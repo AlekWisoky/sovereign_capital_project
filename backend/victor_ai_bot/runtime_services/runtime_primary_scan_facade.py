@@ -68,7 +68,7 @@ class RuntimePrimaryScanFacade:
         usd_enabled = bool(getattr(execution, "usd_accounting_enabled", False))
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
         scan_cache = cache or self.cache
-        for opportunity in list(opps[:80]):
+        for opportunity in list(opps):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
             gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
             existing_profitability = meta.get("profitability")
@@ -86,11 +86,14 @@ class RuntimePrimaryScanFacade:
                     source="runtime_primary_scan",
                     gas_cost_wei=gas_cost_wei,
                 )
-            # Persist canonical flash-loan + gas revalidation even when optional
-            # USD accounting is disabled. USD is enrichment, not the safety gate.
-            meta["profitability"] = dict(state)
+            # Preserve the diagnostic revalidation result for the sizing
+            # evidence matrix, but only promote a valid authoritative result to
+            # canonical profitability. Invalid states must not poison legacy
+            # opportunity ordering or downstream execution metadata.
+            meta["profitability_diagnostic"] = dict(state)
             if not bool(state.get("valid")):
                 continue
+            meta["profitability"] = dict(state)
             profit_after_wei = int(state.get("profit_after_costs_wei") or 0)
             if profit_after_wei <= 0 or not usd_enabled:
                 continue
@@ -396,6 +399,26 @@ class RuntimePrimaryScanFacade:
                 except (TypeError, ValueError):
                     return None
 
+            # Revalidate every scanned candidate before route-size
+            # deduplication. Otherwise the sizing selector cannot see the
+            # authoritative after-cost economics it is supposed to optimize.
+            await self._annotate_canonical_after_fee_usd(
+                opps=[*opps2, *opps3],
+                rpc=rpc,
+                current_block=int(current_block),
+                cache=scan_cache,
+            )
+
+            def _candidate_profitability(candidate: Opportunity) -> Dict[str, Any]:
+                meta = getattr(candidate, "meta", {}) or {}
+                if not isinstance(meta, dict):
+                    return {}
+                state = meta.get("profitability")
+                if isinstance(state, dict):
+                    return state
+                diagnostic = meta.get("profitability_diagnostic")
+                return diagnostic if isinstance(diagnostic, dict) else {}
+
             def _candidate_selection_key(candidate: Opportunity) -> tuple[int, int]:
                 after_cost = _candidate_after_cost(candidate)
                 return (
@@ -410,12 +433,18 @@ class RuntimePrimaryScanFacade:
                     "route_id": _candidate_route_key(candidate),
                     "amount_in": _candidate_amount_in(candidate),
                     "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
-                    "revalidated": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("revalidated")),
-                    "authoritative": bool(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("authoritative")),
-                    "reason": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("reason") or "unavailable"),
-                    "flashloan_fee_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("flashloan_fee_wei") or "0"),
-                    "gas_cost_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("gas_cost_wei") or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei") or "0"),
-                    "after_cost_profit_wei": str(((getattr(candidate, "meta", {}) or {}).get("profitability") or {}).get("profit_after_costs_wei") or "0"),
+                    "revalidated": bool(_candidate_profitability(candidate).get("revalidated")),
+                    "authoritative": bool(_candidate_profitability(candidate).get("authoritative")),
+                    "reason": str(_candidate_profitability(candidate).get("reason") or "unavailable"),
+                    "flashloan_fee_wei": str(_candidate_profitability(candidate).get("flashloan_fee_wei") or "0"),
+                    "gas_cost_wei": str(
+                        _candidate_profitability(candidate).get("gas_cost_wei")
+                        or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei")
+                        or "0"
+                    ),
+                    "after_cost_profit_wei": str(
+                        _candidate_profitability(candidate).get("profit_after_costs_wei") or "0"
+                    ),
                 }
                 for candidate in [*opps2, *opps3]
             ]
@@ -480,12 +509,6 @@ class RuntimePrimaryScanFacade:
                 ),
                 "size_economic_evidence": list(telemetry.get("size_economic_evidence") or []),
             }
-            await self._annotate_canonical_after_fee_usd(
-                opps=opps,
-                rpc=rpc,
-                current_block=int(current_block),
-                cache=scan_cache,
-            )
             # Rank authoritative after-cost truth first. For legacy/unverified
             # candidates, preserve the established after-gas-then-gross numeric ordering
             # so diagnostic scan ordering remains deterministic.
