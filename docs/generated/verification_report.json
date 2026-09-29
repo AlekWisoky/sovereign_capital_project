@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 352,
+    "test_file_count": 353,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_quote_balancer_batch_diagnostics.py",
