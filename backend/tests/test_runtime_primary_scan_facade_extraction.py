@@ -332,3 +332,104 @@ async def test_scan_selects_same_route_variant_by_verified_after_cost(monkeypatc
     assert int(opps[0].route.legs[0].amount_in) == 200
     assert runtime._market_pipeline_telemetry["size_economic_evidence"]
     assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["best_sizing_variants"][0]["amount_in"] == "200"
+
+
+@pytest.mark.asyncio
+async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    runtime.cfg.execution = SimpleNamespace(usd_accounting_enabled=False)
+    runtime.cfg.safety.minProfitAbs = 0
+    runtime.cfg.safety.minProfitBps = 0
+
+    def sized(amount: int, gross: int):
+        return SimpleNamespace(
+            id=f"opp-{amount}",
+            route_id="same-route",
+            expected_profit_raw=str(gross),
+            route=SimpleNamespace(legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]),
+            meta={},
+        )
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        amount = int(kwargs["amount_in"])
+        kwargs["telemetry"].update({
+            "quote_requests": 1,
+            "quote_successes": 1,
+            "routes_considered": 1,
+            "edges_generated": 1,
+            "route_groups_evaluated": 1,
+        })
+        if amount == 100:
+            return [sized(100, 500)]
+        if amount == 50:
+            return [sized(50, 400)]
+        return [sized(amount, 600)]
+
+    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei):
+        amount = int(opportunity.route.legs[0].amount_in)
+        return {
+            "valid": True,
+            "revalidated": True,
+            "authoritative": True,
+            "reason": "ok",
+            "profit_after_costs_wei": str({50: 300, 100: 200, 200: 250}[amount]),
+            "flashloan_fee_wei": str(amount // 10),
+            "gas_cost_wei": "10",
+        }
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setattr(scan_mod, "revalidate_profitability_state", fake_revalidate)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
+
+    assert len(opps) == 1
+    assert int(opps[0].route.legs[0].amount_in) == 50
+    evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
+    assert [row["amount_in"] for row in evidence] == ["100", "50", "200"]
+    assert [row["after_cost_profit_wei"] for row in evidence] == ["200", "300", "250"]
+    assert all(row["authoritative"] is True for row in evidence)
+
+
+@pytest.mark.asyncio
+async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    runtime.cfg.execution = SimpleNamespace(usd_accounting_enabled=False)
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        kwargs["telemetry"].update({"quote_requests": 1, "quote_successes": 1})
+        return [
+            SimpleNamespace(
+                id="legacy",
+                route_id="legacy-route",
+                expected_profit_raw="900",
+                route=None,
+                meta={},
+            )
+        ]
+
+    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei):
+        return {
+            "valid": False,
+            "revalidated": True,
+            "authoritative": False,
+            "reason": "missing_flashloan_fee",
+            "profit_after_costs_wei": "0",
+            "flashloan_fee_wei": "0",
+            "gas_cost_wei": str(gas_cost_wei),
+        }
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setattr(scan_mod, "revalidate_profitability_state", fake_revalidate)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
+
+    assert len(opps) == 1
+    assert "profitability" not in opps[0].meta
+    assert opps[0].meta["profitability_diagnostic"]["reason"] == "missing_flashloan_fee"
+    assert runtime._market_pipeline_telemetry["size_economic_evidence"][0]["reason"] == "missing_flashloan_fee"
+    assert runtime._market_pipeline_telemetry["size_economic_evidence"][0]["authoritative"] is False
