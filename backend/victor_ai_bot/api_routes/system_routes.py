@@ -652,6 +652,12 @@ def set_rpc_preferences(body: dict = Body(default={}), rt=Depends(get_runtime)):
         send=patch.get("send"),
         private=patch.get("private"),
     )
+    try:
+        rpc_manager = getattr(rt, "rpc_manager", None)
+        if rpc_manager is not None:
+            rpc_manager.sync_read_preferences((snap or {}).get("read") or [])
+    except (AttributeError, TypeError, ValueError):
+        pass
     return json_safe({"ok": True, "status": "updated", "preferences": snap})
 
 
