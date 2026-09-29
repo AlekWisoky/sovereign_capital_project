@@ -211,3 +211,39 @@ async def test_three_leg_route_evaluation_survives_slow_first_quote_phase(monkey
     assert any(item.expected_profit_raw == "20" for item in out)
     assert telemetry["route_groups_evaluated"] >= 1
     assert telemetry["budget_exhausted_after_quote"] is False
+
+
+def test_three_leg_route_universe_exposes_pruned_edge_identity_and_pool():
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            name="ethereum",
+            token_universe=["0x" + "11" * 20, "0x" + "22" * 20],
+        )
+    )
+    edges = [
+        arb.Edge(
+            "univ3",
+            "0x" + "aa" * 20,
+            "0x" + "11" * 20,
+            "0x" + f"{i + 2:040x}",
+            {"fee": 3000, "pool": "0x" + f"{i + 100:040x}"},
+        )
+        for i in range(12)
+    ]
+    adjacency = {"0x" + "11" * 20: edges[:10]}
+    pruned = edges[10:]
+    snapshot = arb._route_universe_snapshot(
+        cfg,
+        edges,
+        adjacency=adjacency,
+        max_edges_per_token=10,
+        pruned_edges=pruned,
+    )
+
+    assert snapshot["three_leg_edges_pruned_by_token_cap"] == 2
+    assert len(snapshot["three_leg_pruned_edges"]) == 2
+    assert snapshot["three_leg_pruned_edges"][0]["dex"] == "univ3"
+    assert snapshot["three_leg_pruned_edges"][0]["token_in"] == "0x" + "11" * 20
+    assert snapshot["three_leg_pruned_edges"][0]["token_out"] == "0x" + f"{12:040x}"
+    assert snapshot["three_leg_pruned_edges"][0]["pool"] == "0x" + f"{110:040x}"
+    assert snapshot["three_leg_pruned_edges"][0]["edge_id"].startswith("univ3:")

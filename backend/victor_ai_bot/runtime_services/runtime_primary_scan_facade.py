@@ -193,6 +193,31 @@ class RuntimePrimaryScanFacade:
         extra_curve_pools = list(discovery_context.get("curve_pools") or [])
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
 
+        discovery = getattr(self, "_discovery", None)
+        candidate_token_telemetry = (
+            discovery.candidate_token_telemetry(self.cfg)
+            if discovery is not None
+            and callable(getattr(discovery, "candidate_token_telemetry", None))
+            else {
+                "execution_universe": [
+                    str(token).lower()
+                    for token in (
+                        getattr(getattr(self, "cfg", None), "chain", None)
+                        and getattr(self.cfg.chain, "token_universe", [])
+                        or []
+                    )
+                    if token
+                ],
+                "observed_tokens": [],
+                "observed_not_admitted": [],
+                "observed_count": 0,
+                "observed_not_admitted_count": 0,
+                "observation_cap": 0,
+                "observation_truncated": False,
+                "admission_mutated": False,
+                "sources": {},
+            }
+        )
         telemetry: Dict[str, Any] = {
             "last_scan": int(time.time() * 1000),
             "last_block": int(current_block),
@@ -202,6 +227,7 @@ class RuntimePrimaryScanFacade:
                 "curve_pools": len(extra_curve_pools),
                 "balancer_pools": len(extra_balancer_pools),
             },
+            "candidate_token_discovery": candidate_token_telemetry,
         }
         two_leg_telemetry: Dict[str, Any] = {}
         three_leg_telemetry: Dict[str, Any] = {}

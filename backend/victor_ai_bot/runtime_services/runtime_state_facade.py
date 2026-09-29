@@ -103,6 +103,9 @@ class RuntimeStateFacade:
                 "curve_pools": int(discovery.get("curve_pools") or 0),
                 "balancer_pools": int(discovery.get("balancer_pools") or 0),
             },
+            "candidate_token_discovery": dict(
+                telemetry.get("candidate_token_discovery") or {}
+            ),
             "quotes": {
                 "requests": requests,
                 "successes": successes,
