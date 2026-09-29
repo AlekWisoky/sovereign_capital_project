@@ -486,10 +486,32 @@ class RuntimePrimaryScanFacade:
                 current_block=int(current_block),
                 cache=scan_cache,
             )
-            # Use the canonical profitability truth helper for final scan ordering.
-            # It already preserves the legacy after-gas/gross fallback precedence while
-            # giving verified after-cost profitability priority when available.
-            opps.sort(key=opportunity_profit_sort_key, reverse=True)
+            # Rank authoritative after-cost truth first. For legacy/unverified
+            # candidates, preserve the established after-gas-then-gross numeric ordering
+            # so diagnostic scan ordering remains deterministic.
+            def _scan_sort_key(candidate: Opportunity) -> tuple[int, int, str]:
+                meta = getattr(candidate, "meta", {}) or {}
+                route_id = str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or "")
+                profitability = meta.get("profitability") if isinstance(meta, dict) else None
+                if isinstance(profitability, dict) and bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
+                    try:
+                        return (3, int(profitability.get("profit_after_costs_wei") or 0), route_id)
+                    except (TypeError, ValueError):
+                        pass
+                if isinstance(meta, dict):
+                    try:
+                        legacy_value = meta.get("profit_after_gas_estimate_wei")
+                        if legacy_value is not None:
+                            return (2, int(legacy_value), route_id)
+                    except (TypeError, ValueError):
+                        pass
+                try:
+                    gross_value = int(getattr(candidate, "expected_profit_raw", 0) or 0)
+                except (TypeError, ValueError):
+                    gross_value = 0
+                return (2, gross_value, route_id)
+
+            opps.sort(key=_scan_sort_key, reverse=True)
             requests = int(two_leg_telemetry.get("quote_requests", 0)) + int(
                 three_leg_telemetry.get("quote_requests", 0)
             )
