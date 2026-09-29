@@ -52,6 +52,7 @@ def select_best_rpc_evidence(
     tie-breaker when no provider has a better economic result.
     """
     candidates = list(evidence)
-    ordered = sorted(candidates, key=_selection_key, reverse=True)
+    eligible = [item for item in candidates if item.economically_eligible]
+    ordered = sorted(eligible, key=_selection_key, reverse=True)
     selected = ordered[0] if ordered else None
     return selected, ordered
