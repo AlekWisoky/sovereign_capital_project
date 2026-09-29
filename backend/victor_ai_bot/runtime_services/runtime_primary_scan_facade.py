@@ -500,6 +500,16 @@ class RuntimePrimaryScanFacade:
                         pass
                 if isinstance(meta, dict):
                     try:
+                        meta_after = meta.get("profit_after_costs")
+                        safety = meta.get("safety") if isinstance(meta.get("safety"), dict) else {}
+                        safety_after = safety.get("profit_after_costs_wei")
+                        if meta_after is not None or safety_after is not None:
+                            values = [int(v) for v in (meta_after, safety_after) if v is not None]
+                            if values and len(set(values)) == 1:
+                                return (3, values[0], route_id)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
                         legacy_value = meta.get("profit_after_gas_estimate_wei")
                         if legacy_value is not None:
                             return (2, int(legacy_value), route_id)
