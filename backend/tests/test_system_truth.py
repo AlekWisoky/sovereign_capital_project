@@ -59,8 +59,8 @@ def test_system_truth_reports_exception_inventory_and_legacy_sizes():
     assert truth['backend_broad_exception_sites'] == truth['broad_exception_inventory']['backend_sites']
     assert {
         'path': 'backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py',
-        'lineno': 45,
-        'end_lineno': 54,
+        'lineno': 47,
+        'end_lineno': 56,
         'handler_form': 'typed',
         'handler_type': 'Exception',
         'line': 'except Exception as e:',
