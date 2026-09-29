@@ -55,9 +55,10 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 352,
+  "backend_test_file_count": 353,
   "backend_test_files": [
     "test_95plus_realism.py",
+    "test_quote_balancer_batch_diagnostics.py",
     "test_adaptation_maintenance.py",
     "test_agent_hub_maintenance.py",
     "test_agents_system.py",
