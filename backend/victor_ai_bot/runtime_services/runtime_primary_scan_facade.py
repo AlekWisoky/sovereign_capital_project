@@ -486,7 +486,25 @@ class RuntimePrimaryScanFacade:
                 current_block=int(current_block),
                 cache=scan_cache,
             )
-            opps.sort(key=opportunity_profit_sort_key, reverse=True)
+            # Preserve the established scan ordering for legacy opportunities while
+            # allowing canonical after-cost truth to drive upgraded candidates.
+            def _scan_sort_key(candidate: Opportunity) -> tuple[int, int, str]:
+                meta = getattr(candidate, "meta", {}) or {}
+                profitability = meta.get("profitability") if isinstance(meta, dict) else None
+                if isinstance(profitability, dict) and bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
+                    try:
+                        return (3, int(profitability.get("profit_after_costs_wei") or 0), str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""))
+                    except (TypeError, ValueError):
+                        pass
+                try:
+                    legacy_value = meta.get("profit_after_gas_estimate_wei") if isinstance(meta, dict) else None
+                    if legacy_value is not None:
+                        return (2, int(legacy_value), str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""))
+                except (TypeError, ValueError):
+                    pass
+                return opportunity_profit_sort_key(candidate)
+
+            opps.sort(key=_scan_sort_key, reverse=True)
             requests = int(two_leg_telemetry.get("quote_requests", 0)) + int(
                 three_leg_telemetry.get("quote_requests", 0)
             )
