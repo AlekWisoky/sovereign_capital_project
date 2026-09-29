@@ -249,6 +249,8 @@ async def quote_edges_batch(
 
     failure_counts = quote_diagnostics.get("failure_reasons") or {}
     metrics["quote_failure_reasons"] = {str(k): int(v) for k, v in failure_counts.items()}
+    metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
+    metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
     # ensure all are present
     for e in edges:
         ek = edge_key(e)
@@ -689,6 +691,8 @@ async def find_two_leg_opportunities(
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
             "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
+            "quote_fallback_attempts": int(metrics.get("quote_fallback_attempts", 0)),
+            "quote_fallback_successes": int(metrics.get("quote_fallback_successes", 0)),
             "route_rejections": {
                 str(k).replace("route_rejections_", ""): int(v)
                 for k, v in metrics.items()
