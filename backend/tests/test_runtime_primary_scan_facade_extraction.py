@@ -34,10 +34,14 @@ class _Runtime(RuntimePrimaryScanFacade):
         self._discovery = _Discovery(['v3-a', 'v3-b'])
 
 
-def _opp(profit: int, *, expected: int | None = None):
+def _opp(profit: int, *, expected: int | None = None, amount_in: int | None = None):
+    route = None
+    if amount_in is not None:
+        route = SimpleNamespace(legs=[SimpleNamespace(amount_in=str(amount_in))])
     return SimpleNamespace(
         id=f"opp-{profit}-{expected}",
         route_id=f"route-{profit}-{expected}",
+        route=route,
         meta={'profit_after_gas_estimate_wei': profit} if profit >= 0 else {},
         expected_profit_raw=expected if expected is not None else max(0, profit),
     )
@@ -80,6 +84,13 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
     assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'budget_exhausted_after_quote': True}
     assert runtime._market_pipeline_telemetry['gross_candidates'] == 4
+    adaptive = runtime._market_pipeline_telemetry['adaptive_size_discovery']
+    assert adaptive['candidates_before_probe'] == 4
+    assert adaptive['candidates_after_probe'] == 4
+    assert adaptive['probe_candidate_delta'] == 0
+    assert adaptive['probe_triggered'] is False
+    assert adaptive['distinct_route_ids_before_probe'] == 4
+    assert adaptive['distinct_route_ids_after_probe'] == 4
     assert [int((o.meta or {}).get('profit_after_gas_estimate_wei') or o.expected_profit_raw) for o in opps] == [20, 15, 11, 5]
 
 
@@ -229,7 +240,7 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
         })
         amount = int(kwargs["amount_in"])
         return [
-            _opp(amount - 10, expected=amount - 10),
+            _opp(amount - 10, expected=amount - 10, amount_in=amount),
         ]
 
     monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
@@ -241,4 +252,11 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
     assert calls == [100, 50, 200]
     assert len(opps) == 3
     assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200"]
-    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["probe_triggered"] is True
+    adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
+    assert adaptive["probe_triggered"] is True
+    assert adaptive["candidates_before_probe"] == 1
+    assert adaptive["candidates_after_probe"] == 3
+    assert adaptive["probe_candidate_delta"] == 2
+    assert adaptive["distinct_route_ids_before_probe"] == 1
+    assert adaptive["distinct_route_ids_after_probe"] == 3
+    assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["200", "100", "50"]
