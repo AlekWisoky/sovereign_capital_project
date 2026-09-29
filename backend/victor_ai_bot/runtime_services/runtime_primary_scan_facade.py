@@ -478,6 +478,7 @@ class RuntimePrimaryScanFacade:
                         ),
                     )
                 ),
+                "size_economic_evidence": list(telemetry.get("size_economic_evidence") or []),
             }
             await self._annotate_canonical_after_fee_usd(
                 opps=opps,
