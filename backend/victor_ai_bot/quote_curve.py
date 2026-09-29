@@ -136,6 +136,8 @@ async def quote_curve_many(
                 amt = None
             if amt is not None:
                 out[idx] = CurveQuote(amount_out=amt, used_underlying=(not bool(reqs[idx][4])))
+                if diagnostics is not None:
+                    diagnostics["fallback_successes"] = int(diagnostics.get("fallback_successes", 0)) + 1
                 continue
         if not rr.ok:
             record_quote_failure(diagnostics, classify_quote_error(rr.error))
