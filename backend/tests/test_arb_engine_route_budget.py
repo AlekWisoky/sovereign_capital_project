@@ -54,7 +54,7 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
         123,
         amount_in=100,
         slippage_bps=50,
-        time_budget_ms=0,
+        time_budget_ms=1,
         telemetry=telemetry,
     )
 
