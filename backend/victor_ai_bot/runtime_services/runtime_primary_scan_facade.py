@@ -255,6 +255,7 @@ class RuntimePrimaryScanFacade:
             opps3.extend(base_three)
             two_leg_telemetry.update(base_two_metrics)
             three_leg_telemetry.update(base_three_metrics)
+            candidates_before_probe = len(opps2) + len(opps3)
 
             # Only expand the discovery universe when the base notional does not
             # provide enough candidates. Alternative sizes are discovery probes,
@@ -301,16 +302,28 @@ class RuntimePrimaryScanFacade:
                             or source.get("budget_exhausted_after_quote", False)
                         )
 
+            candidates_after_probe = len(opps2) + len(opps3)
+
+            def _candidate_route_key(candidate: Opportunity) -> str:
+                return str(
+                    getattr(candidate, "route_id", "")
+                    or getattr(candidate, "id", "")
+                    or ""
+                )
+
+            def _candidate_amount_in(candidate: Opportunity) -> str:
+                try:
+                    legs = list(getattr(getattr(candidate, "route", None), "legs", []) or [])
+                    return str(int(getattr(legs[0], "amount_in", 0) or 0)) if legs else ""
+                except (AttributeError, IndexError, TypeError, ValueError):
+                    return ""
+
             # A route at different sizes is a sizing variant, not a separate
             # venue/route opportunity. Keep the most profitable verified raw
             # variant per route_id while preserving distinct routes.
             best_by_route: Dict[str, Opportunity] = {}
             for candidate in [*opps2, *opps3]:
-                route_key = str(
-                    getattr(candidate, "route_id", "")
-                    or getattr(candidate, "id", "")
-                    or ""
-                )
+                route_key = _candidate_route_key(candidate)
                 current = best_by_route.get(route_key)
                 if current is None or int(candidate.expected_profit_raw) > int(current.expected_profit_raw):
                     best_by_route[route_key] = candidate
@@ -328,6 +341,23 @@ class RuntimePrimaryScanFacade:
                 "amounts_scanned": [str(int(x)) for x in size_amounts],
                 "probe_triggered": bool(len(size_amounts) > 1),
                 "minimum_opportunities": int(min_opportunities),
+                "candidates_before_probe": int(candidates_before_probe),
+                "candidates_after_probe": int(candidates_after_probe),
+                "probe_candidate_delta": int(candidates_after_probe - candidates_before_probe),
+                "distinct_route_ids_before_probe": len({
+                    _candidate_route_key(candidate) for candidate in [*base_two, *base_three]
+                }),
+                "distinct_route_ids_after_probe": len({
+                    _candidate_route_key(candidate) for candidate in [*opps2, *opps3]
+                }),
+                "best_sizing_variants": [
+                    {
+                        "route_id": _candidate_route_key(candidate),
+                        "amount_in": _candidate_amount_in(candidate),
+                        "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+                    }
+                    for candidate in list(opps)[:80]
+                ],
             }
             await self._annotate_canonical_after_fee_usd(
                 opps=opps,
