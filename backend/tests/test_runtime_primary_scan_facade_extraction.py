@@ -206,3 +206,37 @@ def test_adaptive_scan_amounts_can_be_disabled(monkeypatch):
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
 
     assert runtime._adaptive_scan_amounts(1000) == [1000]
+
+
+@pytest.mark.asyncio
+async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has_too_few(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    calls = []
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        calls.append(int(kwargs["amount_in"]))
+        kwargs["telemetry"].update({
+            "quote_requests": 1,
+            "quote_successes": 1,
+            "routes_considered": 1,
+            "edges_generated": 1,
+            "quote_phase_ms": 1.0,
+            "route_evaluation_ms": 1.0,
+            "route_groups_evaluated": 1,
+        })
+        amount = int(kwargs["amount_in"])
+        return [
+            _opp(amount - 10, expected=amount - 10),
+        ]
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
+
+    assert calls == [100, 50, 200]
+    assert len(opps) == 3
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200"]
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["probe_triggered"] is True
