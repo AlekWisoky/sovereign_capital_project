@@ -146,6 +146,7 @@ async def quote_balancer_given_in_many(
     rpc: JsonRpcClient,
     vault: str,
     reqs: list[tuple[str, str, str, int]],
+    diagnostics: dict | None = None,
 ) -> list[Optional[BalancerQuote]]:
     """Batch Balancer queryBatchSwap GIVEN_IN quotes.
 
