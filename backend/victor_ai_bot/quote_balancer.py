@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 from .rpc import JsonRpcClient
+from .quote_diagnostics import classify_quote_error, record_quote_failure, record_quote_parse_failure
 from .ethabi import (
     selector,
     enc_uint,
@@ -27,6 +28,7 @@ async def quote_balancer_given_in(
     token_in: str,
     token_out: str,
     amount_in: int,
+    diagnostics: dict | None = None,
 ) -> Optional[BalancerQuote]:
     kind = 0  # GIVEN_IN
     pool_id = bytes.fromhex(pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32)
@@ -64,11 +66,20 @@ async def quote_balancer_given_in(
     data = selector(_SIG) + head + swaps + assets + funds
 
     r = await rpc.eth_call(vault, "0x" + data.hex())
-    if not r.ok or not isinstance(r.result, str):
+    if not r.ok:
+        record_quote_failure(diagnostics, classify_quote_error(r.error))
         return None
-    raw = bytes.fromhex(r.result[2:]) if r.result.startswith("0x") else bytes.fromhex(r.result)
-    deltas = decode_int256_array(raw)
+    if not isinstance(r.result, str):
+        record_quote_parse_failure(diagnostics, "invalid_rpc_result")
+        return None
+    try:
+        raw = bytes.fromhex(r.result[2:]) if r.result.startswith("0x") else bytes.fromhex(r.result)
+        deltas = decode_int256_array(raw)
+    except (TypeError, ValueError):
+        record_quote_parse_failure(diagnostics, "invalid_quote_result")
+        return None
     if len(deltas) < 2:
+        record_quote_parse_failure(diagnostics, "insufficient_swap_deltas")
         return None
     amt_out = -deltas[1]
     if amt_out <= 0:
@@ -155,9 +166,19 @@ async def quote_balancer_given_in_many(
     results = await rpc.eth_call_batch(calls)
     out: list[Optional[BalancerQuote]] = []
     for rr in results:
-        if rr.ok and isinstance(rr.result, str):
-            amt = parse_balancer_query_result(rr.result)
-            out.append(BalancerQuote(amount_out=amt) if amt is not None else None)
-        else:
+        if not rr.ok:
+            record_quote_failure(diagnostics, classify_quote_error(rr.error))
             out.append(None)
+            continue
+        if not isinstance(rr.result, str):
+            record_quote_parse_failure(diagnostics, "invalid_rpc_result")
+            out.append(None)
+            continue
+        try:
+            amt = parse_balancer_query_result(rr.result)
+        except (TypeError, ValueError):
+            amt = None
+        if amt is None:
+            record_quote_parse_failure(diagnostics, "invalid_quote_result")
+        out.append(BalancerQuote(amount_out=amt) if amt is not None else None)
     return out

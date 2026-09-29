@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 351,
+    "test_file_count": 352,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -136,6 +136,7 @@
       "backend/tests/test_lifecycle_terminal_profitability_persistence.py",
       "backend/tests/test_llm_inl_runtime_maintenance.py",
       "backend/tests/test_logging_utils.py",
+      "backend/tests/test_market_pipeline_telemetry.py",
       "backend/tests/test_meta_memory_persistence_hardening.py",
       "backend/tests/test_mev_guard_helper.py",
       "backend/tests/test_mev_mempool_hardening.py",
@@ -178,6 +179,7 @@
       "backend/tests/test_quicksight_dashboards_maintenance.py",
       "backend/tests/test_quicksight_datasets_maintenance.py",
       "backend/tests/test_quicksight_runtime_maintenance.py",
+      "backend/tests/test_quote_diagnostics.py",
       "backend/tests/test_ratelimit_env.py",
       "backend/tests/test_receipt_settlement_truth_path.py",
       "backend/tests/test_receipt_terminal_profitability_chain.py",

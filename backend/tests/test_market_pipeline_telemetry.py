@@ -61,6 +61,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "successes": 8,
         "failures": 2,
         "success_rate": 0.8,
+        "failure_reasons": {},
     }
     assert out["route_evaluation"] == {
         "quote_phase_ms": 125.0,
