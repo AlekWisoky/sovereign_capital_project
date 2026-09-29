@@ -433,3 +433,52 @@ async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
     assert opps[0].meta["profitability_diagnostic"]["reason"] == "missing_flashloan_fee"
     assert runtime._market_pipeline_telemetry["size_economic_evidence"][0]["reason"] == "missing_flashloan_fee"
     assert runtime._market_pipeline_telemetry["size_economic_evidence"][0]["authoritative"] is False
+
+
+@pytest.mark.asyncio
+async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        amount = int(kwargs["amount_in"])
+        kwargs["telemetry"].update({
+            "quote_requests": 1,
+            "quote_successes": 1,
+            "routes_considered": 1,
+            "edges_generated": 1,
+            "route_groups_evaluated": 1,
+        })
+        return [
+            SimpleNamespace(
+                id=f"opp-{amount}",
+                route_id=f"route-{amount}",
+                expected_profit_raw="100",
+                route=SimpleNamespace(
+                    legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+                ),
+                meta={"gas_cost_estimate_wei": "10"},
+            )
+        ]
+
+    def failing_revalidate(*args, **kwargs):
+        raise ValueError("bad candidate economics")
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setattr(scan_mod, "revalidate_profitability_state", failing_revalidate)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(
+        object(), current_block=321, amount_in=100
+    )
+
+    assert len(opps) == 3
+    assert {int(opp.route.legs[0].amount_in) for opp in opps} == {50, 100, 200}
+    adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
+    assert adaptive["amounts_scanned"] == ["100", "50", "200"]
+    assert adaptive["economic_matrix_complete"] is True
+    evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
+    assert len(evidence) == 3
+    assert all(row["authoritative"] is False for row in evidence)
+    assert all(row["reason"] == "revalidation_exception:ValueError" for row in evidence)
