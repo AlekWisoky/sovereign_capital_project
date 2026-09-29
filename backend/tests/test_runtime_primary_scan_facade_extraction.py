@@ -36,6 +36,8 @@ class _Runtime(RuntimePrimaryScanFacade):
 
 def _opp(profit: int, *, expected: int | None = None):
     return SimpleNamespace(
+        id=f"opp-{profit}-{expected}",
+        route_id=f"route-{profit}-{expected}",
         meta={'profit_after_gas_estimate_wei': profit} if profit >= 0 else {},
         expected_profit_raw=expected if expected is not None else max(0, profit),
     )
