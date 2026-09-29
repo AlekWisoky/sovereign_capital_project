@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 from .rpc import JsonRpcClient
 from .ethabi import selector, enc_address, enc_uint
+from .quote_diagnostics import classify_quote_error, record_quote_failure, record_quote_parse_failure
 
 
 @dataclass
@@ -24,6 +25,7 @@ async def quote_exact_input_single(
     sqrt_price_limit_x96: int = 0,
     *,
     block: str = "latest",
+    diagnostics: dict | None = None,
 ) -> Optional[UniV3Quote]:
     data = b"".join(
         [
@@ -36,10 +38,19 @@ async def quote_exact_input_single(
         ]
     )
     r = await rpc.eth_call(quoter_v2, "0x" + data.hex(), block=block)
-    if not r.ok or not isinstance(r.result, str):
+    if not r.ok:
+        record_quote_failure(diagnostics, classify_quote_error(r.error))
         return None
-    raw = bytes.fromhex(r.result[2:]) if r.result.startswith("0x") else bytes.fromhex(r.result)
+    if not isinstance(r.result, str):
+        record_quote_parse_failure(diagnostics, "invalid_rpc_result")
+        return None
+    try:
+        raw = bytes.fromhex(r.result[2:]) if r.result.startswith("0x") else bytes.fromhex(r.result)
+    except (TypeError, ValueError):
+        record_quote_parse_failure(diagnostics, "invalid_hex_result")
+        return None
     if len(raw) < 32 * 4:
+        record_quote_parse_failure(diagnostics, "short_quote_result")
         return None
     amount_out = int.from_bytes(raw[0:32], "big")
     gas_est = int.from_bytes(raw[96:128], "big")
@@ -85,6 +96,7 @@ async def quote_exact_input_single_batch(
     reqs: list[tuple[str, str, int, int, int]],
     *,
     block: str = "latest",
+    diagnostics: dict | None = None,
 ) -> list[Optional[UniV3Quote]]:
     """Batch UniV3 QuoterV2 quotes.
 
@@ -103,8 +115,19 @@ async def quote_exact_input_single_batch(
     results = await rpc.eth_call_batch(calls, block=block)
     out: list[Optional[UniV3Quote]] = []
     for r in results:
-        if not r.ok or not isinstance(r.result, str):
+        if not r.ok:
+            record_quote_failure(diagnostics, classify_quote_error(r.error))
             out.append(None)
-        else:
-            out.append(parse_quote_exact_input_single_result(r.result))
+            continue
+        if not isinstance(r.result, str):
+            record_quote_parse_failure(diagnostics, "invalid_rpc_result")
+            out.append(None)
+            continue
+        try:
+            parsed = parse_quote_exact_input_single_result(r.result)
+        except (TypeError, ValueError):
+            parsed = None
+        if parsed is None:
+            record_quote_parse_failure(diagnostics, "invalid_quote_result")
+        out.append(parsed)
     return out
