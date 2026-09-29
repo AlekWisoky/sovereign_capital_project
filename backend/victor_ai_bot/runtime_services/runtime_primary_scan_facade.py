@@ -79,13 +79,31 @@ class RuntimePrimaryScanFacade:
             ):
                 state = dict(existing_profitability)
             else:
-                state = revalidate_profitability_state(
-                    opportunity,
-                    self.cfg,
-                    stage="scan_after_fee_revalidation",
-                    source="runtime_primary_scan",
-                    gas_cost_wei=gas_cost_wei,
-                )
+                try:
+                    state = revalidate_profitability_state(
+                        opportunity,
+                        self.cfg,
+                        stage="scan_after_fee_revalidation",
+                        source="runtime_primary_scan",
+                        gas_cost_wei=gas_cost_wei,
+                    )
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    # One malformed candidate must not erase the entire
+                    # institutional sizing matrix. Fail closed for this
+                    # candidate and retain the concrete diagnostic reason.
+                    state = {
+                        "stage": "scan_after_fee_revalidation",
+                        "source": "runtime_primary_scan",
+                        "reason": f"revalidation_exception:{type(exc).__name__}",
+                        "revalidated": False,
+                        "stale": True,
+                        "valid": False,
+                        "authoritative": False,
+                        "gross_profit_wei": str(getattr(opportunity, "expected_profit_raw", "0") or "0"),
+                        "profit_after_costs_wei": "0",
+                        "gas_cost_wei": str(max(0, gas_cost_wei)),
+                        "flashloan_fee_wei": "0",
+                    }
             # Preserve the diagnostic revalidation result for the sizing
             # evidence matrix, but only promote a valid authoritative result to
             # canonical profitability. Invalid states must not poison legacy
@@ -449,6 +467,31 @@ class RuntimePrimaryScanFacade:
                 for candidate in [*opps2, *opps3]
             ]
 
+            telemetry["adaptive_size_discovery"] = {
+                "enabled": bool(len(adaptive_amounts) > 1),
+                "base_amount_in": str(int(amount_in)),
+                "amounts_scanned": [str(int(x)) for x in size_amounts],
+                "probe_triggered": bool(len(size_amounts) > 1),
+                "minimum_opportunities": int(min_opportunities),
+                "candidates_before_probe": int(candidates_before_probe),
+                "candidates_after_probe": int(candidates_after_probe),
+                "probe_candidate_delta": int(candidates_after_probe - candidates_before_probe),
+                "best_sizing_variants": [],
+                "borrow_cap_wei": str(
+                    max(
+                        0,
+                        int(
+                            getattr(getattr(self, "_bankroll", None), "cfg", None)
+                            and getattr(self._bankroll.cfg, "max_borrow_amount_wei", 0)
+                            or getattr(getattr(self.cfg, "safety", None), "max_borrow_amount", 0)
+                            or 0
+                        ),
+                    )
+                ),
+                "size_economic_evidence": list(telemetry.get("size_economic_evidence") or []),
+                "economic_matrix_complete": False,
+            }
+
             # A route at different sizes is a sizing variant, not a separate
             # venue/route opportunity. Prefer the highest verified after-cost
             # result; gross profit is only a deterministic fallback.
@@ -508,6 +551,7 @@ class RuntimePrimaryScanFacade:
                     )
                 ),
                 "size_economic_evidence": list(telemetry.get("size_economic_evidence") or []),
+                "economic_matrix_complete": True,
             }
             # Rank authoritative after-cost truth first. For legacy/unverified
             # candidates, preserve the established after-gas-then-gross numeric ordering
