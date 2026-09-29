@@ -113,7 +113,7 @@ class RpcManager:
         return [
             stats.url
             for stats in sorted(self._read.values(), key=lambda item: item.score())
-            if stats.ok or stats.last_seen_block is None
+            if stats.ok
         ]
 
     def best_read(self) -> str:
