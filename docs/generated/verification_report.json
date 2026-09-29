@@ -4,7 +4,6 @@
     "test_file_count": 353,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
-      "backend/tests/test_quote_balancer_batch_diagnostics.py",
       "backend/tests/test_adaptation_maintenance.py",
       "backend/tests/test_agent_hub_maintenance.py",
       "backend/tests/test_agents_system.py",
@@ -180,6 +179,7 @@
       "backend/tests/test_quicksight_dashboards_maintenance.py",
       "backend/tests/test_quicksight_datasets_maintenance.py",
       "backend/tests/test_quicksight_runtime_maintenance.py",
+      "backend/tests/test_quote_balancer_batch_diagnostics.py",
       "backend/tests/test_quote_diagnostics.py",
       "backend/tests/test_ratelimit_env.py",
       "backend/tests/test_receipt_settlement_truth_path.py",
