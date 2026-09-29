@@ -4,6 +4,7 @@
     "test_file_count": 352,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
+      "backend/tests/test_quote_balancer_batch_diagnostics.py",
       "backend/tests/test_adaptation_maintenance.py",
       "backend/tests/test_agent_hub_maintenance.py",
       "backend/tests/test_agents_system.py",
