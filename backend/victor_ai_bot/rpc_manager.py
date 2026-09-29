@@ -113,7 +113,7 @@ class RpcManager:
         return [
             stats.url
             for stats in sorted(self._read.values(), key=lambda item: item.score())
-            if stats.ok
+            if stats.ok and float(stats.quote_unhealthy_until or 0.0) <= time.time()
         ]
 
     def best_read(self) -> str:
