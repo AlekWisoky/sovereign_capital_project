@@ -30,6 +30,20 @@ class RuntimeLoopEntryFacade:
                 current_block=int(bn),
                 loop_started_at=loop_started_at,
             )
+            telemetry = getattr(self, "_market_pipeline_telemetry", {}) or {}
+            if isinstance(telemetry, dict):
+                quotes = telemetry.get("quotes") or {}
+                try:
+                    self.rpc_manager.observe_quote_telemetry(
+                        read_url,
+                        requests=int(quotes.get("requests", 0) or 0),
+                        successes=int(quotes.get("successes", 0) or 0),
+                        failure_reasons=dict(quotes.get("failure_reasons") or {}),
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    # Quote telemetry is observational; never let health feedback
+                    # interrupt the existing scan/execution containment path.
+                    pass
 
     async def _sleep(self, seconds: float) -> None:
         import asyncio

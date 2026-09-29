@@ -18,6 +18,10 @@ class EndpointStats:
     last_error: str | None = None
     last_seen_block: int | None = None
     updated_at: float = field(default_factory=lambda: time.time())
+    quote_failures: int = 0
+    quote_successes: int = 0
+    quote_last_error: str | None = None
+    quote_unhealthy_until: float = 0.0
 
     def score(self) -> float:
         # Hard-penalize unhealthy endpoints so flakey URLs never win selection
@@ -28,6 +32,10 @@ class EndpointStats:
         # If we've never observed a block, treat as unhealthy.
         if self.last_seen_block is None:
             penalty *= 50.0
+        if self.quote_unhealthy_until > time.time():
+            penalty *= 10_000.0
+        else:
+            penalty *= 1.0 + min(self.quote_failures, 10) * 0.25
         return self.latency_ema_ms * penalty
 
 
@@ -81,6 +89,59 @@ class RpcManager:
     def best_read(self) -> str:
         return min(self._read.values(), key=lambda s: s.score()).url if self._read else ""
 
+    def observe_quote_telemetry(
+        self,
+        url: str,
+        *,
+        requests: int,
+        successes: int,
+        failure_reasons: Dict[str, int] | None = None,
+    ) -> None:
+        """Feed quote-layer health back into read-endpoint selection.
+
+        Basic block probes can succeed while quote traffic is throttled or
+        transported poorly. Reverts are deliberately excluded because they
+        commonly originate from the quoted pool/contract rather than the RPC.
+        """
+        stats = self._read.get(str(url))
+        if stats is None:
+            return
+        req = max(0, int(requests))
+        ok = max(0, int(successes))
+        failures = {
+            str(key): max(0, int(value))
+            for key, value in dict(failure_reasons or {}).items()
+        }
+        provider_failures = sum(
+            value
+            for key, value in failures.items()
+            if key in {
+                "rpc_rate_limited",
+                "rpc_timeout",
+                "rpc_transport_or_provider_error",
+                "rpc_error",
+                "rpc_error_unknown",
+                "missing_batch_response",
+            }
+            or key.startswith("rpc_error_")
+        )
+        stats.quote_successes += ok
+        stats.quote_failures += provider_failures
+        if provider_failures:
+            stats.quote_last_error = max(
+                ((key, value) for key, value in failures.items() if value),
+                key=lambda item: item[1],
+                default=("quote_provider_error", provider_failures),
+            )[0]
+            stats.quote_unhealthy_until = max(
+                stats.quote_unhealthy_until,
+                time.time() + 30.0,
+            )
+        elif ok > 0:
+            stats.quote_unhealthy_until = 0.0
+            stats.quote_last_error = None
+            stats.quote_failures = max(0, stats.quote_failures - 1)
+
     def best_send(self) -> str:
         return (
             min(self._send.values(), key=lambda s: s.score()).url
@@ -101,6 +162,10 @@ class RpcManager:
                 "last_error": s.last_error,
                 "last_seen_block": s.last_seen_block,
                 "score": round(s.score(), 1),
+                "quote_failures": s.quote_failures,
+                "quote_successes": s.quote_successes,
+                "quote_last_error": s.quote_last_error,
+                "quote_unhealthy_until": s.quote_unhealthy_until,
             }
 
         return {
