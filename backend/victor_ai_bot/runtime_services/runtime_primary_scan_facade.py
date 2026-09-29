@@ -105,15 +105,17 @@ class RuntimePrimaryScanFacade:
             successes = int(two_leg_telemetry.get("quote_successes", 0)) + int(
                 three_leg_telemetry.get("quote_successes", 0)
             )
+            quote_failure_reasons: Dict[str, int] = {}
+            route_rejections: Dict[str, int] = {}
+            for source in (two_leg_telemetry, three_leg_telemetry):
+                for key, value in dict(source.get("quote_failure_reasons") or {}).items():
+                    quote_failure_reasons[str(key)] = quote_failure_reasons.get(str(key), 0) + int(value)
+                for key, value in dict(source.get("route_rejections") or {}).items():
+                    route_rejections[str(key)] = route_rejections.get(str(key), 0) + int(value)
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
-                "failure_reasons": {
-                    str(k): int(v)
-                    for source in (two_leg_telemetry, three_leg_telemetry)
-                    for k, v in dict(source.get("quote_failure_reasons") or {}).items()
-                    for _ in [0]
-                },
+                "failure_reasons": quote_failure_reasons,
             }
             telemetry["discovery"]["pools_seen"] = (
                 len(extra_v3_pairs) + len(extra_curve_pools) + len(extra_balancer_pools)
@@ -140,11 +142,7 @@ class RuntimePrimaryScanFacade:
                 ),
             }
             telemetry["gross_candidates"] = len(opps)
-            telemetry["route_rejections"] = {
-                str(k): int(v)
-                for source in (two_leg_telemetry, three_leg_telemetry)
-                for k, v in dict(source.get("route_rejections") or {}).items()
-            }
+            telemetry["route_rejections"] = route_rejections
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
