@@ -412,6 +412,15 @@ class RuntimePrimaryScanFacade:
                     or three_leg_telemetry.get("budget_exhausted_after_quote", False)
                 ),
             }
+            # Both scanners build the same route graph; expose one canonical
+            # pre-quote universe snapshot rather than summing duplicate edges.
+            # Prefer the three-leg snapshot because it also carries adjacency
+            # pruning telemetry, falling back to two-leg when unavailable.
+            telemetry["route_universe"] = dict(
+                three_leg_telemetry.get("route_universe")
+                or two_leg_telemetry.get("route_universe")
+                or {}
+            )
             telemetry["gross_candidates"] = len(opps)
             telemetry["route_rejections"] = route_rejections
             telemetry["scan_latency_ms"] = float(
