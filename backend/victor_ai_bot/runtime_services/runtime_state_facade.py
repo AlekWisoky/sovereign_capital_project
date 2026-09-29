@@ -112,6 +112,7 @@ class RuntimeStateFacade:
             },
             "rpc": dict(telemetry.get("rpc") or {}),
             "adaptive_size_discovery": dict(telemetry.get("adaptive_size_discovery") or {}),
+            "route_universe": dict(telemetry.get("route_universe") or {}),
             "route_evaluation": dict(telemetry.get("route_evaluation") or {}),
             "route_rejections": dict(telemetry.get("route_rejections") or {}),
             "economics": {
