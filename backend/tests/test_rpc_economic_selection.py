@@ -21,6 +21,9 @@ def test_rpc_preferences_extend_live_read_provider_universe():
     manager.sync_read_preferences([])
     assert "https://premium.example" not in manager.read_candidates()
     assert "https://rpc-config.example" in manager.read_candidates()
+    manager.sync_read_preferences(["https://premium.example"])
+    manager._read["https://premium.example"].quote_unhealthy_until = 9_999_999_999.0
+    assert "https://premium.example" not in manager.read_candidates()
 
 
 def test_rpc_economic_selector_prefers_higher_after_fee_profit_and_ignores_unhealthy():
@@ -66,8 +69,14 @@ def test_rpc_economic_selector_prefers_higher_after_fee_profit_and_ignores_unhea
 @pytest.mark.asyncio
 async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadcast(monkeypatch):
     class _Manager:
+        def __init__(self):
+            self.telemetry = []
+
         def read_candidates(self):
             return ["https://rpc-a.example", "https://rpc-b.example"]
+
+        def observe_quote_telemetry(self, url, **kwargs):
+            self.telemetry.append((url, kwargs))
 
         def snapshot(self):
             return {
@@ -144,3 +153,7 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
     assert selection["selected_endpoint"] == "https://rpc-b.example"
     assert selection["broadcast_attempted"] is False
     assert selection["auto_trade_enabled"] is False
+    assert {url for url, _ in runtime.rpc_manager.telemetry} == {
+        "https://rpc-a.example",
+        "https://rpc-b.example",
+    }
