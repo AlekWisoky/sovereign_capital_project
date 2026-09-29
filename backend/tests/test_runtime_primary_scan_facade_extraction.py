@@ -473,7 +473,8 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
         object(), current_block=321, amount_in=100
     )
 
-    assert len(opps) == 1
+    assert len(opps) == 3
+    assert {int(opp.route.legs[0].amount_in) for opp in opps} == {50, 100, 200}
     adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
     assert adaptive["amounts_scanned"] == ["100", "50", "200"]
     assert adaptive["economic_matrix_complete"] is True
