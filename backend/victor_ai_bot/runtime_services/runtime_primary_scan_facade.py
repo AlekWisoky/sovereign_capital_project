@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Dict, List
 from urllib.parse import urlsplit
+from urllib.parse import urlsplit
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
+from ..cache import PerBlockCache
 from ..models import Opportunity
+from ..rpc import JsonRpcClient
+from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from ..profitability_state import revalidate_profitability_state
 from ..usd_pricing import token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
@@ -36,6 +41,7 @@ class RuntimePrimaryScanFacade:
         opps: List[Opportunity],
         rpc: Any,
         current_block: int,
+        cache: PerBlockCache | None = None,
     ) -> None:
         """Attach explicit USD value for canonical scan-time after-fee truth.
 
@@ -50,6 +56,7 @@ class RuntimePrimaryScanFacade:
         if not bool(getattr(execution, "usd_accounting_enabled", False)):
             return
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
+        scan_cache = cache or self.cache
         for opportunity in list(opps[:80]):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
             gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
@@ -75,7 +82,7 @@ class RuntimePrimaryScanFacade:
                 token=profit_token,
                 amount_wei=profit_after_wei,
                 block_number=int(current_block),
-                cache=self.cache,
+                cache=scan_cache,
                 preference=preference,
             )
             if usd_after is None or int(usd_after) <= 0:
@@ -101,19 +108,36 @@ class RuntimePrimaryScanFacade:
         *,
         current_block: int,
         amount_in: int,
+        cache: PerBlockCache | None = None,
+        discovery_context: Dict[str, List[Any]] | None = None,
+        telemetry_sink: Dict[str, Any] | None = None,
     ) -> List[Opportunity]:
         if int(amount_in) <= 0:
             return []
 
         scan_started = time.perf_counter()
-        extra_v3_pairs = await self._discover_extra_v3_pairs(rpc, current_block=int(current_block))
-        venue_pools = {"curve": [], "balancer": []}
-        discovery = getattr(self, "_discovery", None)
-        discover_venues = getattr(discovery, "maybe_discover_venues", None) if discovery is not None else None
-        if callable(discover_venues):
-            venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
-        extra_curve_pools = list(venue_pools.get("curve") or [])
-        extra_balancer_pools = list(venue_pools.get("balancer") or [])
+        scan_cache = cache or self.cache
+        if discovery_context is None:
+            extra_v3_pairs = await self._discover_extra_v3_pairs(
+                rpc, current_block=int(current_block)
+            )
+            venue_pools = {"curve": [], "balancer": []}
+            discovery = getattr(self, "_discovery", None)
+            discover_venues = (
+                getattr(discovery, "maybe_discover_venues", None)
+                if discovery is not None
+                else None
+            )
+            if callable(discover_venues):
+                venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
+            discovery_context = {
+                "v3_pairs": list(extra_v3_pairs),
+                "curve_pools": list(venue_pools.get("curve") or []),
+                "balancer_pools": list(venue_pools.get("balancer") or []),
+            }
+        extra_v3_pairs = list(discovery_context.get("v3_pairs") or [])
+        extra_curve_pools = list(discovery_context.get("curve_pools") or [])
+        extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
 
         telemetry: Dict[str, Any] = {
             "last_scan": int(time.time() * 1000),
@@ -134,7 +158,7 @@ class RuntimePrimaryScanFacade:
                 opps2 = await find_two_leg_opportunities(
                     rpc,
                     self.cfg,
-                    self.cache,
+                    scan_cache,
                     current_block,
                     amount_in=int(amount_in),
                     slippage_bps=self.cfg.safety.slippage_bps,
@@ -153,7 +177,7 @@ class RuntimePrimaryScanFacade:
                 opps3 = await find_three_leg_opportunities(
                     rpc,
                     self.cfg,
-                    self.cache,
+                    scan_cache,
                     current_block,
                     amount_in=int(amount_in),
                     slippage_bps=self.cfg.safety.slippage_bps,
@@ -170,6 +194,7 @@ class RuntimePrimaryScanFacade:
                 opps=opps,
                 rpc=rpc,
                 current_block=int(current_block),
+                cache=scan_cache,
             )
             opps.sort(key=opportunity_profit_sort_key, reverse=True)
             requests = int(two_leg_telemetry.get("quote_requests", 0)) + int(
@@ -247,12 +272,20 @@ class RuntimePrimaryScanFacade:
                 "quote_last_error": selected_rpc.get("quote_last_error"),
                 "quote_unhealthy_until": selected_rpc.get("quote_unhealthy_until", 0.0),
             }
-            self._market_pipeline_telemetry = telemetry
+            if telemetry_sink is not None:
+                telemetry_sink.clear()
+                telemetry_sink.update(telemetry)
+            else:
+                self._market_pipeline_telemetry = telemetry
             return opps[:80]
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
             telemetry["scan_error"] = f"{type(exc).__name__}: {exc}"
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
-            self._market_pipeline_telemetry = telemetry
+            if telemetry_sink is not None:
+                telemetry_sink.clear()
+                telemetry_sink.update(telemetry)
+            else:
+                self._market_pipeline_telemetry = telemetry
             raise
