@@ -367,7 +367,10 @@ def build_edges(
                     v3_exec_venue,
                     p["token_out"],
                     p["token_in"],
-                    {"fee": int(p.get("fee", 3000))},
+                    {
+                        "fee": int(p.get("fee", 3000)),
+                        **({"pool": str(p.get("pool"))} if p.get("pool") else {}),
+                    },
                 )
             )
     if bool(getattr(cfg.flags, "enable_curve_autogen", True)):
