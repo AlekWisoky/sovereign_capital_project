@@ -389,6 +389,7 @@ def revalidate_profitability_state(
     stage: str,
     source: str,
     gas_cost_wei: int | None = None,
+    quoted_amount_out_wei: int | None = None,
 ) -> Dict[str, Any]:
     if not isinstance(getattr(opp, "meta", None), dict):
         try:
@@ -397,7 +398,16 @@ def revalidate_profitability_state(
             return {}
     meta = opp.meta
     continuity = _continuity(opp)
-    amount_in_wei, amount_out_wei = _resolve_amounts(opp)
+    amount_in_wei, resolved_amount_out_wei = _resolve_amounts(opp)
+    # Scan-time economics must use the exact quoted terminal output. The route's
+    # min_out is an execution protection floor after the slippage reserve, not a
+    # realized cost. Callers that do not have a fresh quote retain the historical
+    # min_out fallback, preserving execution/preflight conservatism.
+    amount_out_wei = (
+        int(quoted_amount_out_wei)
+        if quoted_amount_out_wei is not None
+        else int(resolved_amount_out_wei)
+    )
     gross_profit_wei = int(amount_out_wei) - int(amount_in_wei)
     expected_profit_usd = _safe_float(
         _raw_attr(opp, "expected_profit_usd")
