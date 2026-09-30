@@ -62,5 +62,5 @@ def test_revalidation_without_fresh_quote_keeps_min_out_fallback():
 
     assert state["revalidated"] is True
     assert state["valid"] is False
-    assert state["reason"] == "profit_after_costs_not_positive"
+    assert state["reason"] == "does_not_repay_flashloan"
     assert state["amount_out_wei"] == "995"
