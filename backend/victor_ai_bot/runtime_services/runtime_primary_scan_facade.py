@@ -93,7 +93,7 @@ def _build_size_economic_matrix(
         ):
             if not isinstance(diagnostic, dict):
                 continue
-            diagnostic_rows.append({
+            row = {
                 "route_id": str(diagnostic.get("route_id") or ""),
                 "gross_profit_wei": str(diagnostic.get("gross_profit_wei") or "0"),
                 "flashloan_fee_wei": str(diagnostic.get("flashloan_fee_wei") or "0"),
@@ -103,8 +103,11 @@ def _build_size_economic_matrix(
                 "authoritative": bool(diagnostic.get("authoritative")),
                 "reason": str(diagnostic.get("reason") or "diagnostic_only"),
                 "diagnostic_only": True,
-                "legs": [dict(leg) for leg in (diagnostic.get("legs") or []) if isinstance(leg, dict)][:3],
-            })
+            }
+            legs = [dict(leg) for leg in (diagnostic.get("legs") or []) if isinstance(leg, dict)][:3]
+            if legs:
+                row["legs"] = legs
+            diagnostic_rows.append(row)
         existing_route_ids = {existing["route_id"] for existing in route_rows}
         route_rows.extend(
             row for row in diagnostic_rows
