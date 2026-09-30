@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..cache import PerBlockCache
+from ..gas_model import estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
 from ..models import Opportunity
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
@@ -68,9 +69,32 @@ class RuntimePrimaryScanFacade:
         usd_enabled = bool(getattr(execution, "usd_accounting_enabled", False))
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
         scan_cache = cache or self.cache
+        observed_gas_price_wei: int | None = None
+        try:
+            observed_gas_price_wei = await rpc.gas_price()
+        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+            observed_gas_price_wei = None
         for opportunity in list(opps):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
-            gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
+            # Synthetic/test opportunities may carry a precomputed gas cost
+            # without route metadata. Preserve that concrete value when no
+            # route-level gas inputs exist; production opportunities always
+            # carry legs/venues and therefore use the observed gas price.
+            has_route_gas_inputs = bool(
+                meta.get("venues")
+                or any(isinstance(meta.get(key), dict) for key in ("leg1", "leg2", "leg3"))
+            )
+            if has_route_gas_inputs:
+                gas_units = estimate_route_gas_units(meta)
+                gas_cost_wei = int(
+                    estimate_gas_cost_wei_from_cfg(
+                        self.cfg,
+                        gas_units,
+                        observed_gas_price_wei=observed_gas_price_wei,
+                    )
+                )
+            else:
+                gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
             existing_profitability = meta.get("profitability")
             if (
                 isinstance(existing_profitability, dict)
