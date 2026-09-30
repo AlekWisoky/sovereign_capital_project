@@ -103,6 +103,7 @@ def _build_size_economic_matrix(
                 "authoritative": bool(diagnostic.get("authoritative")),
                 "reason": str(diagnostic.get("reason") or "diagnostic_only"),
                 "diagnostic_only": True,
+                "legs": [dict(leg) for leg in (diagnostic.get("legs") or []) if isinstance(leg, dict)][:3],
             })
         existing_route_ids = {existing["route_id"] for existing in route_rows}
         route_rows.extend(
