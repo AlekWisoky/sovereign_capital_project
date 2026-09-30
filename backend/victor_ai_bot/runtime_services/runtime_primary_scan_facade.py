@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..cache import PerBlockCache
 from ..models import Opportunity
+from ..gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from ..profitability_state import revalidate_profitability_state
@@ -68,9 +69,21 @@ class RuntimePrimaryScanFacade:
         usd_enabled = bool(getattr(execution, "usd_accounting_enabled", False))
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
         scan_cache = cache or self.cache
+        observed_gas_price_wei: int | None = None
+        try:
+            observed_gas_price_wei = await rpc.gas_price()
+        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+            observed_gas_price_wei = None
         for opportunity in list(opps):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
-            gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
+            gas_units = estimate_route_gas_units(meta)
+            gas_cost_wei = int(
+                estimate_gas_cost_wei_from_cfg(
+                    self.cfg,
+                    gas_units,
+                    observed_gas_price_wei=observed_gas_price_wei,
+                )
+            )
             existing_profitability = meta.get("profitability")
             if (
                 isinstance(existing_profitability, dict)
