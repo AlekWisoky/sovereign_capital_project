@@ -220,7 +220,9 @@ class RuntimePrimaryScanFacade:
                 continue
             if value > 0.0 and value != 1.0:
                 multipliers.append(value)
-        multipliers = list(dict.fromkeys(multipliers))
+        # Preserve the established user/default probes, but bound them so the
+        # cap-aware ladder cannot be displaced by an oversized environment value.
+        multipliers = list(dict.fromkeys(multipliers))[:4]
 
         # Always retain the explicit configured probes first. Then add a bounded
         # geometric ladder toward the authorized cap. This is discovery-only:
@@ -233,7 +235,6 @@ class RuntimePrimaryScanFacade:
                 # At most four additional larger probes plus the exact cap. The
                 # logarithmic spacing avoids a 4x blind spot without creating an
                 # unbounded RPC fan-out for very large caps.
-                import math
                 for step in range(1, 5):
                     fraction = float(step) / 5.0
                     multipliers.append(ratio ** fraction)
