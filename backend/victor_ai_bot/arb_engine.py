@@ -69,9 +69,13 @@ def _record_size_economic_diagnostic(
     flashloan_fee_wei: int,
     gas_cost_wei: int,
     reason: str,
+    legs: Optional[List[Dict[str, Any]]] = None,
     max_samples: int = 16,
 ) -> None:
-    """Retain bounded economic near-misses without promoting them to opportunities."""
+    """Retain bounded economic near-misses without promoting them to opportunities.
+
+    Route details are diagnostic evidence only and never grant execution authority.
+    """
     row = {
         "route_id": str(route_id),
         "amount_in": str(max(0, int(amount_in))),
@@ -85,6 +89,7 @@ def _record_size_economic_diagnostic(
         "authoritative": False,
         "reason": str(reason or "non_positive_gross_profit"),
         "diagnostic_only": True,
+        "legs": [dict(leg) for leg in (legs or []) if isinstance(leg, dict)][:3],
     }
     samples = list(metrics.get("size_economic_diagnostics") or [])
     samples.append(row)
@@ -682,6 +687,10 @@ async def find_two_leg_opportunities(
                     flashloan_fee_wei=int(flashloan_fee_wei),
                     gas_cost_wei=int(gas_cost_wei),
                     reason="non_positive_gross_profit",
+                    legs=[
+                        {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
+                        {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
+                    ]
                 )
                 metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
                 continue
@@ -1021,6 +1030,11 @@ async def find_three_leg_opportunities(
                             flashloan_fee_wei=int(flashloan_fee_wei),
                             gas_cost_wei=int(gas_cost_wei),
                             reason="non_positive_gross_profit",
+                            legs=[
+                                {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
+                                {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
+                                {"dex": str(e3.dex), "venue": str(e3.venue), "token_in": str(e3.token_in), "token_out": str(e3.token_out), "fee": int(meta3.get("fee", e3.params.get("fee", 0) or 0)), "pool": str(e3.params.get("pool") or e3.venue), "amount_in": str(int(out2)), "quoted_amount_out": str(int(out3)), "min_out": str(int(min3)), "slippage_reserve": str(max(0, int(out3) - int(min3))), "quote_meta": dict(meta3)},
+                            ]
                         )
                         continue
 
