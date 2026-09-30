@@ -106,6 +106,54 @@ def test_size_economic_diagnostic_is_bounded_and_keeps_closest_gross_routes():
     assert all(row["diagnostic_only"] is True for row in rows)
 
 
+def test_size_economic_diagnostic_preserves_per_leg_quote_and_slippage_evidence():
+    metrics = {}
+    _record_size_economic_diagnostic(
+        metrics,
+        route_id="route-trace",
+        amount_in=5_000,
+        gross_profit_wei=100,
+        flashloan_fee_wei=5,
+        gas_cost_wei=20,
+        reason="non_positive_gross_profit",
+        legs=[
+            {
+                "dex": "univ3",
+                "venue": "0xrouter",
+                "token_in": "0xaaa",
+                "token_out": "0xbbb",
+                "fee": 500,
+                "pool": "0xpool1",
+                "amount_in": "5000",
+                "quoted_amount_out": "5100",
+                "min_out": "5074",
+                "slippage_reserve": "26",
+                "quote_meta": {"fee": 500},
+            },
+            {
+                "dex": "univ3",
+                "venue": "0xrouter",
+                "token_in": "0xbbb",
+                "token_out": "0xaaa",
+                "fee": 3000,
+                "pool": "0xpool2",
+                "amount_in": "5100",
+                "quoted_amount_out": "5100",
+                "min_out": "5074",
+                "slippage_reserve": "26",
+                "quote_meta": {"fee": 3000},
+            },
+        ],
+    )
+    row = metrics["size_economic_diagnostics"][0]
+    assert row["legs"][0]["fee"] == 500
+    assert row["legs"][0]["pool"] == "0xpool1"
+    assert row["legs"][0]["quoted_amount_out"] == "5100"
+    assert row["legs"][0]["slippage_reserve"] == "26"
+    assert row["legs"][1]["fee"] == 3000
+
+
+
 
 def test_pool_key_falls_back_for_malformed_curve_metadata():
     key = _pool_keys_for_leg(
