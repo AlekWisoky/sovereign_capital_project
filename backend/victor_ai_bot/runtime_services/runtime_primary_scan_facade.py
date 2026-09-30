@@ -451,6 +451,10 @@ class RuntimePrimaryScanFacade:
 
             # Preserve the full diagnostic sizing matrix before route-level
             # deduplication. This is evidence only; it never grants execution authority.
+            telemetry["size_economic_diagnostics"] = [
+                *list(two_leg_telemetry.get("size_economic_diagnostics") or []),
+                *list(three_leg_telemetry.get("size_economic_diagnostics") or []),
+            ]
             telemetry["size_economic_evidence"] = [
                 {
                     "route_id": _candidate_route_key(candidate),
