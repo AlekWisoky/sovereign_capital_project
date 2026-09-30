@@ -58,3 +58,30 @@ def test_estimate_route_gas_units_does_not_swallow_unexpected_venues_bug() -> No
     meta = {'venues': _BadSequence()}
     with pytest.raises(RuntimeError, match='unexpected iter bug'):
         gas_model.estimate_route_gas_units(meta)
+
+
+
+def test_estimate_gas_cost_uses_observed_price_for_expected_cost() -> None:
+    cfg = type("Cfg", (), {
+        "execution": type("Execution", (), {
+            "gas_mode": "standard",
+            "gas_presets": type("Presets", (), {"standard_max_fee_gwei": 25})(),
+        })(),
+    })()
+    units = 500_000
+    assert gas_model.estimate_gas_cost_wei_from_cfg(
+        cfg, units, observed_gas_price_wei=1_000_000_000
+    ) == units * 1_000_000_000
+    assert gas_model.estimate_gas_cost_wei_from_cfg(cfg, units) == units * 25_000_000_000
+
+
+def test_estimate_gas_cost_falls_back_when_observed_price_is_unavailable() -> None:
+    cfg = type("Cfg", (), {
+        "execution": type("Execution", (), {
+            "gas_mode": "standard",
+            "gas_presets": type("Presets", (), {"standard_max_fee_gwei": 25})(),
+        })(),
+    })()
+    assert gas_model.estimate_gas_cost_wei_from_cfg(
+        cfg, 500_000, observed_gas_price_wei=0
+    ) == 500_000 * 25_000_000_000
