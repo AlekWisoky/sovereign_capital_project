@@ -212,6 +212,20 @@ class RuntimePrimaryScanFacade:
         if borrow_cap > 0:
             base = min(base, borrow_cap)
 
+        # A zero configured borrow cap means the execution bankroll has no
+        # explicit operator ceiling. Discovery must not interpret that as
+        # permission to scan an unbounded notional, so use a separate,
+        # diagnostic-only ceiling. An explicit borrow cap always wins.
+        discovery_max_multiplier = 16.0
+        try:
+            discovery_max_multiplier = float(
+                os.environ.get("VICTOR_ADAPTIVE_SIZE_DISCOVERY_MAX_MULTIPLIER", "16.0")
+                or 16.0
+            )
+        except (TypeError, ValueError):
+            discovery_max_multiplier = 16.0
+        discovery_max_multiplier = max(1.0, min(64.0, discovery_max_multiplier))
+
         multipliers: List[float] = []
         for item in str(raw).split(","):
             try:
@@ -229,16 +243,21 @@ class RuntimePrimaryScanFacade:
         # every point is still requoted and economically revalidated before it can
         # influence the retained opportunity, and no point grants execution
         # authority by itself.
-        if borrow_cap > base:
-            ratio = float(borrow_cap) / float(base)
-            if ratio > 1.0:
-                # At most four additional larger probes plus the exact cap. The
-                # logarithmic spacing avoids a 4x blind spot without creating an
-                # unbounded RPC fan-out for very large caps.
-                for step in range(1, 4):
-                    fraction = float(step) / 4.0
-                    multipliers.append(ratio ** fraction)
-                multipliers.append(ratio)
+        target_ratio = (
+            float(borrow_cap) / float(base)
+            if borrow_cap > base
+            else float(discovery_max_multiplier)
+        )
+        if target_ratio > 1.0:
+            # At most three interpolated larger probes plus the exact target.
+            # Logarithmic spacing avoids a large blind spot without creating an
+            # unbounded RPC fan-out. When a real borrow cap exists it is the
+            # target; otherwise this is discovery-only and never changes the
+            # execution cap.
+            for step in range(1, 4):
+                fraction = float(step) / 4.0
+                multipliers.append(target_ratio ** fraction)
+            multipliers.append(target_ratio)
 
         # Preserve smaller probes and deduplicate after rounding to wei. Hard cap
         # the total number of alternative sizes to eight.
