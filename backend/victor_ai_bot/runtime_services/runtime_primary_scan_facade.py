@@ -33,7 +33,11 @@ def _canonical_route_universe_telemetry(
 
 def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     meta = getattr(candidate, "meta", {}) or {}
-    profitability = meta.get("profitability") if isinstance(meta, dict) else {}
+    profitability = (
+        (meta.get("profitability") or {})
+        if isinstance(meta, dict)
+        else {}
+    )
     return {
         "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
         "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
@@ -694,9 +698,8 @@ class RuntimePrimaryScanFacade:
 
             # Preserve one bounded row per scanned size so production can distinguish
             # "no route quoted" from "route quoted but economically rejected".
-            telemetry["size_economic_matrix"] = _build_size_economic_matrix(
-                size_scan_records
-            )
+            size_matrix = _build_size_economic_matrix(size_scan_records)
+            telemetry["size_economic_matrix"] = size_matrix
 
             telemetry["adaptive_size_discovery"] = {
                 "enabled": bool(len(adaptive_amounts) > 1),
