@@ -413,13 +413,57 @@ class RuntimePrimaryScanFacade:
             three_leg_telemetry.update(base_three_metrics)
             candidates_before_probe = len(opps2) + len(opps3)
 
+            def _authoritative_positive_after_cost_count(
+                candidates: List[Opportunity],
+            ) -> int:
+                count = 0
+                for candidate in candidates:
+                    meta = getattr(candidate, "meta", {}) or {}
+                    profitability = meta.get("profitability") if isinstance(meta, dict) else None
+                    if not isinstance(profitability, dict):
+                        continue
+                    if not bool(profitability.get("revalidated")) or not bool(
+                        profitability.get("authoritative")
+                    ):
+                        continue
+                    try:
+                        if int(profitability.get("profit_after_costs_wei") or 0) > 0:
+                            count += 1
+                    except (TypeError, ValueError):
+                        continue
+                return count
+
+            # Probe sufficiency must be measured in authoritative after-cost
+            # opportunities, not merely gross candidates. Otherwise two gross
+            # near-misses can suppress institutional size discovery even though
+            # neither candidate can pay the flashloan fee and gas.
+            authoritative_positive_candidates_before_probe = 0
+            probe_basis = "gross_candidate_count"
+            if candidates_before_probe >= min_opportunities:
+                await self._annotate_canonical_after_fee_usd(
+                    opps=[*opps2, *opps3],
+                    rpc=rpc,
+                    current_block=int(current_block),
+                    cache=scan_cache,
+                )
+                authoritative_positive_candidates_before_probe = (
+                    _authoritative_positive_after_cost_count([*opps2, *opps3])
+                )
+                probe_basis = "authoritative_after_cost_positive_count"
+
+            should_probe = (
+                candidates_before_probe < min_opportunities
+                or (
+                    candidates_before_probe >= min_opportunities
+                    and authoritative_positive_candidates_before_probe < min_opportunities
+                )
+            )
+
             # Only expand the discovery universe when the base notional does not
-            # provide enough candidates. Alternative sizes are discovery probes,
-            # not execution decisions, and are never broadcast automatically.
-            if (
-                len(opps2) + len(opps3) < min_opportunities
-                and len(adaptive_amounts) > 1
-            ):
+            # provide enough authoritative after-cost opportunities. Alternative
+            # sizes are discovery probes, not execution decisions, and are never
+            # broadcast automatically.
+            if should_probe and len(adaptive_amounts) > 1:
                 size_amounts.extend(adaptive_amounts[1:])
                 for probe_amount in adaptive_amounts[1:]:
                     probe_two, probe_three, probe_two_metrics, probe_three_metrics = await _run_size_scan(
@@ -556,6 +600,10 @@ class RuntimePrimaryScanFacade:
                 "candidates_before_probe": int(candidates_before_probe),
                 "candidates_after_probe": int(candidates_after_probe),
                 "probe_candidate_delta": int(candidates_after_probe - candidates_before_probe),
+                "authoritative_positive_candidates_before_probe": int(
+                    authoritative_positive_candidates_before_probe
+                ),
+                "probe_basis": str(probe_basis),
                 "best_sizing_variants": [],
                 "borrow_cap_wei": str(
                     max(
@@ -598,6 +646,10 @@ class RuntimePrimaryScanFacade:
                 "candidates_before_probe": int(candidates_before_probe),
                 "candidates_after_probe": int(candidates_after_probe),
                 "probe_candidate_delta": int(candidates_after_probe - candidates_before_probe),
+                "authoritative_positive_candidates_before_probe": int(
+                    authoritative_positive_candidates_before_probe
+                ),
+                "probe_basis": str(probe_basis),
                 "distinct_route_ids_before_probe": len({
                     _candidate_route_key(candidate) for candidate in [*base_two, *base_three]
                 }),
