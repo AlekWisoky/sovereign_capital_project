@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb_engine_module
-from victor_ai_bot.arb_engine import Edge, quote_edge, requote_opportunity, _pool_keys_for_leg, _classify_route_family
+from victor_ai_bot.arb_engine import Edge, quote_edge, requote_opportunity, _pool_keys_for_leg, _classify_route_family, _record_size_economic_diagnostic
 from victor_ai_bot.cache import PerBlockCache
 from victor_ai_bot.models import Opportunity, Route, RouteLeg
 
@@ -84,6 +84,27 @@ async def test_quote_edge_programmer_bug_is_not_swallowed(monkeypatch):
 
     with pytest.raises(NameError):
         await quote_edge(object(), _cfg(), PerBlockCache(), edge, 100)
+
+
+def test_size_economic_diagnostic_is_bounded_and_keeps_closest_gross_routes():
+    metrics = {}
+    for gross in (-500, -10, -100, -1, -250, -5, -300, -20, -30, -40, -50, -60, -70, -80, -90, -110, -120):
+        _record_size_economic_diagnostic(
+            metrics,
+            route_id=f"route-{gross}",
+            amount_in=100,
+            gross_profit_wei=gross,
+            flashloan_fee_wei=1,
+            gas_cost_wei=2,
+            reason="non_positive_gross_profit",
+        )
+
+    rows = metrics["size_economic_diagnostics"]
+    assert len(rows) == 16
+    assert rows[0]["gross_profit_wei"] == "-1"
+    assert rows[0]["after_cost_profit_wei"] == "-4"
+    assert all(row["diagnostic_only"] is True for row in rows)
+
 
 
 def test_pool_key_falls_back_for_malformed_curve_metadata():
