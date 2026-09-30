@@ -79,6 +79,37 @@ def _build_size_economic_matrix(
         two_metrics = dict(record.get("two_metrics") or {})
         three_metrics = dict(record.get("three_metrics") or {})
         route_rows = [_size_economic_candidate_row(candidate) for candidate in candidates]
+
+        # Gross-rejected routes are intentionally removed from the retained
+        # opportunity list, but their bounded economic diagnostics are the
+        # evidence needed to distinguish "no gross edge" from "gross edge
+        # consumed by flashloan/gas costs". Preserve those diagnostics in the
+        # per-size matrix without promoting them to execution candidates.
+        diagnostic_rows = []
+        for diagnostic in list(
+            two_metrics.get("size_economic_diagnostics") or []
+        ) + list(
+            three_metrics.get("size_economic_diagnostics") or []
+        ):
+            if not isinstance(diagnostic, dict):
+                continue
+            diagnostic_rows.append({
+                "route_id": str(diagnostic.get("route_id") or ""),
+                "gross_profit_wei": str(diagnostic.get("gross_profit_wei") or "0"),
+                "flashloan_fee_wei": str(diagnostic.get("flashloan_fee_wei") or "0"),
+                "gas_cost_wei": str(diagnostic.get("gas_cost_wei") or "0"),
+                "after_cost_profit_wei": str(diagnostic.get("after_cost_profit_wei") or "0"),
+                "revalidated": bool(diagnostic.get("revalidated")),
+                "authoritative": bool(diagnostic.get("authoritative")),
+                "reason": str(diagnostic.get("reason") or "diagnostic_only"),
+                "diagnostic_only": True,
+            })
+        existing_route_ids = {existing["route_id"] for existing in route_rows}
+        route_rows.extend(
+            row for row in diagnostic_rows
+            if row["route_id"] and row["route_id"] not in existing_route_ids
+        )
+
         positive = [
             row for row in route_rows
             if row["revalidated"]
