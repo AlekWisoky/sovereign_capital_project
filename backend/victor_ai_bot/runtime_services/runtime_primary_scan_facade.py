@@ -385,6 +385,11 @@ class RuntimePrimaryScanFacade:
                                 merged[str(reason)] = int(merged.get(str(reason), 0)) + int(count)
                             if merged:
                                 target[key] = merged
+                        if source.get("size_economic_diagnostics"):
+                            target.setdefault("size_economic_diagnostics", [])
+                            target["size_economic_diagnostics"].extend(
+                                list(source.get("size_economic_diagnostics") or [])
+                            )
                         target["budget_exhausted_after_quote"] = bool(
                             target.get("budget_exhausted_after_quote", False)
                             or source.get("budget_exhausted_after_quote", False)
@@ -466,6 +471,9 @@ class RuntimePrimaryScanFacade:
                 }
                 for candidate in [*opps2, *opps3]
             ]
+            telemetry["size_economic_evidence"].extend(
+                list(telemetry.get("size_economic_diagnostics") or [])
+            )
 
             telemetry["adaptive_size_discovery"] = {
                 "enabled": bool(len(adaptive_amounts) > 1),
@@ -551,7 +559,14 @@ class RuntimePrimaryScanFacade:
                     )
                 ),
                 "size_economic_evidence": list(telemetry.get("size_economic_evidence") or []),
-                "economic_matrix_complete": True,
+                "economic_matrix_complete": bool(
+                    size_amounts
+                    and {
+                        str(row.get("amount_in"))
+                        for row in (telemetry.get("size_economic_evidence") or [])
+                        if row.get("amount_in")
+                    }.issuperset({str(int(x)) for x in size_amounts})
+                ),
             }
             # Rank authoritative after-cost truth first. For legacy/unverified
             # candidates, preserve the established after-gas-then-gross numeric ordering
