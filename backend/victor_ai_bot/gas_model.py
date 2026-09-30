@@ -62,10 +62,17 @@ def _gwei_to_wei(gwei: int) -> int:
     return int(gwei) * 1_000_000_000
 
 
-def estimate_gas_cost_wei_from_cfg(cfg: Any, gas_units: int) -> int:
-    """Estimate gas cost in wei based on configured gas preset max fee for current mode.
+def estimate_gas_cost_wei_from_cfg(
+    cfg: Any,
+    gas_units: int,
+    *,
+    observed_gas_price_wei: int | None = None,
+) -> int:
+    """Estimate expected gas cost in wei for read-only economic ranking.
 
-    Used only for ranking. Execution uses live gas suggestion.
+    An observed network gas price represents expected cost; the configured
+    max-fee preset is a submission ceiling and must not be treated as expected
+    cost. When no live price is available, retain the conservative fallback.
     """
     mode = str(getattr(getattr(cfg, "execution", None), "gas_mode", "standard") or "standard")
     presets = getattr(getattr(cfg, "execution", None), "gas_presets", None)
@@ -77,4 +84,11 @@ def estimate_gas_cost_wei_from_cfg(cfg: Any, gas_units: int) -> int:
             max_fee_gwei = int(getattr(presets, "instant_max_fee_gwei", max_fee_gwei))
         else:
             max_fee_gwei = int(getattr(presets, "standard_max_fee_gwei", max_fee_gwei))
+    if observed_gas_price_wei is not None:
+        try:
+            observed = max(0, int(observed_gas_price_wei))
+        except (TypeError, ValueError):
+            observed = 0
+        if observed > 0:
+            return int(gas_units) * observed
     return int(gas_units) * _gwei_to_wei(int(max_fee_gwei))
