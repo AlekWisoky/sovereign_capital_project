@@ -332,6 +332,19 @@ def test_adaptive_scan_amounts_reaches_large_borrow_cap(monkeypatch):
     assert len(amounts) <= 9
 
 
+def test_adaptive_scan_amounts_uses_bounded_capless_discovery(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.safety.max_borrow_amount = "0"
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY_MAX_MULTIPLIER", "16")
+
+    amounts = runtime._adaptive_scan_amounts(1000)
+
+    assert amounts == [1000, 500, 1500, 2000, 4000, 8000, 16000]
+    assert len(amounts) <= 9
+
+
 @pytest.mark.asyncio
 async def test_scan_selects_same_route_variant_by_verified_after_cost(monkeypatch):
     runtime = _Runtime()
