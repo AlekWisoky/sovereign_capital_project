@@ -307,6 +307,73 @@ async def test_scan_preserves_per_size_near_miss_economics_when_no_gross_candida
 
 
 
+@pytest.mark.asyncio
+async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    runtime.cfg.execution = SimpleNamespace(
+        usd_accounting_enabled=False,
+        flashloan_fee_bps=9,
+    )
+    runtime.cfg.safety.minProfitAbs = 0
+    runtime.cfg.safety.minProfitBps = 0
+    calls = []
+
+    def sized_candidate(route_id: str, amount: int):
+        return SimpleNamespace(
+            id=f"{route_id}-{amount}",
+            route_id=route_id,
+            expected_profit_raw="100000",
+            route=SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+            ),
+            meta={
+                "profitability": {
+                    "valid": True,
+                    "revalidated": True,
+                    "authoritative": True,
+                    "reason": "after_cost_non_positive",
+                    "profit_after_costs_wei": "0",
+                    "flashloan_fee_wei": "90",
+                    "gas_cost_wei": "100000",
+                }
+            },
+        )
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        amount = int(kwargs["amount_in"])
+        calls.append(amount)
+        kwargs["telemetry"].update({
+            "quote_requests": 1,
+            "quote_successes": 1,
+            "routes_considered": 1,
+            "edges_generated": 1,
+            "route_groups_evaluated": 1,
+        })
+        if amount == 100:
+            return [
+                sized_candidate("route-a", amount),
+                sized_candidate("route-b", amount),
+            ]
+        return []
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(
+        object(), current_block=321, amount_in=100
+    )
+
+    assert {int(o.route.legs[0].amount_in) for o in opps} == {100}
+    assert calls == [100, 50, 200, 400, 800, 1600]
+    adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
+    assert adaptive["candidates_before_probe"] == 2
+    assert adaptive["authoritative_positive_candidates_before_probe"] == 0
+    assert adaptive["probe_basis"] == "authoritative_after_cost_positive_count"
+    assert adaptive["probe_triggered"] is True
+
+
 def test_adaptive_scan_amounts_respects_borrow_cap(monkeypatch):
     runtime = _Runtime()
     runtime.cfg.safety.max_borrow_amount = "1500"
