@@ -413,7 +413,7 @@ class RuntimePrimaryScanFacade:
             two_leg_telemetry.update(base_two_metrics)
             three_leg_telemetry.update(base_three_metrics)
             size_scan_records.append({
-                "amount_in": int(size_amount),
+                "amount_in": int(amount_in),
                 "two": list(base_two),
                 "three": list(base_three),
                 "two_metrics": dict(base_two_metrics),
