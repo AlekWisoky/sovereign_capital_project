@@ -318,6 +318,7 @@
     "test_server_boot_maintenance.py",
     "test_shadow_venue_discovery.py",
     "test_smmae_engine.py",
+    "test_size_economic_matrix_diagnostics.py",
     "test_spread_engine_hardening.py",
     "test_spread_formulas.py",
     "test_stability_maintenance.py",
