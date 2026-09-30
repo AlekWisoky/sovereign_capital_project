@@ -52,6 +52,20 @@ class _Runtime(RuntimeStateFacade):
                 "route_groups_evaluated": 3,
                 "budget_exhausted_after_quote": False,
             },
+            "size_economic_matrix": [{
+                "amount_in": "100",
+                "quote_requests": 10,
+                "quote_successes": 8,
+                "quote_failures": 2,
+                "candidates": [],
+                "selection_basis": "gross_profit_diagnostic_only",
+            }],
+            "size_economic_evidence": [{
+                "route_id": "route-1",
+                "amount_in": "100",
+                "after_cost_profit_wei": "0",
+            }],
+            "size_economic_diagnostics": [],
         }
         self._opps = [
             SimpleNamespace(meta={
@@ -111,6 +125,9 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "after_fee_candidates": 0,
         "after_fee_positive_candidates": 0,
     }
+    assert out["size_economic_matrix"][0]["amount_in"] == "100"
+    assert out["size_economic_matrix"][0]["quote_failures"] == 2
+    assert out["size_economic_evidence"][0]["route_id"] == "route-1"
 
 
 def test_market_pipeline_telemetry_counts_canonical_profitability_when_candidates_exist():

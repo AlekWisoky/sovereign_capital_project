@@ -395,6 +395,14 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
     assert adaptive["authoritative_positive_candidates_before_probe"] == 0
     assert adaptive["probe_basis"] == "authoritative_after_cost_positive_count"
     assert adaptive["probe_triggered"] is True
+    matrix = runtime._market_pipeline_telemetry["size_economic_matrix"]
+    assert [row["amount_in"] for row in matrix] == ["100", "50", "200", "400", "800", "1600"]
+    assert matrix[0]["quote_successes"] == 1
+    assert matrix[0]["quote_failures"] == 0
+    assert matrix[0]["candidates"][0]["route_id"] == "route-a"
+    assert matrix[0]["candidates"][0]["after_cost_profit_wei"] == "0"
+    assert matrix[0]["selection_basis"] == "gross_profit_diagnostic_only"
+    assert all(row["selection_basis"] == "gross_profit_diagnostic_only" for row in matrix)
 
 
 def test_adaptive_scan_amounts_respects_borrow_cap(monkeypatch):

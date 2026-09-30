@@ -115,6 +115,18 @@ class RuntimeStateFacade:
             },
             "rpc": dict(telemetry.get("rpc") or {}),
             "adaptive_size_discovery": dict(telemetry.get("adaptive_size_discovery") or {}),
+            "size_economic_matrix": [
+                dict(row) for row in (telemetry.get("size_economic_matrix") or [])
+                if isinstance(row, dict)
+            ],
+            "size_economic_evidence": [
+                dict(row) for row in (telemetry.get("size_economic_evidence") or [])
+                if isinstance(row, dict)
+            ],
+            "size_economic_diagnostics": [
+                dict(row) for row in (telemetry.get("size_economic_diagnostics") or [])
+                if isinstance(row, dict)
+            ],
             "route_universe": dict(telemetry.get("route_universe") or {}),
             "route_evaluation": dict(telemetry.get("route_evaluation") or {}),
             "route_rejections": dict(telemetry.get("route_rejections") or {}),
