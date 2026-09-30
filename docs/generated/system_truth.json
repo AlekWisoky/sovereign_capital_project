@@ -314,6 +314,7 @@
     "test_runtime_treasury_overlay_facade_extraction.py",
     "test_runtime_unit_econ_facade_extraction.py",
     "test_safety.py",
+    "test_scan_profitability_output_semantics.py",
     "test_sentry_config.py",
     "test_server_boot_maintenance.py",
     "test_shadow_venue_discovery.py",
