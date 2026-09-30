@@ -235,6 +235,14 @@ class RuntimePrimaryScanFacade:
                         stage="scan_after_fee_revalidation",
                         source="runtime_primary_scan",
                         gas_cost_wei=gas_cost_wei,
+                        quoted_amount_out_wei=(
+                            int(
+                                meta.get("out3")
+                                or meta.get("out2")
+                            )
+                            if meta.get("out3") or meta.get("out2")
+                            else None
+                        ),
                     )
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                     # One malformed candidate must not erase the entire
