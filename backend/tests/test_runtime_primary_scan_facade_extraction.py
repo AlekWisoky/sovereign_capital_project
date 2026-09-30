@@ -62,12 +62,35 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
         calls['two'] = {'rpc': rpc, 'cfg': cfg, 'cache': cache, 'block_number': block_number, **kwargs}
         kwargs['telemetry'].update({'quote_requests': 10, 'quote_successes': 8, 'routes_considered': 12, 'edges_generated': 6, 'quote_phase_ms': 100.0, 'route_evaluation_ms': 20.0, 'route_groups_evaluated': 2, 'budget_exhausted_after_quote': True})
-        return [_opp(5), _opp(20), _opp(-1, expected=11)]
+        candidates = [_opp(5), _opp(20), _opp(-1, expected=11)]
+        for candidate in candidates:
+            candidate.meta["profitability"] = {
+                "valid": True,
+                "revalidated": True,
+                "authoritative": True,
+                "reason": "ok",
+                "profit_after_costs_wei": str(
+                    int(candidate.meta.get("profit_after_gas_estimate_wei") or candidate.expected_profit_raw)
+                ),
+                "flashloan_fee_wei": "1",
+                "gas_cost_wei": "1",
+            }
+        return candidates
 
     async def fake_three(rpc, cfg, cache, block_number, **kwargs):
         calls['three'] = {'rpc': rpc, 'cfg': cfg, 'cache': cache, 'block_number': block_number, **kwargs}
         kwargs['telemetry'].update({'quote_requests': 4, 'quote_successes': 4, 'routes_considered': 5, 'edges_generated': 3, 'quote_phase_ms': 30.0, 'route_evaluation_ms': 7.5, 'route_groups_evaluated': 1, 'budget_exhausted_after_quote': False})
-        return [_opp(15)]
+        candidate = _opp(15)
+        candidate.meta["profitability"] = {
+            "valid": True,
+            "revalidated": True,
+            "authoritative": True,
+            "reason": "ok",
+            "profit_after_costs_wei": "15",
+            "flashloan_fee_wei": "1",
+            "gas_cost_wei": "1",
+        }
+        return [candidate]
 
     monkeypatch.setattr(scan_mod, 'find_two_leg_opportunities', fake_two)
     monkeypatch.setattr(scan_mod, 'find_three_leg_opportunities', fake_three)
