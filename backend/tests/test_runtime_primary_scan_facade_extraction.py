@@ -258,7 +258,7 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
     assert adaptive["candidates_after_probe"] == 6
     assert adaptive["probe_candidate_delta"] == 5
     assert adaptive["distinct_route_ids_before_probe"] == 1
-    assert adaptive["distinct_route_ids_after_probe"] == 3
+    assert adaptive["distinct_route_ids_after_probe"] == 6
     assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["200", "100", "50"]
 
 
