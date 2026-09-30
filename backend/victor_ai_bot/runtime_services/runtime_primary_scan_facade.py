@@ -18,6 +18,21 @@ from .profitability_truth import opportunity_profit_sort_key
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
+def _resolve_scan_quoted_amount(meta: Dict[str, Any]) -> int | None:
+    """Return the first positive quoted terminal output, preferring the final leg."""
+    for key in ("out3", "out2"):
+        value = meta.get(key)
+        if value is None:
+            continue
+        try:
+            amount = int(value)
+        except (TypeError, ValueError):
+            continue
+        if amount > 0:
+            return amount
+    return None
+
+
 
 def _canonical_route_universe_telemetry(
     two_leg: Dict[str, Any],
@@ -235,14 +250,7 @@ class RuntimePrimaryScanFacade:
                         stage="scan_after_fee_revalidation",
                         source="runtime_primary_scan",
                         gas_cost_wei=gas_cost_wei,
-                        quoted_amount_out_wei=(
-                            int(
-                                meta.get("out3")
-                                or meta.get("out2")
-                            )
-                            if meta.get("out3") or meta.get("out2")
-                            else None
-                        ),
+                        quoted_amount_out_wei=_resolve_scan_quoted_amount(meta),
                     )
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                     # One malformed candidate must not erase the entire
