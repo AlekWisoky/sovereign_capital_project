@@ -235,8 +235,8 @@ class RuntimePrimaryScanFacade:
                 # At most four additional larger probes plus the exact cap. The
                 # logarithmic spacing avoids a 4x blind spot without creating an
                 # unbounded RPC fan-out for very large caps.
-                for step in range(1, 5):
-                    fraction = float(step) / 5.0
+                for step in range(1, 4):
+                    fraction = float(step) / 4.0
                     multipliers.append(ratio ** fraction)
                 multipliers.append(ratio)
 
