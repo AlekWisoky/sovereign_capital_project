@@ -264,7 +264,6 @@
       "backend/tests/test_server_boot_maintenance.py",
       "backend/tests/test_shadow_venue_discovery.py",
       "backend/tests/test_smmae_engine.py",
-      "backend/tests/test_size_economic_matrix_diagnostics.py",
       "backend/tests/test_spread_engine_hardening.py",
       "backend/tests/test_spread_formulas.py",
       "backend/tests/test_stability_maintenance.py",
@@ -671,3 +670,4 @@
     "runtime_surface_summary": true
   }
 }
+      "backend/tests/test_size_economic_matrix_diagnostics.py",
