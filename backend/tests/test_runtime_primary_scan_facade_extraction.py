@@ -209,7 +209,7 @@ def test_adaptive_scan_amounts_returns_bounded_size_ladder(monkeypatch):
 
     amounts = runtime._adaptive_scan_amounts(1000)
 
-    assert amounts == [1000, 500, 2000]
+    assert amounts == [1000, 500, 2000, 4000, 8000, 16000]
     assert runtime._adaptive_size_min_opportunities == 2
 
 
@@ -249,17 +249,17 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
 
     opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
 
-    assert calls == [100, 50, 200]
-    assert len(opps) == 3
-    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200"]
+    assert calls == [100, 50, 200, 400, 800, 1600]
+    assert len(opps) == 6
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200", "400", "800", "1600"]
     adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
     assert adaptive["probe_triggered"] is True
     assert adaptive["candidates_before_probe"] == 1
-    assert adaptive["candidates_after_probe"] == 3
-    assert adaptive["probe_candidate_delta"] == 2
+    assert adaptive["candidates_after_probe"] == 6
+    assert adaptive["probe_candidate_delta"] == 5
     assert adaptive["distinct_route_ids_before_probe"] == 1
-    assert adaptive["distinct_route_ids_after_probe"] == 3
-    assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["200", "100", "50"]
+    assert adaptive["distinct_route_ids_after_probe"] == 6
+    assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["1600", "800", "400", "200", "100", "50"]
 
 
 @pytest.mark.asyncio
@@ -299,9 +299,9 @@ async def test_scan_preserves_per_size_near_miss_economics_when_no_gross_candida
     opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
 
     assert opps == []
-    assert calls == [100, 50, 200]
+    assert calls == [100, 50, 200, 400, 800, 1600]
     evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
-    assert [row["amount_in"] for row in evidence] == ["100", "50", "200"]
+    assert [row["amount_in"] for row in evidence] == ["100", "50", "200", "400", "800", "1600"]
     assert all(row["diagnostic_only"] is True for row in evidence)
     assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["economic_matrix_complete"] is True
 
@@ -329,6 +329,19 @@ def test_adaptive_scan_amounts_reaches_large_borrow_cap(monkeypatch):
     assert 1500 in amounts
     assert 4000 in amounts
     assert amounts[-1] == 10000
+    assert len(amounts) <= 9
+
+
+def test_adaptive_scan_amounts_uses_bounded_capless_discovery(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.safety.max_borrow_amount = "0"
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY_MAX_MULTIPLIER", "16")
+
+    amounts = runtime._adaptive_scan_amounts(1000)
+
+    assert amounts == [1000, 500, 1500, 2000, 4000, 8000, 16000]
     assert len(amounts) <= 9
 
 
@@ -449,9 +462,9 @@ async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypa
     assert len(opps) == 1
     assert int(opps[0].route.legs[0].amount_in) == 50
     evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
-    assert [row["amount_in"] for row in evidence] == ["100", "50", "200"]
-    assert [row["after_cost_profit_wei"] for row in evidence] == ["200", "300", "250"]
-    assert all(row["authoritative"] is True for row in evidence)
+    assert [row["amount_in"] for row in evidence] == ["100", "50", "200", "400", "800", "1600"]
+    assert [row["after_cost_profit_wei"] for row in evidence] == ["200", "300", "250", "0", "0", "0"]
+    assert [row["authoritative"] for row in evidence] == [True, True, True, False, False, False]
 
 
 @pytest.mark.asyncio
@@ -534,12 +547,12 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
         object(), current_block=321, amount_in=100
     )
 
-    assert len(opps) == 3
-    assert {int(opp.route.legs[0].amount_in) for opp in opps} == {50, 100, 200}
+    assert len(opps) == 6
+    assert {int(opp.route.legs[0].amount_in) for opp in opps} == {50, 100, 200, 400, 800, 1600}
     adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
-    assert adaptive["amounts_scanned"] == ["100", "50", "200"]
+    assert adaptive["amounts_scanned"] == ["100", "50", "200", "400", "800", "1600"]
     assert adaptive["economic_matrix_complete"] is True
     evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
-    assert len(evidence) == 3
+    assert len(evidence) == 6
     assert all(row["authoritative"] is False for row in evidence)
     assert all(row["reason"] == "revalidation_exception:ValueError" for row in evidence)
