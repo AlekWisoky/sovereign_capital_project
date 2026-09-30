@@ -64,3 +64,12 @@ def test_revalidation_without_fresh_quote_keeps_min_out_fallback():
     assert state["valid"] is False
     assert state["reason"] == "does_not_repay_flashloan"
     assert state["amount_out_wei"] == "995"
+
+
+
+def test_scan_quoted_amount_ignores_zero_final_leg_and_uses_second_leg():
+    from victor_ai_bot.runtime_services.runtime_primary_scan_facade import _resolve_scan_quoted_amount
+
+    assert _resolve_scan_quoted_amount({"out3": "0", "out2": "1010"}) == 1010
+    assert _resolve_scan_quoted_amount({"out3": "1015", "out2": "1010"}) == 1015
+    assert _resolve_scan_quoted_amount({"out3": "0", "out2": "0"}) is None
