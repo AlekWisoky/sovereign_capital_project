@@ -251,7 +251,7 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
 
     assert calls == [100, 50, 200, 400, 800, 1600]
     assert len(opps) == 6
-    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200"]
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["amounts_scanned"] == ["100", "50", "200", "400", "800", "1600"]
     adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
     assert adaptive["probe_triggered"] is True
     assert adaptive["candidates_before_probe"] == 1
@@ -463,7 +463,7 @@ async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypa
     assert int(opps[0].route.legs[0].amount_in) == 50
     evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
     assert [row["amount_in"] for row in evidence] == ["100", "50", "200", "400", "800", "1600"]
-    assert [row["after_cost_profit_wei"] for row in evidence] == ["200", "300", "250"]
+    assert [row["after_cost_profit_wei"] for row in evidence] == ["200", "300", "250", "0", "0", "0"]
     assert all(row["authoritative"] is True for row in evidence)
 
 
@@ -548,7 +548,7 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
     )
 
     assert len(opps) == 6
-    assert {int(opp.route.legs[0].amount_in) for opp in opps} == {50, 100, 200}
+    assert {int(opp.route.legs[0].amount_in) for opp in opps} == {50, 100, 200, 400, 800, 1600}
     adaptive = runtime._market_pipeline_telemetry["adaptive_size_discovery"]
     assert adaptive["amounts_scanned"] == ["100", "50", "200"]
     assert adaptive["economic_matrix_complete"] is True
