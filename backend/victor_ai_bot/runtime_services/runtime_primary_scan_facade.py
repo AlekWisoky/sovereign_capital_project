@@ -31,6 +31,92 @@ def _canonical_route_universe_telemetry(
     )
 
 
+def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
+    meta = getattr(candidate, "meta", {}) or {}
+    profitability = meta.get("profitability") if isinstance(meta, dict) else {}
+    return {
+        "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
+        "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+        "flashloan_fee_wei": str(profitability.get("flashloan_fee_wei") or "0"),
+        "gas_cost_wei": str(
+            profitability.get("gas_cost_wei")
+            or meta.get("gas_cost_estimate_wei")
+            or "0"
+        ),
+        "after_cost_profit_wei": str(
+            profitability.get("profit_after_costs_wei") or "0"
+        ),
+        "revalidated": bool(profitability.get("revalidated")),
+        "authoritative": bool(profitability.get("authoritative")),
+        "reason": str(profitability.get("reason") or "unavailable"),
+    }
+
+
+def _merge_size_quote_failure_reasons(
+    two_metrics: Dict[str, Any],
+    three_metrics: Dict[str, Any],
+) -> Dict[str, int]:
+    merged = {
+        str(k): int(v)
+        for k, v in dict(two_metrics.get("quote_failure_reasons") or {}).items()
+    }
+    for key, value in dict(three_metrics.get("quote_failure_reasons") or {}).items():
+        merged[str(key)] = int(merged.get(str(key), 0)) + int(value)
+    return merged
+
+
+def _build_size_economic_matrix(
+    size_scan_records: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    matrix: List[Dict[str, Any]] = []
+    for record in size_scan_records:
+        amount = int(record.get("amount_in") or 0)
+        candidates = list(record.get("two") or []) + list(record.get("three") or [])
+        two_metrics = dict(record.get("two_metrics") or {})
+        three_metrics = dict(record.get("three_metrics") or {})
+        route_rows = [_size_economic_candidate_row(candidate) for candidate in candidates]
+        positive = [
+            row for row in route_rows
+            if row["revalidated"]
+            and row["authoritative"]
+            and int(row["after_cost_profit_wei"]) > 0
+        ]
+        selected = max(
+            positive,
+            key=lambda row: int(row["after_cost_profit_wei"]),
+            default=None,
+        )
+        matrix.append({
+            "amount_in": str(amount),
+            "quote_requests": int(two_metrics.get("quote_requests", 0) or 0)
+            + int(three_metrics.get("quote_requests", 0) or 0),
+            "quote_successes": int(two_metrics.get("quote_successes", 0) or 0)
+            + int(three_metrics.get("quote_successes", 0) or 0),
+            "quote_failures": max(
+                0,
+                int(two_metrics.get("quote_requests", 0) or 0)
+                + int(three_metrics.get("quote_requests", 0) or 0)
+                - int(two_metrics.get("quote_successes", 0) or 0)
+                - int(three_metrics.get("quote_successes", 0) or 0),
+            ),
+            "quote_failure_reasons": _merge_size_quote_failure_reasons(
+                two_metrics, three_metrics
+            ),
+            "route_ids": [row["route_id"] for row in route_rows if row["route_id"]],
+            "candidates": route_rows,
+            "selection_basis": (
+                "verified_after_cost_profit"
+                if selected
+                else "gross_profit_diagnostic_only"
+            ),
+            "selected_route_id": selected["route_id"] if selected else "",
+            "selected_after_cost_profit_wei": (
+                selected["after_cost_profit_wei"] if selected else "0"
+            ),
+        })
+    return matrix
+
+
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
 
@@ -607,55 +693,10 @@ class RuntimePrimaryScanFacade:
             )
 
             # Preserve one bounded row per scanned size so production can distinguish
-            # "no route quoted" from "route quoted but economically rejected". This is
-            # diagnostic evidence only and never grants execution authority.
-            size_matrix: List[Dict[str, Any]] = []
-            for record in size_scan_records:
-                amount = int(record.get("amount_in") or 0)
-                candidates = list(record.get("two") or []) + list(record.get("three") or [])
-                two_metrics = dict(record.get("two_metrics") or {})
-                three_metrics = dict(record.get("three_metrics") or {})
-                quote_requests = int(two_metrics.get("quote_requests", 0) or 0) + int(three_metrics.get("quote_requests", 0) or 0)
-                quote_successes = int(two_metrics.get("quote_successes", 0) or 0) + int(three_metrics.get("quote_successes", 0) or 0)
-                route_rows = []
-                for candidate in candidates:
-                    profit = _candidate_profitability(candidate)
-                    route_rows.append({
-                        "route_id": _candidate_route_key(candidate),
-                        "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
-                        "flashloan_fee_wei": str(profit.get("flashloan_fee_wei") or "0"),
-                        "gas_cost_wei": str(profit.get("gas_cost_wei") or getattr(candidate, "meta", {}).get("gas_cost_estimate_wei") or "0"),
-                        "after_cost_profit_wei": str(profit.get("profit_after_costs_wei") or "0"),
-                        "revalidated": bool(profit.get("revalidated")),
-                        "authoritative": bool(profit.get("authoritative")),
-                        "reason": str(profit.get("reason") or "unavailable"),
-                    })
-                positive = [row for row in route_rows if row["revalidated"] and row["authoritative"] and int(row["after_cost_profit_wei"]) > 0]
-                selected = max(positive, key=lambda row: int(row["after_cost_profit_wei"])) if positive else None
-                size_matrix.append({
-                    "amount_in": str(amount),
-                    "quote_requests": quote_requests,
-                    "quote_successes": quote_successes,
-                    "quote_failures": max(0, quote_requests - quote_successes),
-                    "quote_failure_reasons": {
-                        **{
-                            str(k): int(v)
-                            for k, v in dict(two_metrics.get("quote_failure_reasons") or {}).items()
-                        },
-                        **{
-                            str(k): int(
-                                dict(two_metrics.get("quote_failure_reasons") or {}).get(k, 0)
-                            ) + int(v)
-                            for k, v in dict(three_metrics.get("quote_failure_reasons") or {}).items()
-                        },
-                    },
-                    "route_ids": [row["route_id"] for row in route_rows if row["route_id"]],
-                    "candidates": route_rows,
-                    "selection_basis": "verified_after_cost_profit" if selected else "gross_profit_diagnostic_only",
-                    "selected_route_id": selected["route_id"] if selected else "",
-                    "selected_after_cost_profit_wei": selected["after_cost_profit_wei"] if selected else "0",
-                })
-            telemetry["size_economic_matrix"] = size_matrix
+            # "no route quoted" from "route quoted but economically rejected".
+            telemetry["size_economic_matrix"] = _build_size_economic_matrix(
+                size_scan_records
+            )
 
             telemetry["adaptive_size_discovery"] = {
                 "enabled": bool(len(adaptive_amounts) > 1),
