@@ -58,6 +58,41 @@ def aux_curve_from_meta(meta: Dict[str, Any], params: Dict[str, Any]) -> str:
     return aux_curve(int(i), int(j), bool(underlying))
 
 
+
+
+def _record_size_economic_diagnostic(
+    metrics: Dict[str, Any],
+    *,
+    route_id: str,
+    amount_in: int,
+    gross_profit_wei: int,
+    flashloan_fee_wei: int,
+    gas_cost_wei: int,
+    reason: str,
+    max_samples: int = 16,
+) -> None:
+    """Retain bounded economic near-misses without promoting them to opportunities."""
+    row = {
+        "route_id": str(route_id),
+        "amount_in": str(max(0, int(amount_in))),
+        "gross_profit_wei": str(int(gross_profit_wei)),
+        "flashloan_fee_wei": str(max(0, int(flashloan_fee_wei))),
+        "gas_cost_wei": str(max(0, int(gas_cost_wei))),
+        "after_cost_profit_wei": str(
+            int(gross_profit_wei) - int(flashloan_fee_wei) - int(gas_cost_wei)
+        ),
+        "revalidated": False,
+        "authoritative": False,
+        "reason": str(reason or "non_positive_gross_profit"),
+        "diagnostic_only": True,
+    }
+    samples = list(metrics.get("size_economic_diagnostics") or [])
+    samples.append(row)
+    # Keep the closest-to-profitable routes, bounded per scan, so diagnostics
+    # cannot become an execution-sized result set.
+    samples.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
+    metrics["size_economic_diagnostics"] = samples[: max(1, int(max_samples))]
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -587,12 +622,6 @@ async def find_two_leg_opportunities(
                 continue
             out2, meta2 = q2
             gross_profit = out2 - amount_in
-            # Route-level gas estimate (ranking-only)
-            # We'll fill meta after aux construction; here keep gross filter.
-            # Filter unprofitable routes unless explicitly debugging.
-            if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
-                metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
-                continue
             # min_outs for legs include slippage haircut
             min1 = _apply_slippage(out1, slippage_bps)
             min2 = _apply_slippage(out2, slippage_bps)
@@ -632,6 +661,30 @@ async def find_two_leg_opportunities(
                     ),
                 ]
             )
+
+            if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
+                gas_cost_wei = int(
+                    estimate_gas_cost_wei_from_cfg(
+                        cfg,
+                        estimate_route_gas_units(
+                            {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
+                        ),
+                    )
+                )
+                flashloan_fee_wei = (
+                    int(amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
+                ) // 10_000
+                _record_size_economic_diagnostic(
+                    metrics,
+                    route_id=rid,
+                    amount_in=int(amount_in),
+                    gross_profit_wei=int(gross_profit),
+                    flashloan_fee_wei=int(flashloan_fee_wei),
+                    gas_cost_wei=int(gas_cost_wei),
+                    reason="non_positive_gross_profit",
+                )
+                metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
+                continue
 
             pool_keys = [
                 _pool_keys_for_leg(
@@ -778,6 +831,7 @@ async def find_two_leg_opportunities(
                 for k, v in metrics.items()
                 if str(k).startswith("route_rejections_")
             },
+            "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
         })
     # rank by gross profit desc
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
@@ -897,8 +951,6 @@ async def find_three_leg_opportunities(
                         continue
                     out3, meta3 = q3
                     gross_profit = out3 - amount_in
-                    if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
-                        continue
 
                     # slippage haircut
                     min1 = _apply_slippage(out1, slippage_bps)
@@ -943,6 +995,34 @@ async def find_three_leg_opportunities(
                             ),
                         ]
                     )
+
+                    if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
+                        gas_cost_wei = int(
+                            estimate_gas_cost_wei_from_cfg(
+                                cfg,
+                                estimate_route_gas_units(
+                                    {
+                                        "leg1": meta1,
+                                        "leg2": meta2,
+                                        "leg3": meta3,
+                                        "venues": [e1.dex, e2.dex, e3.dex],
+                                    }
+                                ),
+                            )
+                        )
+                        flashloan_fee_wei = (
+                            int(amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
+                        ) // 10_000
+                        _record_size_economic_diagnostic(
+                            metrics,
+                            route_id=rid,
+                            amount_in=int(amount_in),
+                            gross_profit_wei=int(gross_profit),
+                            flashloan_fee_wei=int(flashloan_fee_wei),
+                            gas_cost_wei=int(gas_cost_wei),
+                            reason="non_positive_gross_profit",
+                        )
+                        continue
 
                     pool_keys = [
                         _pool_keys_for_leg(
@@ -1124,6 +1204,7 @@ async def find_three_leg_opportunities(
             "route_universe": dict(route_universe),
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
+            "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
         })
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
     return opps

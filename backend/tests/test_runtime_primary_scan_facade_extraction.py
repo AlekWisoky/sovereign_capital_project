@@ -262,6 +262,51 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
     assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["200", "100", "50"]
 
 
+@pytest.mark.asyncio
+async def test_scan_preserves_per_size_near_miss_economics_when_no_gross_candidates(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    calls = []
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        amount = int(kwargs["amount_in"])
+        calls.append(amount)
+        kwargs["telemetry"].update({
+            "quote_requests": 2,
+            "quote_successes": 2,
+            "routes_considered": 2,
+            "edges_generated": 2,
+            "route_groups_evaluated": 2,
+            "size_economic_diagnostics": [{
+                "route_id": f"route-{amount}",
+                "amount_in": str(amount),
+                "gross_profit_wei": str(-amount),
+                "flashloan_fee_wei": str(amount * 9 // 10000),
+                "gas_cost_wei": "100",
+                "after_cost_profit_wei": str(-amount - (amount * 9 // 10000) - 100),
+                "revalidated": False,
+                "authoritative": False,
+                "reason": "non_positive_gross_profit",
+                "diagnostic_only": True,
+            }],
+        })
+        return []
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=100)
+
+    assert opps == []
+    assert calls == [100, 50, 200]
+    evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
+    assert [row["amount_in"] for row in evidence] == ["100", "50", "200"]
+    assert all(row["diagnostic_only"] is True for row in evidence)
+    assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["economic_matrix_complete"] is True
+
+
+
 def test_adaptive_scan_amounts_respects_borrow_cap(monkeypatch):
     runtime = _Runtime()
     runtime.cfg.safety.max_borrow_amount = "1500"
