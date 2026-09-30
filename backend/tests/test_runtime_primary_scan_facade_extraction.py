@@ -256,7 +256,7 @@ async def test_scan_primary_opportunities_probes_alternative_sizes_when_base_has
     assert adaptive["probe_triggered"] is True
     assert adaptive["candidates_before_probe"] == 1
     assert adaptive["candidates_after_probe"] == 6
-    assert adaptive["probe_candidate_delta"] == 2
+    assert adaptive["probe_candidate_delta"] == 5
     assert adaptive["distinct_route_ids_before_probe"] == 1
     assert adaptive["distinct_route_ids_after_probe"] == 3
     assert [row["amount_in"] for row in adaptive["best_sizing_variants"]] == ["200", "100", "50"]
@@ -553,6 +553,6 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
     assert adaptive["amounts_scanned"] == ["100", "50", "200", "400", "800", "1600"]
     assert adaptive["economic_matrix_complete"] is True
     evidence = runtime._market_pipeline_telemetry["size_economic_evidence"]
-    assert len(evidence) == 3
+    assert len(evidence) == 6
     assert all(row["authoritative"] is False for row in evidence)
     assert all(row["reason"] == "revalidation_exception:ValueError" for row in evidence)
