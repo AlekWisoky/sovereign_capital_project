@@ -190,7 +190,9 @@ class RuntimePrimaryScanFacade:
             min_opportunities = 2
 
         # Keep the public helper deterministic; the caller decides whether probes
-        # are needed after the base scan. These are deliberately coarse probes.
+        # are needed after the base scan. User-supplied multipliers remain supported,
+        # but an institutional scan must not silently stop at an arbitrary 4x ceiling
+        # when an explicit authorized borrow cap is available.
         raw = os.environ.get("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
         borrow_cap = 0
         try:
@@ -209,6 +211,7 @@ class RuntimePrimaryScanFacade:
         borrow_cap = max(0, borrow_cap)
         if borrow_cap > 0:
             base = min(base, borrow_cap)
+
         multipliers: List[float] = []
         for item in str(raw).split(","):
             try:
@@ -217,8 +220,27 @@ class RuntimePrimaryScanFacade:
                 continue
             if value > 0.0 and value != 1.0:
                 multipliers.append(value)
-        multipliers = list(dict.fromkeys(multipliers))[:4]
+        multipliers = list(dict.fromkeys(multipliers))
 
+        # Always retain the explicit configured probes first. Then add a bounded
+        # geometric ladder toward the authorized cap. This is discovery-only:
+        # every point is still requoted and economically revalidated before it can
+        # influence the retained opportunity, and no point grants execution
+        # authority by itself.
+        if borrow_cap > base:
+            ratio = float(borrow_cap) / float(base)
+            if ratio > 1.0:
+                # At most four additional larger probes plus the exact cap. The
+                # logarithmic spacing avoids a 4x blind spot without creating an
+                # unbounded RPC fan-out for very large caps.
+                import math
+                for step in range(1, 5):
+                    fraction = float(step) / 5.0
+                    multipliers.append(ratio ** fraction)
+                multipliers.append(ratio)
+
+        # Preserve smaller probes and deduplicate after rounding to wei. Hard cap
+        # the total number of alternative sizes to eight.
         amounts: List[int] = [base]
         for multiplier in multipliers:
             candidate = max(1, int(round(float(base) * multiplier)))
@@ -226,6 +248,8 @@ class RuntimePrimaryScanFacade:
                 candidate = min(candidate, borrow_cap)
             if candidate not in amounts:
                 amounts.append(candidate)
+            if len(amounts) >= 9:
+                break
         # The attribute is intentionally stored only for diagnostics/tests.
         self._adaptive_size_min_opportunities = min_opportunities
         return amounts
