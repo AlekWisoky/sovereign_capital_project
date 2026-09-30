@@ -313,7 +313,23 @@ def test_adaptive_scan_amounts_respects_borrow_cap(monkeypatch):
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
 
-    assert runtime._adaptive_scan_amounts(1000) == [1000, 500, 1500]
+    assert runtime._adaptive_scan_amounts(1000) == [1000, 500, 1500, 1107, 1225, 1355]
+
+
+def test_adaptive_scan_amounts_reaches_large_borrow_cap(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.safety.max_borrow_amount = "10000"
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,1.5,2.0,4.0")
+
+    amounts = runtime._adaptive_scan_amounts(1000)
+
+    assert amounts[0] == 1000
+    assert 500 in amounts
+    assert 1500 in amounts
+    assert 4000 in amounts
+    assert amounts[-1] == 10000
+    assert len(amounts) <= 9
 
 
 @pytest.mark.asyncio
