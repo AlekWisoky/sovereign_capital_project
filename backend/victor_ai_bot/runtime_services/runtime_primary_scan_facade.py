@@ -8,8 +8,8 @@ from urllib.parse import urlsplit
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..cache import PerBlockCache
+from ..gas_model import estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
 from ..models import Opportunity
-from ..gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from ..profitability_state import revalidate_profitability_state
