@@ -68,6 +68,10 @@ def test_revalidation_accepts_non_weth_profit_token_gas_conversion():
     assert state["profit_after_costs_wei"] == "10000"
 
 
+import pytest
+
+
+@pytest.mark.asyncio
 async def test_scan_revalidation_wires_converted_gas_into_profitability(monkeypatch):
     from victor_ai_bot.runtime_services import runtime_primary_scan_facade as scan_mod
 
