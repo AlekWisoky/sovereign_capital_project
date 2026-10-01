@@ -247,3 +247,42 @@ def test_three_leg_route_universe_exposes_pruned_edge_identity_and_pool():
     assert snapshot["three_leg_pruned_edges"][0]["token_out"] == "0x" + f"{12:040x}"
     assert snapshot["three_leg_pruned_edges"][0]["pool"] == "0x" + f"{110:040x}"
     assert snapshot["three_leg_pruned_edges"][0]["edge_id"].startswith("univ3:")
+
+
+
+def test_three_leg_adjacency_prioritizes_late_discovered_cycle_edge():
+    anchor = "0x" + "11" * 20
+    cycle_token = "0x" + "99" * 20
+    noise = [
+        arb.Edge(
+            "univ3",
+            "0x" + "aa" * 20,
+            anchor,
+            "0x" + f"{i + 2:040x}",
+            {"fee": 3000},
+        )
+        for i in range(16)
+    ]
+    cycle_edge = arb.Edge(
+        "univ3",
+        "0x" + "bb" * 20,
+        anchor,
+        cycle_token,
+        {"fee": 500},
+    )
+    reverse = arb.Edge(
+        "univ3",
+        "0x" + "bb" * 20,
+        cycle_token,
+        anchor,
+        {"fee": 500},
+    )
+
+    adjacency, pruned = arb._prioritize_three_leg_adjacency(
+        [*noise, cycle_edge, reverse],
+        max_edges_per_token=16,
+    )
+
+    assert cycle_edge in adjacency[anchor]
+    assert reverse in adjacency[cycle_token]
+    assert cycle_edge not in pruned
