@@ -119,13 +119,29 @@ def _record_size_economic_diagnostic(
         if not key:
             continue
         per_route.setdefault(key, []).append(sample)
-    retained: List[Dict[str, Any]] = []
     per_route_limit = max(1, int(max_samples))
-    for route_samples in per_route.values():
-        route_samples.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
+    # Keep complete bounded curves for the strongest route families, while
+    # retaining a hard total cap so telemetry cannot grow with route-universe
+    # size. Ranking route families by their best gross sample preserves the
+    # historical "closest gross routes" behavior when there are many routes.
+    ranked_routes = sorted(
+        per_route.values(),
+        key=lambda route_samples: max(
+            (int(item.get("gross_profit_wei") or 0) for item in route_samples),
+            default=0,
+        ),
+        reverse=True,
+    )
+    max_routes = 16
+    retained: List[Dict[str, Any]] = []
+    for route_samples in ranked_routes[:max_routes]:
+        route_samples.sort(
+            key=lambda item: int(item.get("gross_profit_wei") or 0),
+            reverse=True,
+        )
         retained.extend(route_samples[:per_route_limit])
     retained.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
-    total_limit = max(per_route_limit, per_route_limit * 16)
+    total_limit = per_route_limit * max_routes
     metrics["size_economic_diagnostics"] = retained[:total_limit]
 
 def _now_ms() -> int:
