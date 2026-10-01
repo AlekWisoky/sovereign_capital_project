@@ -30,7 +30,7 @@ class _Runtime(RuntimeLoopEntryFacade):
         self.calls = []
         self.read_url = 'https://read.example'
         self.bn = 123
-        self.rpc_manager = type('Mgr', (), {'best_read': lambda s: self.read_url})()
+        self.rpc_manager = type('Mgr', (), {'best_read': lambda s: self.read_url, 'read_candidates': lambda s: [self.read_url] if self.read_url else []})()
 
     async def _sleep(self, seconds: float) -> None:
         self.calls.append(('sleep', seconds))
@@ -103,7 +103,7 @@ async def test_loop_entry_iteration_returns_when_block_number_missing(monkeypatc
 
     await runtime._run_loop_entry_iteration(loop_started_at=2.0)
 
-    assert [name for name, _ in runtime.calls] == ['enter_rpc', 'prepare', 'exit_rpc']
+    assert [name for name, _ in runtime.calls] == ['enter_rpc', 'prepare', 'exit_rpc', 'sleep']
 
 
 @pytest.mark.asyncio
@@ -113,3 +113,37 @@ async def test_loop_entry_iteration_does_not_swallow_unexpected_bug(monkeypatch)
 
     with pytest.raises(KeyError, match='unexpected loop-entry bug'):
         await runtime._run_loop_entry_iteration(loop_started_at=3.0)
+
+
+class _RuntimeFailover(_Runtime):
+    def __init__(self):
+        super().__init__()
+        self.read_url = 'https://bad.example'
+        self.urls = ['https://bad.example', 'https://good.example']
+        self.prepares = 0
+        self.rpc_manager = type('Mgr', (), {
+            'best_read': lambda s: self.urls[0],
+            'read_candidates': lambda s: list(self.urls),
+        })()
+
+    async def _prepare_tick_iteration(self, *, rpc):
+        self.prepares += 1
+        self.calls.append(('prepare', rpc))
+        return None if self.prepares == 1 else 456
+
+
+@pytest.mark.asyncio
+async def test_loop_entry_iteration_fails_over_when_bootstrap_block_is_unavailable(monkeypatch):
+    runtime = _RuntimeFailover()
+    monkeypatch.setattr(
+        'victor_ai_bot.runtime_services.runtime_loop_entry_facade.JsonRpcClient',
+        lambda *a, **k: _RpcContext(runtime.calls),
+    )
+
+    await runtime._run_loop_entry_iteration(loop_started_at=4.0)
+
+    assert runtime.prepares == 2
+    assert [name for name, _ in runtime.calls] == [
+        'enter_rpc', 'prepare', 'exit_rpc',
+        'enter_rpc', 'prepare', 'contained', 'exit_rpc',
+    ]

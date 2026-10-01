@@ -153,3 +153,27 @@ async def test_prepare_tick_iteration_does_not_swallow_unexpected_bug(monkeypatc
 
     with pytest.raises(ZeroDivisionError, match='unexpected prepare bug'):
         await runtime._prepare_tick_iteration(rpc=_Rpc(13))
+
+
+@pytest.mark.asyncio
+async def test_prepare_tick_iteration_records_pre_scan_rpc_boundary(monkeypatch):
+    runtime = _Runtime()
+    runtime.rpc_manager = type('RpcManager', (), {
+        'snapshot': lambda self: {
+            'read': [{'url': 'https://eth.example', 'ok': False, 'last_error': 'timeout'}]
+        }
+    })()
+    result = await runtime._prepare_tick_iteration(rpc=type('Rpc', (), {
+        'url': 'https://eth.example',
+        'block_number': lambda self: _async_none(),
+    })())
+    assert result is None
+    telemetry = runtime._market_pipeline_telemetry
+    assert telemetry['scan_status'] == 'blocked_before_scan'
+    assert telemetry['scan_error'] == 'bootstrap_block_number_failed'
+    assert telemetry['rpc']['endpoint'] == 'https://eth.example'
+    assert telemetry['quotes']['requests'] == 0
+
+
+async def _async_none():
+    return None
