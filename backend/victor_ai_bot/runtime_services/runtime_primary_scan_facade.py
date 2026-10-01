@@ -54,6 +54,17 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         if isinstance(meta, dict)
         else {}
     )
+    # Revalidation deliberately keeps loss-making candidates in
+    # profitability_diagnostic instead of promoting them to executable
+    # profitability. Economic modeling must still consume that diagnostic
+    # truth; otherwise a gross-positive/after-cost-negative route silently
+    # loses its actual net P&L and sizing optimum.
+    if not profitability and isinstance(meta, dict):
+        profitability = (
+            meta.get("profitability_diagnostic")
+            if isinstance(meta.get("profitability_diagnostic"), dict)
+            else {}
+        )
     legs = []
     try:
         for leg in list(getattr(getattr(candidate, "route", None), "legs", []) or [])[:3]:
@@ -944,13 +955,24 @@ class RuntimePrimaryScanFacade:
                     return ""
 
             def _candidate_after_cost(candidate: Opportunity) -> int | None:
-                profitability = (getattr(candidate, "meta", {}) or {}).get("profitability")
-                if not isinstance(profitability, dict):
+                meta = getattr(candidate, "meta", {}) or {}
+                if not isinstance(meta, dict):
                     return None
-                if not bool(profitability.get("revalidated")) or not bool(profitability.get("authoritative")):
+                profitability = meta.get("profitability")
+                diagnostic = meta.get("profitability_diagnostic")
+                state = profitability if isinstance(profitability, dict) else diagnostic
+                if not isinstance(state, dict):
+                    return None
+                # Authoritative state is preferred, but a fully revalidated
+                # loss-making state is still the canonical economic diagnostic.
+                # It must participate in sizing/route optimization even though
+                # it cannot execute.
+                if not bool(state.get("revalidated")):
+                    return None
+                if "profit_after_costs_wei" not in state:
                     return None
                 try:
-                    return int(profitability.get("profit_after_costs_wei") or 0)
+                    return int(state.get("profit_after_costs_wei") or 0)
                 except (TypeError, ValueError):
                     return None
 
