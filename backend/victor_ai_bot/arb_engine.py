@@ -922,6 +922,9 @@ async def find_three_leg_opportunities(
         edges,
         max_edges_per_token=max_edges_per_token,
     )
+    by_pair: Dict[Tuple[str, str], List[Edge]] = {}
+    for edge in edges:
+        by_pair.setdefault((edge.token_in, edge.token_out), []).append(edge)
     route_universe = _route_universe_snapshot(
         cfg,
         edges,
