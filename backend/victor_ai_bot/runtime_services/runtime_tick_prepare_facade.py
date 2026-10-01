@@ -114,6 +114,7 @@ class RuntimeTickPrepareFacade:
             return None
 
         self.metrics.last_block = bn
+        self.metrics.last_error = ""
         try:
             self.cache.reset_if_new_block(int(self.cfg.chain.chain_id), int(bn))
         except _SAFE_TICK_PREPARE_EXCEPTIONS:
