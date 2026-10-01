@@ -572,6 +572,8 @@ async def find_two_leg_opportunities(
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
+    amount_in_by_token: Optional[Dict[str, int]] = None,
+    observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
     metrics: Dict[str, int] = {}
@@ -593,7 +595,22 @@ async def find_two_leg_opportunities(
     # slow provider. The old wall-clock check immediately after this await could
     # therefore discard every route before considering even one successful quote.
     quote_phase_started = time.perf_counter()
-    qmap1 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in, metrics=metrics)
+    normalized_amounts = {
+        str(token).lower(): max(1, int(value))
+        for token, value in dict(amount_in_by_token or {}).items()
+        if str(token) and int(value) > 0
+    }
+    edge_groups: Dict[int, List[Edge]] = {}
+    for edge in edges:
+        effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
+        edge_groups.setdefault(effective_amount, []).append(edge)
+    qmap1: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+    for effective_amount, grouped_edges in edge_groups.items():
+        qmap1.update(
+            await quote_edges_batch(
+                rpc, cfg, cache, grouped_edges, effective_amount, metrics=metrics
+            )
+        )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
     for e1 in edges:
@@ -610,6 +627,9 @@ async def find_two_leg_opportunities(
             metrics["route_rejections_no_reverse_route"] = int(metrics.get("route_rejections_no_reverse_route", 0)) + 1
             continue
         metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
+        effective_amount_in = int(
+            normalized_amounts.get(str(e1.token_in).lower(), int(amount_in))
+        )
         q1 = qmap1.get(edge_key(e1))
         if not q1:
             metrics["route_rejections_first_leg_quote_unavailable"] = int(metrics.get("route_rejections_first_leg_quote_unavailable", 0)) + 1
@@ -626,7 +646,7 @@ async def find_two_leg_opportunities(
                 metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
                 continue
             out2, meta2 = q2
-            gross_profit = out2 - amount_in
+            gross_profit = out2 - effective_amount_in
             # min_outs for legs include slippage haircut
             min1 = _apply_slippage(out1, slippage_bps)
             min2 = _apply_slippage(out2, slippage_bps)
@@ -677,18 +697,18 @@ async def find_two_leg_opportunities(
                     )
                 )
                 flashloan_fee_wei = (
-                    int(amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
+                    int(effective_amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
                 ) // 10_000
                 _record_size_economic_diagnostic(
                     metrics,
                     route_id=rid,
-                    amount_in=int(amount_in),
+                    amount_in=int(effective_amount_in),
                     gross_profit_wei=int(gross_profit),
                     flashloan_fee_wei=int(flashloan_fee_wei),
                     gas_cost_wei=int(gas_cost_wei),
                     reason="non_positive_gross_profit",
                     legs=[
-                        {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
+                        {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(effective_amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
                         {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
                     ]
                 )
@@ -719,7 +739,7 @@ async def find_two_leg_opportunities(
                     aux2,
                 ),
             ]
-            opp_id = _id([cfg.chain.name, "2leg", rid, str(amount_in), str(block_number)])
+            opp_id = _id([cfg.chain.name, "2leg", rid, str(effective_amount_in), str(block_number)])
             opps.append(
                 Opportunity(
                     id=opp_id,
@@ -734,7 +754,7 @@ async def find_two_leg_opportunities(
                                 venue=e1.venue,
                                 token_in=e1.token_in,
                                 token_out=e1.token_out,
-                                amount_in=str(amount_in),
+                                amount_in=str(effective_amount_in),
                                 min_out=str(min1),
                                 data=aux1,
                             ),
@@ -773,6 +793,7 @@ async def find_two_leg_opportunities(
                                 estimate_route_gas_units(
                                     {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
                                 ),
+                                observed_gas_price_wei=observed_gas_price_wei,
                             )
                         ),
                         "profit_after_gas_estimate_wei": str(
@@ -938,7 +959,22 @@ async def find_three_leg_opportunities(
     # a slow provider. Start the bounded route-evaluation clock only after the
     # first-leg quote phase, matching the two-leg scanner.
     quote_phase_started = time.perf_counter()
-    qmap1_3 = await quote_edges_batch(rpc, cfg, cache, edges, amount_in, metrics=metrics)
+    normalized_amounts = {
+        str(token).lower(): max(1, int(value))
+        for token, value in dict(amount_in_by_token or {}).items()
+        if str(token) and int(value) > 0
+    }
+    edge_groups: Dict[int, List[Edge]] = {}
+    for edge in edges:
+        effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
+        edge_groups.setdefault(effective_amount, []).append(edge)
+    qmap1_3: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+    for effective_amount, grouped_edges in edge_groups.items():
+        qmap1_3.update(
+            await quote_edges_batch(
+                rpc, cfg, cache, grouped_edges, effective_amount, metrics=metrics
+            )
+        )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
 
@@ -952,6 +988,9 @@ async def find_three_leg_opportunities(
                 break
             if e1.token_in != a_in:
                 continue
+            effective_amount_in = int(
+                normalized_amounts.get(str(e1.token_in).lower(), int(amount_in))
+            )
             # quote leg1
             q1 = qmap1_3.get(edge_key(e1))
             if not q1:
@@ -986,7 +1025,7 @@ async def find_three_leg_opportunities(
                     if not q3:
                         continue
                     out3, meta3 = q3
-                    gross_profit = out3 - amount_in
+                    gross_profit = out3 - effective_amount_in
 
                     # slippage haircut
                     min1 = _apply_slippage(out1, slippage_bps)
@@ -1044,21 +1083,22 @@ async def find_three_leg_opportunities(
                                         "venues": [e1.dex, e2.dex, e3.dex],
                                     }
                                 ),
+                                observed_gas_price_wei=observed_gas_price_wei,
                             )
                         )
                         flashloan_fee_wei = (
-                            int(amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
+                            int(effective_amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
                         ) // 10_000
                         _record_size_economic_diagnostic(
                             metrics,
                             route_id=rid,
-                            amount_in=int(amount_in),
+                            amount_in=int(effective_amount_in),
                             gross_profit_wei=int(gross_profit),
                             flashloan_fee_wei=int(flashloan_fee_wei),
                             gas_cost_wei=int(gas_cost_wei),
                             reason="non_positive_gross_profit",
                             legs=[
-                                {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
+                                {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(effective_amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
                                 {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
                                 {"dex": str(e3.dex), "venue": str(e3.venue), "token_in": str(e3.token_in), "token_out": str(e3.token_out), "fee": int(meta3.get("fee", e3.params.get("fee", 0) or 0)), "pool": str(e3.params.get("pool") or e3.venue), "amount_in": str(int(out2)), "quoted_amount_out": str(int(out3)), "min_out": str(int(min3)), "slippage_reserve": str(max(0, int(out3) - int(min3))), "quote_meta": dict(meta3)},
                             ]
@@ -1101,7 +1141,7 @@ async def find_three_leg_opportunities(
                         ),
                     ]
 
-                    opp_id = _id([cfg.chain.name, "3leg", rid, str(amount_in), str(block_number)])
+                    opp_id = _id([cfg.chain.name, "3leg", rid, str(effective_amount_in), str(block_number)])
                     opps.append(
                         Opportunity(
                             id=opp_id,
@@ -1116,7 +1156,7 @@ async def find_three_leg_opportunities(
                                         venue=e1.venue,
                                         token_in=e1.token_in,
                                         token_out=e1.token_out,
-                                        amount_in=str(amount_in),
+                                        amount_in=str(effective_amount_in),
                                         min_out=str(min1),
                                         data=aux1,
                                     ),
