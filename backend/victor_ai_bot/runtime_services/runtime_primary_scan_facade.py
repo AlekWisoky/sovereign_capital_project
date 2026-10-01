@@ -14,7 +14,7 @@ from ..models import Opportunity
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from ..profitability_state import revalidate_profitability_state
-from ..usd_pricing import token_to_usd_micro
+from ..usd_pricing import gas_wei_to_token_wei, token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
@@ -299,6 +299,26 @@ class RuntimePrimaryScanFacade:
                 )
             else:
                 gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
+            gas_cost_in_profit_token_wei: int | None = None
+            profit_token = ""
+            try:
+                legs = list(getattr(getattr(opportunity, "route", None), "legs", []) or [])
+                profit_token = str(getattr(legs[0], "token_in", "") or "") if legs else ""
+            except (AttributeError, IndexError, TypeError, ValueError):
+                profit_token = ""
+            if has_route_gas_inputs and profit_token:
+                try:
+                    gas_cost_in_profit_token_wei = await gas_wei_to_token_wei(
+                        rpc,
+                        chain=self.cfg.chain,
+                        gas_cost_wei=int(gas_cost_wei),
+                        token_out=profit_token,
+                        block_number=int(current_block),
+                        cache=scan_cache,
+                    )
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+                    gas_cost_in_profit_token_wei = None
+
             existing_profitability = meta.get("profitability")
             if (
                 isinstance(existing_profitability, dict)
@@ -315,6 +335,11 @@ class RuntimePrimaryScanFacade:
                         source="runtime_primary_scan",
                         gas_cost_wei=gas_cost_wei,
                         quoted_amount_out_wei=_resolve_scan_quoted_amount(meta),
+                        gas_cost_in_profit_token_wei=(
+                            gas_cost_in_profit_token_wei
+                            if has_route_gas_inputs
+                            else gas_cost_wei
+                        ),
                     )
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                     # One malformed candidate must not erase the entire
@@ -333,6 +358,21 @@ class RuntimePrimaryScanFacade:
                         "gas_cost_wei": str(max(0, gas_cost_wei)),
                         "flashloan_fee_wei": "0",
                     }
+            if has_route_gas_inputs and gas_cost_in_profit_token_wei is None:
+                state = {
+                    "stage": "scan_after_fee_revalidation",
+                    "source": "runtime_primary_scan",
+                    "reason": "gas_cost_profit_token_unavailable",
+                    "revalidated": False,
+                    "stale": True,
+                    "valid": False,
+                    "authoritative": False,
+                    "gross_profit_wei": str(getattr(opportunity, "expected_profit_raw", "0") or "0"),
+                    "profit_after_costs_wei": "0",
+                    "gas_cost_wei": str(max(0, gas_cost_wei)),
+                    "gas_cost_profit_token_wei": "0",
+                    "flashloan_fee_wei": "0",
+                }
             # Preserve the diagnostic revalidation result for the sizing
             # evidence matrix, but only promote a valid authoritative result to
             # canonical profitability. Invalid states must not poison legacy
