@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 359,
+  "backend_test_file_count": 360,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -131,6 +131,7 @@
     "test_end_to_end_remediation_flow.py",
     "test_engine_routes.py",
     "test_engine_upgrades.py",
+    "test_ethereum_discovery_config.py",
     "test_evolution_lifecycle.py",
     "test_exception_budget.py",
     "test_executable_edge_objective.py",
@@ -2141,7 +2142,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 352,
+    "backend_test_files": 360,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2213,6 +2214,7 @@
       "test_end_to_end_remediation_flow.py",
       "test_engine_routes.py",
       "test_engine_upgrades.py",
+      "test_ethereum_discovery_config.py",
       "test_evolution_lifecycle.py",
       "test_exception_budget.py",
       "test_executable_edge_objective.py",

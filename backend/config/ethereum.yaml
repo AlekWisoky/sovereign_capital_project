@@ -19,6 +19,10 @@ chain:
   univ3_swap_router: '0xE592427A0AEce92De3Edee1F18E0157C05861564'
   aave_v3_pool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'
   balancer_vault: '0xba12222222228d8ba445958a75a0704d566bf2c8'
+  curve_address_provider: '0x0000000022D53366457F9d5E68Ec105046FC4383'
+  enable_venue_discovery: true
+  discovery_pool_max_candidates: 48
+  discovery_log_window_blocks: 50000
   token_universe:
   - '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
   - '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
