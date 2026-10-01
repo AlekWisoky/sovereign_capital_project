@@ -68,6 +68,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
         "reason": str(profitability.get("reason") or "unavailable"),
+        "diagnostic_only": False,
     }
 
 
@@ -144,6 +145,7 @@ def _build_size_economic_matrix(
             row for row in route_rows
             if row.get("route_id")
             and row.get("after_cost_profit_wei") is not None
+            and (bool(row.get("authoritative")) or bool(row.get("diagnostic_only")))
         ]
         economic_optimum = max(
             economic_rows,
