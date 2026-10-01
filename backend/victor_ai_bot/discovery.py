@@ -220,6 +220,9 @@ class DiscoveryManager:
                     )
                     if dv.token0 and dv.token1 and dv.pool and dv.fee:
                         self._v3[self._key(dv.token0, dv.token1, dv.fee)] = dv
+                        self._observe_candidate_tokens(
+                            [dv.token0, dv.token1], source="univ3_persisted"
+                        )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
             for it in j.get("curve") or []:
@@ -235,6 +238,9 @@ class DiscoveryManager:
                     )
                     if dc.pool and dc.token_in and dc.token_out and dc.i != dc.j:
                         self._curve[self._curve_key(dc.pool, dc.i, dc.j)] = dc
+                        self._observe_candidate_tokens(
+                            [dc.token_in, dc.token_out], source="curve_persisted"
+                        )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
             for it in j.get("balancer") or []:
@@ -249,6 +255,9 @@ class DiscoveryManager:
                     )
                     if db.pool_id and db.pool and db.token_in and db.token_out:
                         self._balancer[self._balancer_key(db.pool_id, db.token_in, db.token_out)] = db
+                        self._observe_candidate_tokens(
+                            [db.token_in, db.token_out], source="balancer_persisted"
+                        )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
         except _SAFE_DISCOVERY_LOAD_EXCEPTIONS:
