@@ -508,6 +508,75 @@ async def test_scan_selects_same_route_variant_by_verified_after_cost(monkeypatc
     assert runtime._market_pipeline_telemetry["adaptive_size_discovery"]["best_sizing_variants"][0]["amount_in"] == "200"
 
 
+
+@pytest.mark.asyncio
+async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = False
+    runtime.cfg.execution = SimpleNamespace(
+        usd_accounting_enabled=False,
+        flashloan_fee_bps=9,
+    )
+    runtime.cfg.safety.minProfitAbs = 0
+    runtime.cfg.safety.minProfitBps = 0
+
+    def candidate(route_id: str, amount: int, gross: int, net: int):
+        return SimpleNamespace(
+            id=f"{route_id}-{amount}",
+            route_id=route_id,
+            expected_profit_raw=str(gross),
+            route=SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+            ),
+            meta={
+                "profitability_diagnostic": {
+                    "revalidated": True,
+                    "authoritative": False,
+                    "valid": False,
+                    "reason": "after_cost_non_positive",
+                    "gross_profit_wei": str(gross),
+                    "profit_after_costs_wei": str(net),
+                    "flashloan_fee_wei": "90",
+                    "gas_cost_wei": "100",
+                }
+            },
+        )
+
+    async def fake_two(rpc, cfg, cache, block_number, **kwargs):
+        amount = int(kwargs["amount_in"])
+        kwargs["telemetry"].update({
+            "quote_requests": 2,
+            "quote_successes": 2,
+            "routes_considered": 2,
+            "edges_generated": 2,
+            "route_groups_evaluated": 2,
+        })
+        if amount == 100:
+            # Gross ranking would choose route-b; true revalidated economics
+            # must choose route-a because -10 > -40.
+            return [
+                candidate("route-a", amount, 500, -10),
+                candidate("route-b", amount, 900, -40),
+            ]
+        return []
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
+
+    opps = await runtime._scan_primary_opportunities(
+        object(), current_block=321, amount_in=100
+    )
+
+    assert [getattr(o, "route_id", "") for o in opps] == ["route-a", "route-b"]
+    matrix = runtime._market_pipeline_telemetry["size_economic_matrix"]
+    assert matrix[0]["economic_optimum_route_id"] == "route-a"
+    assert matrix[0]["economic_optimum_after_cost_profit_wei"] == "-10"
+    rows = {row["route_id"]: row for row in matrix[0]["candidates"]}
+    assert rows["route-a"]["after_cost_profit_wei"] == "-10"
+    assert rows["route-a"]["revalidated"] is True
+    assert rows["route-a"]["authoritative"] is False
+    assert rows["route-a"]["reason"] == "after_cost_non_positive"
+
 @pytest.mark.asyncio
 async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypatch):
     runtime = _Runtime()
