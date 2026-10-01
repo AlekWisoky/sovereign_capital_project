@@ -71,21 +71,37 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     route_legs = list(getattr(getattr(candidate, "route", None), "legs", []) or [])
     amount_in_value = str(getattr(route_legs[0], "amount_in", "0") or "0") if route_legs else "0"
     terminal = (meta.get("out3") or meta.get("out2") or "") if isinstance(meta, dict) else ""
+    gross_profit_wei = int(getattr(candidate, "expected_profit_raw", "0") or "0")
+    amount_out_wei = int(terminal or 0)
+    flashloan_fee_wei = int(profitability.get("flashloan_fee_wei") or "0")
+    gas_cost_profit_token_wei = int(
+        profitability.get("gas_cost_profit_token_wei") or "0"
+    )
+    gross_minus_flashloan_fee_wei = gross_profit_wei - flashloan_fee_wei
+    gross_minus_all_costs_wei = (
+        gross_minus_flashloan_fee_wei - gas_cost_profit_token_wei
+    )
+    repayment_valid = bool(
+        amount_in_value
+        and amount_out_wei > 0
+        and amount_out_wei >= int(amount_in_value) + flashloan_fee_wei
+    )
     row = {
         "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
         "amount_in": amount_in_value,
-        "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
-        "amount_out_wei": str(terminal),
-        "gas_cost_profit_token_wei": str(
-            profitability.get("gas_cost_profit_token_wei") or "0"
-        ),
+        "gross_profit_wei": str(gross_profit_wei),
+        "amount_out_wei": str(amount_out_wei),
+        "gas_cost_profit_token_wei": str(gas_cost_profit_token_wei),
         "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
-        "flashloan_fee_wei": str(profitability.get("flashloan_fee_wei") or "0"),
+        "flashloan_fee_wei": str(flashloan_fee_wei),
         "gas_cost_wei": str(
             profitability.get("gas_cost_wei")
             or meta.get("gas_cost_estimate_wei")
             or "0"
         ),
+        "gross_minus_flashloan_fee_wei": str(gross_minus_flashloan_fee_wei),
+        "gross_minus_flashloan_fee_minus_gas_wei": str(gross_minus_all_costs_wei),
+        "repayment_valid": repayment_valid,
         "after_cost_profit_wei": str(
             profitability.get("profit_after_costs_wei") or "0"
         ),
@@ -136,14 +152,25 @@ def _build_size_economic_matrix(
         ):
             if not isinstance(diagnostic, dict):
                 continue
+            amount_in_diag = int(diagnostic.get("amount_in") or 0)
+            amount_out_diag = int(diagnostic.get("amount_out_wei") or 0)
+            gross_diag = int(diagnostic.get("gross_profit_wei") or 0)
+            fee_diag = int(diagnostic.get("flashloan_fee_wei") or 0)
+            gas_diag = int(diagnostic.get("gas_cost_profit_token_wei") or 0)
             row = {
                 "route_id": str(diagnostic.get("route_id") or ""),
-                "amount_in": str(diagnostic.get("amount_in") or "0"),
-                "amount_out_wei": str(diagnostic.get("amount_out_wei") or ""),
-                "gross_profit_wei": str(diagnostic.get("gross_profit_wei") or "0"),
-                "flashloan_fee_wei": str(diagnostic.get("flashloan_fee_wei") or "0"),
+                "amount_in": str(amount_in_diag),
+                "amount_out_wei": str(amount_out_diag),
+                "gross_profit_wei": str(gross_diag),
+                "flashloan_fee_wei": str(fee_diag),
                 "gas_cost_wei": str(diagnostic.get("gas_cost_wei") or "0"),
-                "gas_cost_profit_token_wei": str(diagnostic.get("gas_cost_profit_token_wei") or ""),
+                "gas_cost_profit_token_wei": str(gas_diag),
+                "gross_minus_flashloan_fee_wei": str(gross_diag - fee_diag),
+                "gross_minus_flashloan_fee_minus_gas_wei": str(gross_diag - fee_diag - gas_diag),
+                "repayment_valid": bool(
+                    amount_out_diag > 0
+                    and amount_out_diag >= amount_in_diag + fee_diag
+                ),
                 "after_cost_profit_wei": str(diagnostic.get("after_cost_profit_wei") or "0"),
                 "revalidated": bool(diagnostic.get("revalidated")),
                 "authoritative": bool(diagnostic.get("authoritative")),
@@ -171,10 +198,14 @@ def _build_size_economic_matrix(
             key=lambda row: int(row["after_cost_profit_wei"]),
             default=None,
         )
+        # -1 is a non-repayable sentinel, not an economic P&L value.
+        # Never let that sentinel win the economic-optimum comparison over a
+        # real (possibly negative) after-cost result.
         economic_rows = [
             row for row in route_rows
             if row.get("route_id")
             and row.get("after_cost_profit_wei") is not None
+            and str(row.get("reason") or "") != "does_not_repay_flashloan"
             and (bool(row.get("authoritative")) or bool(row.get("diagnostic_only")))
         ]
         economic_optimum = max(

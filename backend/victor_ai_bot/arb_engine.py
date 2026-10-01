@@ -109,10 +109,40 @@ def _record_size_economic_diagnostic(
     }
     samples = list(metrics.get("size_economic_diagnostics") or [])
     samples.append(row)
-    # Keep the closest-to-profitable routes, bounded per scan, so diagnostics
-    # cannot become an execution-sized result set.
-    samples.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
-    metrics["size_economic_diagnostics"] = samples[: max(1, int(max_samples))]
+    # Preserve the complete bounded size curve for each route. A single global
+    # top-N list can erase a route's zero/negative size points when another
+    # route has a larger gross near-miss, making economic-optimum modeling
+    # incomplete. Bound both per-route and total telemetry volume.
+    per_route: Dict[str, List[Dict[str, Any]]] = {}
+    for sample in samples:
+        key = str(sample.get("route_id") or "")
+        if not key:
+            continue
+        per_route.setdefault(key, []).append(sample)
+    per_route_limit = max(1, int(max_samples))
+    # Keep complete bounded curves for the strongest route families, while
+    # retaining a hard total cap so telemetry cannot grow with route-universe
+    # size. Ranking route families by their best gross sample preserves the
+    # historical "closest gross routes" behavior when there are many routes.
+    ranked_routes = sorted(
+        per_route.values(),
+        key=lambda route_samples: max(
+            (int(item.get("gross_profit_wei") or 0) for item in route_samples),
+            default=0,
+        ),
+        reverse=True,
+    )
+    max_routes = 16
+    retained: List[Dict[str, Any]] = []
+    for route_samples in ranked_routes[:max_routes]:
+        route_samples.sort(
+            key=lambda item: int(item.get("gross_profit_wei") or 0),
+            reverse=True,
+        )
+        retained.extend(route_samples[:per_route_limit])
+    retained.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
+    total_limit = per_route_limit * max_routes
+    metrics["size_economic_diagnostics"] = retained[:total_limit]
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
