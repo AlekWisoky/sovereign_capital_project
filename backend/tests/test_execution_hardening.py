@@ -11,6 +11,13 @@ from victor_ai_bot.execution import execution_outcome_from_result, try_execute_o
 ROOT = Path(__file__).resolve().parents[1] / 'victor_ai_bot'
 
 
+@pytest.fixture(autouse=True)
+def _stub_profit_token_gas_conversion(monkeypatch):
+    async def _convert(*args, **kwargs):
+        return 1
+    monkeypatch.setattr(execution, 'gas_wei_to_token_wei', _convert)
+
+
 class SafetyResult(SimpleNamespace):
     ok: bool = True
     flashloan_fee_wei: int = 0

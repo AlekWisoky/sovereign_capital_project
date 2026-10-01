@@ -540,7 +540,7 @@ async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypa
             return [sized(50, 400)]
         return [sized(amount, 600)]
 
-    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei, quoted_amount_out_wei=None):
+    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei, quoted_amount_out_wei=None, gas_cost_in_profit_token_wei=None):
         amount = int(opportunity.route.legs[0].amount_in)
         return {
             "valid": True,
@@ -585,7 +585,7 @@ async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
             )
         ]
 
-    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei, quoted_amount_out_wei=None):
+    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei, quoted_amount_out_wei=None, gas_cost_in_profit_token_wei=None):
         return {
             "valid": False,
             "revalidated": True,

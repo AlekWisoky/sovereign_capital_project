@@ -390,6 +390,7 @@ def revalidate_profitability_state(
     source: str,
     gas_cost_wei: int | None = None,
     quoted_amount_out_wei: int | None = None,
+    gas_cost_in_profit_token_wei: int | None = None,
 ) -> Dict[str, Any]:
     if not isinstance(getattr(opp, "meta", None), dict):
         try:
@@ -417,6 +418,22 @@ def revalidate_profitability_state(
     if expected_profit_usd > _MICRO_USD_THRESHOLD:
         expected_profit_usd /= 1_000_000.0
     resolved_gas_cost_wei = _infer_gas_cost_wei(opp, cfg, gas_cost_wei)
+    existing_profitability = _safe_dict(meta.get("profitability"))
+    existing_safety = _safe_dict(meta.get("safety"))
+    inherited_profit_token_gas = _safe_int(
+        existing_profitability.get("gas_cost_profit_token_wei")
+        or existing_safety.get("gas_cost_profit_token_wei"),
+        0,
+    )
+    resolved_gas_cost_in_profit_token_wei = (
+        max(0, int(gas_cost_in_profit_token_wei))
+        if gas_cost_in_profit_token_wei is not None
+        else (
+            int(inherited_profit_token_gas)
+            if inherited_profit_token_gas > 0
+            else int(resolved_gas_cost_wei)
+        )
+    )
 
     if continuity and not bool(continuity.get("valid", False)):
         state = build_profitability_state(
@@ -480,6 +497,7 @@ def revalidate_profitability_state(
             min_profit_bps=int(getattr(cfg.safety, "minProfitBps", 0) or 0),
             flashloan_fee_bps=int(getattr(cfg.execution, "flashloan_fee_bps", 0) or 0),
             gas_cost_wei=int(resolved_gas_cost_wei),
+            gas_cost_profit_token_wei=int(resolved_gas_cost_in_profit_token_wei),
         )
         state = build_profitability_state(
             stage=str(stage),
@@ -508,6 +526,7 @@ def revalidate_profitability_state(
                 "amount_out_final_wei": str(int(amount_out_wei)),
                 "flashloan_fee_wei": str(int(sr.flashloan_fee_wei)),
                 "gas_cost_wei": str(int(sr.gas_cost_wei)),
+                "gas_cost_profit_token_wei": str(int(sr.gas_cost_profit_token_wei)),
                 "profit_after_costs_wei": str(int(sr.profit_after_costs_wei)),
                 "continuity": dict(continuity),
             }
@@ -518,6 +537,15 @@ def revalidate_profitability_state(
             except (AttributeError, TypeError, ValueError):
                 pass
         meta["safety"] = safety
+    state["gas_cost_profit_token_wei"] = str(
+        int(
+            getattr(
+                locals().get("sr", None),
+                "gas_cost_profit_token_wei",
+                resolved_gas_cost_in_profit_token_wei,
+            )
+        )
+    )
     set_profitability_state(opp, state)
     unit_econ = _safe_dict(meta.get("unit_econ"))
     unit_econ["profitability_revalidated"] = bool(state.get("revalidated", False)) and bool(

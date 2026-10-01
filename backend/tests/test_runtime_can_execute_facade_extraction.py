@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 import asyncio
 
+import pytest
+
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services.runtime_can_execute_facade import RuntimeCanExecuteFacade
 import victor_ai_bot.runtime_services.runtime_can_execute_facade as mod
@@ -23,13 +25,13 @@ class _Runtime(RuntimeCanExecuteFacade):
                 private_key_env="VICTOR_PRIVATE_KEY",
                 flashloan_fee_bps=9,
             ),
-            chain=SimpleNamespace(univ3_swap_router="", balancer_vault=""),
+            chain=SimpleNamespace(univ3_swap_router="", balancer_vault="", weth="0xTokenIn"),
             safety=SimpleNamespace(minProfitAbs=1, minProfitBps=1),
         )
 
 
 def _opp(amount_in, amount_out, dex="univ2"):
-    leg = SimpleNamespace(amount_in=amount_in, dex=dex)
+    leg = SimpleNamespace(amount_in=amount_in, dex=dex, token_in="0xTokenIn")
     route = SimpleNamespace(legs=[leg])
     return SimpleNamespace(route=route, min_outs=[amount_out], meta={}, can_execute=None)
 
@@ -39,7 +41,14 @@ async def _fake_suggest_gas(_rpc, *, mode, presets):
 
 
 def _fake_profit_ok(**_kwargs):
-    return SimpleNamespace(ok=True, reason="ok", flashloan_fee_wei=7, profit_after_costs_wei=9)
+    return SimpleNamespace(
+        ok=True,
+        reason="ok",
+        flashloan_fee_wei=7,
+        gas_cost_wei=500000,
+        gas_cost_profit_token_wei=500000,
+        profit_after_costs_wei=9,
+    )
 
 
 def test_runtime_bundle_inherits_can_execute_facade():
@@ -61,13 +70,17 @@ def test_annotate_can_execute_marks_invalid_amounts(monkeypatch):
     assert opp.meta["safety"] == {"ok": False, "reason": "invalid_amounts", "exec_ready": False}
 
 
+async def _fake_block_number():
+    return 321
+
+
 def test_annotate_can_execute_preserves_readiness_semantics(monkeypatch):
     monkeypatch.setattr(mod, "suggest_gas", _fake_suggest_gas)
     monkeypatch.setattr(mod, "check_profit_and_repay", _fake_profit_ok)
     runtime = _Runtime()
     opp = _opp(100, 120, dex="univ3")
 
-    asyncio.run(runtime._annotate_can_execute(SimpleNamespace(), [opp]))
+    asyncio.run(runtime._annotate_can_execute(SimpleNamespace(block_number=_fake_block_number), [opp]))
 
     assert opp.can_execute is True
     assert opp.meta["safety"]["ok"] is True

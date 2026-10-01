@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 358,
+  "backend_test_file_count": 359,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -229,6 +229,7 @@
     "test_post_mutation_revalidation_contract.py",
     "test_presets.py",
     "test_pretrade_capital_admission_unification.py",
+    "test_profit_token_gas_accounting.py",
     "test_profitability_projection_auxiliary_sync.py",
     "test_profitability_projection_post_mutation_canonical.py",
     "test_profitability_truth_selection_sync.py",
