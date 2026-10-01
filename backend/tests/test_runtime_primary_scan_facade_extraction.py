@@ -401,7 +401,9 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
     assert matrix[0]["quote_failures"] == 0
     assert matrix[0]["candidates"][0]["route_id"] == "route-a"
     assert matrix[0]["candidates"][0]["after_cost_profit_wei"] == "0"
-    assert matrix[0]["selection_basis"] == "gross_profit_diagnostic_only"
+    assert matrix[0]["selection_basis"] == "economic_optimum_diagnostic"
+    assert matrix[0]["economic_optimum_route_id"] == "route-1"
+    assert matrix[0]["economic_optimum_after_cost_profit_wei"] == "-1"
     assert all(row["selection_basis"] == "gross_profit_diagnostic_only" for row in matrix)
 
 
