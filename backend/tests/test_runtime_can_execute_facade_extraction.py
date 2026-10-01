@@ -25,7 +25,7 @@ class _Runtime(RuntimeCanExecuteFacade):
                 private_key_env="VICTOR_PRIVATE_KEY",
                 flashloan_fee_bps=9,
             ),
-            chain=SimpleNamespace(univ3_swap_router="", balancer_vault=""),
+            chain=SimpleNamespace(univ3_swap_router="", balancer_vault="", weth="0xTokenIn"),
             safety=SimpleNamespace(minProfitAbs=1, minProfitBps=1),
         )
 
@@ -41,14 +41,14 @@ async def _fake_suggest_gas(_rpc, *, mode, presets):
 
 
 def _fake_profit_ok(**_kwargs):
-    return SimpleNamespace(ok=True, reason="ok", flashloan_fee_wei=7, profit_after_costs_wei=9)
-
-
-@pytest.fixture(autouse=True)
-def _stub_profit_token_gas_conversion(monkeypatch):
-    async def _convert(*args, **kwargs):
-        return 1
-    monkeypatch.setattr(mod, "gas_wei_to_token_wei", _convert)
+    return SimpleNamespace(
+        ok=True,
+        reason="ok",
+        flashloan_fee_wei=7,
+        gas_cost_wei=500000,
+        gas_cost_profit_token_wei=500000,
+        profit_after_costs_wei=9,
+    )
 
 
 def test_runtime_bundle_inherits_can_execute_facade():
