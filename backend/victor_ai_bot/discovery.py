@@ -309,6 +309,57 @@ class DiscoveryManager:
         allowed = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
         return [(i, t) for i, t in enumerate(tokens) if t and t.lower() in allowed]
 
+    def _supported_discovery_pairs(
+        self,
+        cfg: Any,
+        tokens: List[str],
+        balances: List[int],
+    ) -> List[Tuple[int, str, int, str]]:
+        """Return bounded liquid pairs touching the configured execution universe.
+
+        Discovery may observe a token outside the execution universe, but it must
+        never mutate that universe. Once a verified pool contains an execution
+        anchor plus another liquid token, however, the pair is valid read-only
+        market-discovery evidence and must reach the quote graph; otherwise
+        cross-venue/triangle discovery is permanently blind to newly discovered
+        edges.
+        """
+        anchors = {
+            str(token).lower()
+            for token in (getattr(cfg.chain, "token_universe", []) or [])
+            if token
+        }
+        liquid: List[Tuple[int, str]] = []
+        for index, token in enumerate(tokens):
+            normalized = str(token or "").lower()
+            if (
+                not normalized
+                or normalized == _ZERO_ADDRESS.lower()
+                or index >= len(balances)
+                or int(balances[index] or 0) <= 0
+            ):
+                continue
+            liquid.append((index, str(token)))
+        anchor_positions = [item for item in liquid if item[1].lower() in anchors]
+        if len(anchor_positions) < 1:
+            return []
+
+        pairs: List[Tuple[int, str, int, str]] = []
+        seen: set[tuple[int, int]] = set()
+        # Anchor-to-anchor and anchor-to-discovered-token edges are both useful.
+        # Unknown-to-unknown edges are intentionally excluded to keep discovery
+        # bounded and anchored to the configured execution universe.
+        for i, token_i in anchor_positions:
+            for j, token_j in liquid:
+                if i == j:
+                    continue
+                key = (min(i, j), max(i, j))
+                if key in seen:
+                    continue
+                seen.add(key)
+                pairs.append((i, token_i, j, token_j))
+        return pairs
+
     async def maybe_discover_univ3(
         self, rpc: JsonRpcClient, cfg: Any, block_number: int
     ) -> List[Dict[str, Any]]:
@@ -495,21 +546,20 @@ class DiscoveryManager:
             self._observe_candidate_tokens(coins, source="curve_pool_candidate")
             if not coins or not balances:
                 continue
-            supported = [
-                (i, token)
-                for i, token in self._supported(cfg, coins)
-                if i < len(balances) and int(balances[i]) > 0
-            ]
-            if len(supported) < 2:
+            supported_pairs = self._supported_discovery_pairs(cfg, coins, balances)
+            if not supported_pairs:
                 continue
-            for pos_a, (i, token_a) in enumerate(supported):
-                for j, token_b in supported[pos_a + 1:]:
-                    if self._curve_key(pool, i, j) not in self._curve:
-                        self._curve[self._curve_key(pool, i, j)] = DiscoveredCurve(pool, token_a, token_b, i, j, int(block_number), int(block_number))
-                        changed = True
-                    if self._curve_key(pool, j, i) not in self._curve:
-                        self._curve[self._curve_key(pool, j, i)] = DiscoveredCurve(pool, token_b, token_a, j, i, int(block_number), int(block_number))
-                        changed = True
+            for i, token_a, j, token_b in supported_pairs:
+                if self._curve_key(pool, i, j) not in self._curve:
+                    self._curve[self._curve_key(pool, i, j)] = DiscoveredCurve(
+                        pool, token_a, token_b, i, j, int(block_number), int(block_number)
+                    )
+                    changed = True
+                if self._curve_key(pool, j, i) not in self._curve:
+                    self._curve[self._curve_key(pool, j, i)] = DiscoveredCurve(
+                        pool, token_b, token_a, j, i, int(block_number), int(block_number)
+                    )
+                    changed = True
         return changed
 
     async def _discover_balancer(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
@@ -542,19 +592,18 @@ class DiscoveryManager:
                 continue
             tokens, balances = _decode_balancer_pool_tokens(r.result)
             self._observe_candidate_tokens(tokens, source="balancer_pool_candidate")
-            supported = [
-                (i, token)
-                for i, token in self._supported(cfg, tokens)
-                if i < len(balances) and int(balances[i]) > 0
-            ]
-            if len(supported) < 2:
+            supported_pairs = self._supported_discovery_pairs(cfg, tokens, balances)
+            if not supported_pairs:
                 continue
-            for pos_a, (_i, token_a) in enumerate(supported):
-                for _j, token_b in supported[pos_a + 1:]:
-                    if self._balancer_key(pool_id, token_a, token_b) not in self._balancer:
-                        self._balancer[self._balancer_key(pool_id, token_a, token_b)] = DiscoveredBalancer(pool_id, token_a, token_b, pool, int(block_number), int(block_number))
-                        changed = True
-                    if self._balancer_key(pool_id, token_b, token_a) not in self._balancer:
-                        self._balancer[self._balancer_key(pool_id, token_b, token_a)] = DiscoveredBalancer(pool_id, token_b, token_a, pool, int(block_number), int(block_number))
-                        changed = True
+            for _i, token_a, _j, token_b in supported_pairs:
+                if self._balancer_key(pool_id, token_a, token_b) not in self._balancer:
+                    self._balancer[self._balancer_key(pool_id, token_a, token_b)] = DiscoveredBalancer(
+                        pool_id, token_a, token_b, pool, int(block_number), int(block_number)
+                    )
+                    changed = True
+                if self._balancer_key(pool_id, token_b, token_a) not in self._balancer:
+                    self._balancer[self._balancer_key(pool_id, token_b, token_a)] = DiscoveredBalancer(
+                        pool_id, token_b, token_a, pool, int(block_number), int(block_number)
+                    )
+                    changed = True
         return changed
