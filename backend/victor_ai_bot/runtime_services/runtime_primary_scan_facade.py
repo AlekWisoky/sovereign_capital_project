@@ -54,6 +54,17 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         if isinstance(meta, dict)
         else {}
     )
+    # Revalidation deliberately keeps loss-making candidates in
+    # profitability_diagnostic instead of promoting them to executable
+    # profitability. Economic modeling must still consume that diagnostic
+    # truth; otherwise a gross-positive/after-cost-negative route silently
+    # loses its actual net P&L and sizing optimum.
+    if not profitability and isinstance(meta, dict):
+        profitability = (
+            meta.get("profitability_diagnostic")
+            if isinstance(meta.get("profitability_diagnostic"), dict)
+            else {}
+        )
     legs = []
     try:
         for leg in list(getattr(getattr(candidate, "route", None), "legs", []) or [])[:3]:
@@ -108,7 +119,9 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
         "reason": str(profitability.get("reason") or "unavailable"),
-        "diagnostic_only": False,
+        # Revalidated non-authoritative states are economic diagnostics: they
+        # are valid for optimum modeling but remain non-executable.
+        "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
     }
     if legs:
         row["legs"] = legs
@@ -944,13 +957,24 @@ class RuntimePrimaryScanFacade:
                     return ""
 
             def _candidate_after_cost(candidate: Opportunity) -> int | None:
-                profitability = (getattr(candidate, "meta", {}) or {}).get("profitability")
-                if not isinstance(profitability, dict):
+                meta = getattr(candidate, "meta", {}) or {}
+                if not isinstance(meta, dict):
                     return None
-                if not bool(profitability.get("revalidated")) or not bool(profitability.get("authoritative")):
+                profitability = meta.get("profitability")
+                diagnostic = meta.get("profitability_diagnostic")
+                state = profitability if isinstance(profitability, dict) else diagnostic
+                if not isinstance(state, dict):
+                    return None
+                # Authoritative state is preferred, but a fully revalidated
+                # loss-making state is still the canonical economic diagnostic.
+                # It must participate in sizing/route optimization even though
+                # it cannot execute.
+                if not bool(state.get("revalidated")):
+                    return None
+                if "profit_after_costs_wei" not in state:
                     return None
                 try:
-                    return int(profitability.get("profit_after_costs_wei") or 0)
+                    return int(state.get("profit_after_costs_wei") or 0)
                 except (TypeError, ValueError):
                     return None
 
@@ -1098,14 +1122,21 @@ class RuntimePrimaryScanFacade:
             # candidates, preserve the established after-gas-then-gross numeric ordering
             # so diagnostic scan ordering remains deterministic.
             def _scan_sort_key(candidate: Opportunity) -> tuple[int, int, str]:
-                meta = getattr(candidate, "meta", {}) or {}
                 route_id = str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or "")
-                profitability = meta.get("profitability") if isinstance(meta, dict) else None
-                if isinstance(profitability, dict) and bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
-                    try:
-                        return (3, int(profitability.get("profit_after_costs_wei") or 0), route_id)
-                    except (TypeError, ValueError):
-                        pass
+                diagnostic_after_cost = _candidate_after_cost(candidate)
+                if diagnostic_after_cost is not None:
+                    meta = getattr(candidate, "meta", {}) or {}
+                    profitability = meta.get("profitability") if isinstance(meta, dict) else None
+                    authoritative = (
+                        isinstance(profitability, dict)
+                        and bool(profitability.get("revalidated"))
+                        and bool(profitability.get("authoritative"))
+                    )
+                    # Revalidated diagnostic P&L is economically authoritative for
+                    # ranking even when it is not executable. Keep the execution
+                    # gate separate from this ordering decision.
+                    return (3 if authoritative else 2, int(diagnostic_after_cost), route_id)
+                meta = getattr(candidate, "meta", {}) or {}
                 if isinstance(meta, dict):
                     try:
                         meta_after = meta.get("profit_after_costs")
