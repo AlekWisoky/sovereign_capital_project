@@ -70,13 +70,17 @@ def test_annotate_can_execute_marks_invalid_amounts(monkeypatch):
     assert opp.meta["safety"] == {"ok": False, "reason": "invalid_amounts", "exec_ready": False}
 
 
+async def _fake_block_number():
+    return 321
+
+
 def test_annotate_can_execute_preserves_readiness_semantics(monkeypatch):
     monkeypatch.setattr(mod, "suggest_gas", _fake_suggest_gas)
     monkeypatch.setattr(mod, "check_profit_and_repay", _fake_profit_ok)
     runtime = _Runtime()
     opp = _opp(100, 120, dex="univ3")
 
-    asyncio.run(runtime._annotate_can_execute(SimpleNamespace(), [opp]))
+    asyncio.run(runtime._annotate_can_execute(SimpleNamespace(block_number=_fake_block_number), [opp]))
 
     assert opp.can_execute is True
     assert opp.meta["safety"]["ok"] is True
