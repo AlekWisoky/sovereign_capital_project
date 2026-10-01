@@ -229,6 +229,16 @@ def _build_size_economic_matrix(
             "quote_failure_reasons": _merge_size_quote_failure_reasons(
                 two_metrics, three_metrics
             ),
+            "failed_quote_edge_count": int(two_metrics.get("failed_quote_edge_count", 0) or 0)
+            + int(three_metrics.get("failed_quote_edge_count", 0) or 0),
+            "failed_quote_edge_samples": list(
+                dict.fromkeys(
+                    [
+                        *list(two_metrics.get("failed_quote_edge_samples") or []),
+                        *list(three_metrics.get("failed_quote_edge_samples") or []),
+                    ]
+                )
+            )[:256],
             "route_ids": [row["route_id"] for row in route_rows if row["route_id"]],
             "candidates": route_rows,
             "selection_basis": (
@@ -1128,11 +1138,15 @@ class RuntimePrimaryScanFacade:
             )
             quote_failure_reasons: Dict[str, int] = {}
             route_rejections: Dict[str, int] = {}
+            failed_quote_edge_samples: List[str] = []
             for source in (two_leg_telemetry, three_leg_telemetry):
                 for key, value in dict(source.get("quote_failure_reasons") or {}).items():
                     quote_failure_reasons[str(key)] = quote_failure_reasons.get(str(key), 0) + int(value)
                 for key, value in dict(source.get("route_rejections") or {}).items():
                     route_rejections[str(key)] = route_rejections.get(str(key), 0) + int(value)
+                failed_quote_edge_samples.extend(
+                    list(source.get("failed_quote_edge_samples") or [])
+                )
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
@@ -1172,6 +1186,12 @@ class RuntimePrimaryScanFacade:
             )
             telemetry["gross_candidates"] = len(opps)
             telemetry["route_rejections"] = route_rejections
+            telemetry["failed_quote_edge_samples"] = list(
+                dict.fromkeys(failed_quote_edge_samples)
+            )[:256]
+            telemetry["failed_quote_edge_count"] = int(
+                len(failed_quote_edge_samples)
+            )
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
