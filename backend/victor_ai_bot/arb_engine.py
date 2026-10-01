@@ -882,15 +882,40 @@ async def find_three_leg_opportunities(
     for e in edges:
         adj.setdefault(e.token_in, []).append(e)
 
-    # cap per token to avoid combinatorial explosion. Keep the exact
-    # rejected identities for diagnostics only; the cap itself is unchanged.
+    # Build the complete directed pair index before pruning. The old implementation
+    # kept the first N edges for each token, which made discovery order a hidden
+    # economic filter: newly discovered pools appended after configured pools could
+    # be pruned even when they completed a 2-leg or 3-leg cycle.
+    by_pair: Dict[Tuple[str, str], List[Edge]] = {}
+    for e in edges:
+        by_pair.setdefault((e.token_in, e.token_out), []).append(e)
+
+    # Keep a bounded graph, but spend the bound on edges that can actually close
+    # an arbitrage cycle. Direct reverse pairs get priority, followed by edges
+    # with at least one valid 3-hop return path, then non-cyclic edges. This is
+    # discovery/ranking only; every retained route is still fully requoted and
+    # economically revalidated before it can become an opportunity.
     max_edges_per_token = max(
-        1, int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "10") or 10)
+        1, int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "16") or 16)
     )
     active_edge_ids: set[int] = set()
-    for k in list(adj.keys()):
-        kept = adj[k][:max_edges_per_token]
-        adj[k] = kept
+    for token_in in list(adj.keys()):
+        original = list(adj[token_in])
+        scored: List[Tuple[int, int, Edge]] = []
+        for order, edge in enumerate(original):
+            direct_reverse = bool(by_pair.get((edge.token_out, edge.token_in)))
+            triangle_close = False
+            for middle in adj.get(edge.token_out, []):
+                if middle.token_out == edge.token_in:
+                    continue
+                if by_pair.get((middle.token_out, edge.token_in)):
+                    triangle_close = True
+                    break
+            score = 3 if direct_reverse else (2 if triangle_close else 1)
+            scored.append((score, order, edge))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        kept = [item[2] for item in scored[:max_edges_per_token]]
+        adj[token_in] = kept
         active_edge_ids.update(id(edge) for edge in kept)
     pruned_edges = [edge for edge in edges if id(edge) not in active_edge_ids]
     route_universe = _route_universe_snapshot(
@@ -900,11 +925,6 @@ async def find_three_leg_opportunities(
         max_edges_per_token=max_edges_per_token,
         pruned_edges=pruned_edges,
     )
-
-    # quick lookup for final leg candidates
-    by_pair: Dict[Tuple[str, str], List[Edge]] = {}
-    for e in edges:
-        by_pair.setdefault((e.token_in, e.token_out), []).append(e)
 
     opps: List[Opportunity] = []
     # Quote acquisition can legitimately consume most of the scan wall clock on
