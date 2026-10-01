@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 import asyncio
 
+import pytest
+
 from victor_ai_bot.runtime_legacy import RuntimeBundle
 from victor_ai_bot.runtime_services.runtime_can_execute_facade import RuntimeCanExecuteFacade
 import victor_ai_bot.runtime_services.runtime_can_execute_facade as mod
@@ -29,7 +31,7 @@ class _Runtime(RuntimeCanExecuteFacade):
 
 
 def _opp(amount_in, amount_out, dex="univ2"):
-    leg = SimpleNamespace(amount_in=amount_in, dex=dex)
+    leg = SimpleNamespace(amount_in=amount_in, dex=dex, token_in="0xTokenIn")
     route = SimpleNamespace(legs=[leg])
     return SimpleNamespace(route=route, min_outs=[amount_out], meta={}, can_execute=None)
 
@@ -40,6 +42,13 @@ async def _fake_suggest_gas(_rpc, *, mode, presets):
 
 def _fake_profit_ok(**_kwargs):
     return SimpleNamespace(ok=True, reason="ok", flashloan_fee_wei=7, profit_after_costs_wei=9)
+
+
+@pytest.fixture(autouse=True)
+def _stub_profit_token_gas_conversion(monkeypatch):
+    async def _convert(*args, **kwargs):
+        return 1
+    monkeypatch.setattr(mod, "gas_wei_to_token_wei", _convert)
 
 
 def test_runtime_bundle_inherits_can_execute_facade():
