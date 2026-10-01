@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any
 
 _SAFE_TICK_PREPARE_EXCEPTIONS = (
@@ -45,7 +46,7 @@ class RuntimeTickPrepareFacade:
                 if manager is not None and hasattr(manager, "snapshot"):
                     snapshot = dict(manager.snapshot() or {})
                 self._market_pipeline_telemetry = {
-                    "last_scan": int(__import__("time").time() * 1000),
+                    "last_scan": int(time.time() * 1000),
                     "last_block": int(getattr(self.metrics, "last_block", 0) or 0),
                     "scan_status": "blocked_before_scan",
                     "scan_error": "bootstrap_block_number_failed",
