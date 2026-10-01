@@ -627,9 +627,15 @@ async def find_two_leg_opportunities(
             metrics["route_rejections_no_reverse_route"] = int(metrics.get("route_rejections_no_reverse_route", 0)) + 1
             continue
         metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
-        effective_amount_in = int(
-            normalized_amounts.get(str(e1.token_in).lower(), int(amount_in))
-        )
+        if normalized_amounts:
+            effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
+            if effective_amount_in <= 0:
+                metrics["route_rejections_input_notional_unavailable"] = int(
+                    metrics.get("route_rejections_input_notional_unavailable", 0)
+                ) + 1
+                continue
+        else:
+            effective_amount_in = int(amount_in)
         q1 = qmap1.get(edge_key(e1))
         if not q1:
             metrics["route_rejections_first_leg_quote_unavailable"] = int(metrics.get("route_rejections_first_leg_quote_unavailable", 0)) + 1
@@ -988,9 +994,15 @@ async def find_three_leg_opportunities(
                 break
             if e1.token_in != a_in:
                 continue
-            effective_amount_in = int(
-                normalized_amounts.get(str(e1.token_in).lower(), int(amount_in))
-            )
+            if normalized_amounts:
+                effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
+                if effective_amount_in <= 0:
+                    metrics["route_rejections_input_notional_unavailable"] = int(
+                        metrics.get("route_rejections_input_notional_unavailable", 0)
+                    ) + 1
+                    continue
+            else:
+                effective_amount_in = int(amount_in)
             # quote leg1
             q1 = qmap1_3.get(edge_key(e1))
             if not q1:
