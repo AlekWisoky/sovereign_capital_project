@@ -585,7 +585,7 @@ async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
             )
         ]
 
-    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei, quoted_amount_out_wei=None):
+    def fake_revalidate(opportunity, cfg, *, stage, source, gas_cost_wei, quoted_amount_out_wei=None, gas_cost_in_profit_token_wei=None):
         return {
             "valid": False,
             "revalidated": True,
