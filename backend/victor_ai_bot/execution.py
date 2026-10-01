@@ -23,6 +23,7 @@ from .profitability_state import (
 from .calldata_builder import build_execute_calldata
 from .abi_utils import extract_revert_data, decode_revert_data
 from .arb_engine import requote_opportunity
+from .usd_pricing import gas_wei_to_token_wei
 from .cache import PerBlockCache
 from .aqe.mev.evaluator import evaluate_adversarial_execution
 from .aqe.mev.relay import RelayClient
@@ -460,6 +461,36 @@ async def try_execute_opportunity(
 
     gas_cost = max_fee * gas_limit
 
+    # Gas is paid in native wei, while the flashloan repayment/profit is
+    # denominated in the borrowed token. Convert the execution gas budget into
+    # that profit-token unit before applying the profitability gate.
+    try:
+        profit_token = str(opp.route.legs[0].token_in)
+        gas_cost_profit_token_wei = await gas_wei_to_token_wei(
+            rpc_read,
+            chain=cfg.chain,
+            gas_cost_wei=int(gas_cost),
+            token_out=profit_token,
+            block_number=int(current_block),
+            cache=PerBlockCache(),
+        )
+    except _SAFE_OPTIONAL_RPC_EXCEPTIONS:
+        gas_cost_profit_token_wei = None
+    if gas_cost_profit_token_wei is None:
+        return ExecResult(
+            False,
+            effective_dry_run,
+            "safety:gas_cost_profit_token_unavailable",
+            attempted=False,
+            plan={
+                "amount_in": str(amount_in),
+                "amount_out": str(amount_out),
+                "gas_cost": str(gas_cost),
+                "gas_cost_profit_token": "",
+                "route_id": route_id,
+            },
+        )
+
     # Safety rails (CRITICAL RULE #1: repay + gas + thresholds)
     min_abs = int(cfg.safety.minProfitAbs)
     min_bps = int(cfg.safety.minProfitBps)
@@ -471,6 +502,7 @@ async def try_execute_opportunity(
         min_profit_bps=min_bps,
         flashloan_fee_bps=fee_bps,
         gas_cost_wei=gas_cost,
+        gas_cost_profit_token_wei=int(gas_cost_profit_token_wei),
     )
     profitability_plan = _execution_profitability_plan(
         sr=sr, amount_in=amount_in, amount_out=amount_out, reason=getattr(sr, "reason", "unknown")
@@ -489,6 +521,7 @@ async def try_execute_opportunity(
                 "borrow_mult": float(borrow_mult),
                 "flashloan_fee": str(sr.flashloan_fee_wei),
                 "gas_cost": str(sr.gas_cost_wei),
+                "gas_cost_profit_token": str(sr.gas_cost_profit_token_wei),
                 "profit_after_costs": str(sr.profit_after_costs_wei),
                 "profitability": profitability_plan,
                 "terminalProfitabilityAuthority": terminal_authority,
@@ -579,7 +612,7 @@ async def try_execute_opportunity(
                 min_amount_out_wei=int(min_out),
                 expected_amount_out_wei=int(expected_out),
                 flashloan_fee_wei=int(sr.flashloan_fee_wei),
-                gas_cost_wei=int(sr.gas_cost_wei),
+                gas_cost_wei=int(sr.gas_cost_profit_token_wei),
                 p_success_base=float(p_base),
                 mev_risk=float(risk),
                 mev_fail_prob_scale=float(getattr(cfg.safety, "mev_fail_prob_scale", 0.55) or 0.55),
