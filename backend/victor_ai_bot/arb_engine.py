@@ -109,10 +109,24 @@ def _record_size_economic_diagnostic(
     }
     samples = list(metrics.get("size_economic_diagnostics") or [])
     samples.append(row)
-    # Keep the closest-to-profitable routes, bounded per scan, so diagnostics
-    # cannot become an execution-sized result set.
-    samples.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
-    metrics["size_economic_diagnostics"] = samples[: max(1, int(max_samples))]
+    # Preserve the complete bounded size curve for each route. A single global
+    # top-N list can erase a route's zero/negative size points when another
+    # route has a larger gross near-miss, making economic-optimum modeling
+    # incomplete. Bound both per-route and total telemetry volume.
+    per_route: Dict[str, List[Dict[str, Any]]] = {}
+    for sample in samples:
+        key = str(sample.get("route_id") or "")
+        if not key:
+            continue
+        per_route.setdefault(key, []).append(sample)
+    retained: List[Dict[str, Any]] = []
+    per_route_limit = max(1, int(max_samples))
+    for route_samples in per_route.values():
+        route_samples.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
+        retained.extend(route_samples[:per_route_limit])
+    retained.sort(key=lambda item: int(item.get("gross_profit_wei") or 0), reverse=True)
+    total_limit = max(per_route_limit, per_route_limit * 16)
+    metrics["size_economic_diagnostics"] = retained[:total_limit]
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
