@@ -173,7 +173,16 @@ def _build_size_economic_matrix(
             "selection_basis": (
                 "verified_after_cost_profit"
                 if selected
-                else ("economic_optimum_diagnostic" if economic_optimum else "no_economic_evidence")
+                else (
+                    "economic_optimum_diagnostic"
+                    if economic_optimum
+                    and str(economic_optimum.get("reason") or "") != "non_positive_gross_profit"
+                    else (
+                        "gross_profit_diagnostic_only"
+                        if economic_optimum
+                        else "no_economic_evidence"
+                    )
+                )
             ),
             # Execution selection remains fail-closed: only an authoritative
             # positive after-cost result can populate selected_route_id.
