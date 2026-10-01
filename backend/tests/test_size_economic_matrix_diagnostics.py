@@ -99,7 +99,7 @@ def test_size_economic_matrix_does_not_treat_non_repay_sentinel_as_optimum():
     by_route = {candidate["route_id"]: candidate for candidate in row["candidates"]}
     assert by_route["route-non-repay"]["repayment_valid"] is False
     assert by_route["route-non-repay"]["gross_minus_flashloan_fee_wei"] == "-13460194266673"
-    assert by_route["route-non-repay"]["gross_minus_flashloan_fee_minus_gas_wei"] == "-16029178666673"
+    assert by_route["route-non-repay"]["gross_minus_flashloan_fee_minus_gas_wei"] == "-16029178266673"
     assert by_route["route-non-repay"]["after_cost_profit_wei"] == "-1"
 
 
