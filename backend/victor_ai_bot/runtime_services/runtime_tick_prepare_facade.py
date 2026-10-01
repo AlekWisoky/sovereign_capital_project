@@ -32,6 +32,42 @@ class RuntimeTickPrepareFacade:
         bn = await rpc.block_number()
         if bn is None:
             self.metrics.last_error = "block_number failed"
+            # A block/RPC failure happens before _scan_primary_opportunities,
+            # so without an explicit lifecycle record the market-pipeline API
+            # looks like a healthy zero-opportunity scan. Preserve the actual
+            # boundary and provider identity for diagnosis and failover.
+            try:
+                from urllib.parse import urlsplit
+                rpc_url = str(getattr(rpc, "url", "") or "")
+                host = str(urlsplit(rpc_url).hostname or "") if rpc_url else ""
+                snapshot = {}
+                manager = getattr(self, "rpc_manager", None)
+                if manager is not None and hasattr(manager, "snapshot"):
+                    snapshot = dict(manager.snapshot() or {})
+                self._market_pipeline_telemetry = {
+                    "last_scan": int(__import__("time").time() * 1000),
+                    "last_block": int(getattr(self.metrics, "last_block", 0) or 0),
+                    "scan_status": "blocked_before_scan",
+                    "scan_error": "bootstrap_block_number_failed",
+                    "rpc": {
+                        "endpoint": rpc_url,
+                        "provider": host,
+                        "ok": False,
+                    },
+                    "quotes": {
+                        "requests": 0,
+                        "successes": 0,
+                        "failure_reasons": {"bootstrap_block_number_failed": 1},
+                    },
+                    "discovery": {},
+                    "route_universe": {},
+                    "size_economic_matrix": [],
+                    "adaptive_size_discovery": {},
+                }
+                if snapshot:
+                    self._market_pipeline_telemetry["rpc"]["manager_snapshot"] = snapshot
+            except _SAFE_TICK_PREPARE_EXCEPTIONS:
+                pass
             try:
                 self.metrics.failed_ticks += 1
             except _SAFE_TICK_PREPARE_BREAKER_EXCEPTIONS:
