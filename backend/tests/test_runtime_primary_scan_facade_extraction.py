@@ -537,7 +537,7 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
                     "gross_profit_wei": str(gross),
                     "profit_after_costs_wei": str(net),
                     "flashloan_fee_wei": "90",
-                    "gas_cost_wei": "100",
+                    "gas_cost_wei": str(490 if gross == 500 else 850),
                 }
             },
         )
