@@ -1403,6 +1403,57 @@ class RuntimePrimaryScanFacade:
             selected_result = next(item for item in results if item[0] == selected_url)
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
+
+        provider_symmetry: List[Dict[str, Any]] = []
+        route_universes: List[Dict[str, Any]] = []
+        size_ladders: List[tuple[str, ...]] = []
+        token_ladders: List[tuple[tuple[str, str], ...]] = []
+        for url, _opps, _cache, provider_telemetry, _provider_evidence in results:
+            adaptive = dict(provider_telemetry.get("adaptive_size_discovery") or {})
+            sizing = dict(provider_telemetry.get("scan_sizing") or {})
+            universe = dict(provider_telemetry.get("route_universe") or {})
+            quotes = dict(provider_telemetry.get("quotes") or {})
+            failures = dict(quotes.get("failure_reasons") or {})
+            route_rejections = dict(provider_telemetry.get("route_rejections") or {})
+            amounts_scanned = tuple(str(x) for x in adaptive.get("amounts_scanned") or [])
+            amounts_by_token = tuple(
+                sorted(
+                    (str(k), str(v))
+                    for k, v in dict(sizing.get("amounts_by_token") or {}).items()
+                )
+            )
+            route_universes.append(universe)
+            size_ladders.append(amounts_scanned)
+            token_ladders.append(amounts_by_token)
+            provider_symmetry.append({
+                "endpoint": url,
+                "provider": str(urlsplit(url).hostname or ""),
+                "block_number": int(current_block),
+                "route_universe": universe,
+                "amounts_scanned": list(amounts_scanned),
+                "amounts_by_token": dict(sizing.get("amounts_by_token") or {}),
+                "quote_requests": int(quotes.get("requests", 0) or 0),
+                "quote_successes": int(quotes.get("successes", 0) or 0),
+                "quote_failure_reasons": failures,
+                "route_rejections": route_rejections,
+                "failed_quote_edge_count": int(
+                    provider_telemetry.get("failed_quote_edge_count", 0) or 0
+                ),
+                "failed_quote_edge_samples": list(
+                    provider_telemetry.get("failed_quote_edge_samples") or []
+                )[:256],
+                "failed_quotes_removed_from_candidates": True,
+            })
+        route_universe_equal = bool(route_universes) and all(
+            universe == route_universes[0] for universe in route_universes[1:]
+        )
+        size_ladder_equal = bool(size_ladders) and all(
+            ladder == size_ladders[0] for ladder in size_ladders[1:]
+        )
+        token_ladder_equal = bool(token_ladders) and all(
+            ladder == token_ladders[0] for ladder in token_ladders[1:]
+        )
+
         selected_telemetry["rpc"]["economic_selection"] = {
             "mode": "read_only_economic",
             "selected_endpoint": selected_url,
@@ -1428,6 +1479,19 @@ class RuntimePrimaryScanFacade:
             "active_chain_changed": False,
             "broadcast_attempted": False,
             "auto_trade_enabled": False,
+            "provider_scan_symmetry": {
+                "route_universe_identical": route_universe_equal,
+                "size_ladder_identical": size_ladder_equal,
+                "token_size_ladder_identical": token_ladder_equal,
+                "same_block": all(
+                    int(row.get("block_number") or -1) == int(current_block)
+                    for row in provider_symmetry
+                ),
+                "failure_classification_shared": True,
+                "failed_quotes_are_non_candidates": True,
+                "shared_token_sizing": dict(shared_token_scan_telemetry),
+                "providers": provider_symmetry,
+            },
         }
         return {
             "selected_endpoint": selected_url,
