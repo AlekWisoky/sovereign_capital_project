@@ -847,6 +847,42 @@ async def find_two_leg_opportunities(
     return opps
 
 
+def _prioritize_three_leg_adjacency(
+    edges: List[Edge],
+    *,
+    max_edges_per_token: int,
+) -> tuple[Dict[str, List[Edge]], List[Edge]]:
+    """Bound triangle adjacency without letting discovery order hide cycles."""
+    by_pair: Dict[Tuple[str, str], List[Edge]] = {}
+    full_adj: Dict[str, List[Edge]] = {}
+    for edge in edges:
+        by_pair.setdefault((edge.token_in, edge.token_out), []).append(edge)
+        full_adj.setdefault(edge.token_in, []).append(edge)
+
+    cap = max(1, int(max_edges_per_token))
+    active_edge_ids: set[int] = set()
+    adj: Dict[str, List[Edge]] = {}
+    for token_in, original in full_adj.items():
+        scored: List[Tuple[int, int, Edge]] = []
+        for order, edge in enumerate(original):
+            direct_reverse = bool(by_pair.get((edge.token_out, edge.token_in)))
+            triangle_close = False
+            for middle in full_adj.get(edge.token_out, []):
+                if middle.token_out == edge.token_in:
+                    continue
+                if by_pair.get((middle.token_out, edge.token_in)):
+                    triangle_close = True
+                    break
+            score = 3 if direct_reverse else (2 if triangle_close else 1)
+            scored.append((score, order, edge))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        kept = [item[2] for item in scored[:cap]]
+        adj[token_in] = kept
+        active_edge_ids.update(id(edge) for edge in kept)
+    pruned = [edge for edge in edges if id(edge) not in active_edge_ids]
+    return adj, pruned
+
+
 async def find_three_leg_opportunities(
     rpc,
     cfg,
@@ -877,47 +913,15 @@ async def find_three_leg_opportunities(
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
     )
-    # adjacency: token_in -> edges
-    adj: Dict[str, List[Edge]] = {}
-    for e in edges:
-        adj.setdefault(e.token_in, []).append(e)
-
-    # Build the complete directed pair index before pruning. The old implementation
-    # kept the first N edges for each token, which made discovery order a hidden
-    # economic filter: newly discovered pools appended after configured pools could
-    # be pruned even when they completed a 2-leg or 3-leg cycle.
-    by_pair: Dict[Tuple[str, str], List[Edge]] = {}
-    for e in edges:
-        by_pair.setdefault((e.token_in, e.token_out), []).append(e)
-
-    # Keep a bounded graph, but spend the bound on edges that can actually close
-    # an arbitrage cycle. Direct reverse pairs get priority, followed by edges
-    # with at least one valid 3-hop return path, then non-cyclic edges. This is
-    # discovery/ranking only; every retained route is still fully requoted and
-    # economically revalidated before it can become an opportunity.
+    # Keep a bounded graph, but spend the bound on edges that can actually
+    # close an arbitrage cycle. Discovery order is no longer an economic filter.
     max_edges_per_token = max(
         1, int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "16") or 16)
     )
-    active_edge_ids: set[int] = set()
-    for token_in in list(adj.keys()):
-        original = list(adj[token_in])
-        scored: List[Tuple[int, int, Edge]] = []
-        for order, edge in enumerate(original):
-            direct_reverse = bool(by_pair.get((edge.token_out, edge.token_in)))
-            triangle_close = False
-            for middle in adj.get(edge.token_out, []):
-                if middle.token_out == edge.token_in:
-                    continue
-                if by_pair.get((middle.token_out, edge.token_in)):
-                    triangle_close = True
-                    break
-            score = 3 if direct_reverse else (2 if triangle_close else 1)
-            scored.append((score, order, edge))
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        kept = [item[2] for item in scored[:max_edges_per_token]]
-        adj[token_in] = kept
-        active_edge_ids.update(id(edge) for edge in kept)
-    pruned_edges = [edge for edge in edges if id(edge) not in active_edge_ids]
+    adj, pruned_edges = _prioritize_three_leg_adjacency(
+        edges,
+        max_edges_per_token=max_edges_per_token,
+    )
     route_universe = _route_universe_snapshot(
         cfg,
         edges,
