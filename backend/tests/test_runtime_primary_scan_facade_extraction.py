@@ -576,7 +576,7 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
     assert rows["route-a"]["after_cost_profit_wei"] == "-10"
     assert rows["route-a"]["revalidated"] is True
     assert rows["route-a"]["authoritative"] is False
-    assert rows["route-a"]["reason"] == "after_cost_non_positive"
+    assert rows["route-a"]["reason"] == "profit_after_costs_not_positive"
 
 @pytest.mark.asyncio
 async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypatch):
