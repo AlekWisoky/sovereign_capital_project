@@ -66,12 +66,13 @@ class RuntimeCanExecuteFacade:
 
             try:
                 profit_token = str(o.route.legs[0].token_in)
+                current_block = await rpc.block_number()
                 gas_cost_profit_token_wei = await gas_wei_to_token_wei(
                     rpc,
                     chain=self.cfg.chain,
                     gas_cost_wei=int(gas_cost),
                     token_out=profit_token,
-                    block_number=int(getattr(rpc, "last_block", 0) or 0),
+                    block_number=int(current_block),
                     cache=None,
                 )
             except _SAFE_CAN_EXECUTE_EXCEPTIONS:
