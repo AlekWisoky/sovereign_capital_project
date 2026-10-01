@@ -563,6 +563,7 @@ class DiscoveryManager:
         return changed
 
     async def _discover_balancer(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
+        changed = False
         vault = str(getattr(cfg.chain, "balancer_vault", "") or "")
         if not vault:
             return False
