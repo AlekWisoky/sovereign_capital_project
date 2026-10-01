@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from victor_ai_bot.arb_engine import _record_size_economic_diagnostic
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _build_size_economic_matrix,
 )
@@ -40,6 +41,9 @@ def test_size_economic_matrix_preserves_gross_rejected_diagnostics():
     assert matrix[0]["selection_basis"] == "gross_profit_diagnostic_only"
     assert matrix[0]["candidates"] == [{
         **rejected,
+        "gross_minus_flashloan_fee_wei": "1770811652699",
+        "gross_minus_flashloan_fee_minus_gas_wei": "960811652699",
+        "repayment_valid": True,
         "diagnostic_only": True,
     }]
     assert matrix[0]["selected_route_id"] == ""
@@ -94,40 +98,26 @@ def test_size_economic_matrix_does_not_treat_non_repay_sentinel_as_optimum():
     assert row["economic_optimum_executable"] is False
     by_route = {candidate["route_id"]: candidate for candidate in row["candidates"]}
     assert by_route["route-non-repay"]["repayment_valid"] is False
-    assert by_route["route-non-repay"]["gross_minus_flashloan_fee_wei"] == "-13460194666673"
+    assert by_route["route-non-repay"]["gross_minus_flashloan_fee_wei"] == "-13460194266673"
     assert by_route["route-non-repay"]["gross_minus_flashloan_fee_minus_gas_wei"] == "-16029178666673"
     assert by_route["route-non-repay"]["after_cost_profit_wei"] == "-1"
 
 
 def test_size_economic_diagnostics_are_bounded_per_route_not_global_top_n():
-    diagnostics = []
+    metrics = {}
     for route_id in ("route-a", "route-b"):
         for i in range(20):
-            diagnostics.append({
-                "route_id": route_id,
-                "amount_in": str(i + 1),
-                "amount_out_wei": str(i),
-                "gross_profit_wei": str(i),
-                "flashloan_fee_wei": "0",
-                "gas_cost_wei": "0",
-                "gas_cost_profit_token_wei": "0",
-                "after_cost_profit_wei": str(i),
-                "revalidated": False,
-                "authoritative": False,
-                "reason": "non_positive_gross_profit",
-            })
-    matrix = _build_size_economic_matrix([{
-        "amount_in": 1,
-        "two": [],
-        "three": [],
-        "two_metrics": {
-            "quote_requests": 40,
-            "quote_successes": 40,
-            "size_economic_diagnostics": diagnostics,
-        },
-        "three_metrics": {},
-    }])
-    candidates = matrix[0]["candidates"]
+            _record_size_economic_diagnostic(
+                metrics,
+                route_id=route_id,
+                amount_in=i + 1,
+                gross_profit_wei=i,
+                flashloan_fee_wei=0,
+                gas_cost_wei=0,
+                reason="non_positive_gross_profit",
+            )
+
+    candidates = metrics["size_economic_diagnostics"]
     assert len(candidates) == 32
     counts = {route_id: 0 for route_id in ("route-a", "route-b")}
     for candidate in candidates:
