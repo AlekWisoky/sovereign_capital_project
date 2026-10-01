@@ -348,7 +348,7 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
             route_id=route_id,
             expected_profit_raw="100000",
             route=SimpleNamespace(
-                legs=[SimpleNamespace(amount_in=str(amount), min_out=str(amount + gross), token_in="0xtoken")]
+                legs=[SimpleNamespace(amount_in=str(amount), min_out=str(amount), token_in="0xtoken")]
             ),
             meta={
                 "profitability": {
@@ -462,7 +462,7 @@ async def test_scan_selects_same_route_variant_by_verified_after_cost(monkeypatc
             route_id="same-route",
             expected_profit_raw=str(gross),
             route=SimpleNamespace(
-                legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+                legs=[SimpleNamespace(amount_in=str(amount), min_out=str(amount + gross), token_in="0xtoken")]
             ),
             min_outs=[str(amount + gross)],
             meta={
@@ -537,7 +537,7 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
                     "gross_profit_wei": str(gross),
                     "profit_after_costs_wei": str(net),
                     "flashloan_fee_wei": "90",
-                    "gas_cost_wei": str(420 if gross == 500 else 850),
+                    "gas_cost_wei": str(510 if gross == 500 else 940),
                 }
             },
         )
