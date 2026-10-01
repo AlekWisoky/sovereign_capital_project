@@ -700,6 +700,7 @@ async def find_two_leg_opportunities(
                         estimate_route_gas_units(
                             {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
                         ),
+                        observed_gas_price_wei=observed_gas_price_wei,
                     )
                 )
                 flashloan_fee_wei = (
@@ -924,6 +925,8 @@ async def find_three_leg_opportunities(
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
+    amount_in_by_token: Optional[Dict[str, int]] = None,
+    observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
     """Triangle / 3-hop cycle search A->B->C->A.
 
