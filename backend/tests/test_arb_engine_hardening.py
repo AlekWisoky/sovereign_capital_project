@@ -102,7 +102,8 @@ def test_size_economic_diagnostic_is_bounded_and_keeps_closest_gross_routes():
     rows = metrics["size_economic_diagnostics"]
     assert len(rows) == 16
     assert rows[0]["gross_profit_wei"] == "-1"
-    assert rows[0]["after_cost_profit_wei"] == "-4"
+    assert rows[0]["after_cost_profit_wei"] == "-2"
+    assert rows[0]["gas_cost_profit_token_wei"] == ""
     assert all(row["diagnostic_only"] is True for row in rows)
 
 
