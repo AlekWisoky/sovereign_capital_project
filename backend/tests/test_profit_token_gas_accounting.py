@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from victor_ai_bot.profitability_state import revalidate_profitability_state
 from victor_ai_bot.safety import check_profit_and_repay
 
@@ -66,9 +68,6 @@ def test_revalidation_accepts_non_weth_profit_token_gas_conversion():
     assert state["gas_cost_wei"] == str(10**12)
     assert state["gas_cost_profit_token_wei"] == "1000"
     assert state["profit_after_costs_wei"] == "10000"
-
-
-import pytest
 
 
 @pytest.mark.asyncio
