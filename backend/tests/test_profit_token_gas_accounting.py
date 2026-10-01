@@ -66,3 +66,53 @@ def test_revalidation_accepts_non_weth_profit_token_gas_conversion():
     assert state["gas_cost_wei"] == str(10**12)
     assert state["gas_cost_profit_token_wei"] == "1000"
     assert state["profit_after_costs_wei"] == "10000"
+
+
+async def test_scan_revalidation_wires_converted_gas_into_profitability(monkeypatch):
+    from victor_ai_bot.runtime_services import runtime_primary_scan_facade as scan_mod
+
+    class _Rpc:
+        async def gas_price(self):
+            return 1
+
+    runtime = scan_mod.RuntimePrimaryScanFacade.__new__(
+        scan_mod.RuntimePrimaryScanFacade
+    )
+    runtime.cfg = SimpleNamespace(
+        execution=SimpleNamespace(
+            usd_accounting_enabled=False,
+            usd_stable_preference="usdc",
+            flashloan_fee_bps=90,
+            gas_mode="standard",
+            gas_presets=SimpleNamespace(standard_max_fee_gwei=25),
+        ),
+        safety=SimpleNamespace(minProfitAbs=0, minProfitBps=0),
+        chain=SimpleNamespace(weth="0x0000000000000000000000000000000000000001"),
+    )
+    runtime.cache = None
+
+    opp = _opp(1_000_000, 1_020_000)
+    opp.meta.update({
+        "venues": ["univ3", "univ3"],
+        "leg1": {"gas_estimate": 120_000},
+        "leg2": {"gas_estimate": 120_000},
+        "out1": "2",
+        "out2": "1020000",
+    })
+
+    async def fake_gas_conversion(*_args, **_kwargs):
+        return 1_000
+
+    monkeypatch.setattr(scan_mod, "gas_wei_to_token_wei", fake_gas_conversion)
+
+    await runtime._annotate_canonical_after_fee_usd(
+        opps=[opp],
+        rpc=_Rpc(),
+        current_block=123,
+        cache=None,
+    )
+
+    state = opp.meta["profitability"]
+    assert state["authoritative"] is True
+    assert state["gas_cost_profit_token_wei"] == "1000"
+    assert state["profit_after_costs_wei"] == "10000"
