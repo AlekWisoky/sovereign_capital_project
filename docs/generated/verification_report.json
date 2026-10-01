@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 358,
+    "test_file_count": 359,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -115,8 +115,8 @@
       "backend/tests/test_governed_ai_inference.py",
       "backend/tests/test_imports.py",
       "backend/tests/test_income_helper.py",
-      "backend/tests/test_institutional_sizing_runtime_wiring.py",
       "backend/tests/test_institutional_scan_sizing.py",
+      "backend/tests/test_institutional_sizing_runtime_wiring.py",
       "backend/tests/test_intelligence_routes_maintenance.py",
       "backend/tests/test_internal_prime_capital_write_coordinator.py",
       "backend/tests/test_internal_prime_closed_loop_reconciliation.py",
@@ -360,7 +360,8 @@
       "backend/tests/test_withdraw_all_route_ownership_maintenance.py",
       "backend/tests/test_withdraw_capital_truth_coordination_maintenance.py",
       "backend/tests/test_withdraw_ledger_coordination_maintenance.py",
-      "backend/tests/test_withdraw_route_failure_semantics_maintenance.py"
+      "backend/tests/test_withdraw_route_failure_semantics_maintenance.py",
+      "test_profit_token_gas_accounting.py"
     ]
   },
   "contracts": {
