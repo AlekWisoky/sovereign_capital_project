@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 357,
+  "backend_test_file_count": 358,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -169,6 +169,7 @@
     "test_governed_ai_inference.py",
     "test_imports.py",
     "test_income_helper.py",
+    "test_institutional_scan_sizing.py",
     "test_institutional_sizing_runtime_wiring.py",
     "test_intelligence_routes_maintenance.py",
     "test_internal_prime_capital_write_coordinator.py",
@@ -2248,6 +2249,8 @@
       "test_governance_read_surface_auto_trade_sync.py",
       "test_imports.py",
       "test_income_helper.py",
+      "test_institutional_scan_sizing.py",
+      "test_institutional_scan_sizing.py",
       "test_institutional_sizing_runtime_wiring.py",
       "test_intelligence_routes_maintenance.py",
       "test_internal_prime_capital_write_coordinator.py",

@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from urllib.parse import urlsplit
 
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
+from ..execution_capture.final_quote import FinalQuoteError, produce_market_price_evidence
 from ..cache import PerBlockCache
 from ..gas_model import estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
 from ..models import Opportunity
@@ -53,9 +54,29 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         if isinstance(meta, dict)
         else {}
     )
-    return {
+    legs = []
+    try:
+        for leg in list(getattr(getattr(candidate, "route", None), "legs", []) or [])[:3]:
+            legs.append({
+                "dex": str(getattr(leg, "dex", "") or ""),
+                "venue": str(getattr(leg, "venue", "") or ""),
+                "token_in": str(getattr(leg, "token_in", "") or ""),
+                "token_out": str(getattr(leg, "token_out", "") or ""),
+                "amount_in": str(getattr(leg, "amount_in", "0") or "0"),
+                "min_out": str(getattr(leg, "min_out", "0") or "0"),
+                "data": str(getattr(leg, "data", "") or ""),
+            })
+    except (AttributeError, TypeError, ValueError):
+        legs = []
+    route_legs = list(getattr(getattr(candidate, "route", None), "legs", []) or [])
+    amount_in_value = str(getattr(route_legs[0], "amount_in", "0") or "0") if route_legs else "0"
+    terminal = (meta.get("out3") or meta.get("out2") or "") if isinstance(meta, dict) else ""
+    row = {
         "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
+        "amount_in": amount_in_value,
         "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+        "amount_out_wei": str(terminal),
+        "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
         "flashloan_fee_wei": str(profitability.get("flashloan_fee_wei") or "0"),
         "gas_cost_wei": str(
             profitability.get("gas_cost_wei")
@@ -70,6 +91,9 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "reason": str(profitability.get("reason") or "unavailable"),
         "diagnostic_only": False,
     }
+    if legs:
+        row["legs"] = legs
+    return row
 
 
 def _merge_size_quote_failure_reasons(
@@ -455,6 +479,79 @@ class RuntimePrimaryScanFacade:
         self._adaptive_size_min_opportunities = min_opportunities
         return amounts
 
+    async def _build_token_scan_amounts(
+        self,
+        rpc: Any,
+        *,
+        current_block: int,
+        base_amount_in: int,
+        cache: PerBlockCache,
+    ) -> tuple[Dict[str, int], Dict[str, Any]]:
+        """Translate the reference borrow notional into raw units per input token."""
+        chain = getattr(self.cfg, "chain", None)
+        tokens = [str(token) for token in (getattr(chain, "token_universe", []) or []) if token]
+        weth = str(getattr(chain, "weth", "") or "")
+        telemetry: Dict[str, Any] = {
+            "enabled": False,
+            "source": "",
+            "reference_token": weth,
+            "base_amount_in": str(int(base_amount_in)),
+            "amounts_by_token": {},
+            "unpriced_tokens": [],
+        }
+        if not tokens or not weth:
+            return {}, telemetry
+        try:
+            evidence = await produce_market_price_evidence(
+                rpc,
+                cfg=self.cfg,
+                tokens=[(token, "scan_input") for token in tokens],
+                block_number=int(current_block),
+            )
+        except (FinalQuoteError, OSError, RuntimeError, TypeError, ValueError):
+            telemetry["source"] = "reference_token_fallback"
+            telemetry["amounts_by_token"] = {weth.lower(): str(max(1, int(base_amount_in)))}
+            telemetry["unpriced_tokens"] = [
+                token for token in tokens if token.lower() != weth.lower()
+            ]
+            return {weth.lower(): max(1, int(base_amount_in))}, telemetry
+        ref = evidence.get(weth.lower())
+        if not isinstance(ref, dict):
+            telemetry["source"] = "reference_token_unpriced"
+            telemetry["unpriced_tokens"] = list(tokens)
+            return {}, telemetry
+        try:
+            ref_decimals = int(ref["decimals"])
+            ref_price = float(ref["price_usd"])
+            reference_usd = (
+                float(base_amount_in) / float(10 ** ref_decimals)
+            ) * ref_price
+            if reference_usd <= 0:
+                raise ValueError("reference_usd_non_positive")
+        except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+            telemetry["source"] = "reference_token_invalid"
+            telemetry["unpriced_tokens"] = list(tokens)
+            return {}, telemetry
+        amounts: Dict[str, int] = {}
+        for token in tokens:
+            row = evidence.get(token.lower())
+            if not isinstance(row, dict):
+                telemetry["unpriced_tokens"].append(token)
+                continue
+            try:
+                decimals = int(row["decimals"])
+                price_usd = float(row["price_usd"])
+                raw = int(max(1.0, round(reference_usd / price_usd * float(10 ** decimals))))
+            except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+                telemetry["unpriced_tokens"].append(token)
+                continue
+            amounts[token.lower()] = raw
+        telemetry["enabled"] = bool(amounts)
+        telemetry["source"] = "quote_derived_usd_notional"
+        telemetry["reference_notional_usd"] = float(reference_usd)
+        telemetry["amounts_by_token"] = {token: str(amount) for token, amount in amounts.items()}
+        return amounts, telemetry
+
     async def _scan_primary_opportunities(
         self,
         rpc: Any,
@@ -532,6 +629,18 @@ class RuntimePrimaryScanFacade:
         three_leg_telemetry: Dict[str, Any] = {}
         opps2: List[Opportunity] = []
         opps3: List[Opportunity] = []
+        observed_gas_price_wei: int | None = None
+        try:
+            observed_gas_price_wei = await rpc.gas_price()
+        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+            observed_gas_price_wei = None
+        token_scan_amounts, token_scan_telemetry = await self._build_token_scan_amounts(
+            rpc,
+            current_block=int(current_block),
+            base_amount_in=int(amount_in),
+            cache=scan_cache,
+        )
+        telemetry["scan_sizing"] = dict(token_scan_telemetry)
         try:
             size_amounts = [int(amount_in)]
             adaptive_amounts = self._adaptive_scan_amounts(int(amount_in))
@@ -560,6 +669,11 @@ class RuntimePrimaryScanFacade:
                         time_budget_ms=1500,
                         max_opps=60,
                         telemetry=two_metrics,
+                        amount_in_by_token={
+                            token: max(1, int(round(raw * float(size_amount) / float(max(1, int(amount_in))))))
+                            for token, raw in token_scan_amounts.items()
+                        },
+                        observed_gas_price_wei=observed_gas_price_wei,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
@@ -579,6 +693,11 @@ class RuntimePrimaryScanFacade:
                         time_budget_ms=1600,
                         max_opps=40,
                         telemetry=three_metrics,
+                        amount_in_by_token={
+                            token: max(1, int(round(raw * float(size_amount) / float(max(1, int(amount_in))))))
+                            for token, raw in token_scan_amounts.items()
+                        },
+                        observed_gas_price_wei=observed_gas_price_wei,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
