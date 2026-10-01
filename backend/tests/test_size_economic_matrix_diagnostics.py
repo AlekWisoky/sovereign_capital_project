@@ -8,9 +8,12 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 def test_size_economic_matrix_preserves_gross_rejected_diagnostics():
     rejected = {
         "route_id": "route-near-miss",
+        "amount_in": "5000000000000000",
+        "amount_out_wei": "5001786893695962",
         "gross_profit_wei": "1786893695962",
         "flashloan_fee_wei": "16082043263",
         "gas_cost_wei": "900000000000",
+        "gas_cost_profit_token_wei": "810000000000",
         "after_cost_profit_wei": "0",
         "revalidated": False,
         "authoritative": False,
@@ -41,3 +44,5 @@ def test_size_economic_matrix_preserves_gross_rejected_diagnostics():
     }]
     assert matrix[0]["selected_route_id"] == ""
     assert matrix[0]["selected_after_cost_profit_wei"] == "0"
+    assert matrix[0]["candidates"][0]["amount_out_wei"] == "5001786893695962"
+    assert matrix[0]["candidates"][0]["gas_cost_profit_token_wei"] == "810000000000"
