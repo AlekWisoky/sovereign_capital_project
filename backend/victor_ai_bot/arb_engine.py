@@ -833,10 +833,6 @@ async def find_two_leg_opportunities(
                     },
                 )
             )
-            if len(opps) >= max_opps:
-                break
-        if len(opps) >= max_opps:
-            break
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
@@ -886,9 +882,10 @@ async def find_two_leg_opportunities(
             },
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
         })
-    # rank by gross profit desc
+    # Rank the complete bounded scan result, then enforce the caller's output
+    # cap. Discovery order must not hard-stop candidate generation.
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
-    return opps
+    return opps[: max(1, int(max_opps))]
 
 
 def _prioritize_three_leg_adjacency(
@@ -1046,7 +1043,14 @@ async def find_three_leg_opportunities(
                 revs = by_pair.get((e2.token_out, e1.token_in), [])
                 if not revs:
                     continue
-                e3_cands = list(revs[:3])
+                max_reverse_candidates = max(
+                    3,
+                    min(
+                        12,
+                        int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8),
+                    ),
+                )
+                e3_cands = list(revs[:max_reverse_candidates])
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
                 qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
                 for e3 in e3_cands:
@@ -1268,15 +1272,7 @@ async def find_three_leg_opportunities(
                             },
                         )
                     )
-                    if len(opps) >= max_opps:
-                        break
-                if len(opps) >= max_opps:
-                    break
-            if len(opps) >= max_opps:
-                break
-        if len(opps) >= max_opps:
-            break
-
+    
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
@@ -1318,8 +1314,10 @@ async def find_three_leg_opportunities(
             "opportunity_count": len(opps),
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
         })
+    # Rank the complete bounded scan result, then enforce the caller's output
+    # cap. Discovery order must not hard-stop candidate generation.
     opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
-    return opps
+    return opps[: max(1, int(max_opps))]
 
 
 async def requote_opportunity(
