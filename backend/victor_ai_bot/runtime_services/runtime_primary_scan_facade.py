@@ -76,6 +76,9 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "amount_in": amount_in_value,
         "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
         "amount_out_wei": str(terminal),
+        "gas_cost_profit_token_wei": str(
+            profitability.get("gas_cost_profit_token_wei") or "0"
+        ),
         "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
         "flashloan_fee_wei": str(profitability.get("flashloan_fee_wei") or "0"),
         "gas_cost_wei": str(
@@ -135,9 +138,12 @@ def _build_size_economic_matrix(
                 continue
             row = {
                 "route_id": str(diagnostic.get("route_id") or ""),
+                "amount_in": str(diagnostic.get("amount_in") or "0"),
+                "amount_out_wei": str(diagnostic.get("amount_out_wei") or ""),
                 "gross_profit_wei": str(diagnostic.get("gross_profit_wei") or "0"),
                 "flashloan_fee_wei": str(diagnostic.get("flashloan_fee_wei") or "0"),
                 "gas_cost_wei": str(diagnostic.get("gas_cost_wei") or "0"),
+                "gas_cost_profit_token_wei": str(diagnostic.get("gas_cost_profit_token_wei") or ""),
                 "after_cost_profit_wei": str(diagnostic.get("after_cost_profit_wei") or "0"),
                 "revalidated": bool(diagnostic.get("revalidated")),
                 "authoritative": bool(diagnostic.get("authoritative")),
@@ -926,7 +932,9 @@ class RuntimePrimaryScanFacade:
                 {
                     "route_id": _candidate_route_key(candidate),
                     "amount_in": _candidate_amount_in(candidate),
+                    "amount_out_wei": str(_candidate_profitability(candidate).get("amount_out_wei") or getattr(candidate, "meta", {}).get("out3") or getattr(candidate, "meta", {}).get("out2") or ""),
                     "gross_profit_wei": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+                    "gas_cost_profit_token_wei": str(_candidate_profitability(candidate).get("gas_cost_profit_token_wei") or "0"),
                     "revalidated": bool(_candidate_profitability(candidate).get("revalidated")),
                     "authoritative": bool(_candidate_profitability(candidate).get("authoritative")),
                     "reason": str(_candidate_profitability(candidate).get("reason") or "unavailable"),
