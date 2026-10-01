@@ -115,12 +115,17 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
         cache,
         discovery_context,
         telemetry_sink,
+        shared_token_scan_amounts=None,
+        force_adaptive_size_scan=False,
     ):
         profit = 100 if rpc.url.endswith("a.example") else 300
         telemetry_sink.update(
             {
                 "quotes": {"requests": 10, "successes": 10, "failure_reasons": {}},
                 "scan_latency_ms": 1.0,
+                "route_universe": {"edges_by_dex": {"univ3": 2}},
+                "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
+                "adaptive_size_discovery": {"amounts_scanned": ["1000", "2000"]},
             }
         )
         return [
