@@ -418,10 +418,21 @@ def revalidate_profitability_state(
     if expected_profit_usd > _MICRO_USD_THRESHOLD:
         expected_profit_usd /= 1_000_000.0
     resolved_gas_cost_wei = _infer_gas_cost_wei(opp, cfg, gas_cost_wei)
+    existing_profitability = _safe_dict(meta.get("profitability"))
+    existing_safety = _safe_dict(meta.get("safety"))
+    inherited_profit_token_gas = _safe_int(
+        existing_profitability.get("gas_cost_profit_token_wei")
+        or existing_safety.get("gas_cost_profit_token_wei"),
+        0,
+    )
     resolved_gas_cost_in_profit_token_wei = (
         max(0, int(gas_cost_in_profit_token_wei))
         if gas_cost_in_profit_token_wei is not None
-        else int(resolved_gas_cost_wei)
+        else (
+            int(inherited_profit_token_gas)
+            if inherited_profit_token_gas > 0
+            else int(resolved_gas_cost_wei)
+        )
     )
 
     if continuity and not bool(continuity.get("valid", False)):
