@@ -348,7 +348,7 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
             route_id=route_id,
             expected_profit_raw="100000",
             route=SimpleNamespace(
-                legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+                legs=[SimpleNamespace(amount_in=str(amount), min_out=str(amount + gross), token_in="0xtoken")]
             ),
             meta={
                 "profitability": {
