@@ -7,6 +7,7 @@ from ..gas import suggest_gas
 from ..models import Opportunity
 from ..rpc import JsonRpcClient
 from ..safety import check_profit_and_repay
+from ..usd_pricing import gas_wei_to_token_wei
 
 _SAFE_CAN_EXECUTE_EXCEPTIONS = (
     AttributeError,
@@ -63,6 +64,28 @@ class RuntimeCanExecuteFacade:
                 }
                 continue
 
+            try:
+                profit_token = str(o.route.legs[0].token_in)
+                gas_cost_profit_token_wei = await gas_wei_to_token_wei(
+                    rpc,
+                    chain=self.cfg.chain,
+                    gas_cost_wei=int(gas_cost),
+                    token_out=profit_token,
+                    block_number=int(getattr(rpc, "last_block", 0) or 0),
+                    cache=None,
+                )
+            except _SAFE_CAN_EXECUTE_EXCEPTIONS:
+                gas_cost_profit_token_wei = None
+            if gas_cost_profit_token_wei is None:
+                o.can_execute = False
+                o.meta["safety"] = {
+                    "ok": False,
+                    "reason": "gas_cost_profit_token_unavailable",
+                    "exec_ready": False,
+                    "gas_cost_wei": str(int(gas_cost)),
+                }
+                continue
+
             sr = check_profit_and_repay(
                 amount_in_wei=amount_in,
                 amount_out_wei=amount_out,
@@ -70,6 +93,7 @@ class RuntimeCanExecuteFacade:
                 min_profit_bps=int(self.cfg.safety.minProfitBps),
                 flashloan_fee_bps=int(self.cfg.execution.flashloan_fee_bps),
                 gas_cost_wei=gas_cost,
+                gas_cost_profit_token_wei=int(gas_cost_profit_token_wei),
             )
 
             missing: list[str] = []
@@ -102,5 +126,6 @@ class RuntimeCanExecuteFacade:
                 "max_fee_wei": str(int(max_fee)),
                 "priority_fee_wei": str(int(prio)),
                 "gas_cost_wei": str(int(gas_cost)),
+                "gas_cost_profit_token_wei": str(int(sr.gas_cost_profit_token_wei)),
                 "profit_after_costs_wei": str(sr.profit_after_costs_wei),
             }
