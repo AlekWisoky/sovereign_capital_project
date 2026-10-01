@@ -90,6 +90,38 @@ def test_discovery_load_invalid_json_degrades_safely(tmp_path):
     assert dm.v3_pairs() == []
 
 
+
+def test_discovery_venue_pairs_expand_from_anchor_to_observed_liquid_token(tmp_path):
+    anchor = "0x" + "33" * 20
+    discovered = "0x" + "55" * 20
+    manager = DiscoveryManager(chain_name="base", data_dir=str(tmp_path))
+    cfg = _cfg(chain={"token_universe": [anchor]})
+
+    pairs = manager._supported_discovery_pairs(
+        cfg,
+        [anchor, discovered],
+        [10**18, 10**18],
+    )
+
+    assert pairs == [(0, anchor, 1, discovered)]
+
+
+def test_discovery_venue_pairs_ignore_unanchored_unknown_tokens(tmp_path):
+    anchor = "0x" + "33" * 20
+    discovered_a = "0x" + "55" * 20
+    discovered_b = "0x" + "66" * 20
+    manager = DiscoveryManager(chain_name="base", data_dir=str(tmp_path))
+    cfg = _cfg(chain={"token_universe": [anchor]})
+
+    pairs = manager._supported_discovery_pairs(
+        cfg,
+        [discovered_a, discovered_b],
+        [10**18, 10**18],
+    )
+
+    assert pairs == []
+
+
 @pytest.mark.asyncio
 async def test_discovery_runtime_value_error_degrades_safely(tmp_path):
     dm = DiscoveryManager(chain_name='eth', data_dir=str(tmp_path))
