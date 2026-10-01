@@ -328,6 +328,12 @@ async def quote_edges_batch(
 
     metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal)
     metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal))
+    metrics.setdefault("failed_quote_edge_samples", [])
+
+    def _record_failed_edge(edge: Edge) -> None:
+        samples = metrics["failed_quote_edge_samples"]
+        if len(samples) < 256:
+            samples.append(edge_key(edge))
 
     # UniV3 batch
     if missing_univ3 and getattr(cfg.chain, "univ3_quoter_v2", ""):
@@ -352,6 +358,7 @@ async def quote_edges_batch(
             else:
                 out[ek] = None
                 cache.set(ck, None)
+                _record_failed_edge(e)
 
     # Curve batch (two-stage underlying fallback inside quote_curve_many)
     if missing_curve:
@@ -383,6 +390,7 @@ async def quote_edges_batch(
             else:
                 out[ek] = None
                 cache.set(ck, None)
+                _record_failed_edge(e)
 
     # Balancer batch
     if missing_bal and getattr(cfg.chain, "balancer_vault", ""):
@@ -404,9 +412,11 @@ async def quote_edges_batch(
             else:
                 out[ek] = None
                 cache.set(ck, None)
+                _record_failed_edge(e)
 
     failure_counts = quote_diagnostics.get("failure_reasons") or {}
     metrics["quote_failure_reasons"] = {str(k): int(v) for k, v in failure_counts.items()}
+    metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
     metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
     metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
     # ensure all are present

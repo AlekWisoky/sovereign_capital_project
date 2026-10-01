@@ -229,6 +229,16 @@ def _build_size_economic_matrix(
             "quote_failure_reasons": _merge_size_quote_failure_reasons(
                 two_metrics, three_metrics
             ),
+            "failed_quote_edge_count": int(two_metrics.get("failed_quote_edge_count", 0) or 0)
+            + int(three_metrics.get("failed_quote_edge_count", 0) or 0),
+            "failed_quote_edge_samples": list(
+                dict.fromkeys(
+                    [
+                        *list(two_metrics.get("failed_quote_edge_samples") or []),
+                        *list(three_metrics.get("failed_quote_edge_samples") or []),
+                    ]
+                )
+            )[:256],
             "route_ids": [row["route_id"] for row in route_rows if row["route_id"]],
             "candidates": route_rows,
             "selection_basis": (
@@ -638,6 +648,8 @@ class RuntimePrimaryScanFacade:
         cache: PerBlockCache | None = None,
         discovery_context: Dict[str, List[Any]] | None = None,
         telemetry_sink: Dict[str, Any] | None = None,
+        shared_token_scan_amounts: Dict[str, int] | None = None,
+        force_adaptive_size_scan: bool = False,
     ) -> List[Opportunity]:
         if int(amount_in) <= 0:
             return []
@@ -711,12 +723,27 @@ class RuntimePrimaryScanFacade:
             observed_gas_price_wei = await rpc.gas_price()
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
             observed_gas_price_wei = None
-        token_scan_amounts, token_scan_telemetry = await self._build_token_scan_amounts(
-            rpc,
-            current_block=int(current_block),
-            base_amount_in=int(amount_in),
-            cache=scan_cache,
-        )
+        if shared_token_scan_amounts is None:
+            token_scan_amounts, token_scan_telemetry = await self._build_token_scan_amounts(
+                rpc,
+                current_block=int(current_block),
+                base_amount_in=int(amount_in),
+                cache=scan_cache,
+            )
+        else:
+            token_scan_amounts = {
+                str(token).lower(): max(1, int(raw))
+                for token, raw in dict(shared_token_scan_amounts).items()
+                if str(token) and int(raw) > 0
+            }
+            token_scan_telemetry = {
+                "enabled": bool(token_scan_amounts),
+                "source": "shared_provider_comparison",
+                "reference_token": str(getattr(getattr(self.cfg, "chain", None), "weth", "") or ""),
+                "base_amount_in": str(int(amount_in)),
+                "amounts_by_token": {token: str(raw) for token, raw in token_scan_amounts.items()},
+                "unpriced_tokens": [],
+            }
         telemetry["scan_sizing"] = dict(token_scan_telemetry)
         try:
             size_amounts = [int(amount_in)]
@@ -837,7 +864,8 @@ class RuntimePrimaryScanFacade:
                 probe_basis = "authoritative_after_cost_positive_count"
 
             should_probe = (
-                candidates_before_probe < min_opportunities
+                force_adaptive_size_scan
+                or candidates_before_probe < min_opportunities
                 or (
                     candidates_before_probe >= min_opportunities
                     and authoritative_positive_candidates_before_probe < min_opportunities
@@ -1110,11 +1138,15 @@ class RuntimePrimaryScanFacade:
             )
             quote_failure_reasons: Dict[str, int] = {}
             route_rejections: Dict[str, int] = {}
+            failed_quote_edge_samples: List[str] = []
             for source in (two_leg_telemetry, three_leg_telemetry):
                 for key, value in dict(source.get("quote_failure_reasons") or {}).items():
                     quote_failure_reasons[str(key)] = quote_failure_reasons.get(str(key), 0) + int(value)
                 for key, value in dict(source.get("route_rejections") or {}).items():
                     route_rejections[str(key)] = route_rejections.get(str(key), 0) + int(value)
+                failed_quote_edge_samples.extend(
+                    list(source.get("failed_quote_edge_samples") or [])
+                )
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
@@ -1154,6 +1186,12 @@ class RuntimePrimaryScanFacade:
             )
             telemetry["gross_candidates"] = len(opps)
             telemetry["route_rejections"] = route_rejections
+            telemetry["failed_quote_edge_samples"] = list(
+                dict.fromkeys(failed_quote_edge_samples)
+            )[:256]
+            telemetry["failed_quote_edge_count"] = int(
+                len(failed_quote_edge_samples)
+            )
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
@@ -1235,6 +1273,15 @@ class RuntimePrimaryScanFacade:
             bootstrap_rpc,
             current_block=int(current_block),
         )
+        shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
+            bootstrap_rpc,
+            current_block=int(current_block),
+            base_amount_in=int(amount_in),
+            cache=PerBlockCache(),
+        )
+        force_symmetric_sizing = str(
+            os.environ.get("VICTOR_RPC_ECONOMIC_SYMMETRIC_SIZING", "1")
+        ).strip().lower() not in {"0", "false", "no", "off"}
 
         async def scan_one(url: str) -> tuple[str, List[Opportunity], PerBlockCache, Dict[str, Any], RpcEconomicEvidence]:
             scan_cache = PerBlockCache()
@@ -1249,6 +1296,8 @@ class RuntimePrimaryScanFacade:
                         cache=scan_cache,
                         discovery_context=discovery_context,
                         telemetry_sink=telemetry,
+                        shared_token_scan_amounts=shared_token_scan_amounts,
+                        force_adaptive_size_scan=force_symmetric_sizing,
                     )
                 else:
                     async with JsonRpcClient(
@@ -1261,6 +1310,8 @@ class RuntimePrimaryScanFacade:
                             cache=scan_cache,
                             discovery_context=discovery_context,
                             telemetry_sink=telemetry,
+                            shared_token_scan_amounts=shared_token_scan_amounts,
+                            force_adaptive_size_scan=force_symmetric_sizing,
                         )
             except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                 telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
@@ -1352,6 +1403,57 @@ class RuntimePrimaryScanFacade:
             selected_result = next(item for item in results if item[0] == selected_url)
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
+
+        provider_symmetry: List[Dict[str, Any]] = []
+        route_universes: List[Dict[str, Any]] = []
+        size_ladders: List[tuple[str, ...]] = []
+        token_ladders: List[tuple[tuple[str, str], ...]] = []
+        for url, _opps, _cache, provider_telemetry, _provider_evidence in results:
+            adaptive = dict(provider_telemetry.get("adaptive_size_discovery") or {})
+            sizing = dict(provider_telemetry.get("scan_sizing") or {})
+            universe = dict(provider_telemetry.get("route_universe") or {})
+            quotes = dict(provider_telemetry.get("quotes") or {})
+            failures = dict(quotes.get("failure_reasons") or {})
+            route_rejections = dict(provider_telemetry.get("route_rejections") or {})
+            amounts_scanned = tuple(str(x) for x in adaptive.get("amounts_scanned") or [])
+            amounts_by_token = tuple(
+                sorted(
+                    (str(k), str(v))
+                    for k, v in dict(sizing.get("amounts_by_token") or {}).items()
+                )
+            )
+            route_universes.append(universe)
+            size_ladders.append(amounts_scanned)
+            token_ladders.append(amounts_by_token)
+            provider_symmetry.append({
+                "endpoint": url,
+                "provider": str(urlsplit(url).hostname or ""),
+                "block_number": int(current_block),
+                "route_universe": universe,
+                "amounts_scanned": list(amounts_scanned),
+                "amounts_by_token": dict(sizing.get("amounts_by_token") or {}),
+                "quote_requests": int(quotes.get("requests", 0) or 0),
+                "quote_successes": int(quotes.get("successes", 0) or 0),
+                "quote_failure_reasons": failures,
+                "route_rejections": route_rejections,
+                "failed_quote_edge_count": int(
+                    provider_telemetry.get("failed_quote_edge_count", 0) or 0
+                ),
+                "failed_quote_edge_samples": list(
+                    provider_telemetry.get("failed_quote_edge_samples") or []
+                )[:256],
+                "failed_quotes_removed_from_candidates": True,
+            })
+        route_universe_equal = bool(route_universes) and all(
+            universe == route_universes[0] for universe in route_universes[1:]
+        )
+        size_ladder_equal = bool(size_ladders) and all(
+            ladder == size_ladders[0] for ladder in size_ladders[1:]
+        )
+        token_ladder_equal = bool(token_ladders) and all(
+            ladder == token_ladders[0] for ladder in token_ladders[1:]
+        )
+
         selected_telemetry["rpc"]["economic_selection"] = {
             "mode": "read_only_economic",
             "selected_endpoint": selected_url,
@@ -1377,6 +1479,19 @@ class RuntimePrimaryScanFacade:
             "active_chain_changed": False,
             "broadcast_attempted": False,
             "auto_trade_enabled": False,
+            "provider_scan_symmetry": {
+                "route_universe_identical": route_universe_equal,
+                "size_ladder_identical": size_ladder_equal,
+                "token_size_ladder_identical": token_ladder_equal,
+                "same_block": all(
+                    int(row.get("block_number") or -1) == int(current_block)
+                    for row in provider_symmetry
+                ),
+                "failure_classification_shared": True,
+                "failed_quotes_are_non_candidates": True,
+                "shared_token_sizing": dict(shared_token_scan_telemetry),
+                "providers": provider_symmetry,
+            },
         }
         return {
             "selected_endpoint": selected_url,
