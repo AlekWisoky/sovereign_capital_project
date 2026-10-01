@@ -158,6 +158,11 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
     assert selection["selected_endpoint"] == "https://rpc-b.example"
     assert selection["broadcast_attempted"] is False
     assert selection["auto_trade_enabled"] is False
+    symmetry = selection["provider_scan_symmetry"]
+    assert symmetry["route_universe_identical"] is True
+    assert symmetry["size_ladder_identical"] is True
+    assert symmetry["token_size_ladder_identical"] is True
+    assert symmetry["failed_quotes_are_non_candidates"] is True
     assert {url for url, _ in runtime.rpc_manager.telemetry} == {
         "https://rpc-a.example",
         "https://rpc-b.example",
