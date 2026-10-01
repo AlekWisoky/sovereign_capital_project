@@ -1120,14 +1120,21 @@ class RuntimePrimaryScanFacade:
             # candidates, preserve the established after-gas-then-gross numeric ordering
             # so diagnostic scan ordering remains deterministic.
             def _scan_sort_key(candidate: Opportunity) -> tuple[int, int, str]:
-                meta = getattr(candidate, "meta", {}) or {}
                 route_id = str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or "")
-                profitability = meta.get("profitability") if isinstance(meta, dict) else None
-                if isinstance(profitability, dict) and bool(profitability.get("revalidated")) and bool(profitability.get("authoritative")):
-                    try:
-                        return (3, int(profitability.get("profit_after_costs_wei") or 0), route_id)
-                    except (TypeError, ValueError):
-                        pass
+                diagnostic_after_cost = _candidate_after_cost(candidate)
+                if diagnostic_after_cost is not None:
+                    meta = getattr(candidate, "meta", {}) or {}
+                    profitability = meta.get("profitability") if isinstance(meta, dict) else None
+                    authoritative = (
+                        isinstance(profitability, dict)
+                        and bool(profitability.get("revalidated"))
+                        and bool(profitability.get("authoritative"))
+                    )
+                    # Revalidated diagnostic P&L is economically authoritative for
+                    # ranking even when it is not executable. Keep the execution
+                    # gate separate from this ordering decision.
+                    return (3 if authoritative else 2, int(diagnostic_after_cost), route_id)
+                meta = getattr(candidate, "meta", {}) or {}
                 if isinstance(meta, dict):
                     try:
                         meta_after = meta.get("profit_after_costs")
