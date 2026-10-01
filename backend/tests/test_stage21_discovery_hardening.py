@@ -59,6 +59,29 @@ def test_discovery_load_ignores_invalid_entries_and_keeps_valid(tmp_path):
     assert pairs[0]['fee'] == 3000
 
 
+def test_discovery_load_rehydrates_candidate_token_telemetry(tmp_path):
+    p = tmp_path / 'discovery' / 'eth.json'
+    p.parent.mkdir(parents=True, exist_ok=True)
+    token_a = '0x' + '11' * 20
+    token_b = '0x' + '22' * 20
+    p.write_text(json.dumps({
+        'v3': [{
+            'token0': token_a,
+            'token1': token_b,
+            'fee': 3000,
+            'pool': '0x' + '33' * 20,
+            'first_seen_block': 1,
+            'last_seen_block': 2,
+        }]
+    }))
+    dm = DiscoveryManager(chain_name='eth', data_dir=str(tmp_path))
+    telemetry = dm.candidate_token_telemetry(
+        SimpleNamespace(chain=SimpleNamespace(token_universe=[token_a]))
+    )
+    assert token_b in telemetry['observed_not_admitted']
+    assert 'univ3_persisted' in telemetry['sources'][token_b]
+
+
 def test_discovery_load_invalid_json_degrades_safely(tmp_path):
     p = tmp_path / 'discovery' / 'eth.json'
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +108,41 @@ async def test_discovery_saves_found_pairs(tmp_path):
     assert len(pairs) == 1
     saved = json.loads((tmp_path / 'discovery' / 'eth.json').read_text())
     assert saved['v3']
+
+
+
+@pytest.mark.asyncio
+async def test_discovery_admits_bounded_v3_pool_event_touching_anchor(tmp_path):
+    anchor = '0x' + '33' * 20
+    candidate = '0x' + '55' * 20
+    pool = '0x' + '66' * 20
+    topic = '0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118'
+
+    class _Rpc(_RpcOK):
+        async def eth_get_logs(self, *, address, from_block, to_block, topics=None):
+            assert address == '0x' + '22' * 20
+            assert topics == [topic]
+            return [{
+                'topics': [
+                    topic,
+                    '0x' + '00' * 12 + anchor[2:],
+                    '0x' + '00' * 12 + candidate[2:],
+                    '0x' + '00' * 29 + '0bb8',
+                ],
+                'data': '0x' + '00' * 32 + '00' * 12 + pool[2:],
+            }]
+
+    dm = DiscoveryManager(chain_name='eth', data_dir=str(tmp_path))
+    cfg = _cfg(chain={'discovery_pool_max_candidates': 4})
+    pairs = await dm.maybe_discover_univ3(_Rpc(), cfg, 100)
+    assert any(
+        row['token_in'].lower() == anchor.lower()
+        and row['token_out'].lower() == candidate.lower()
+        and row['fee'] == 3000
+        for row in pairs
+    )
+    telemetry = dm.candidate_token_telemetry(cfg)
+    assert candidate.lower() in telemetry['observed_not_admitted']
 
 
 @pytest.mark.asyncio

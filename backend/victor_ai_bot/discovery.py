@@ -17,6 +17,7 @@ _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS = (
     AttributeError, TypeError, ValueError, RuntimeError, OSError, IndexError
 )
 _ZERO_ADDRESS = "0x" + "00" * 20
+_UNIV3_POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 
 
 def _hex0x(b: bytes) -> str:
@@ -219,6 +220,9 @@ class DiscoveryManager:
                     )
                     if dv.token0 and dv.token1 and dv.pool and dv.fee:
                         self._v3[self._key(dv.token0, dv.token1, dv.fee)] = dv
+                        self._observe_candidate_tokens(
+                            [dv.token0, dv.token1], source="univ3_persisted"
+                        )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
             for it in j.get("curve") or []:
@@ -234,6 +238,9 @@ class DiscoveryManager:
                     )
                     if dc.pool and dc.token_in and dc.token_out and dc.i != dc.j:
                         self._curve[self._curve_key(dc.pool, dc.i, dc.j)] = dc
+                        self._observe_candidate_tokens(
+                            [dc.token_in, dc.token_out], source="curve_persisted"
+                        )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
             for it in j.get("balancer") or []:
@@ -248,6 +255,9 @@ class DiscoveryManager:
                     )
                     if db.pool_id and db.pool and db.token_in and db.token_out:
                         self._balancer[self._balancer_key(db.pool_id, db.token_in, db.token_out)] = db
+                        self._observe_candidate_tokens(
+                            [db.token_in, db.token_out], source="balancer_persisted"
+                        )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
         except _SAFE_DISCOVERY_LOAD_EXCEPTIONS:
@@ -314,6 +324,11 @@ class DiscoveryManager:
             if self._last_run_block and (block_number - self._last_run_block) < interval:
                 return self.v3_pairs()
             self._last_run_block = int(block_number)
+
+            # Consume canonical factory PoolCreated events first. This bounded
+            # bridge expands the quote graph only when a discovered pool touches
+            # a configured anchor token; economics/execution remain downstream.
+            await self._discover_univ3_pool_events(rpc, cfg, int(block_number))
             fee_tiers = [100, 500, 3000, 10000]
             seed = f"disc:{int(block_number)}:{self.chain_name}"
             pairs: List[Tuple[str, str]] = []
@@ -363,6 +378,63 @@ class DiscoveryManager:
             return self.v3_pairs()
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return self.v3_pairs()
+
+    async def _discover_univ3_pool_events(
+        self, rpc: JsonRpcClient, cfg: Any, block_number: int
+    ) -> bool:
+        factory = str(getattr(cfg.chain, "univ3_factory", "") or "")
+        if not factory:
+            return False
+        window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50000) or 50000))
+        max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 24) or 24))
+        from_block = max(0, int(block_number) - window)
+        try:
+            logs = await rpc.eth_get_logs(
+                address=factory,
+                from_block=from_block,
+                to_block=int(block_number),
+                topics=[_UNIV3_POOL_CREATED_TOPIC],
+            )
+        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+            return False
+        anchors = {
+            str(token).lower()
+            for token in (getattr(cfg.chain, "token_universe", []) or [])
+            if token
+        }
+        changed = False
+        for log in list(logs or [])[-max_pools:]:
+            topics = log.get("topics") if isinstance(log, dict) else None
+            if not isinstance(topics, list) or len(topics) < 4:
+                continue
+            token0 = _decode_address(str(topics[1] or ""))
+            token1 = _decode_address(str(topics[2] or ""))
+            try:
+                fee = int(str(topics[3] or "0"), 16)
+            except (TypeError, ValueError):
+                continue
+            words = _words(log.get("data") if isinstance(log, dict) else "")
+            pool = "0x" + words[1][-20:].hex() if len(words) >= 2 else ""
+            if (
+                not token0 or not token1 or not pool
+                or token0.lower() == _ZERO_ADDRESS.lower()
+                or token1.lower() == _ZERO_ADDRESS.lower()
+                or pool.lower() == _ZERO_ADDRESS.lower()
+                or fee <= 0
+                or not ({token0.lower(), token1.lower()} & anchors)
+            ):
+                continue
+            self._observe_candidate_tokens([token0, token1], source="univ3_pool_created")
+            key = self._key(token0, token1, fee)
+            if key in self._v3:
+                continue
+            self._v3[key] = DiscoveredV3(
+                token0, token1, fee, pool, int(block_number), int(block_number)
+            )
+            changed = True
+        if changed:
+            self._save()
+        return changed
 
     async def maybe_discover_venues(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> Dict[str, List[Dict[str, Any]]]:
         if not self._venue_discovery_enabled(cfg):
