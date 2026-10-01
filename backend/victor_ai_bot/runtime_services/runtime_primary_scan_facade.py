@@ -1253,6 +1253,15 @@ class RuntimePrimaryScanFacade:
             bootstrap_rpc,
             current_block=int(current_block),
         )
+        shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
+            bootstrap_rpc,
+            current_block=int(current_block),
+            base_amount_in=int(amount_in),
+            cache=PerBlockCache(),
+        )
+        force_symmetric_sizing = str(
+            os.environ.get("VICTOR_RPC_ECONOMIC_SYMMETRIC_SIZING", "1")
+        ).strip().lower() not in {"0", "false", "no", "off"}
 
         async def scan_one(url: str) -> tuple[str, List[Opportunity], PerBlockCache, Dict[str, Any], RpcEconomicEvidence]:
             scan_cache = PerBlockCache()
@@ -1266,7 +1275,12 @@ class RuntimePrimaryScanFacade:
                         amount_in=int(amount_in),
                         cache=scan_cache,
                         discovery_context=discovery_context,
-                        telemetry_sink=telemetry,
+                        telemetry_sink=telemetry,,
+
+                    shared_token_scan_amounts=shared_token_scan_amounts,
+
+                    force_adaptive_size_scan=force_symmetric_sizing,
+
                     )
                 else:
                     async with JsonRpcClient(
@@ -1278,7 +1292,12 @@ class RuntimePrimaryScanFacade:
                             amount_in=int(amount_in),
                             cache=scan_cache,
                             discovery_context=discovery_context,
-                            telemetry_sink=telemetry,
+                            telemetry_sink=telemetry,,
+
+                        shared_token_scan_amounts=shared_token_scan_amounts,
+
+                        force_adaptive_size_scan=force_symmetric_sizing,
+
                         )
             except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                 telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
