@@ -68,6 +68,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
         "reason": str(profitability.get("reason") or "unavailable"),
+        "diagnostic_only": False,
     }
 
 
@@ -140,12 +141,23 @@ def _build_size_economic_matrix(
             key=lambda row: int(row["after_cost_profit_wei"]),
             default=None,
         )
+        economic_rows = [
+            row for row in route_rows
+            if row.get("route_id")
+            and row.get("after_cost_profit_wei") is not None
+            and (bool(row.get("authoritative")) or bool(row.get("diagnostic_only")))
+        ]
+        economic_optimum = max(
+            economic_rows,
+            key=lambda row: int(row["after_cost_profit_wei"]),
+            default=None,
+        )
         matrix.append({
             "amount_in": str(amount),
             "quote_requests": int(two_metrics.get("quote_requests", 0) or 0)
             + int(three_metrics.get("quote_requests", 0) or 0),
-            "quote_successes": int(two_metrics.get("quote_successes", 0) or 0)
-            + int(three_metrics.get("quote_successes", 0) or 0),
+            "quote_successes": int(three_metrics.get("quote_successes", 0) or 0)
+            + int(two_metrics.get("quote_successes", 0) or 0),
             "quote_failures": max(
                 0,
                 int(two_metrics.get("quote_requests", 0) or 0)
@@ -161,12 +173,40 @@ def _build_size_economic_matrix(
             "selection_basis": (
                 "verified_after_cost_profit"
                 if selected
-                else "gross_profit_diagnostic_only"
+                else (
+                    "economic_optimum_diagnostic"
+                    if economic_optimum
+                    and str(economic_optimum.get("reason") or "") != "non_positive_gross_profit"
+                    else (
+                        "gross_profit_diagnostic_only"
+                        if economic_optimum
+                        else "no_economic_evidence"
+                    )
+                )
             ),
+            # Execution selection remains fail-closed: only an authoritative
+            # positive after-cost result can populate selected_route_id.
             "selected_route_id": selected["route_id"] if selected else "",
             "selected_after_cost_profit_wei": (
                 selected["after_cost_profit_wei"] if selected else "0"
             ),
+            # Economic modeling is deliberately broader than execution
+            # eligibility. This records the best modeled route/size even when
+            # every observed outcome is loss-making, so the engine can identify
+            # the least-bad size and later recognize when the optimum crosses
+            # into positive territory.
+            "economic_optimum_route_id": (
+                economic_optimum["route_id"] if economic_optimum else ""
+            ),
+            "economic_optimum_after_cost_profit_wei": (
+                economic_optimum["after_cost_profit_wei"] if economic_optimum else "0"
+            ),
+            "economic_optimum_authoritative": (
+                bool(economic_optimum and economic_optimum["authoritative"])
+                if economic_optimum
+                else False
+            ),
+            "economic_optimum_executable": bool(selected),
         })
     return matrix
 
