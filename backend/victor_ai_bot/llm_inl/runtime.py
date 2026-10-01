@@ -769,6 +769,7 @@ class LLMINLRuntime:
         from ..arb_engine import requote_opportunity
         from ..gas import suggest_gas
         from ..safety import check_profit_and_repay
+        from ..usd_pricing import gas_wei_to_token_wei
 
         mults = [0.5, 1.0, 1.5, 2.0]
         _, rs = self._risk_profile(rt)
@@ -784,6 +785,24 @@ class LLMINLRuntime:
             max_fee, prio = await suggest_gas(rpc, mode=str(getattr(cfg_exec, "gas_mode", "standard")), presets=cfg_exec.gas_presets)
             gas_limit = _safe_int(getattr(cfg_exec, "gas_limit", 550000), 550000)
             gas_cost = int(max_fee) * int(gas_limit)
+            profit_token = str(getattr(first_leg, "token_in", "") or "")
+            try:
+                current_block = await rpc.block_number()
+                gas_cost_profit_token_wei = await gas_wei_to_token_wei(
+                    rpc,
+                    chain=rt.cfg.chain,
+                    gas_cost_wei=int(gas_cost),
+                    token_out=profit_token,
+                    block_number=int(current_block),
+                    cache=rt.cache,
+                )
+            except _SAFE_RUNTIME_EXCEPTIONS:
+                gas_cost_profit_token_wei = None
+            if gas_cost_profit_token_wei is None:
+                return {
+                    "response": "Gas cost could not be converted into the profit-token unit.",
+                    "results": [],
+                }
 
             for m in mults:
                 target_in = max(1, int(base_in * float(m)))
@@ -816,6 +835,7 @@ class LLMINLRuntime:
                     min_profit_bps=_safe_int(getattr(cfg_safety, "minProfitBps", 0), 0),
                     flashloan_fee_bps=_safe_int(getattr(cfg_exec, "flashloan_fee_bps", 9), 9),
                     gas_cost_wei=int(gas_cost),
+                    gas_cost_profit_token_wei=int(gas_cost_profit_token_wei),
                 )
 
                 prof = _safe_int(getattr(sr, "profit_after_costs_wei", 0), 0)
