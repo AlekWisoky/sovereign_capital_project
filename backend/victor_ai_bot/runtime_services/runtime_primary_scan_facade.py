@@ -638,6 +638,8 @@ class RuntimePrimaryScanFacade:
         cache: PerBlockCache | None = None,
         discovery_context: Dict[str, List[Any]] | None = None,
         telemetry_sink: Dict[str, Any] | None = None,
+        shared_token_scan_amounts: Dict[str, int] | None = None,
+        force_adaptive_size_scan: bool = False,
     ) -> List[Opportunity]:
         if int(amount_in) <= 0:
             return []
@@ -711,12 +713,27 @@ class RuntimePrimaryScanFacade:
             observed_gas_price_wei = await rpc.gas_price()
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
             observed_gas_price_wei = None
-        token_scan_amounts, token_scan_telemetry = await self._build_token_scan_amounts(
-            rpc,
-            current_block=int(current_block),
-            base_amount_in=int(amount_in),
-            cache=scan_cache,
-        )
+        if shared_token_scan_amounts is None:
+            token_scan_amounts, token_scan_telemetry = await self._build_token_scan_amounts(
+                rpc,
+                current_block=int(current_block),
+                base_amount_in=int(amount_in),
+                cache=scan_cache,
+            )
+        else:
+            token_scan_amounts = {
+                str(token).lower(): max(1, int(raw))
+                for token, raw in dict(shared_token_scan_amounts).items()
+                if str(token) and int(raw) > 0
+            }
+            token_scan_telemetry = {
+                "enabled": bool(token_scan_amounts),
+                "source": "shared_provider_comparison",
+                "reference_token": str(getattr(getattr(self.cfg, "chain", None), "weth", "") or ""),
+                "base_amount_in": str(int(amount_in)),
+                "amounts_by_token": {token: str(raw) for token, raw in token_scan_amounts.items()},
+                "unpriced_tokens": [],
+            }
         telemetry["scan_sizing"] = dict(token_scan_telemetry)
         try:
             size_amounts = [int(amount_in)]
@@ -837,7 +854,8 @@ class RuntimePrimaryScanFacade:
                 probe_basis = "authoritative_after_cost_positive_count"
 
             should_probe = (
-                candidates_before_probe < min_opportunities
+                force_adaptive_size_scan
+                or candidates_before_probe < min_opportunities
                 or (
                     candidates_before_probe >= min_opportunities
                     and authoritative_positive_candidates_before_probe < min_opportunities
