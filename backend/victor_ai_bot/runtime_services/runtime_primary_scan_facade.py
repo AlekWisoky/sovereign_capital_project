@@ -119,7 +119,9 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
         "reason": str(profitability.get("reason") or "unavailable"),
-        "diagnostic_only": False,
+        # Revalidated non-authoritative states are economic diagnostics: they
+        # are valid for optimum modeling but remain non-executable.
+        "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
     }
     if legs:
         row["legs"] = legs
