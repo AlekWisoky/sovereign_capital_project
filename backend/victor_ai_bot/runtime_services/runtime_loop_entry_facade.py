@@ -17,7 +17,8 @@ class RuntimeLoopEntryFacade:
         # Prefer currently healthy/readable endpoints, but always retain the
         # configured best endpoint as a bootstrap fallback. A single provider
         # outage must not suppress an entire chain's discovery cycle.
-        candidates = list(self.rpc_manager.read_candidates() or [])
+        read_candidates = getattr(self.rpc_manager, "read_candidates", None)
+        candidates = list(read_candidates() or []) if callable(read_candidates) else []
         bootstrap_url = self.rpc_manager.best_read()
         if bootstrap_url:
             candidates.insert(0, bootstrap_url)
