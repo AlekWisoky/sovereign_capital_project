@@ -719,6 +719,7 @@ class RuntimePrimaryScanFacade:
         telemetry: Dict[str, Any] = {
             "last_scan": int(time.time() * 1000),
             "last_block": int(current_block),
+            "scan_status": "running",
             "scan_error": "",
             "discovery": {
                 "v3_pairs": len(extra_v3_pairs),
@@ -1226,6 +1227,7 @@ class RuntimePrimaryScanFacade:
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
+            telemetry["scan_status"] = "completed"
             telemetry["quote_success_rate"] = (
                 float(successes) / float(requests) if requests else 0.0
             )
@@ -1261,6 +1263,7 @@ class RuntimePrimaryScanFacade:
                 self._market_pipeline_telemetry = telemetry
             return opps[:80]
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+            telemetry["scan_status"] = "failed"
             telemetry["scan_error"] = f"{type(exc).__name__}: {exc}"
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
