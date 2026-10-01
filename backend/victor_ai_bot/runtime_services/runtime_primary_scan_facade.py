@@ -1275,12 +1275,9 @@ class RuntimePrimaryScanFacade:
                         amount_in=int(amount_in),
                         cache=scan_cache,
                         discovery_context=discovery_context,
-                        telemetry_sink=telemetry,,
-
-                    shared_token_scan_amounts=shared_token_scan_amounts,
-
-                    force_adaptive_size_scan=force_symmetric_sizing,
-
+                        telemetry_sink=telemetry,
+                        shared_token_scan_amounts=shared_token_scan_amounts,
+                        force_adaptive_size_scan=force_symmetric_sizing,
                     )
                 else:
                     async with JsonRpcClient(
@@ -1292,13 +1289,10 @@ class RuntimePrimaryScanFacade:
                             amount_in=int(amount_in),
                             cache=scan_cache,
                             discovery_context=discovery_context,
-                            telemetry_sink=telemetry,,
-
+                        telemetry_sink=telemetry,
                         shared_token_scan_amounts=shared_token_scan_amounts,
-
                         force_adaptive_size_scan=force_symmetric_sizing,
-
-                        )
+                    )
             except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                 telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
                 telemetry["scan_latency_ms"] = float((time.perf_counter() - started) * 1000.0)
