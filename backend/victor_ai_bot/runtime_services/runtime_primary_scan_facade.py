@@ -670,7 +670,7 @@ class RuntimePrimaryScanFacade:
                         max_opps=60,
                         telemetry=two_metrics,
                         amount_in_by_token={
-                            token: max(1, int(round(raw * float(size_amount) / float(max(1, int(amount_in)))))
+                            token: max(1, int(round(raw * float(size_amount) / float(max(1, int(amount_in))))))
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
@@ -694,7 +694,7 @@ class RuntimePrimaryScanFacade:
                         max_opps=40,
                         telemetry=three_metrics,
                         amount_in_by_token={
-                            token: max(1, int(round(raw * float(size_amount) / float(max(1, int(amount_in)))))
+                            token: max(1, int(round(raw * float(size_amount) / float(max(1, int(amount_in))))))
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
