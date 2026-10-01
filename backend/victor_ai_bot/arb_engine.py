@@ -71,6 +71,7 @@ def _record_size_economic_diagnostic(
     reason: str,
     legs: Optional[List[Dict[str, Any]]] = None,
     max_samples: int = 16,
+    gas_cost_profit_token_wei: int | None = None,
 ) -> None:
     """Retain bounded economic near-misses without promoting them to opportunities.
 
@@ -82,8 +83,23 @@ def _record_size_economic_diagnostic(
         "gross_profit_wei": str(int(gross_profit_wei)),
         "flashloan_fee_wei": str(max(0, int(flashloan_fee_wei))),
         "gas_cost_wei": str(max(0, int(gas_cost_wei))),
+        "gas_cost_profit_token_wei": (
+            str(max(0, int(gas_cost_profit_token_wei)))
+            if gas_cost_profit_token_wei is not None
+            else ""
+        ),
+        # Diagnostic rows are only produced after gross profit is already
+        # non-positive. When the native gas conversion is unavailable, do not
+        # subtract native wei from profit-token units; gross-minus-fee remains
+        # a dimensionally valid upper bound and cannot become executable.
         "after_cost_profit_wei": str(
-            int(gross_profit_wei) - int(flashloan_fee_wei) - int(gas_cost_wei)
+            int(gross_profit_wei)
+            - int(flashloan_fee_wei)
+            - (
+                int(gas_cost_profit_token_wei)
+                if gas_cost_profit_token_wei is not None
+                else 0
+            )
         ),
         "revalidated": False,
         "authoritative": False,
