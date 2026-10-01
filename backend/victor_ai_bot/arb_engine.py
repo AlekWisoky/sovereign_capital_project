@@ -1272,7 +1272,7 @@ async def find_three_leg_opportunities(
                             },
                         )
                     )
-    
+
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
