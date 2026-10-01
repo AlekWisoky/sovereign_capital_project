@@ -59,6 +59,29 @@ def test_discovery_load_ignores_invalid_entries_and_keeps_valid(tmp_path):
     assert pairs[0]['fee'] == 3000
 
 
+def test_discovery_load_rehydrates_candidate_token_telemetry(tmp_path):
+    p = tmp_path / 'discovery' / 'eth.json'
+    p.parent.mkdir(parents=True, exist_ok=True)
+    token_a = '0x' + '11' * 20
+    token_b = '0x' + '22' * 20
+    p.write_text(json.dumps({
+        'v3': [{
+            'token0': token_a,
+            'token1': token_b,
+            'fee': 3000,
+            'pool': '0x' + '33' * 20,
+            'first_seen_block': 1,
+            'last_seen_block': 2,
+        }]
+    }))
+    dm = DiscoveryManager(chain_name='eth', data_dir=str(tmp_path))
+    telemetry = dm.candidate_token_telemetry(
+        SimpleNamespace(chain=SimpleNamespace(token_universe=[token_a]))
+    )
+    assert token_b in telemetry['observed_not_admitted']
+    assert 'univ3_persisted' in telemetry['sources'][token_b]
+
+
 def test_discovery_load_invalid_json_degrades_safely(tmp_path):
     p = tmp_path / 'discovery' / 'eth.json'
     p.parent.mkdir(parents=True, exist_ok=True)
