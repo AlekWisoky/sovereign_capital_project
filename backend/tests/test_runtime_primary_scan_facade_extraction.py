@@ -526,7 +526,7 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
             route_id=route_id,
             expected_profit_raw=str(gross),
             route=SimpleNamespace(
-                legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
+                legs=[SimpleNamespace(amount_in=str(amount), min_out=str(amount + gross), token_in="0xtoken")]
             ),
             meta={
                 "profitability_diagnostic": {
