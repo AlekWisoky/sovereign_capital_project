@@ -1622,6 +1622,13 @@ class RuntimePrimaryScanFacade:
                 "failed_quotes_are_non_candidates": True,
                 "shared_token_sizing": dict(shared_token_scan_telemetry),
                 "providers": provider_symmetry,
+                "opportunity_union": {
+                    "enabled": True,
+                    "healthy_provider_count": int(sum(1 for value in provider_eligible.values() if value)),
+                    "provider_candidate_counts": dict(provider_candidate_counts),
+                    "unique_route_amount_candidates": int(len(candidate_by_key)),
+                    "selected_provider_remains_execution_context": True,
+                },
             },
         }
         return {
