@@ -673,5 +673,6 @@
     "contract_inventory": true,
     "mobile_inventory": true,
     "runtime_surface_summary": true
-  }
+  },
+  "backend_test_file_count": 361
 }
