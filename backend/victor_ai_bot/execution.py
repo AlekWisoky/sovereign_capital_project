@@ -296,7 +296,12 @@ async def try_execute_opportunity(
 
     route_id = str(getattr(opp, "route_id", "") or "")
 
-    post_mutation_contract = post_mutation_revalidation_view(opp)
+    if native_flashloan_fee_bps is not None:
+        # The provider-native premium supersedes any earlier static-fee contract.
+        # Force one final profitability revalidation against the observed fee.
+        post_mutation_contract = {}
+    else:
+        post_mutation_contract = post_mutation_revalidation_view(opp)
     if post_mutation_contract and has_profitability_contract(opp):
         continuity = assess_post_mutation_profitability_continuity(
             opp,
