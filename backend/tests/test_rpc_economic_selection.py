@@ -167,3 +167,104 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
         "https://rpc-a.example",
         "https://rpc-b.example",
     }
+
+@pytest.mark.asyncio
+async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(monkeypatch):
+    class _Manager:
+        def __init__(self):
+            self.telemetry = []
+
+        def read_candidates(self):
+            return ["https://rpc-a.example", "https://rpc-b.example"]
+
+        def observe_quote_telemetry(self, url, **kwargs):
+            self.telemetry.append((url, kwargs))
+
+        def snapshot(self):
+            return {
+                "read": [
+                    {"url": "https://rpc-a.example", "ok": True, "score": 10.0},
+                    {"url": "https://rpc-b.example", "ok": True, "score": 20.0},
+                ]
+            }
+
+    class _Rpc:
+        def __init__(self, url):
+            self.url = url
+
+    class _Client:
+        def __init__(self, url, **kwargs):
+            self.url = url
+
+        async def __aenter__(self):
+            return _Rpc(self.url)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    runtime = RuntimePrimaryScanFacade()
+    runtime.rpc_manager = _Manager()
+    runtime.cfg = SimpleNamespace()
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_scan(
+        rpc,
+        *,
+        current_block,
+        amount_in,
+        cache,
+        discovery_context,
+        telemetry_sink,
+        shared_token_scan_amounts=None,
+        force_adaptive_size_scan=False,
+    ):
+        telemetry_sink.update({
+            "quotes": {"requests": 10, "successes": 10, "failure_reasons": {}},
+            "scan_latency_ms": 1.0,
+            "route_universe": {"edges_by_dex": {"univ3": 2}},
+            "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
+            "adaptive_size_discovery": {"amounts_scanned": ["1000", "2000"]},
+        })
+        suffix = "a" if rpc.url.endswith("a.example") else "b"
+
+        def opp(route_id, profit):
+            return SimpleNamespace(
+                id=f"id-{route_id}",
+                route_id=route_id,
+                expected_profit_raw=str(profit),
+                route=SimpleNamespace(
+                    legs=[SimpleNamespace(amount_in="1000")]
+                ),
+                meta={
+                    "canonical_after_fee_usd": {
+                        "verified": True,
+                        "profit_after_costs_usd_micro": profit,
+                    }
+                },
+            )
+
+        if suffix == "a":
+            return [opp("shared", 100), opp("only-a", 150)]
+        return [opp("shared", 300), opp("only-b", 250)]
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.JsonRpcClient",
+        _Client,
+    )
+    monkeypatch.setattr(runtime, "_build_discovery_context", fake_discovery)
+    monkeypatch.setattr(runtime, "_scan_primary_opportunities", fake_scan)
+
+    result = await runtime._select_rpc_and_scan(
+        bootstrap_rpc=_Rpc("https://rpc-a.example"),
+        current_block=123,
+        amount_in=1_000,
+    )
+
+    routes = {opp.route_id for opp in result["opps"]}
+    assert routes == {"shared", "only-a", "only-b"}
+    shared = next(opp for opp in result["opps"] if opp.route_id == "shared")
+    assert shared.meta["canonical_after_fee_usd"]["profit_after_costs_usd_micro"] == 300
+    assert shared.meta["quote_provider"] == "rpc-b.example"
+    assert result["selected_endpoint"] == "https://rpc-b.example"
