@@ -16,6 +16,7 @@ def test_size_economic_matrix_preserves_gross_rejected_diagnostics():
         "gas_cost_wei": "900000000000",
         "gas_cost_profit_token_wei": "810000000000",
         "after_cost_profit_wei": "0",
+        "economic_after_cost_profit_wei": "960811652699",
         "revalidated": False,
         "authoritative": False,
         "reason": "non_positive_gross_profit",
