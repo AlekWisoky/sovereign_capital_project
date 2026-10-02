@@ -523,6 +523,16 @@ class RuntimePrimaryScanFacade:
         fixed notional from defining the entire opportunity universe.
         """
         base = max(1, int(amount_in))
+        # Provider comparison must be economically symmetric at one notional.
+        # Running the full institutional size ladder on every RPC multiplies
+        # quote traffic and scan latency across providers. The selected provider
+        # receives the full sizing pass after economic provider selection.
+        if bool(getattr(self, "_rpc_provider_comparison", False)):
+            self._adaptive_size_min_opportunities = max(
+                1,
+                int(os.environ.get("VICTOR_ADAPTIVE_SIZE_MIN_OPPORTUNITIES", "2") or 2),
+            )
+            return [base]
         enabled = str(os.environ.get("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")).strip().lower()
         if enabled in {"0", "false", "no", "off"}:
             return [base]
@@ -1466,7 +1476,15 @@ class RuntimePrimaryScanFacade:
             )
             return url, list(opps or []), scan_cache, telemetry, evidence
 
-        results = await asyncio.gather(*(scan_one(url) for url in candidates))
+        # Provider selection is a comparison gate, not the institutional sizing
+        # pass. Keep all providers on the same base notional so quote volume and
+        # latency remain bounded; the selected provider gets the full adaptive
+        # economic curve below.
+        self._rpc_provider_comparison = True
+        try:
+            results = await asyncio.gather(*(scan_one(url) for url in candidates))
+        finally:
+            self._rpc_provider_comparison = False
         evidence = [item[4] for item in results]
         selected, ordered = select_best_rpc_evidence(evidence)
         if selected is None:
@@ -1477,6 +1495,56 @@ class RuntimePrimaryScanFacade:
             selected_result = next(item for item in results if item[0] == selected_url)
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
+
+        # Now that the read provider is selected on comparable base-size
+        # economics, perform institutional adaptive sizing exactly once on that
+        # provider. This preserves economic-optimum modeling without multiplying
+        # the size ladder across every RPC candidate.
+        adaptive_cache = PerBlockCache()
+        adaptive_telemetry: Dict[str, Any] = {}
+        adaptive_opps: List[Opportunity] = []
+        selected_provider_url = str(selected_url)
+        try:
+            if selected_provider_url == bootstrap_url:
+                selected_provider_rpc = bootstrap_rpc
+                adaptive_opps = await self._scan_primary_opportunities(
+                    selected_provider_rpc,
+                    current_block=int(current_block),
+                    amount_in=int(amount_in),
+                    cache=adaptive_cache,
+                    discovery_context=discovery_context,
+                    telemetry_sink=adaptive_telemetry,
+                    shared_token_scan_amounts=shared_token_scan_amounts,
+                    force_adaptive_size_scan=True,
+                )
+            else:
+                async with JsonRpcClient(
+                    selected_provider_url, timeout_s=10.0, max_concurrency=30, max_batch=80
+                ) as selected_provider_rpc:
+                    adaptive_opps = await self._scan_primary_opportunities(
+                        selected_provider_rpc,
+                        current_block=int(current_block),
+                        amount_in=int(amount_in),
+                        cache=adaptive_cache,
+                        discovery_context=discovery_context,
+                        telemetry_sink=adaptive_telemetry,
+                        shared_token_scan_amounts=shared_token_scan_amounts,
+                        force_adaptive_size_scan=True,
+                    )
+        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+            adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
+            adaptive_opps = []
+
+        if adaptive_telemetry and adaptive_opps:
+            selected_telemetry = dict(adaptive_telemetry)
+            selected_telemetry["rpc"] = dict(selected_telemetry.get("rpc") or {})
+            selected_telemetry["rpc"].update({
+                "endpoint": selected_url,
+                "provider": str(urlsplit(selected_url).hostname or ""),
+            })
+        if adaptive_opps:
+            selected_opps = list(adaptive_opps)
+            selected_cache = adaptive_cache
 
         discovery_runtime = dict(discovery_context.get("runtime") or {})
         if discovery_runtime:
@@ -1528,6 +1596,45 @@ class RuntimePrimaryScanFacade:
                 )
                 if candidate_usd > existing_usd:
                     candidate_by_key[key] = opportunity
+
+        # Add the selected provider's full adaptive-size pass to the same
+        # provider union. Other providers remain base-size comparison passes;
+        # the selected provider is the only one allowed to expand the economic
+        # sizing curve in this tick.
+        for opportunity in list(adaptive_opps or []):
+            route_id = str(getattr(opportunity, "route_id", "") or "")
+            meta = getattr(opportunity, "meta", None)
+            meta = meta if isinstance(meta, dict) else {}
+            amount_key = ""
+            try:
+                amount_key = str(
+                    getattr(getattr(opportunity, "route", None).legs[0], "amount_in", "")
+                )
+            except (AttributeError, IndexError, TypeError):
+                pass
+            key = (route_id, amount_key)
+            if not route_id:
+                key = (str(getattr(opportunity, "id", "") or ""), amount_key)
+            meta["quote_provider_endpoint"] = selected_url
+            meta["quote_provider"] = str(urlsplit(selected_url).hostname or "")
+            existing = candidate_by_key.get(key)
+            if existing is None:
+                candidate_by_key[key] = opportunity
+                continue
+            existing_meta = getattr(existing, "meta", None)
+            existing_meta = existing_meta if isinstance(existing_meta, dict) else {}
+            existing_usd = int(
+                ((existing_meta.get("canonical_after_fee_usd") or {}).get(
+                    "profit_after_costs_usd_micro"
+                )) or 0
+            )
+            candidate_usd = int(
+                ((meta.get("canonical_after_fee_usd") or {}).get(
+                    "profit_after_costs_usd_micro"
+                )) or 0
+            )
+            if candidate_usd > existing_usd:
+                candidate_by_key[key] = opportunity
 
         provider_union_opps = sorted(
             candidate_by_key.values(),
