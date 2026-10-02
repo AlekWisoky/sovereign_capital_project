@@ -14,6 +14,7 @@ from ..models import Opportunity
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from ..profitability_state import revalidate_profitability_state
+from ..flashloan_providers import observe_flashloan_fee_bps
 from ..usd_pricing import gas_wei_to_token_wei, token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
 
@@ -352,6 +353,19 @@ class RuntimePrimaryScanFacade:
         usd_enabled = bool(getattr(execution, "usd_accounting_enabled", False))
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
         scan_cache = cache or self.cache
+        flash_provider = str(getattr(getattr(self.cfg, "execution", None), "flash_provider", "aave") or "aave")
+        flashloan_fee_observation = await observe_flashloan_fee_bps(
+            rpc,
+            self.cfg,
+            flash_provider,
+            block=f"0x{int(current_block):x}",
+        )
+        native_flashloan_fee_bps = (
+            int(flashloan_fee_observation["fee_bps"])
+            if bool(flashloan_fee_observation.get("ok"))
+            and flashloan_fee_observation.get("fee_bps") is not None
+            else None
+        )
         observed_gas_price_wei: int | None = None
         try:
             observed_gas_price_wei = await rpc.gas_price()
@@ -359,6 +373,8 @@ class RuntimePrimaryScanFacade:
             observed_gas_price_wei = None
         for opportunity in list(opps):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
+            if isinstance(meta, dict):
+                meta["flashloan_fee_observation"] = dict(flashloan_fee_observation)
             # Synthetic/test opportunities may carry a precomputed gas cost
             # without route metadata. Preserve that concrete value when no
             # route-level gas inputs exist; production opportunities always
@@ -407,18 +423,23 @@ class RuntimePrimaryScanFacade:
                 state = dict(existing_profitability)
             else:
                 try:
+                    revalidation_kwargs = {
+                        "gas_cost_wei": gas_cost_wei,
+                        "quoted_amount_out_wei": _resolve_scan_quoted_amount(meta),
+                        "gas_cost_in_profit_token_wei": (
+                            gas_cost_in_profit_token_wei
+                            if has_route_gas_inputs
+                            else gas_cost_wei
+                        ),
+                    }
+                    if native_flashloan_fee_bps is not None:
+                        revalidation_kwargs["flashloan_fee_bps_override"] = native_flashloan_fee_bps
                     state = revalidate_profitability_state(
                         opportunity,
                         self.cfg,
                         stage="scan_after_fee_revalidation",
                         source="runtime_primary_scan",
-                        gas_cost_wei=gas_cost_wei,
-                        quoted_amount_out_wei=_resolve_scan_quoted_amount(meta),
-                        gas_cost_in_profit_token_wei=(
-                            gas_cost_in_profit_token_wei
-                            if has_route_gas_inputs
-                            else gas_cost_wei
-                        ),
+                        **revalidation_kwargs,
                     )
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                     # One malformed candidate must not erase the entire

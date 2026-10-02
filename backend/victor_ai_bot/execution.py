@@ -10,6 +10,7 @@ except ImportError:  # pragma: no cover
 from .rpc import JsonRpcClient
 from .gas import suggest_gas
 from .safety import check_profit_and_repay
+from .flashloan_providers import observe_flashloan_fee_bps
 from .profitability_state import (
     build_profitability_state,
     build_terminal_profitability_authority,
@@ -261,9 +262,57 @@ async def try_execute_opportunity(
     if amount_in <= 0 or amount_out <= 0:
         return ExecResult(False, effective_dry_run, "invalid_amounts")
 
+    if (
+        not effective_dry_run
+        and Account is None
+        and str(getattr(cfg.execution, "executor_address", "") or "")
+    ):
+        return ExecResult(False, effective_dry_run, "missing_eth_account_dependency", attempted=False)
+
+    provider_hint = str(
+        (
+            ((getattr(decision, "metadata", {}) or {}).get("provider_hint"))
+            if decision is not None and isinstance(getattr(decision, "metadata", None), dict)
+            else ""
+        )
+        or getattr(cfg.execution, "flash_provider", "aave")
+        or "aave"
+    )
+    flashloan_fee_observation = await observe_flashloan_fee_bps(
+        rpc_read,
+        cfg,
+        provider_hint,
+        block=f"0x{int(current_block):x}",
+    )
+    native_flashloan_fee_bps = (
+        int(flashloan_fee_observation["fee_bps"])
+        if bool(flashloan_fee_observation.get("ok"))
+        and flashloan_fee_observation.get("fee_bps") is not None
+        else None
+    )
+    if isinstance(getattr(opp, "meta", None), dict):
+        opp.meta["flashloan_fee_observation"] = dict(flashloan_fee_observation)
+    if (
+        native_flashloan_fee_bps is None
+        and not effective_dry_run
+        and str(flashloan_fee_observation.get("reason") or "") != "provider_address_missing"
+    ):
+        return ExecResult(
+            False,
+            effective_dry_run,
+            "flashloan_fee_unavailable",
+            attempted=False,
+            plan={"provider": provider_hint, "flashloan_fee_observation": dict(flashloan_fee_observation)},
+        )
+
     route_id = str(getattr(opp, "route_id", "") or "")
 
-    post_mutation_contract = post_mutation_revalidation_view(opp)
+    if native_flashloan_fee_bps is not None:
+        # The provider-native premium supersedes any earlier static-fee contract.
+        # Force one final profitability revalidation against the observed fee.
+        post_mutation_contract = {}
+    else:
+        post_mutation_contract = post_mutation_revalidation_view(opp)
     if post_mutation_contract and has_profitability_contract(opp):
         continuity = assess_post_mutation_profitability_continuity(
             opp,
@@ -335,7 +384,12 @@ async def try_execute_opportunity(
         )
     ):
         revalidate_profitability_state(
-            opp, cfg, stage="execution_preflight_gate", source="execution"
+            opp,
+            cfg,
+            stage="execution_preflight_gate",
+            source="execution",
+            quoted_amount_out_wei=amount_out,
+            flashloan_fee_bps_override=native_flashloan_fee_bps,
         )
         gate_profitability = profitability_state_view(opp)
         if str(gate_profitability.get("reason") or "") != "gas_cost_unavailable" and (
@@ -396,15 +450,6 @@ async def try_execute_opportunity(
                     "aux": leg.data or "0x",
                 }
             )
-        provider_hint = str(
-            (
-                ((getattr(decision, "metadata", {}) or {}).get("provider_hint"))
-                if decision is not None and isinstance(getattr(decision, "metadata", None), dict)
-                else ""
-            )
-            or getattr(cfg.execution, "flash_provider", "aave")
-            or "aave"
-        )
         calldata, rid = build_execute_calldata(
             provider=provider_hint,
             borrow_token=opp.route.legs[0].token_in,

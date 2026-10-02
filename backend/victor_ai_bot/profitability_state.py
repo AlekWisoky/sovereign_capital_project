@@ -399,6 +399,7 @@ def revalidate_profitability_state(
     gas_cost_wei: int | None = None,
     quoted_amount_out_wei: int | None = None,
     gas_cost_in_profit_token_wei: int | None = None,
+    flashloan_fee_bps_override: int | None = None,
 ) -> Dict[str, Any]:
     if not isinstance(getattr(opp, "meta", None), dict):
         try:
@@ -503,7 +504,11 @@ def revalidate_profitability_state(
             amount_out_wei=int(amount_out_wei),
             min_profit_abs_wei=int(getattr(cfg.safety, "minProfitAbs", 0) or 0),
             min_profit_bps=int(getattr(cfg.safety, "minProfitBps", 0) or 0),
-            flashloan_fee_bps=int(getattr(cfg.execution, "flashloan_fee_bps", 0) or 0),
+            flashloan_fee_bps=(
+                int(flashloan_fee_bps_override)
+                if flashloan_fee_bps_override is not None
+                else int(getattr(cfg.execution, "flashloan_fee_bps", 0) or 0)
+            ),
             gas_cost_wei=int(resolved_gas_cost_wei),
             gas_cost_profit_token_wei=int(resolved_gas_cost_in_profit_token_wei),
         )

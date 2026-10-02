@@ -99,7 +99,7 @@ def make_cfg(*, dry_run: bool, executor_address: str = '', profit_to: str = ''):
             require_simulation=False,
             mev_adversarial_eval_enabled=False,
         ),
-        chain=SimpleNamespace(chain_id=1),
+        chain=SimpleNamespace(chain_id=1, aave_v3_pool="0x" + "a" * 40),
     )
 
 
@@ -235,6 +235,10 @@ class _RelayRpc:
 
     async def send_private_tx(self, raw, max_block_number=None):
         raise AssertionError("private RPC must be reached through RelayClient")
+
+    async def eth_call(self, to, data, block="latest", **kwargs):
+        # Provider-native Aave premium fixture.
+        return SimpleNamespace(ok=True, result="0x" + (5).to_bytes(32, "big").hex(), error="")
 
 
 class _RelayAccount:
