@@ -103,21 +103,20 @@ async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
             self.max_active = 0
 
         def post(self, *args, **kwargs):
-            self.last_payload = kwargs["json"]
-            return _ConcurrentCtx(self)
+            return _ConcurrentCtx(self, kwargs["json"])
 
     class _ConcurrentCtx:
-        def __init__(self, owner):
+        def __init__(self, owner, payload):
             self.owner = owner
+            self.payload = payload
 
         async def __aenter__(self):
             self.owner.active += 1
             self.owner.max_active = max(self.owner.max_active, self.owner.active)
             await asyncio.sleep(0.01)
-            payload = self.owner.last_payload
             return _JsonResponse([
                 {"id": req["id"], "result": hex(req["id"])}
-                for req in payload
+                for req in self.payload
             ])
 
         async def __aexit__(self, exc_type, exc, tb):
@@ -138,7 +137,9 @@ async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
         ("eth_chainId", []),
         ("eth_gasPrice", []),
         ("eth_blockNumber", []),
+        ("eth_chainId", []),
+        ("eth_gasPrice", []),
     ])
 
-    assert [r.result for r in results] == ["0x1", "0x2", "0x3", "0x4"]
+    assert [r.result for r in results] == ["0x1", "0x2", "0x3", "0x4", "0x5", "0x6"]
     assert session.max_active == 2
