@@ -178,6 +178,52 @@ async def test_discovery_admits_bounded_v3_pool_event_touching_anchor(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_discovery_uses_observed_token_as_bounded_univ3_frontier(tmp_path):
+    anchor = "0x" + "33" * 20
+    second_anchor = "0x" + "44" * 20
+    candidate = "0x" + "55" * 20
+    event_pool = "0x" + "66" * 20
+    frontier_pool = "0x" + "77" * 20
+    topic = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
+
+    class _Rpc(_RpcOK):
+        async def eth_get_logs(self, *, address, from_block, to_block, topics=None):
+            return [{
+                "topics": [
+                    topic,
+                    "0x" + "00" * 12 + anchor[2:],
+                    "0x" + "00" * 12 + candidate[2:],
+                    "0x" + "00" * 29 + "0bb8",
+                ],
+                "data": "0x" + "00" * 32 + "00" * 12 + event_pool[2:],
+            }]
+
+        async def eth_call(self, to, data, *, block="latest", from_addr=None):
+            self.calls += 1
+            return RpcResult(True, result="0x" + "00" * 12 + frontier_pool[2:])
+
+    dm = DiscoveryManager(chain_name="base", data_dir=str(tmp_path))
+    cfg = _cfg(
+        chain={
+            "token_universe": [anchor, second_anchor],
+            "discovery_max_calls": 1,
+            "discovery_pool_max_candidates": 4,
+        }
+    )
+
+    pairs = await dm.maybe_discover_univ3(_Rpc(), cfg, 100)
+
+    assert any(
+        row["token_in"].lower() == anchor.lower()
+        and row["token_out"].lower() == candidate.lower()
+        and row["fee"] == 100
+        and row["pool"].lower() == frontier_pool.lower()
+        for row in pairs
+    )
+    assert len(pairs) == 2
+
+
+@pytest.mark.asyncio
 async def test_discovery_unexpected_programmer_bug_propagates(tmp_path, monkeypatch):
     import victor_ai_bot.discovery as discovery_mod
 
