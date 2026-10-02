@@ -596,20 +596,37 @@ def _classify_route_family(cfg: Any, legs: List[Edge], *, route_type: str) -> st
 
 
 def _is_same_pool_roundtrip(e1: Edge, e2: Edge) -> bool:
-    """Return True when a two-leg reversal traverses the exact same pool."""
-    return _pool_keys_for_leg(
-        e1.dex,
-        e1.token_in,
-        e1.token_out,
-        {"pool": e1.venue, **e1.params},
-        "",
-    ) == _pool_keys_for_leg(
-        e2.dex,
-        e2.token_in,
-        e2.token_out,
-        {"pool": e2.venue, **e2.params},
-        "",
-    )
+    """Return True only when both legs expose a reliable pool identity."""
+    if str(e1.dex) != str(e2.dex):
+        return False
+
+    dex = str(e1.dex)
+    if dex == "univ3":
+        # The venue is normally the shared SwapRouter/Quoter, not the pool.
+        # Without explicit pool metadata we cannot safely conclude that two
+        # reverse edges hit the same pool; treating the router as the pool
+        # would incorrectly discard legitimate cross-pool opportunities.
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        if not p1 or not p2:
+            return False
+        return p1 == p2 and int(e1.params.get("fee", 3000)) == int(e2.params.get("fee", 3000))
+
+    if dex == "curve":
+        p1 = str(e1.venue or e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.venue or e2.params.get("pool") or "").strip().lower()
+        if not p1 or not p2:
+            return False
+        return p1 == p2 and bool(e1.params.get("underlying", False)) == bool(
+            e2.params.get("underlying", False)
+        )
+
+    if dex == "balancer":
+        p1 = str(e1.params.get("pool_id") or "").strip().lower()
+        p2 = str(e2.params.get("pool_id") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2)
+
+    return False
 
 
 def _pool_keys_for_leg(
