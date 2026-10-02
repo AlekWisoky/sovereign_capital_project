@@ -77,9 +77,25 @@ def _record_size_economic_diagnostic(
 
     Route details are diagnostic evidence only and never grant execution authority.
     """
+    diagnostic_legs = [dict(leg) for leg in (legs or []) if isinstance(leg, dict)][:3]
+    terminal_amount_out = 0
+    if diagnostic_legs:
+        for leg in reversed(diagnostic_legs):
+            for key in ("quoted_amount_out", "amount_out_wei", "amount_out"):
+                try:
+                    value = int(leg.get(key) or 0)
+                except (TypeError, ValueError):
+                    value = 0
+                if value > 0:
+                    terminal_amount_out = value
+                    break
+            if terminal_amount_out > 0:
+                break
+
     row = {
         "route_id": str(route_id),
         "amount_in": str(max(0, int(amount_in))),
+        "amount_out_wei": str(max(0, terminal_amount_out)),
         "gross_profit_wei": str(int(gross_profit_wei)),
         "flashloan_fee_wei": str(max(0, int(flashloan_fee_wei))),
         "gas_cost_wei": str(max(0, int(gas_cost_wei))),
@@ -105,7 +121,7 @@ def _record_size_economic_diagnostic(
         "authoritative": False,
         "reason": str(reason or "non_positive_gross_profit"),
         "diagnostic_only": True,
-        "legs": [dict(leg) for leg in (legs or []) if isinstance(leg, dict)][:3],
+        "legs": diagnostic_legs,
     }
     samples = list(metrics.get("size_economic_diagnostics") or [])
     samples.append(row)

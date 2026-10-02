@@ -1470,6 +1470,71 @@ class RuntimePrimaryScanFacade:
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
 
+        # Provider scans are parallel discovery passes, not mutually exclusive
+        # markets. A route can be unquotable on one RPC while quoting normally on
+        # another. Keep the economically verified union of healthy provider
+        # candidates so provider-local quote failures do not erase opportunities
+        # before the execution revalidation gate.
+        candidate_by_key: Dict[tuple[str, str], Opportunity] = {}
+        provider_candidate_counts: Dict[str, int] = {}
+        provider_eligible: Dict[str, bool] = {}
+        for url, provider_opps, _cache, _provider_telemetry, provider_evidence in results:
+            provider_eligible[str(url)] = bool(provider_evidence.economically_eligible)
+            provider_candidate_counts[str(url)] = len(provider_opps or [])
+            if not provider_evidence.economically_eligible:
+                continue
+            for opportunity in list(provider_opps or []):
+                route_id = str(getattr(opportunity, "route_id", "") or "")
+                meta = getattr(opportunity, "meta", None)
+                meta = meta if isinstance(meta, dict) else {}
+                try:
+                    amount_key = str(
+                        getattr(getattr(opportunity, "route", None).legs[0], "amount_in", "")
+                    )
+                except (AttributeError, IndexError, TypeError):
+                    amount_key = ""
+                key = (route_id, amount_key)
+                if not route_id:
+                    key = (str(getattr(opportunity, "id", "") or ""), amount_key)
+                meta["quote_provider_endpoint"] = str(url)
+                meta["quote_provider"] = str(urlsplit(url).hostname or "")
+                existing = candidate_by_key.get(key)
+                if existing is None:
+                    candidate_by_key[key] = opportunity
+                    continue
+                existing_meta = getattr(existing, "meta", None)
+                existing_meta = existing_meta if isinstance(existing_meta, dict) else {}
+                existing_usd = int(
+                    ((existing_meta.get("canonical_after_fee_usd") or {}).get(
+                        "profit_after_costs_usd_micro"
+                    )) or 0
+                )
+                candidate_usd = int(
+                    ((meta.get("canonical_after_fee_usd") or {}).get(
+                        "profit_after_costs_usd_micro"
+                    )) or 0
+                )
+                if candidate_usd > existing_usd:
+                    candidate_by_key[key] = opportunity
+
+        provider_union_opps = sorted(
+            candidate_by_key.values(),
+            key=lambda opportunity: (
+                -int(
+                    (
+                        ((getattr(opportunity, "meta", {}) or {}).get(
+                            "canonical_after_fee_usd"
+                        ) or {}).get("profit_after_costs_usd_micro")
+                    )
+                    or 0
+                ),
+                -int(getattr(opportunity, "expected_profit_raw", "0") or "0"),
+                str(getattr(opportunity, "route_id", "") or ""),
+            ),
+        )
+        if provider_union_opps:
+            selected_opps = provider_union_opps
+
         provider_symmetry: List[Dict[str, Any]] = []
         route_universes: List[Dict[str, Any]] = []
         size_ladders: List[tuple[str, ...]] = []
@@ -1557,6 +1622,13 @@ class RuntimePrimaryScanFacade:
                 "failed_quotes_are_non_candidates": True,
                 "shared_token_sizing": dict(shared_token_scan_telemetry),
                 "providers": provider_symmetry,
+                "opportunity_union": {
+                    "enabled": True,
+                    "healthy_provider_count": int(sum(1 for value in provider_eligible.values() if value)),
+                    "provider_candidate_counts": dict(provider_candidate_counts),
+                    "unique_route_amount_candidates": int(len(candidate_by_key)),
+                    "selected_provider_remains_execution_context": True,
+                },
             },
         }
         return {
