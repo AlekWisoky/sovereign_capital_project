@@ -21,6 +21,11 @@ def test_curve_fallback_telemetry_is_not_execution_authority():
     diagnostics = {"fallback_attempts": 3, "fallback_successes": 2}
     assert diagnostics["fallback_successes"] <= diagnostics["fallback_attempts"]
 
+
 def test_http_status_errors_map_to_provider_classes():
-    assert classify_quote_error({"code": 429, "message": "http_status_429"}) == "rpc_rate_limited"
-    assert classify_quote_error({"code": 503, "message": "http_status_503"}) == "rpc_error_503"
+    assert classify_quote_error(
+        {"code": 429, "message": "http_status_429"}
+    ) == "rpc_rate_limited"
+    assert classify_quote_error(
+        {"code": 503, "message": "http_status_503"}
+    ) == "rpc_error_503"
