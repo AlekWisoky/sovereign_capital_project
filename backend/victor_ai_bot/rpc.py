@@ -33,11 +33,15 @@ class JsonRpcClient:
         self.timeout_s = timeout_s
         self._sem = asyncio.Semaphore(max_concurrency)
         self.max_batch = max_batch
-        configured_batch_concurrency = (
-            max_batch_concurrency
-            if max_batch_concurrency is not None
-            else int(os.environ.get("VICTOR_RPC_BATCH_CONCURRENCY", "2") or 2)
-        )
+        if max_batch_concurrency is not None:
+            configured_batch_concurrency = max_batch_concurrency
+        else:
+            try:
+                configured_batch_concurrency = int(
+                    os.environ.get("VICTOR_RPC_BATCH_CONCURRENCY", "2") or 2
+                )
+            except (TypeError, ValueError):
+                configured_batch_concurrency = 2
         self.max_batch_concurrency = max(
             1, min(int(configured_batch_concurrency), int(max_concurrency))
         )
