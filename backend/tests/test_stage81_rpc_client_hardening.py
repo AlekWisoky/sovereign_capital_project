@@ -103,6 +103,7 @@ async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
             self.max_active = 0
 
         def post(self, *args, **kwargs):
+            self._last_payload = kwargs["json"]
             return _ConcurrentCtx(self)
 
     class _ConcurrentCtx:
@@ -113,9 +114,10 @@ async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
             self.owner.active += 1
             self.owner.max_active = max(self.owner.max_active, self.owner.active)
             await asyncio.sleep(0.01)
+            payload = self._last_payload
             return _JsonResponse([
-                {"id": 1, "result": "0x1"},
-                {"id": 2, "result": "0x2"},
+                {"id": req["id"], "result": hex(req["id"])}
+                for req in payload
             ])
 
         async def __aexit__(self, exc_type, exc, tb):
@@ -138,5 +140,5 @@ async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
         ("eth_blockNumber", []),
     ])
 
-    assert [r.result for r in results] == ["0x1", "0x2", "0x1", "0x2"]
+    assert [r.result for r in results] == ["0x1", "0x2", "0x3", "0x4"]
     assert session.max_active == 2
