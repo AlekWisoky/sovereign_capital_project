@@ -35,21 +35,46 @@ def check_profit_and_repay(
         else max(0, int(gas_cost_wei))
     )
     repay = amount_in_wei + flash_fee
-    if amount_out_wei < repay:
-        return SafetyResult(False, "does_not_repay_flashloan", -1, flash_fee, gas_cost_wei, effective_gas_cost)
-
     gross_profit = amount_out_wei - amount_in_wei
-    profit_after = gross_profit - flash_fee - effective_gas_cost
+    economic_profit_after = gross_profit - flash_fee - effective_gas_cost
+    if amount_out_wei < repay:
+        return SafetyResult(
+            False,
+            "does_not_repay_flashloan",
+            -1,
+            flash_fee,
+            gas_cost_wei,
+            effective_gas_cost,
+            economic_profit_after_costs_wei=economic_profit_after,
+        )
+
+    profit_after = economic_profit_after
     if profit_after <= 0:
         return SafetyResult(
             False, "profit_after_costs_not_positive", profit_after, flash_fee, gas_cost_wei, effective_gas_cost
         )
     if profit_after < min_profit_abs_wei:
-        return SafetyResult(False, "minProfitAbs_not_met", profit_after, flash_fee, gas_cost_wei, effective_gas_cost)
+        return SafetyResult(
+            False,
+            "minProfitAbs_not_met",
+            profit_after,
+            flash_fee,
+            gas_cost_wei,
+            effective_gas_cost,
+            economic_profit_after_costs_wei=profit_after,
+        )
     # bps threshold based on amount_in
     if min_profit_bps > 0:
         if profit_after * 10_000 < amount_in_wei * min_profit_bps:
             return SafetyResult(
                 False, "minProfitBps_not_met", profit_after, flash_fee, gas_cost_wei, effective_gas_cost
             )
-    return SafetyResult(True, "ok", profit_after, flash_fee, gas_cost_wei, effective_gas_cost)
+    return SafetyResult(
+        True,
+        "ok",
+        profit_after,
+        flash_fee,
+        gas_cost_wei,
+        effective_gas_cost,
+        economic_profit_after_costs_wei=profit_after,
+    )
