@@ -710,23 +710,10 @@ class RuntimePrimaryScanFacade:
         scan_started = time.perf_counter()
         scan_cache = cache or self.cache
         if discovery_context is None:
-            extra_v3_pairs = await self._discover_extra_v3_pairs(
-                rpc, current_block=int(current_block)
+            discovery_context = await self._build_discovery_context(
+                rpc,
+                current_block=int(current_block),
             )
-            venue_pools = {"curve": [], "balancer": []}
-            discovery = getattr(self, "_discovery", None)
-            discover_venues = (
-                getattr(discovery, "maybe_discover_venues", None)
-                if discovery is not None
-                else None
-            )
-            if callable(discover_venues):
-                venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
-            discovery_context = {
-                "v3_pairs": list(extra_v3_pairs),
-                "curve_pools": list(venue_pools.get("curve") or []),
-                "balancer_pools": list(venue_pools.get("balancer") or []),
-            }
         extra_v3_pairs = list(discovery_context.get("v3_pairs") or [])
         extra_curve_pools = list(discovery_context.get("curve_pools") or [])
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
@@ -1490,6 +1477,10 @@ class RuntimePrimaryScanFacade:
             selected_result = next(item for item in results if item[0] == selected_url)
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
+
+        discovery_runtime = dict(discovery_context.get("runtime") or {})
+        if discovery_runtime:
+            selected_telemetry.setdefault("discovery", {})["runtime"] = discovery_runtime
 
         # Provider scans are parallel discovery passes, not mutually exclusive
         # markets. A route can be unquotable on one RPC while quoting normally on
