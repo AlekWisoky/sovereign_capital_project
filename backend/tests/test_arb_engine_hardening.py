@@ -147,6 +147,7 @@ def test_size_economic_diagnostic_preserves_per_leg_quote_and_slippage_evidence(
         ],
     )
     row = metrics["size_economic_diagnostics"][0]
+    assert row["amount_out_wei"] == "5100"
     assert row["legs"][0]["fee"] == 500
     assert row["legs"][0]["pool"] == "0xpool1"
     assert row["legs"][0]["quoted_amount_out"] == "5100"
