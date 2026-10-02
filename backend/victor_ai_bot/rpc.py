@@ -73,7 +73,20 @@ class JsonRpcClient:
             try:
                 assert self._session is not None, "Use as async context manager"
                 async with self._session.post(self.url, json=payload) as r:
-                    j = await r.json()
+                    try:
+                        j = await r.json()
+                    except aiohttp.ClientError:
+                        dt = (time.perf_counter() - t0) * 1000.0
+                        if int(r.status) >= 400:
+                            return RpcResult(
+                                False,
+                                error={
+                                    "code": int(r.status),
+                                    "message": f"http_status_{int(r.status)}",
+                                },
+                                latency_ms=dt,
+                            )
+                        raise
                 dt = (time.perf_counter() - t0) * 1000.0
                 if "error" in j:
                     return RpcResult(False, error=j["error"], latency_ms=dt)
@@ -114,7 +127,23 @@ class JsonRpcClient:
                 try:
                     assert self._session is not None, "Use as async context manager"
                     async with self._session.post(self.url, json=reqs) as r:
-                        j = await r.json()
+                        try:
+                            j = await r.json()
+                        except aiohttp.ClientError:
+                            dt = (time.perf_counter() - t0) * 1000.0
+                            if int(r.status) >= 400:
+                                return [
+                                    RpcResult(
+                                        False,
+                                        error={
+                                            "code": int(r.status),
+                                            "message": f"http_status_{int(r.status)}",
+                                        },
+                                        latency_ms=dt,
+                                    )
+                                    for _ in chunk
+                                ]
+                            raise
                     dt = (time.perf_counter() - t0) * 1000.0
 
                     if not isinstance(j, list):
