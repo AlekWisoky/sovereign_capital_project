@@ -262,6 +262,13 @@ async def try_execute_opportunity(
     if amount_in <= 0 or amount_out <= 0:
         return ExecResult(False, effective_dry_run, "invalid_amounts")
 
+    if (
+        not effective_dry_run
+        and Account is None
+        and str(getattr(cfg.execution, "executor_address", "") or "")
+    ):
+        return ExecResult(False, effective_dry_run, "missing_eth_account_dependency", attempted=False)
+
     provider_hint = str(
         (
             ((getattr(decision, "metadata", {}) or {}).get("provider_hint"))
