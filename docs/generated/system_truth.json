@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 361,
+  "backend_test_file_count": 362,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -274,6 +274,7 @@
     "test_runtime_contexts_stage7.py",
     "test_runtime_decision_facade_extraction.py",
     "test_runtime_decision_finalize_facade_extraction.py",
+    "test_runtime_discovery_budget.py",
     "test_runtime_engine_facade_extraction.py",
     "test_runtime_execute_dispatch_facade_extraction.py",
     "test_runtime_execute_entry_facade_extraction.py",
