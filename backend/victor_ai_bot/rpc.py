@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, List, Optional, Dict
@@ -20,12 +21,27 @@ class RpcResult:
 
 class JsonRpcClient:
     def __init__(
-        self, url: str, *, timeout_s: float = 10.0, max_concurrency: int = 20, max_batch: int = 50
+        self,
+        url: str,
+        *,
+        timeout_s: float = 10.0,
+        max_concurrency: int = 20,
+        max_batch: int = 50,
+        max_batch_concurrency: int | None = None,
     ):
         self.url = url
         self.timeout_s = timeout_s
         self._sem = asyncio.Semaphore(max_concurrency)
         self.max_batch = max_batch
+        configured_batch_concurrency = (
+            max_batch_concurrency
+            if max_batch_concurrency is not None
+            else int(os.environ.get("VICTOR_RPC_BATCH_CONCURRENCY", "2") or 2)
+        )
+        self.max_batch_concurrency = max(
+            1, min(int(configured_batch_concurrency), int(max_concurrency))
+        )
+        self._batch_sem = asyncio.Semaphore(self.max_batch_concurrency)
         self._session: aiohttp.ClientSession | None = None
         self._id = 0
         # Provider capability cache: some endpoints do not support JSON-RPC batching.
@@ -63,80 +79,104 @@ class JsonRpcClient:
                 return RpcResult(False, error=str(e), latency_ms=dt)
 
     async def batch(self, calls: List[tuple[str, list]]) -> List[RpcResult]:
-        """Execute JSON-RPC calls using a single batched HTTP request when supported.
+        """Execute JSON-RPC calls in bounded-concurrent HTTP batches.
 
-        Many RPC providers support JSON-RPC batching (sending a list of request objects).
-        This can drastically reduce latency for quote-heavy workloads (e.g., arbitrage scanning).
-
-        Behavior:
-        - Preserves input ordering.
-        - Splits into chunks of size `self.max_batch`.
-        - If the provider does not support batching, transparently falls back to per-call requests
-          and caches that capability for this client instance.
+        Independent chunks may overlap, but concurrency is capped separately
+        from the per-call semaphore. Input ordering is preserved.
         """
         if not calls:
             return []
 
-        # Fast path: provider known to not support batching.
+        chunk_size = max(1, int(self.max_batch))
+        chunks = [
+            calls[i : i + chunk_size]
+            for i in range(0, len(calls), chunk_size)
+        ]
+
+        async def _send_chunk(chunk: List[tuple[str, list]]) -> List[RpcResult]:
+            async with self._batch_sem:
+                async with self._sem:
+                    t0 = time.perf_counter()
+                    reqs = []
+                    ids: List[int] = []
+                    for method, params in chunk:
+                        rid = self._next_id()
+                        ids.append(rid)
+                        reqs.append({
+                            "jsonrpc": "2.0",
+                            "id": rid,
+                            "method": method,
+                            "params": params or [],
+                        })
+                    try:
+                        assert self._session is not None, "Use as async context manager"
+                        async with self._session.post(self.url, json=reqs) as r:
+                            j = await r.json()
+                        dt = (time.perf_counter() - t0) * 1000.0
+
+                        if not isinstance(j, list):
+                            self._batch_supported = False
+                            return [
+                                await self.call(method, params or [])
+                                for method, params in chunk
+                            ]
+
+                        if self._batch_supported is None:
+                            self._batch_supported = True
+
+                        by_id: Dict[int, Any] = {}
+                        for resp in j:
+                            try:
+                                if isinstance(resp, dict) and "id" in resp:
+                                    by_id[int(resp["id"])] = resp
+                            except _SAFE_RPC_BATCH_ID_EXCEPTIONS:
+                                continue
+                        results: List[RpcResult] = []
+                        for rid in ids:
+                            resp = by_id.get(rid)
+                            if not isinstance(resp, dict):
+                                results.append(RpcResult(
+                                    False, error="missing_batch_response", latency_ms=dt
+                                ))
+                            elif "error" in resp:
+                                results.append(RpcResult(
+                                    False, error=resp["error"], latency_ms=dt
+                                ))
+                            else:
+                                results.append(RpcResult(
+                                    True, result=resp.get("result"), latency_ms=dt
+                                ))
+                        return results
+                    except _SAFE_RPC_CALL_EXCEPTIONS as exc:
+                        dt = (time.perf_counter() - t0) * 1000.0
+                        return [
+                            RpcResult(False, error=str(exc), latency_ms=dt)
+                            for _ in chunk
+                        ]
+
         if self._batch_supported is False:
             out: List[RpcResult] = []
-            for method, params in calls:
-                out.append(await self.call(method, params or []))
+            for chunk in chunks:
+                for method, params in chunk:
+                    out.append(await self.call(method, params or []))
             return out
 
-        out: List[RpcResult] = []
-        for i in range(0, len(calls), max(1, int(self.max_batch))):
-            chunk = calls[i : i + max(1, int(self.max_batch))]
-            async with self._sem:
-                t0 = time.perf_counter()
-                reqs = []
-                ids: List[int] = []
-                for method, params in chunk:
-                    rid = self._next_id()
-                    ids.append(rid)
-                    reqs.append(
-                        {"jsonrpc": "2.0", "id": rid, "method": method, "params": params or []}
-                    )
-                try:
-                    assert self._session is not None, "Use as async context manager"
-                    async with self._session.post(self.url, json=reqs) as r:
-                        j = await r.json()
-                    dt = (time.perf_counter() - t0) * 1000.0
+        if self._batch_supported is None:
+            first = await _send_chunk(chunks[0])
+            if self._batch_supported is False:
+                out = list(first)
+                for chunk in chunks[1:]:
+                    for method, params in chunk:
+                        out.append(await self.call(method, params or []))
+                return out
+            remaining = chunks[1:]
+            if not remaining:
+                return first
+            rest = await asyncio.gather(*(_send_chunk(chunk) for chunk in remaining))
+            return first + [item for chunk_results in rest for item in chunk_results]
 
-                    # Some providers do not support batching and will return a dict/error.
-                    if not isinstance(j, list):
-                        # Cache capability and fallback for this chunk.
-                        self._batch_supported = False
-                        for method, params in chunk:
-                            out.append(await self.call(method, params or []))
-                        continue
-
-                    # Cache as supported once we see a list response.
-                    if self._batch_supported is None:
-                        self._batch_supported = True
-
-                    by_id: Dict[int, Any] = {}
-                    for resp in j:
-                        try:
-                            if isinstance(resp, dict) and "id" in resp:
-                                by_id[int(resp["id"])] = resp
-                        except _SAFE_RPC_BATCH_ID_EXCEPTIONS:
-                            continue
-                    for rid in ids:
-                        resp = by_id.get(rid)
-                        if not isinstance(resp, dict):
-                            out.append(
-                                RpcResult(False, error="missing_batch_response", latency_ms=dt)
-                            )
-                        elif "error" in resp:
-                            out.append(RpcResult(False, error=resp["error"], latency_ms=dt))
-                        else:
-                            out.append(RpcResult(True, result=resp.get("result"), latency_ms=dt))
-                except _SAFE_RPC_CALL_EXCEPTIONS as e:
-                    dt = (time.perf_counter() - t0) * 1000.0
-                    for _ in chunk:
-                        out.append(RpcResult(False, error=str(e), latency_ms=dt))
-        return out
+        results = await asyncio.gather(*(_send_chunk(chunk) for chunk in chunks))
+        return [item for chunk_results in results for item in chunk_results]
 
     async def eth_call_batch(
         self,
