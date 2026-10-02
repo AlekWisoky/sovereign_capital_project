@@ -31,3 +31,57 @@ def test_selected_provider_can_run_full_adaptive_size_ladder_after_comparison():
     assert amounts[0] == 1_000
     assert len(amounts) > 1
     assert max(amounts) <= 100_000
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_provider_comparison_does_not_force_adaptive_scan():
+    runtime = RuntimePrimaryScanFacade()
+    calls = []
+
+    class FakeManager:
+        def read_candidates(self):
+            return ["https://provider.example"]
+
+        def observe_quote_telemetry(self, *args, **kwargs):
+            return None
+
+        def snapshot(self):
+            return {"read": [{"url": "https://provider.example", "ok": True, "score": 1.0}]}
+
+    class FakeRpc:
+        url = "https://provider.example"
+
+    async def fake_discovery(*args, **kwargs):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": [], "runtime": {}}
+
+    async def fake_token_amounts(*args, **kwargs):
+        return {}, {}
+
+    async def fake_scan(*args, **kwargs):
+        calls.append(bool(kwargs.get("force_adaptive_size_scan")))
+        telemetry = kwargs["telemetry_sink"]
+        telemetry.update({
+            "quotes": {"requests": 1, "quote_successes": 1, "failure_reasons": {}},
+            "scan_error": "",
+            "adaptive_size_discovery": {"amounts_scanned": ["1000"]},
+            "scan_sizing": {"amounts_by_token": {}},
+            "route_universe": {},
+        })
+        return []
+
+    runtime.rpc_manager = FakeManager()
+    runtime._build_discovery_context = fake_discovery
+    runtime._build_token_scan_amounts = fake_token_amounts
+    runtime._scan_primary_opportunities = fake_scan
+    runtime.cache = object()
+
+    await runtime._select_rpc_and_scan(
+        bootstrap_rpc=FakeRpc(),
+        current_block=123,
+        amount_in=1_000,
+    )
+
+    assert calls == [False, True]
