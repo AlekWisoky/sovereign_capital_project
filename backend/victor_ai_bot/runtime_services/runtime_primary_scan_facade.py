@@ -423,19 +423,23 @@ class RuntimePrimaryScanFacade:
                 state = dict(existing_profitability)
             else:
                 try:
+                    revalidation_kwargs = {
+                        "gas_cost_wei": gas_cost_wei,
+                        "quoted_amount_out_wei": _resolve_scan_quoted_amount(meta),
+                        "gas_cost_in_profit_token_wei": (
+                            gas_cost_in_profit_token_wei
+                            if has_route_gas_inputs
+                            else gas_cost_wei
+                        ),
+                    }
+                    if native_flashloan_fee_bps is not None:
+                        revalidation_kwargs["flashloan_fee_bps_override"] = native_flashloan_fee_bps
                     state = revalidate_profitability_state(
                         opportunity,
                         self.cfg,
                         stage="scan_after_fee_revalidation",
                         source="runtime_primary_scan",
-                        gas_cost_wei=gas_cost_wei,
-                        quoted_amount_out_wei=_resolve_scan_quoted_amount(meta),
-                        gas_cost_in_profit_token_wei=(
-                            gas_cost_in_profit_token_wei
-                            if has_route_gas_inputs
-                            else gas_cost_wei
-                        ),
-                        flashloan_fee_bps_override=native_flashloan_fee_bps,
+                        **revalidation_kwargs,
                     )
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                     # One malformed candidate must not erase the entire
