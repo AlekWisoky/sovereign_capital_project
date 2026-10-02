@@ -5,7 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb_engine_module
-from victor_ai_bot.arb_engine import Edge, quote_edge, requote_opportunity, _pool_keys_for_leg, _classify_route_family, _record_size_economic_diagnostic
+from victor_ai_bot.arb_engine import (
+    Edge,
+    _classify_route_family,
+    _is_same_pool_roundtrip,
+    _pool_keys_for_leg,
+    _record_size_economic_diagnostic,
+    quote_edge,
+    requote_opportunity,
+)
 from victor_ai_bot.cache import PerBlockCache
 from victor_ai_bot.models import Opportunity, Route, RouteLeg
 
@@ -53,6 +61,43 @@ def _opp() -> Opportunity:
         route_id='route-1',
         meta={},
     )
+
+
+def test_same_pool_roundtrip_is_rejected_but_cross_fee_pool_is_preserved():
+    token_a = '0x1111111111111111111111111111111111111111'
+    token_b = '0x2222222222222222222222222222222222222222'
+    same_pool_forward = Edge(
+        'univ3', '0xrouter', token_a, token_b, {'fee': 500, 'pool': '0xpool'}
+    )
+    same_pool_reverse = Edge(
+        'univ3', '0xrouter', token_b, token_a, {'fee': 500, 'pool': '0xpool'}
+    )
+    other_fee_reverse = Edge(
+        'univ3', '0xrouter', token_b, token_a, {'fee': 3000, 'pool': '0xother-pool'}
+    )
+
+    assert _is_same_pool_roundtrip(same_pool_forward, same_pool_reverse) is True
+    assert _is_same_pool_roundtrip(same_pool_forward, other_fee_reverse) is False
+
+
+def test_same_pool_roundtrip_filter_is_protocol_specific():
+    token_a = '0x1111111111111111111111111111111111111111'
+    token_b = '0x2222222222222222222222222222222222222222'
+    curve_forward = Edge(
+        'curve', '0xcurve-pool', token_a, token_b, {'i': 0, 'j': 1, 'underlying': False}
+    )
+    curve_reverse = Edge(
+        'curve', '0xcurve-pool', token_b, token_a, {'i': 1, 'j': 0, 'underlying': False}
+    )
+    balancer_forward = Edge(
+        'balancer', '0xvault', token_a, token_b, {'pool_id': '0xpool-id'}
+    )
+    balancer_reverse = Edge(
+        'balancer', '0xvault', token_b, token_a, {'pool_id': '0xpool-id'}
+    )
+
+    assert _is_same_pool_roundtrip(curve_forward, curve_reverse) is True
+    assert _is_same_pool_roundtrip(balancer_forward, balancer_reverse) is True
 
 
 @pytest.mark.asyncio

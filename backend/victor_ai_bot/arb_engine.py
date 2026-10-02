@@ -595,6 +595,40 @@ def _classify_route_family(cfg: Any, legs: List[Edge], *, route_type: str) -> st
     return "flash_arb"
 
 
+def _is_same_pool_roundtrip(e1: Edge, e2: Edge) -> bool:
+    """Return True only when both legs expose a reliable pool identity."""
+    if str(e1.dex) != str(e2.dex):
+        return False
+
+    dex = str(e1.dex)
+    if dex == "univ3":
+        # The venue is normally the shared SwapRouter/Quoter, not the pool.
+        # Without explicit pool metadata we cannot safely conclude that two
+        # reverse edges hit the same pool; treating the router as the pool
+        # would incorrectly discard legitimate cross-pool opportunities.
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        if not p1 or not p2:
+            return False
+        return p1 == p2 and int(e1.params.get("fee", 3000)) == int(e2.params.get("fee", 3000))
+
+    if dex == "curve":
+        p1 = str(e1.venue or e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.venue or e2.params.get("pool") or "").strip().lower()
+        if not p1 or not p2:
+            return False
+        return p1 == p2 and bool(e1.params.get("underlying", False)) == bool(
+            e2.params.get("underlying", False)
+        )
+
+    if dex == "balancer":
+        p1 = str(e1.params.get("pool_id") or "").strip().lower()
+        p2 = str(e2.params.get("pool_id") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2)
+
+    return False
+
+
 def _pool_keys_for_leg(
     dex: str, token_in: str, token_out: str, params: Dict[str, Any], aux_hex: str
 ) -> str:
@@ -697,6 +731,23 @@ async def find_two_leg_opportunities(
         revs = by_pair.get((e1.token_out, e1.token_in), [])
         if not revs:
             metrics["route_rejections_no_reverse_route"] = int(metrics.get("route_rejections_no_reverse_route", 0)) + 1
+            continue
+
+        # A two-leg round trip through the exact same pool is structurally
+        # loss-making: the second swap traverses the same stateful liquidity
+        # venue in reverse and pays its swap fee again. It cannot express a
+        # cross-pool price dislocation, so quoting it only consumes the bounded
+        # route/size budget and can hide later cross-venue candidates.
+        filtered_revs = [
+            e2 for e2 in revs if not _is_same_pool_roundtrip(e1, e2)
+        ]
+        skipped_same_pool = len(revs) - len(filtered_revs)
+        if skipped_same_pool:
+            metrics["route_rejections_same_pool_roundtrip"] = int(
+                metrics.get("route_rejections_same_pool_roundtrip", 0)
+            ) + int(skipped_same_pool)
+        revs = filtered_revs
+        if not revs:
             continue
         metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
         if normalized_amounts:
