@@ -383,6 +383,40 @@ class DiscoveryManager:
             fee_tiers = [100, 500, 3000, 10000]
             seed = f"disc:{int(block_number)}:{self.chain_name}"
             pairs: List[Tuple[str, str]] = []
+
+            # Discovery is allowed to widen the quote graph without widening the
+            # execution token universe.  PoolCreated/Curve/Balancer observations
+            # can reveal a liquid token that is absent from the three-token anchor
+            # set; use a small deterministic anchor->observed frontier so the next
+            # factory queries can find additional UniV3 liquidity for that token.
+            # This is intentionally bounded by the existing discovery call cap.
+            anchors = sorted(
+                {str(token).lower() for token in toks if token},
+                key=lambda x: stable_hash_int(f"{seed}:anchor:{x}"),
+            )
+            observed = sorted(
+                {
+                    str(token).lower()
+                    for token in self._candidate_tokens_observed
+                    if str(token).lower() not in set(anchors)
+                },
+                key=lambda x: stable_hash_int(f"{seed}:frontier:{x}"),
+            )
+            try:
+                frontier_cap = max(
+                    1,
+                    min(
+                        8,
+                        int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8),
+                    ),
+                )
+            except (TypeError, ValueError):
+                frontier_cap = 8
+            for token in observed[:frontier_cap]:
+                for anchor in anchors:
+                    if token != anchor:
+                        pairs.append((anchor, token))
+
             weth = str(getattr(cfg.chain, "weth", "") or "").lower()
             if weth and any(t.lower() == weth for t in toks):
                 others = [t.lower() for t in toks if t.lower() != weth]
