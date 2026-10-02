@@ -595,6 +595,23 @@ def _classify_route_family(cfg: Any, legs: List[Edge], *, route_type: str) -> st
     return "flash_arb"
 
 
+def _is_same_pool_roundtrip(e1: Edge, e2: Edge) -> bool:
+    """Return True when a two-leg reversal traverses the exact same pool."""
+    return _pool_keys_for_leg(
+        e1.dex,
+        e1.token_in,
+        e1.token_out,
+        {"pool": e1.venue, **e1.params},
+        "",
+    ) == _pool_keys_for_leg(
+        e2.dex,
+        e2.token_in,
+        e2.token_out,
+        {"pool": e2.venue, **e2.params},
+        "",
+    )
+
+
 def _pool_keys_for_leg(
     dex: str, token_in: str, token_out: str, params: Dict[str, Any], aux_hex: str
 ) -> str:
@@ -704,23 +721,8 @@ async def find_two_leg_opportunities(
         # venue in reverse and pays its swap fee again. It cannot express a
         # cross-pool price dislocation, so quoting it only consumes the bounded
         # route/size budget and can hide later cross-venue candidates.
-        e1_pool_key = _pool_keys_for_leg(
-            e1.dex,
-            e1.token_in,
-            e1.token_out,
-            {"pool": e1.venue, **e1.params},
-            "",
-        )
         filtered_revs = [
-            e2
-            for e2 in revs
-            if _pool_keys_for_leg(
-                e2.dex,
-                e2.token_in,
-                e2.token_out,
-                {"pool": e2.venue, **e2.params},
-                "",
-            ) != e1_pool_key
+            e2 for e2 in revs if not _is_same_pool_roundtrip(e1, e2)
         ]
         skipped_same_pool = len(revs) - len(filtered_revs)
         if skipped_same_pool:
