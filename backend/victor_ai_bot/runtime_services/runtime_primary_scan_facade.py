@@ -186,170 +186,132 @@ def _merge_size_quote_failure_reasons(
     return merged
 
 
-def _build_size_economic_matrix(
-    size_scan_records: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+def _size_diagnostic_rows(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for diagnostic in list(metrics.get("size_economic_diagnostics") or []):
+        if not isinstance(diagnostic, dict):
+            continue
+        amount_in = int(diagnostic.get("amount_in") or 0)
+        amount_out = int(diagnostic.get("amount_out_wei") or 0)
+        gross = int(diagnostic.get("gross_profit_wei") or 0)
+        fee = int(diagnostic.get("flashloan_fee_wei") or 0)
+        gas = int(diagnostic.get("gas_cost_profit_token_wei") or 0)
+        economic = diagnostic.get("economic_after_cost_profit_wei")
+        if economic in (None, ""):
+            economic = gross - fee - gas
+        try:
+            economic = int(economic)
+        except (TypeError, ValueError):
+            economic = gross - fee - gas
+        row = {
+            "route_id": str(diagnostic.get("route_id") or ""),
+            "amount_in": str(amount_in),
+            "amount_out_wei": str(amount_out),
+            "gross_profit_wei": str(gross),
+            "flashloan_fee_wei": str(fee),
+            "gas_cost_wei": str(diagnostic.get("gas_cost_wei") or "0"),
+            "gas_cost_profit_token_wei": str(gas),
+            "gross_minus_flashloan_fee_wei": str(gross - fee),
+            "gross_minus_flashloan_fee_minus_gas_wei": str(gross - fee - gas),
+            "repayment_valid": bool(amount_out > 0 and amount_out >= amount_in + fee),
+            "after_cost_profit_wei": str(diagnostic.get("after_cost_profit_wei") or "0"),
+            "economic_after_cost_profit_wei": str(economic),
+            "revalidated": bool(diagnostic.get("revalidated")),
+            "authoritative": bool(diagnostic.get("authoritative")),
+            "reason": str(diagnostic.get("reason") or "diagnostic_only"),
+            "diagnostic_only": True,
+        }
+        legs = [dict(leg) for leg in (diagnostic.get("legs") or []) if isinstance(leg, dict)][:3]
+        if legs:
+            row["legs"] = legs
+        rows.append(row)
+    return rows
+
+
+def _size_route_rows(record: Dict[str, Any]) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    two_metrics = dict(record.get("two_metrics") or {})
+    three_metrics = dict(record.get("three_metrics") or {})
+    candidates = list(record.get("two") or []) + list(record.get("three") or [])
+    rows = [_size_economic_candidate_row(candidate) for candidate in candidates]
+    diagnostics = _size_diagnostic_rows(two_metrics) + _size_diagnostic_rows(three_metrics)
+    existing = {row["route_id"] for row in rows}
+    rows.extend(row for row in diagnostics if row["route_id"] and row["route_id"] not in existing)
+    return rows, two_metrics, three_metrics
+
+
+def _size_matrix_selection(rows: List[Dict[str, Any]]) -> tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
+    positive = [
+        row for row in rows
+        if row["revalidated"] and row["authoritative"] and int(row["after_cost_profit_wei"]) > 0
+    ]
+    selected = max(positive, key=lambda row: int(row["after_cost_profit_wei"]), default=None)
+    economic_rows = [
+        row for row in rows
+        if row.get("route_id")
+        and (bool(row.get("revalidated")) or bool(row.get("diagnostic_only")))
+        and _economic_after_cost_profit(row) is not None
+    ]
+    economic = max(
+        economic_rows,
+        key=lambda row: int(_economic_after_cost_profit(row) or 0),
+        default=None,
+    )
+    return selected, economic
+
+
+def _build_size_matrix_row(
+    amount: int,
+    rows: List[Dict[str, Any]],
+    two_metrics: Dict[str, Any],
+    three_metrics: Dict[str, Any],
+) -> Dict[str, Any]:
+    selected, economic = _size_matrix_selection(rows)
+    requests = int(two_metrics.get("quote_requests", 0) or 0) + int(three_metrics.get("quote_requests", 0) or 0)
+    successes = int(two_metrics.get("quote_successes", 0) or 0) + int(three_metrics.get("quote_successes", 0) or 0)
+    basis = "verified_after_cost_profit" if selected else "no_economic_evidence"
+    if economic and not selected:
+        basis = "economic_optimum_diagnostic"
+        if str(economic.get("reason") or "") == "non_positive_gross_profit":
+            basis = "gross_profit_diagnostic_only"
+    return {
+        "amount_in": str(amount),
+        "quote_requests": requests,
+        "quote_successes": successes,
+        "quote_failures": max(0, requests - successes),
+        "quote_failure_reasons": _merge_size_quote_failure_reasons(two_metrics, three_metrics),
+        "failed_quote_edge_count": int(two_metrics.get("failed_quote_edge_count", 0) or 0) + int(three_metrics.get("failed_quote_edge_count", 0) or 0),
+        "failed_quote_edge_samples": list(dict.fromkeys([
+            *list(two_metrics.get("failed_quote_edge_samples") or []),
+            *list(three_metrics.get("failed_quote_edge_samples") or []),
+        ]))[:256],
+        "route_ids": [row["route_id"] for row in rows if row["route_id"]],
+        "candidates": rows,
+        "selection_basis": basis,
+        "selected_route_id": selected["route_id"] if selected else "",
+        "selected_after_cost_profit_wei": selected["after_cost_profit_wei"] if selected else "0",
+        "economic_optimum_route_id": economic["route_id"] if economic else "",
+        "economic_optimum_after_cost_profit_wei": (
+            str(_economic_after_cost_profit(economic)) if economic else "0"
+        ),
+        "economic_optimum_authoritative": bool(economic and economic["authoritative"]),
+        "economic_optimum_executable": bool(selected),
+    }
+
+
+def _build_size_economic_matrix(size_scan_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     matrix: List[Dict[str, Any]] = []
     for record in size_scan_records:
-        amount = int(record.get("amount_in") or 0)
-        candidates = list(record.get("two") or []) + list(record.get("three") or [])
-        two_metrics = dict(record.get("two_metrics") or {})
-        three_metrics = dict(record.get("three_metrics") or {})
-        route_rows = [_size_economic_candidate_row(candidate) for candidate in candidates]
-
-        # Gross-rejected routes are intentionally removed from the retained
-        # opportunity list, but their bounded economic diagnostics are the
-        # evidence needed to distinguish "no gross edge" from "gross edge
-        # consumed by flashloan/gas costs". Preserve those diagnostics in the
-        # per-size matrix without promoting them to execution candidates.
-        diagnostic_rows = []
-        for diagnostic in list(
-            two_metrics.get("size_economic_diagnostics") or []
-        ) + list(
-            three_metrics.get("size_economic_diagnostics") or []
-        ):
-            if not isinstance(diagnostic, dict):
-                continue
-            amount_in_diag = int(diagnostic.get("amount_in") or 0)
-            amount_out_diag = int(diagnostic.get("amount_out_wei") or 0)
-            gross_diag = int(diagnostic.get("gross_profit_wei") or 0)
-            fee_diag = int(diagnostic.get("flashloan_fee_wei") or 0)
-            gas_diag = int(diagnostic.get("gas_cost_profit_token_wei") or 0)
-            diagnostic_economic_after_cost = diagnostic.get(
-                "economic_after_cost_profit_wei"
+        rows, two_metrics, three_metrics = _size_route_rows(record)
+        matrix.append(
+            _build_size_matrix_row(
+                int(record.get("amount_in") or 0),
+                rows,
+                two_metrics,
+                three_metrics,
             )
-            if diagnostic_economic_after_cost in (None, ""):
-                diagnostic_economic_after_cost = gross_diag - fee_diag - gas_diag
-            else:
-                try:
-                    diagnostic_economic_after_cost = int(diagnostic_economic_after_cost)
-                except (TypeError, ValueError):
-                    diagnostic_economic_after_cost = gross_diag - fee_diag - gas_diag
-            row = {
-                "route_id": str(diagnostic.get("route_id") or ""),
-                "amount_in": str(amount_in_diag),
-                "amount_out_wei": str(amount_out_diag),
-                "gross_profit_wei": str(gross_diag),
-                "flashloan_fee_wei": str(fee_diag),
-                "gas_cost_wei": str(diagnostic.get("gas_cost_wei") or "0"),
-                "gas_cost_profit_token_wei": str(gas_diag),
-                "gross_minus_flashloan_fee_wei": str(gross_diag - fee_diag),
-                "gross_minus_flashloan_fee_minus_gas_wei": str(gross_diag - fee_diag - gas_diag),
-                "repayment_valid": bool(
-                    amount_out_diag > 0
-                    and amount_out_diag >= amount_in_diag + fee_diag
-                ),
-                "after_cost_profit_wei": str(diagnostic.get("after_cost_profit_wei") or "0"),
-                "economic_after_cost_profit_wei": str(diagnostic_economic_after_cost),
-                "revalidated": bool(diagnostic.get("revalidated")),
-                "authoritative": bool(diagnostic.get("authoritative")),
-                "reason": str(diagnostic.get("reason") or "diagnostic_only"),
-                "diagnostic_only": True,
-            }
-            legs = [dict(leg) for leg in (diagnostic.get("legs") or []) if isinstance(leg, dict)][:3]
-            if legs:
-                row["legs"] = legs
-            diagnostic_rows.append(row)
-        existing_route_ids = {existing["route_id"] for existing in route_rows}
-        route_rows.extend(
-            row for row in diagnostic_rows
-            if row["route_id"] and row["route_id"] not in existing_route_ids
         )
-
-        positive = [
-            row for row in route_rows
-            if row["revalidated"]
-            and row["authoritative"]
-            and int(row["after_cost_profit_wei"]) > 0
-        ]
-        selected = max(
-            positive,
-            key=lambda row: int(row["after_cost_profit_wei"]),
-            default=None,
-        )
-        # -1 is a non-repayable sentinel, not an economic P&L value.
-        # Never let that sentinel win the economic-optimum comparison over a
-        # real (possibly negative) after-cost result.
-        economic_rows = [
-            row for row in route_rows
-            if row.get("route_id")
-            and (bool(row.get("revalidated")) or bool(row.get("diagnostic_only")))
-            and _economic_after_cost_profit(row) is not None
-        ]
-        economic_optimum = max(
-            economic_rows,
-            key=lambda row: int(_economic_after_cost_profit(row) or 0),
-            default=None,
-        )
-        matrix.append({
-            "amount_in": str(amount),
-            "quote_requests": int(two_metrics.get("quote_requests", 0) or 0)
-            + int(three_metrics.get("quote_requests", 0) or 0),
-            "quote_successes": int(three_metrics.get("quote_successes", 0) or 0)
-            + int(two_metrics.get("quote_successes", 0) or 0),
-            "quote_failures": max(
-                0,
-                int(two_metrics.get("quote_requests", 0) or 0)
-                + int(three_metrics.get("quote_requests", 0) or 0)
-                - int(two_metrics.get("quote_successes", 0) or 0)
-                - int(three_metrics.get("quote_successes", 0) or 0),
-            ),
-            "quote_failure_reasons": _merge_size_quote_failure_reasons(
-                two_metrics, three_metrics
-            ),
-            "failed_quote_edge_count": int(two_metrics.get("failed_quote_edge_count", 0) or 0)
-            + int(three_metrics.get("failed_quote_edge_count", 0) or 0),
-            "failed_quote_edge_samples": list(
-                dict.fromkeys(
-                    [
-                        *list(two_metrics.get("failed_quote_edge_samples") or []),
-                        *list(three_metrics.get("failed_quote_edge_samples") or []),
-                    ]
-                )
-            )[:256],
-            "route_ids": [row["route_id"] for row in route_rows if row["route_id"]],
-            "candidates": route_rows,
-            "selection_basis": (
-                "verified_after_cost_profit"
-                if selected
-                else (
-                    "economic_optimum_diagnostic"
-                    if economic_optimum
-                    and str(economic_optimum.get("reason") or "") != "non_positive_gross_profit"
-                    else (
-                        "gross_profit_diagnostic_only"
-                        if economic_optimum
-                        else "no_economic_evidence"
-                    )
-                )
-            ),
-            # Execution selection remains fail-closed: only an authoritative
-            # positive after-cost result can populate selected_route_id.
-            "selected_route_id": selected["route_id"] if selected else "",
-            "selected_after_cost_profit_wei": (
-                selected["after_cost_profit_wei"] if selected else "0"
-            ),
-            # Economic modeling is deliberately broader than execution
-            # eligibility. This records the best modeled route/size even when
-            # every observed outcome is loss-making, so the engine can identify
-            # the least-bad size and later recognize when the optimum crosses
-            # into positive territory.
-            "economic_optimum_route_id": (
-                economic_optimum["route_id"] if economic_optimum else ""
-            ),
-            "economic_optimum_after_cost_profit_wei": (
-                str(_economic_after_cost_profit(economic_optimum))
-                if economic_optimum
-                else "0"
-            ),
-            "economic_optimum_authoritative": (
-                bool(economic_optimum and economic_optimum["authoritative"])
-                if economic_optimum
-                else False
-            ),
-            "economic_optimum_executable": bool(selected),
-        })
     return matrix
+
 
 
 class RuntimePrimaryScanFacade:
