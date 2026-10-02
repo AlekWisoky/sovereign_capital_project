@@ -75,25 +75,8 @@ def _economic_after_cost_profit(row: Dict[str, Any]) -> int | None:
     return after_cost
 
 
-def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
-    meta = getattr(candidate, "meta", {}) or {}
-    profitability = (
-        (meta.get("profitability") or {})
-        if isinstance(meta, dict)
-        else {}
-    )
-    # Revalidation deliberately keeps loss-making candidates in
-    # profitability_diagnostic instead of promoting them to executable
-    # profitability. Economic modeling must still consume that diagnostic
-    # truth; otherwise a gross-positive/after-cost-negative route silently
-    # loses its actual net P&L and sizing optimum.
-    if not profitability and isinstance(meta, dict):
-        profitability = (
-            meta.get("profitability_diagnostic")
-            if isinstance(meta.get("profitability_diagnostic"), dict)
-            else {}
-        )
-    legs = []
+def _candidate_route_snapshot(candidate: Opportunity) -> tuple[List[Dict[str, str]], str]:
+    legs: List[Dict[str, str]] = []
     try:
         for leg in list(getattr(getattr(candidate, "route", None), "legs", []) or [])[:3]:
             legs.append({
@@ -106,72 +89,83 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
                 "data": str(getattr(leg, "data", "") or ""),
             })
     except (AttributeError, TypeError, ValueError):
-        legs = []
-    route_legs = list(getattr(getattr(candidate, "route", None), "legs", []) or [])
-    amount_in_value = str(getattr(route_legs[0], "amount_in", "0") or "0") if route_legs else "0"
-    terminal = (meta.get("out3") or meta.get("out2") or "") if isinstance(meta, dict) else ""
-    gross_profit_wei = int(getattr(candidate, "expected_profit_raw", "0") or "0")
+        return [], "0"
+    return legs, str(legs[0]["amount_in"]) if legs else "0"
+
+
+def _candidate_economic_fields(
+    candidate: Opportunity,
+    meta: Dict[str, Any],
+    profitability: Dict[str, Any],
+    amount_in_value: str,
+) -> Dict[str, Any]:
+    terminal = meta.get("out3") or meta.get("out2") or ""
     amount_out_wei = int(terminal or 0)
-    flashloan_fee_wei = int(profitability.get("flashloan_fee_wei") or "0")
-    gas_cost_profit_token_wei = int(
-        profitability.get("gas_cost_profit_token_wei") or "0"
-    )
-    gross_minus_flashloan_fee_wei = gross_profit_wei - flashloan_fee_wei
-    gross_minus_all_costs_wei = (
-        gross_minus_flashloan_fee_wei - gas_cost_profit_token_wei
-    )
-    economic_after_cost_profit_wei = profitability.get(
-        "economic_profit_after_costs_wei"
-    )
-    if economic_after_cost_profit_wei in (None, ""):
+    gross_profit_wei = int(getattr(candidate, "expected_profit_raw", "0") or "0")
+    fee = int(profitability.get("flashloan_fee_wei") or "0")
+    gas_profit = int(profitability.get("gas_cost_profit_token_wei") or "0")
+    gross_minus_fee = gross_profit_wei - fee
+    gross_minus_costs = gross_minus_fee - gas_profit
+    economic = profitability.get("economic_profit_after_costs_wei")
+    if economic in (None, ""):
         try:
-            observed_after_cost = int(
-                profitability.get("profit_after_costs_wei") or 0
-            )
+            observed_after_cost = int(profitability.get("profit_after_costs_wei") or 0)
         except (TypeError, ValueError):
             observed_after_cost = 0
-        reason = str(profitability.get("reason") or "")
-        # Only reconstruct the signed value when the execution sentinel has
-        # erased it. Other rejection reasons already carry real after-cost P&L.
-        if reason == "does_not_repay_flashloan" or observed_after_cost == -1:
-            economic_after_cost_profit_wei = gross_minus_all_costs_wei
+        if profitability.get("reason") == "does_not_repay_flashloan" or observed_after_cost == -1:
+            economic = gross_minus_costs
         else:
-            economic_after_cost_profit_wei = observed_after_cost
-    else:
-        try:
-            economic_after_cost_profit_wei = int(economic_after_cost_profit_wei)
-        except (TypeError, ValueError):
-            economic_after_cost_profit_wei = gross_minus_all_costs_wei
-    repayment_valid = bool(
-        amount_in_value
-        and amount_out_wei > 0
-        and amount_out_wei >= int(amount_in_value) + flashloan_fee_wei
-    )
-    row = {
-        "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
-        "amount_in": amount_in_value,
-        "gross_profit_wei": str(gross_profit_wei),
-        "amount_out_wei": str(amount_out_wei),
-        "gas_cost_profit_token_wei": str(gas_cost_profit_token_wei),
-        "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
-        "flashloan_fee_wei": str(flashloan_fee_wei),
+            economic = observed_after_cost
+    try:
+        economic = int(economic)
+    except (TypeError, ValueError):
+        economic = gross_minus_costs
+    return {
+        "amount_out_wei": amount_out_wei,
+        "gross_profit_wei": gross_profit_wei,
+        "gas_cost_profit_token_wei": gas_profit,
+        "flashloan_fee_wei": fee,
         "gas_cost_wei": str(
             profitability.get("gas_cost_wei")
             or meta.get("gas_cost_estimate_wei")
             or "0"
         ),
-        "gross_minus_flashloan_fee_wei": str(gross_minus_flashloan_fee_wei),
-        "gross_minus_flashloan_fee_minus_gas_wei": str(gross_minus_all_costs_wei),
-        "repayment_valid": repayment_valid,
-        "after_cost_profit_wei": str(
-            profitability.get("profit_after_costs_wei") or "0"
+        "gross_minus_flashloan_fee_wei": gross_minus_fee,
+        "gross_minus_flashloan_fee_minus_gas_wei": gross_minus_costs,
+        "economic_after_cost_profit_wei": economic,
+        "repayment_valid": bool(
+            amount_in_value
+            and amount_out_wei > 0
+            and amount_out_wei >= int(amount_in_value) + fee
         ),
-        "economic_after_cost_profit_wei": str(economic_after_cost_profit_wei),
+    }
+
+
+def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
+    meta = getattr(candidate, "meta", {}) or {}
+    profitability = meta.get("profitability") if isinstance(meta, dict) else {}
+    if not profitability and isinstance(meta, dict):
+        profitability = meta.get("profitability_diagnostic")
+    profitability = profitability if isinstance(profitability, dict) else {}
+    legs, amount_in_value = _candidate_route_snapshot(candidate)
+    fields = _candidate_economic_fields(candidate, meta, profitability, amount_in_value)
+    row = {
+        "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
+        "amount_in": amount_in_value,
+        "gross_profit_wei": str(fields["gross_profit_wei"]),
+        "amount_out_wei": str(fields["amount_out_wei"]),
+        "gas_cost_profit_token_wei": str(fields["gas_cost_profit_token_wei"]),
+        "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
+        "flashloan_fee_wei": str(fields["flashloan_fee_wei"]),
+        "gas_cost_wei": fields["gas_cost_wei"],
+        "gross_minus_flashloan_fee_wei": str(fields["gross_minus_flashloan_fee_wei"]),
+        "gross_minus_flashloan_fee_minus_gas_wei": str(fields["gross_minus_flashloan_fee_minus_gas_wei"]),
+        "repayment_valid": fields["repayment_valid"],
+        "after_cost_profit_wei": str(profitability.get("profit_after_costs_wei") or "0"),
+        "economic_after_cost_profit_wei": str(fields["economic_after_cost_profit_wei"]),
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
         "reason": str(profitability.get("reason") or "unavailable"),
-        # Revalidated non-authoritative states are economic diagnostics: they
-        # are valid for optimum modeling but remain non-executable.
         "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
     }
     if legs:
