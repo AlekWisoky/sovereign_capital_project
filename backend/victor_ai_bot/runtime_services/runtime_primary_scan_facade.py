@@ -1535,7 +1535,7 @@ class RuntimePrimaryScanFacade:
             adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
             adaptive_opps = []
 
-        if adaptive_telemetry:
+        if adaptive_telemetry and adaptive_opps:
             selected_telemetry = dict(adaptive_telemetry)
             selected_telemetry["rpc"] = dict(selected_telemetry.get("rpc") or {})
             selected_telemetry["rpc"].update({
