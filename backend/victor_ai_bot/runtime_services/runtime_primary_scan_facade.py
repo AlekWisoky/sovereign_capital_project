@@ -1478,7 +1478,7 @@ class RuntimePrimaryScanFacade:
         candidate_by_key: Dict[tuple[str, str], Opportunity] = {}
         provider_candidate_counts: Dict[str, int] = {}
         provider_eligible: Dict[str, bool] = {}
-        for url, provider_opps, _cache, provider_telemetry, provider_evidence in results:
+        for url, provider_opps, _cache, _provider_telemetry, provider_evidence in results:
             provider_eligible[str(url)] = bool(provider_evidence.economically_eligible)
             provider_candidate_counts[str(url)] = len(provider_opps or [])
             if not provider_evidence.economically_eligible:
