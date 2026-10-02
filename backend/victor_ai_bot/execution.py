@@ -285,7 +285,11 @@ async def try_execute_opportunity(
     )
     if isinstance(getattr(opp, "meta", None), dict):
         opp.meta["flashloan_fee_observation"] = dict(flashloan_fee_observation)
-    if native_flashloan_fee_bps is None and not effective_dry_run:
+    if (
+        native_flashloan_fee_bps is None
+        and not effective_dry_run
+        and str(flashloan_fee_observation.get("reason") or "") != "provider_address_missing"
+    ):
         return ExecResult(
             False,
             effective_dry_run,
