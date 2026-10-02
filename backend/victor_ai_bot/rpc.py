@@ -95,66 +95,65 @@ class JsonRpcClient:
 
         async def _send_chunk(chunk: List[tuple[str, list]]) -> List[RpcResult]:
             async with self._batch_sem:
-                async with self._sem:
-                    t0 = time.perf_counter()
-                    reqs = []
-                    ids: List[int] = []
-                    for method, params in chunk:
-                        rid = self._next_id()
-                        ids.append(rid)
-                        reqs.append({
-                            "jsonrpc": "2.0",
-                            "id": rid,
-                            "method": method,
-                            "params": params or [],
-                        })
-                    try:
-                        assert self._session is not None, "Use as async context manager"
-                        async with self._session.post(self.url, json=reqs) as r:
-                            j = await r.json()
-                        dt = (time.perf_counter() - t0) * 1000.0
+                t0 = time.perf_counter()
+                reqs = []
+                ids: List[int] = []
+                for method, params in chunk:
+                    rid = self._next_id()
+                    ids.append(rid)
+                    reqs.append({
+                        "jsonrpc": "2.0",
+                        "id": rid,
+                        "method": method,
+                        "params": params or [],
+                    })
+                try:
+                    assert self._session is not None, "Use as async context manager"
+                    async with self._session.post(self.url, json=reqs) as r:
+                        j = await r.json()
+                    dt = (time.perf_counter() - t0) * 1000.0
 
-                        if not isinstance(j, list):
-                            self._batch_supported = False
+                    if not isinstance(j, list):
+                        self._batch_supported = False
                             # The batch semaphore must be released before the
                             # per-call fallback reacquires the normal RPC semaphore.
-                            return [
-                                await self.call(method, params or [])
-                                for method, params in chunk
-                            ]
-
-                        if self._batch_supported is None:
-                            self._batch_supported = True
-
-                        by_id: Dict[int, Any] = {}
-                        for resp in j:
-                            try:
-                                if isinstance(resp, dict) and "id" in resp:
-                                    by_id[int(resp["id"])] = resp
-                            except _SAFE_RPC_BATCH_ID_EXCEPTIONS:
-                                continue
-                        results: List[RpcResult] = []
-                        for rid in ids:
-                            resp = by_id.get(rid)
-                            if not isinstance(resp, dict):
-                                results.append(RpcResult(
-                                    False, error="missing_batch_response", latency_ms=dt
-                                ))
-                            elif "error" in resp:
-                                results.append(RpcResult(
-                                    False, error=resp["error"], latency_ms=dt
-                                ))
-                            else:
-                                results.append(RpcResult(
-                                    True, result=resp.get("result"), latency_ms=dt
-                                ))
-                        return results
-                    except _SAFE_RPC_CALL_EXCEPTIONS as exc:
-                        dt = (time.perf_counter() - t0) * 1000.0
                         return [
-                            RpcResult(False, error=str(exc), latency_ms=dt)
-                            for _ in chunk
+                            await self.call(method, params or [])
+                            for method, params in chunk
                         ]
+
+                    if self._batch_supported is None:
+                        self._batch_supported = True
+
+                    by_id: Dict[int, Any] = {}
+                    for resp in j:
+                        try:
+                            if isinstance(resp, dict) and "id" in resp:
+                                by_id[int(resp["id"])] = resp
+                        except _SAFE_RPC_BATCH_ID_EXCEPTIONS:
+                            continue
+                    results: List[RpcResult] = []
+                    for rid in ids:
+                        resp = by_id.get(rid)
+                        if not isinstance(resp, dict):
+                            results.append(RpcResult(
+                                False, error="missing_batch_response", latency_ms=dt
+                            ))
+                        elif "error" in resp:
+                            results.append(RpcResult(
+                                False, error=resp["error"], latency_ms=dt
+                            ))
+                        else:
+                            results.append(RpcResult(
+                                True, result=resp.get("result"), latency_ms=dt
+                            ))
+                    return results
+                except _SAFE_RPC_CALL_EXCEPTIONS as exc:
+                    dt = (time.perf_counter() - t0) * 1000.0
+                    return [
+                        RpcResult(False, error=str(exc), latency_ms=dt)
+                        for _ in chunk
+                    ]
 
         if self._batch_supported is False:
             out: List[RpcResult] = []
