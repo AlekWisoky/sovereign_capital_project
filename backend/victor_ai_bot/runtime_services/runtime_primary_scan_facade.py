@@ -127,7 +127,19 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "economic_profit_after_costs_wei"
     )
     if economic_after_cost_profit_wei in (None, ""):
-        economic_after_cost_profit_wei = gross_minus_all_costs_wei
+        try:
+            observed_after_cost = int(
+                profitability.get("profit_after_costs_wei") or 0
+            )
+        except (TypeError, ValueError):
+            observed_after_cost = 0
+        reason = str(profitability.get("reason") or "")
+        # Only reconstruct the signed value when the execution sentinel has
+        # erased it. Other rejection reasons already carry real after-cost P&L.
+        if reason == "does_not_repay_flashloan" or observed_after_cost == -1:
+            economic_after_cost_profit_wei = gross_minus_all_costs_wei
+        else:
+            economic_after_cost_profit_wei = observed_after_cost
     else:
         try:
             economic_after_cost_profit_wei = int(economic_after_cost_profit_wei)
