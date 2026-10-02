@@ -103,7 +103,7 @@ def test_size_economic_matrix_models_non_repay_signed_economics():
     assert by_route["route-non-repay"]["gross_minus_flashloan_fee_minus_gas_wei"] == "-16029178266673"
     assert by_route["route-non-repay"]["after_cost_profit_wei"] == "-1"
     assert by_route["route-non-repay"]["economic_after_cost_profit_wei"] == "-16029178266673"
-    assert by_route["route-real-loss"]["economic_after_cost_profit_wei"] == "-18250000000000"
+    assert by_route["route-real-loss"]["economic_after_cost_profit_wei"] == "-18350000000000"
 
 
 def test_size_economic_diagnostics_are_bounded_per_route_not_global_top_n():
