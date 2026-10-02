@@ -47,34 +47,31 @@ def _canonical_route_universe_telemetry(
     )
 
 
-def _economic_after_cost_profit(row: Dict[str, Any]) -> int | None:
-    """Return signed economic P&L for sizing, including non-repayable routes.
+def _reconstruct_nonrepay_economic_profit(row: Dict[str, Any]) -> int | None:
+    try:
+        return (
+            int(row.get("gross_profit_wei") or 0)
+            - int(row.get("flashloan_fee_wei") or 0)
+            - int(row.get("gas_cost_profit_token_wei") or 0)
+        )
+    except (TypeError, ValueError):
+        return None
 
-    Execution profitability remains fail-closed: does_not_repay_flashloan uses
-    -1 in after_cost_profit_wei. That sentinel is not sufficient for comparing
-    sizes, so sizing derives the real signed P&L from gross, flash fee, and
-    profit-token gas when the sentinel is present.
-    """
+
+def _economic_after_cost_profit(row: Dict[str, Any]) -> int | None:
+    """Return signed P&L for sizing while keeping execution fail-closed."""
     explicit = row.get("economic_after_cost_profit_wei")
     if explicit not in (None, ""):
         try:
             return int(explicit)
         except (TypeError, ValueError):
-            pass
+            return None
     try:
         after_cost = int(row.get("after_cost_profit_wei") or 0)
     except (TypeError, ValueError):
-        after_cost = 0
-    reason = str(row.get("reason") or "")
-    if reason == "does_not_repay_flashloan" or after_cost == -1:
-        try:
-            return (
-                int(row.get("gross_profit_wei") or 0)
-                - int(row.get("flashloan_fee_wei") or 0)
-                - int(row.get("gas_cost_profit_token_wei") or 0)
-            )
-        except (TypeError, ValueError):
-            return None
+        return None
+    if row.get("reason") == "does_not_repay_flashloan" or after_cost == -1:
+        return _reconstruct_nonrepay_economic_profit(row)
     return after_cost
 
 
