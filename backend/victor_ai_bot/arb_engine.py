@@ -698,6 +698,38 @@ async def find_two_leg_opportunities(
         if not revs:
             metrics["route_rejections_no_reverse_route"] = int(metrics.get("route_rejections_no_reverse_route", 0)) + 1
             continue
+
+        # A two-leg round trip through the exact same pool is structurally
+        # loss-making: the second swap traverses the same stateful liquidity
+        # venue in reverse and pays its swap fee again. It cannot express a
+        # cross-pool price dislocation, so quoting it only consumes the bounded
+        # route/size budget and can hide later cross-venue candidates.
+        e1_pool_key = _pool_keys_for_leg(
+            e1.dex,
+            e1.token_in,
+            e1.token_out,
+            {"pool": e1.venue, **e1.params},
+            "",
+        )
+        filtered_revs = [
+            e2
+            for e2 in revs
+            if _pool_keys_for_leg(
+                e2.dex,
+                e2.token_in,
+                e2.token_out,
+                {"pool": e2.venue, **e2.params},
+                "",
+            ) != e1_pool_key
+        ]
+        skipped_same_pool = len(revs) - len(filtered_revs)
+        if skipped_same_pool:
+            metrics["route_rejections_same_pool_roundtrip"] = int(
+                metrics.get("route_rejections_same_pool_roundtrip", 0)
+            ) + int(skipped_same_pool)
+        revs = filtered_revs
+        if not revs:
+            continue
         metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
         if normalized_amounts:
             effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
