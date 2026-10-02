@@ -180,6 +180,7 @@ async def test_discovery_admits_bounded_v3_pool_event_touching_anchor(tmp_path):
 @pytest.mark.asyncio
 async def test_discovery_uses_observed_token_as_bounded_univ3_frontier(tmp_path):
     anchor = "0x" + "33" * 20
+    second_anchor = "0x" + "44" * 20
     candidate = "0x" + "55" * 20
     event_pool = "0x" + "66" * 20
     frontier_pool = "0x" + "77" * 20
@@ -204,7 +205,7 @@ async def test_discovery_uses_observed_token_as_bounded_univ3_frontier(tmp_path)
     dm = DiscoveryManager(chain_name="base", data_dir=str(tmp_path))
     cfg = _cfg(
         chain={
-            "token_universe": [anchor],
+            "token_universe": [anchor, second_anchor],
             "discovery_max_calls": 1,
             "discovery_pool_max_candidates": 4,
         }
