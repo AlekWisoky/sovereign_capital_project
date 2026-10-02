@@ -1660,26 +1660,129 @@ class RuntimePrimaryScanFacade:
             "evidence": evidence,
         }
 
+    @staticmethod
+    def _discovery_timeout_s() -> float:
+        """Return the bounded discovery budget for one discovery stage."""
+        try:
+            configured = float(
+                os.environ.get("VICTOR_DISCOVERY_TIMEOUT_S", "2.0") or 2.0
+            )
+        except (TypeError, ValueError):
+            configured = 2.0
+        return max(0.25, min(configured, 10.0))
+
     async def _build_discovery_context(
         self,
         rpc: Any,
         *,
         current_block: int,
-    ) -> Dict[str, List[Any]]:
-        extra_v3_pairs = await self._discover_extra_v3_pairs(
-            rpc, current_block=int(current_block)
-        )
-        venue_pools = {"curve": [], "balancer": []}
+    ) -> Dict[str, Any]:
+        """Build discovery context without allowing discovery to starve scanning.
+
+        Discovery is an opportunity-expansion input, not a prerequisite for
+        operating on the already-persisted/configured route universe. Each
+        discovery stage therefore gets its own bounded budget and falls back to
+        persisted observations when the provider is slow or unavailable.
+        """
+        timeout_s = self._discovery_timeout_s()
         discovery = getattr(self, "_discovery", None)
+        v3_fallback = (
+            list(discovery.v3_pairs())
+            if discovery is not None
+            and callable(getattr(discovery, "v3_pairs", None))
+            else []
+        )
+        venue_fallback = {
+            "curve": (
+                list(discovery.curve_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "curve_pools", None))
+                else []
+            ),
+            "balancer": (
+                list(discovery.balancer_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "balancer_pools", None))
+                else []
+            ),
+        }
+        stages: List[Dict[str, Any]] = []
+
+        async def bounded_stage(
+            name: str,
+            operation: Any,
+            fallback: Any,
+        ) -> Any:
+            started = time.perf_counter()
+            try:
+                result = await asyncio.wait_for(operation, timeout=timeout_s)
+                stages.append(
+                    {
+                        "stage": name,
+                        "status": "completed",
+                        "elapsed_ms": float(
+                            (time.perf_counter() - started) * 1000.0
+                        ),
+                        "timeout_s": float(timeout_s),
+                    }
+                )
+                return result
+            except (TimeoutError, asyncio.TimeoutError):
+                stages.append(
+                    {
+                        "stage": name,
+                        "status": "timed_out",
+                        "elapsed_ms": float(
+                            (time.perf_counter() - started) * 1000.0
+                        ),
+                        "timeout_s": float(timeout_s),
+                    }
+                )
+                return fallback
+            except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                stages.append(
+                    {
+                        "stage": name,
+                        "status": "failed",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "elapsed_ms": float(
+                            (time.perf_counter() - started) * 1000.0
+                        ),
+                        "timeout_s": float(timeout_s),
+                    }
+                )
+                return fallback
+
+        extra_v3_pairs = await bounded_stage(
+            "univ3",
+            self._discover_extra_v3_pairs(
+                rpc, current_block=int(current_block)
+            ),
+            v3_fallback,
+        )
+
+        venue_pools = venue_fallback
         discover_venues = (
             getattr(discovery, "maybe_discover_venues", None)
             if discovery is not None
             else None
         )
         if callable(discover_venues):
-            venue_pools = await discover_venues(rpc, self.cfg, int(current_block))
+            venue_pools = await bounded_stage(
+                "venues",
+                discover_venues(rpc, self.cfg, int(current_block)),
+                venue_fallback,
+            )
+
         return {
-            "v3_pairs": list(extra_v3_pairs),
+            "v3_pairs": list(extra_v3_pairs or []),
             "curve_pools": list(venue_pools.get("curve") or []),
             "balancer_pools": list(venue_pools.get("balancer") or []),
+            "runtime": {
+                "budget_timeout_s": float(timeout_s),
+                "stages": stages,
+                "used_persisted_fallback": any(
+                    stage.get("status") != "completed" for stage in stages
+                ),
+            },
         }
