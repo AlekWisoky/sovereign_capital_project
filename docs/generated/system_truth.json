@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 360,
+  "backend_test_file_count": 361,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -156,6 +156,7 @@
     "test_fioa_runtime_maintenance.py",
     "test_flashloan_borrowing_lifecycle_proof.py",
     "test_flashloan_closed_loop_family_sync_maintenance.py",
+    "test_flashloan_providers.py",
     "test_flashloan_sizing.py",
     "test_frontend_routes_maintenance.py",
     "test_fund_os_upgrade.py",
