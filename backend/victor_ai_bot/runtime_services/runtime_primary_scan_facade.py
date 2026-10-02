@@ -1597,6 +1597,45 @@ class RuntimePrimaryScanFacade:
                 if candidate_usd > existing_usd:
                     candidate_by_key[key] = opportunity
 
+        # Add the selected provider's full adaptive-size pass to the same
+        # provider union. Other providers remain base-size comparison passes;
+        # the selected provider is the only one allowed to expand the economic
+        # sizing curve in this tick.
+        for opportunity in list(adaptive_opps or []):
+            route_id = str(getattr(opportunity, "route_id", "") or "")
+            meta = getattr(opportunity, "meta", None)
+            meta = meta if isinstance(meta, dict) else {}
+            amount_key = ""
+            try:
+                amount_key = str(
+                    getattr(getattr(opportunity, "route", None).legs[0], "amount_in", "")
+                )
+            except (AttributeError, IndexError, TypeError):
+                pass
+            key = (route_id, amount_key)
+            if not route_id:
+                key = (str(getattr(opportunity, "id", "") or ""), amount_key)
+            meta["quote_provider_endpoint"] = selected_url
+            meta["quote_provider"] = str(urlsplit(selected_url).hostname or "")
+            existing = candidate_by_key.get(key)
+            if existing is None:
+                candidate_by_key[key] = opportunity
+                continue
+            existing_meta = getattr(existing, "meta", None)
+            existing_meta = existing_meta if isinstance(existing_meta, dict) else {}
+            existing_usd = int(
+                ((existing_meta.get("canonical_after_fee_usd") or {}).get(
+                    "profit_after_costs_usd_micro"
+                )) or 0
+            )
+            candidate_usd = int(
+                ((meta.get("canonical_after_fee_usd") or {}).get(
+                    "profit_after_costs_usd_micro"
+                )) or 0
+            )
+            if candidate_usd > existing_usd:
+                candidate_by_key[key] = opportunity
+
         provider_union_opps = sorted(
             candidate_by_key.values(),
             key=lambda opportunity: (
