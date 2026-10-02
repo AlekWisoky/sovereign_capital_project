@@ -94,3 +94,49 @@ async def test_batch_unexpected_bug_propagates():
 
     with pytest.raises(LookupError, match="unexpected_post_bug"):
         await client.batch([("eth_blockNumber", [])])
+
+@pytest.mark.asyncio
+async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
+    class _ConcurrentSession:
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+
+        def post(self, *args, **kwargs):
+            return _ConcurrentCtx(self)
+
+    class _ConcurrentCtx:
+        def __init__(self, owner):
+            self.owner = owner
+
+        async def __aenter__(self):
+            self.owner.active += 1
+            self.owner.max_active = max(self.owner.max_active, self.owner.active)
+            await asyncio.sleep(0.01)
+            return _JsonResponse([
+                {"id": 1, "result": "0x1"},
+                {"id": 2, "result": "0x2"},
+            ])
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.owner.active -= 1
+            return False
+
+    session = _ConcurrentSession()
+    client = JsonRpcClient(
+        "http://rpc",
+        max_concurrency=4,
+        max_batch=2,
+        max_batch_concurrency=2,
+    )
+    client._session = session
+
+    results = await client.batch([
+        ("eth_blockNumber", []),
+        ("eth_chainId", []),
+        ("eth_gasPrice", []),
+        ("eth_blockNumber", []),
+    ])
+
+    assert [r.result for r in results] == ["0x1", "0x2", "0x1", "0x2"]
+    assert session.max_active == 2
