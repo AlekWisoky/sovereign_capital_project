@@ -257,6 +257,7 @@ def build_profitability_state(
     gross_profit_wei: int = 0,
     expected_profit_usd: float = 0.0,
     profit_after_costs_wei: int = 0,
+    economic_profit_after_costs_wei: int | None = None,
     profit_after_costs_usd_micro: int = 0,
     gas_cost_wei: int = 0,
     flashloan_fee_wei: int = 0,
@@ -276,6 +277,13 @@ def build_profitability_state(
         "gross_profit_wei": str(max(0, int(gross_profit_wei))),
         "expected_profit_usd": float(expected_profit_usd or 0.0),
         "profit_after_costs_wei": str(int(profit_after_costs_wei)),
+        "economic_profit_after_costs_wei": str(
+            int(
+                profit_after_costs_wei
+                if economic_profit_after_costs_wei is None
+                else economic_profit_after_costs_wei
+            )
+        ),
         "profit_after_costs_usd_micro": int(profit_after_costs_usd_micro or 0),
         "gas_cost_wei": str(max(0, int(gas_cost_wei))),
         "flashloan_fee_wei": str(max(0, int(flashloan_fee_wei))),
@@ -509,6 +517,13 @@ def revalidate_profitability_state(
             gross_profit_wei=int(gross_profit_wei),
             expected_profit_usd=float(expected_profit_usd),
             profit_after_costs_wei=int(sr.profit_after_costs_wei),
+            economic_profit_after_costs_wei=int(
+                getattr(
+                    sr,
+                    "economic_profit_after_costs_wei",
+                    sr.profit_after_costs_wei,
+                )
+            ),
             profit_after_costs_usd_micro=0,
             gas_cost_wei=int(sr.gas_cost_wei),
             flashloan_fee_wei=int(sr.flashloan_fee_wei),
@@ -528,6 +543,15 @@ def revalidate_profitability_state(
                 "gas_cost_wei": str(int(sr.gas_cost_wei)),
                 "gas_cost_profit_token_wei": str(int(sr.gas_cost_profit_token_wei)),
                 "profit_after_costs_wei": str(int(sr.profit_after_costs_wei)),
+                "economic_profit_after_costs_wei": str(
+                    int(
+                        getattr(
+                            sr,
+                            "economic_profit_after_costs_wei",
+                            sr.profit_after_costs_wei,
+                        )
+                    )
+                ),
                 "continuity": dict(continuity),
             }
         )

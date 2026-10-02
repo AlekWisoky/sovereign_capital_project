@@ -12,6 +12,8 @@ def test_safety_repay_fail():
     )
     assert not r.ok
     assert r.reason == "does_not_repay_flashloan"
+    assert r.profit_after_costs_wei == -1
+    assert r.economic_profit_after_costs_wei == -90
 
 def test_safety_profit_after_costs():
     r = check_profit_and_repay(
