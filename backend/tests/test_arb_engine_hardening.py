@@ -5,7 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb_engine_module
-from victor_ai_bot.arb_engine import Edge, quote_edge, requote_opportunity, _pool_keys_for_leg, _is_same_pool_roundtrip, _classify_route_family, _record_size_economic_diagnostic
+from victor_ai_bot.arb_engine import (
+    Edge,
+    _classify_route_family,
+    _is_same_pool_roundtrip,
+    _pool_keys_for_leg,
+    _record_size_economic_diagnostic,
+    quote_edge,
+    requote_opportunity,
+)
 from victor_ai_bot.cache import PerBlockCache
 from victor_ai_bot.models import Opportunity, Route, RouteLeg
 
