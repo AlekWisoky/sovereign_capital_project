@@ -75,11 +75,20 @@ async def observe_flashloan_fee_bps(
         pool = str(getattr(getattr(cfg, "chain", cfg), "aave_v3_pool", "") or "")
         if not pool:
             return {"ok": False, "provider": normalized, "reason": "provider_address_missing"}
-        result = await rpc.eth_call(
-            pool,
-            "0x" + selector("FLASHLOAN_PREMIUM_TOTAL()").hex(),
-            block=block,
-        )
+        try:
+            result = await rpc.eth_call(
+                pool,
+                "0x" + selector("FLASHLOAN_PREMIUM_TOTAL()").hex(),
+                block=block,
+            )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "provider": normalized,
+                "provider_address": pool,
+                "reason": "flashloan_premium_rpc_unavailable",
+                "error": type(exc).__name__,
+            }
         if not getattr(result, "ok", False):
             return {
                 "ok": False,
@@ -109,11 +118,20 @@ async def observe_flashloan_fee_bps(
         vault = str(getattr(getattr(cfg, "chain", cfg), "balancer_vault", "") or "")
         if not vault:
             return {"ok": False, "provider": normalized, "reason": "provider_address_missing"}
-        collector_result = await rpc.eth_call(
-            vault,
-            "0x" + selector("getProtocolFeesCollector()").hex(),
-            block=block,
-        )
+        try:
+            collector_result = await rpc.eth_call(
+                vault,
+                "0x" + selector("getProtocolFeesCollector()").hex(),
+                block=block,
+            )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "provider": normalized,
+                "provider_address": vault,
+                "reason": "flashloan_premium_rpc_unavailable",
+                "error": type(exc).__name__,
+            }
         if not getattr(collector_result, "ok", False):
             return {
                 "ok": False,
@@ -130,11 +148,21 @@ async def observe_flashloan_fee_bps(
                 "provider_address": vault,
                 "reason": "flashloan_fee_collector_unavailable",
             }
-        fee_result = await rpc.eth_call(
-            collector,
-            "0x" + selector("getFlashLoanFeePercentage()").hex(),
-            block=block,
-        )
+        try:
+            fee_result = await rpc.eth_call(
+                collector,
+                "0x" + selector("getFlashLoanFeePercentage()").hex(),
+                block=block,
+            )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "provider": normalized,
+                "provider_address": vault,
+                "fee_collector": collector,
+                "reason": "flashloan_premium_rpc_unavailable",
+                "error": type(exc).__name__,
+            }
         if not getattr(fee_result, "ok", False):
             return {
                 "ok": False,
