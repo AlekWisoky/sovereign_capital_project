@@ -115,8 +115,6 @@ class JsonRpcClient:
 
                     if not isinstance(j, list):
                         self._batch_supported = False
-                            # The batch semaphore must be released before the
-                            # per-call fallback reacquires the normal RPC semaphore.
                         return [
                             await self.call(method, params or [])
                             for method, params in chunk
