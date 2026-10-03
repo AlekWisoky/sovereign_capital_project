@@ -1673,13 +1673,13 @@ class RuntimePrimaryScanFacade:
                 selected_telemetry["adaptive_size_discovery"] = dict(
                     selected_adaptive["adaptive_size_discovery"]
                 )
-            if selected_adaptive.get("size_economic_matrix"):
+            if "size_economic_matrix" in selected_adaptive:
                 selected_telemetry["size_economic_matrix"] = list(
-                    selected_adaptive["size_economic_matrix"]
+                    selected_adaptive.get("size_economic_matrix") or []
                 )
-            if selected_adaptive.get("size_economic_evidence"):
+            if "size_economic_evidence" in selected_adaptive:
                 selected_telemetry["size_economic_evidence"] = list(
-                    selected_adaptive["size_economic_evidence"]
+                    selected_adaptive.get("size_economic_evidence") or []
                 )
         if adaptive_opps:
             selected_telemetry["rpc"] = dict(selected_telemetry.get("rpc") or {})
