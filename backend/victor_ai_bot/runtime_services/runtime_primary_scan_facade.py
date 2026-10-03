@@ -368,17 +368,26 @@ class RuntimePrimaryScanFacade:
             and flashloan_fee_observation.get("fee_bps") is not None
             else None
         )
-        if gas_price_integrity is None:
-            try:
-                consensus = await self.rpc_manager.gas_price_consensus()
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                consensus = {"gas_price_wei": None, "status": "insufficient_agreement", "observations": [], "anomalies": []}
-            observed_gas_price_wei = (
-                int(consensus.get("gas_price_wei"))
-                if consensus.get("gas_price_wei") not in (None, "")
-                else None
-            )
-            gas_price_integrity = dict(consensus)
+        if observed_gas_price_wei is None and gas_price_integrity is None:
+            rpc_manager = getattr(self, "rpc_manager", None)
+            if rpc_manager is not None and callable(getattr(rpc_manager, "gas_price_consensus", None)):
+                try:
+                    consensus = await rpc_manager.gas_price_consensus()
+                except (AttributeError, RuntimeError, TypeError, ValueError):
+                    consensus = {"gas_price_wei": None, "status": "insufficient_agreement", "observations": [], "anomalies": []}
+                observed_gas_price_wei = (
+                    int(consensus.get("gas_price_wei"))
+                    if consensus.get("gas_price_wei") not in (None, "")
+                    else None
+                )
+                gas_price_integrity = dict(consensus)
+            else:
+                # Direct facade callers without the runtime bundle retain their
+                # explicit RPC observation. Production runtime has rpc_manager.
+                try:
+                    observed_gas_price_wei = await rpc.gas_price()
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+                    observed_gas_price_wei = None
         for opportunity in list(opps):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
             if isinstance(meta, dict):
