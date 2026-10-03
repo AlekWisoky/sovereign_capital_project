@@ -65,7 +65,7 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
     service.client.api_key = "test-key"
     monkeypatch.setattr(service, "_pair_universe", lambda: [("USDC", "SOL", 6, 9, "SOL/USDC")])
     monkeypatch.setattr(service, "_sizes", lambda: [100.0])
-    monkeypatch.setattr(service, "_sol_price_usd", lambda: pytest.approx(100.0))
+    monkeypatch.setattr(service, "_sol_price_usd", lambda: 100.0)
     monkeypatch.setattr(
         service,
         "_network_cost_usd",
