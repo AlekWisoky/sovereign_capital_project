@@ -612,7 +612,7 @@
     "api_legacy_lines": 83,
     "backend_broad_except_count": 1,
     "route_count": 167,
-    "runtime_legacy_lines": 187,
+    "runtime_legacy_lines": 189,
     "websocket_route_count": 4
   },
   "source_of_truth": [
