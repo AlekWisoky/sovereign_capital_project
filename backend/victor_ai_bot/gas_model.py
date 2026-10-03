@@ -58,6 +58,73 @@ def estimate_route_gas_units(opportunity_meta: Dict[str, Any]) -> int:
     return int(total)
 
 
+def select_consensus_gas_price(
+    observations: list[dict[str, object]],
+    *,
+    max_block_lag: int = 2,
+    agreement_ratio: float = 0.25,
+) -> dict[str, object]:
+    """Select a fail-closed gas-price consensus from cross-provider observations."""
+    valid: list[dict[str, object]] = []
+    anomalies: list[dict[str, object]] = []
+    for raw in list(observations or []):
+        try:
+            price = int(raw.get("gas_price_wei") or 0)
+            block = int(raw.get("block_number"))
+        except (AttributeError, TypeError, ValueError):
+            anomalies.append(dict(raw))
+            continue
+        if price <= 0 or block < 0:
+            anomalies.append({**dict(raw), "reason": "invalid_observation"})
+            continue
+        valid.append({**dict(raw), "gas_price_wei": price, "block_number": block})
+
+    if not valid:
+        return {"gas_price_wei": None, "status": "insufficient_agreement", "observations": [], "anomalies": anomalies}
+
+    max_block = max(int(item["block_number"]) for item in valid)
+    fresh: list[dict[str, object]] = []
+    for item in valid:
+        if max_block - int(item["block_number"]) <= max(0, int(max_block_lag)):
+            fresh.append(item)
+        else:
+            anomalies.append({**item, "reason": "stale_block"})
+
+    if len(fresh) < 2:
+        return {"gas_price_wei": None, "status": "insufficient_agreement", "observations": fresh, "anomalies": anomalies}
+
+    prices = sorted(int(item["gas_price_wei"]) for item in fresh)
+    median = prices[len(prices) // 2] if len(prices) % 2 else (prices[len(prices) // 2 - 1] + prices[len(prices) // 2]) // 2
+    if median <= 0:
+        return {"gas_price_wei": None, "status": "insufficient_agreement", "observations": fresh, "anomalies": anomalies}
+
+    def close(price: int) -> bool:
+        return abs(price - median) / float(median) <= max(0.0, float(agreement_ratio))
+
+    inliers = [item for item in fresh if close(int(item["gas_price_wei"]))]
+    if len(inliers) >= 2:
+        consensus_prices = sorted(int(item["gas_price_wei"]) for item in inliers)
+        consensus = consensus_prices[len(consensus_prices) // 2]
+        for item in fresh:
+            if item not in inliers:
+                ratio = max(int(item["gas_price_wei"]), consensus) / float(max(1, min(int(item["gas_price_wei"]), consensus)))
+                anomalies.append({**item, "reason": "gas_price_outlier", "ratio_to_consensus": ratio})
+        return {
+            "gas_price_wei": int(consensus),
+            "status": "consensus",
+            "observations": fresh,
+            "inliers": inliers,
+            "anomalies": anomalies,
+        }
+
+    return {
+        "gas_price_wei": None,
+        "status": "insufficient_agreement",
+        "observations": fresh,
+        "anomalies": anomalies,
+    }
+
+
 def _gwei_to_wei(gwei: int) -> int:
     return int(gwei) * 1_000_000_000
 
