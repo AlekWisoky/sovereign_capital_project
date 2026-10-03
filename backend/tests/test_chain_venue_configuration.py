@@ -20,7 +20,9 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
             "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
             "aave": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
             "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "usdt": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+            "usdt": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+            "cb_btc": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+            "aero": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
         },
         "arbitrum.yaml": {
             "chain_id": 42161,
@@ -30,7 +32,11 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
             "router": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
             "aave": "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
             "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-                "usdt": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+            "usdt": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+            "usdc_e": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+            "arb": "0x912CE59144191C1204E64559FE8253a0e49E6548",
+            "dai": "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+            "wbtc": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefc5B0f",
         },
     }
     for name, want in expected.items():
@@ -45,7 +51,11 @@ def test_base_and_arbitrum_have_real_venue_endpoints_and_safe_defaults():
         assert chain["balancer_vault"] == "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
         assert chain["curve_address_provider"] == "0x0000000022D53366457F9d5E68Ec105046FC4383"
         assert chain["enable_venue_discovery"] is True
-        assert chain["token_universe"] == [want["weth"], want["usdc"], want["usdt"]]
+        expected_tokens = [want["weth"], want["usdc"], want["usdt"]]
+        for key in ("cb_btc", "aero", "usdc_e", "arb", "dai", "wbtc"):
+            if key in want:
+                expected_tokens.append(want[key])
+        assert chain["token_universe"] == expected_tokens
         assert cfg["flags"]["enable_discovery"] is True
         assert cfg["flags"]["enable_curve_autogen"] is True
         assert cfg["flags"]["enable_balancer_autogen"] is True
