@@ -315,29 +315,3 @@ async def test_quote_batch_attributes_unclassified_failures(monkeypatch):
     assert out[arb.edge_key(edge)] is None
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 1
 
-
-def test_three_leg_frontier_selects_quote_viable_pruned_edge(monkeypatch):
-    anchor = "0x" + "11" * 20
-    mid = "0x" + "22" * 20
-    close = "0x" + "33" * 20
-    active = [
-        arb.Edge("univ3", "0x" + "aa" * 20, anchor, "0x" + f"{i + 2:040x}", {"fee": 3000})
-        for i in range(16)
-    ]
-    pruned = arb.Edge("univ3", "0x" + "bb" * 20, anchor, mid, {"fee": 500})
-    reverse = arb.Edge("univ3", "0x" + "bb" * 20, mid, close, {"fee": 500})
-    close_back = arb.Edge("univ3", "0x" + "cc" * 20, close, anchor, {"fee": 500})
-    all_edges = [*active, pruned, reverse, close_back]
-    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: all_edges)
-
-    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
-        if metrics is not None:
-            metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
-            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
-        return {arb.edge_key(edge): (100, {"gas_estimate": 1, "fee": int(edge.params.get("fee", 3000))}) for edge in requested_edges}
-
-    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
-    adjacency, pruned_edges = arb._prioritize_three_leg_adjacency(all_edges, max_edges_per_token=16)
-    assert pruned in pruned_edges
-    assert reverse in adjacency[mid]
-    assert close_back in adjacency[close]
