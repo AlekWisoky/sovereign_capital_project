@@ -7,6 +7,7 @@ from typing import Dict, List
 import aiohttp
 
 from .rpc import JsonRpcClient
+from .gas_model import select_consensus_gas_price
 
 
 @dataclass
@@ -72,6 +73,8 @@ class RpcManager:
         self._private: Dict[str, EndpointStats] = {u: EndpointStats(u) for u in self.rpc_private}
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self._gas_consensus_cache: tuple[float, dict] | None = None
+        self._gas_consensus_lock = asyncio.Lock()
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -171,6 +174,64 @@ class RpcManager:
             stats.quote_unhealthy_until = 0.0
             stats.quote_last_error = None
             stats.quote_failures = max(0, stats.quote_failures - 1)
+
+
+    async def gas_price_consensus(self, *, max_providers: int = 8, cache_ttl_s: float = 5.0) -> dict:
+        """Observe gas price + block from multiple read RPCs and fail closed on disagreement."""
+        now = time.time()
+        cached = self._gas_consensus_cache
+        if cached is not None and now - float(cached[0]) <= max(0.0, float(cache_ttl_s)):
+            return dict(cached[1])
+
+        async with self._gas_consensus_lock:
+            now = time.time()
+            cached = self._gas_consensus_cache
+            if cached is not None and now - float(cached[0]) <= max(0.0, float(cache_ttl_s)):
+                return dict(cached[1])
+
+            urls = self.read_candidates()[: max(2, int(max_providers))]
+            async def observe(url: str) -> dict:
+                try:
+                    async with JsonRpcClient(
+                        url,
+                        timeout_s=min(float(self.timeout_s), 8.0),
+                        max_concurrency=2,
+                        max_batch=4,
+                    ) as rpc:
+                        block, price = await asyncio.gather(rpc.block_number(), rpc.gas_price())
+                    if block is None or price is None or int(price) <= 0:
+                        return {
+                            "url": url,
+                            "provider": url.split("//", 1)[-1].split("/", 1)[0],
+                            "block_number": int(block) if block is not None else -1,
+                            "gas_price_wei": int(price) if price is not None else 0,
+                            "error": "gas_price_or_block_unavailable",
+                        }
+                    return {
+                        "url": url,
+                        "provider": url.split("//", 1)[-1].split("/", 1)[0],
+                        "block_number": int(block),
+                        "gas_price_wei": int(price),
+                    }
+                except _SAFE_RPC_MANAGER_PROBE_EXCEPTIONS as exc:
+                    return {
+                        "url": url,
+                        "provider": url.split("//", 1)[-1].split("/", 1)[0],
+                        "block_number": -1,
+                        "gas_price_wei": 0,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+
+            observations = await asyncio.gather(*(observe(url) for url in urls))
+            consensus = select_consensus_gas_price([dict(item) for item in observations])
+            result = {
+                **consensus,
+                "observations": [dict(item) for item in observations],
+                "observed_at": now,
+                "provider_count": len(observations),
+            }
+            self._gas_consensus_cache = (time.time(), result)
+            return dict(result)
 
     def best_send(self) -> str:
         return (
