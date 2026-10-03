@@ -85,3 +85,64 @@ def test_estimate_gas_cost_falls_back_when_observed_price_is_unavailable() -> No
     assert gas_model.estimate_gas_cost_wei_from_cfg(
         cfg, 500_000, observed_gas_price_wei=0
     ) == 500_000 * 25_000_000_000
+
+
+def test_gas_price_consensus_accepts_majority_and_marks_outlier():
+    result = gas_model.select_consensus_gas_price([
+        {"url": "a", "block_number": 100, "gas_price_wei": 100},
+        {"url": "b", "block_number": 100, "gas_price_wei": 105},
+        {"url": "c", "block_number": 100, "gas_price_wei": 1_000},
+    ])
+    assert result["status"] == "consensus"
+    assert result["gas_price_wei"] in {100, 105}
+    assert any(row.get("reason") == "gas_price_outlier" for row in result["anomalies"])
+
+
+def test_gas_price_consensus_fails_closed_on_split_providers():
+    result = gas_model.select_consensus_gas_price([
+        {"url": "a", "block_number": 100, "gas_price_wei": 100},
+        {"url": "b", "block_number": 100, "gas_price_wei": 200},
+    ])
+    assert result["status"] == "insufficient_agreement"
+    assert result["gas_price_wei"] is None
+
+
+def test_gas_price_consensus_rejects_stale_provider():
+    result = gas_model.select_consensus_gas_price([
+        {"url": "a", "block_number": 100, "gas_price_wei": 100},
+        {"url": "b", "block_number": 100, "gas_price_wei": 105},
+        {"url": "stale", "block_number": 90, "gas_price_wei": 1},
+    ], max_block_lag=2)
+    assert result["gas_price_wei"] in {100, 105}
+    assert any(row.get("reason") == "stale_block" for row in result["anomalies"])
+
+
+@pytest.mark.asyncio
+async def test_base_l1_fee_uses_exact_calldata():
+    class _Result:
+        ok = True
+        result = hex(123456)
+
+    class _Rpc:
+        async def eth_call(self, to, data, *, block="latest", from_addr=None):
+            assert to.lower() == gas_model.BASE_GAS_PRICE_ORACLE.lower()
+            raw = bytes.fromhex(data[2:])
+            assert len(raw) > 4
+            assert raw[:4] == gas_model.selector("getL1Fee(bytes)")
+            return _Result()
+
+    fee = await gas_model.estimate_base_l1_fee_wei(_Rpc(), "0x12345678", block="0x10")
+    assert fee == 123456
+
+
+@pytest.mark.asyncio
+async def test_base_l1_fee_fails_closed_on_oracle_failure():
+    class _Result:
+        ok = False
+        result = None
+
+    class _Rpc:
+        async def eth_call(self, *args, **kwargs):
+            return _Result()
+
+    assert await gas_model.estimate_base_l1_fee_wei(_Rpc(), "0x1234") is None

@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Dict, Mapping
 
+from .ethabi import enc_bytes_dyn, enc_uint, selector
+
 # Conservative route-level gas model used for *ranking only*.
 # Execution still uses estimateGas/simulation gates when enabled.
 
@@ -56,6 +58,109 @@ def estimate_route_gas_units(opportunity_meta: Dict[str, Any]) -> int:
         else:
             total += int(LEG_GAS_HEURISTICS.get(dex, 160_000))
     return int(total)
+
+
+def select_consensus_gas_price(
+    observations: list[dict[str, object]],
+    *,
+    max_block_lag: int = 2,
+    agreement_ratio: float = 0.25,
+) -> dict[str, object]:
+    """Select a fail-closed gas-price consensus from cross-provider observations."""
+    valid: list[dict[str, object]] = []
+    anomalies: list[dict[str, object]] = []
+    for raw in list(observations or []):
+        try:
+            price = int(raw.get("gas_price_wei") or 0)
+            block = int(raw.get("block_number"))
+        except (AttributeError, TypeError, ValueError):
+            anomalies.append(dict(raw))
+            continue
+        if price <= 0 or block < 0:
+            anomalies.append({**dict(raw), "reason": "invalid_observation"})
+            continue
+        valid.append({**dict(raw), "gas_price_wei": price, "block_number": block})
+
+    if not valid:
+        return {"gas_price_wei": None, "status": "insufficient_agreement", "observations": [], "anomalies": anomalies}
+
+    max_block = max(int(item["block_number"]) for item in valid)
+    fresh: list[dict[str, object]] = []
+    for item in valid:
+        if max_block - int(item["block_number"]) <= max(0, int(max_block_lag)):
+            fresh.append(item)
+        else:
+            anomalies.append({**item, "reason": "stale_block"})
+
+    if len(fresh) < 2:
+        return {"gas_price_wei": None, "status": "insufficient_agreement", "observations": fresh, "anomalies": anomalies}
+
+    prices = sorted(int(item["gas_price_wei"]) for item in fresh)
+    median = prices[len(prices) // 2] if len(prices) % 2 else (prices[len(prices) // 2 - 1] + prices[len(prices) // 2]) // 2
+    if median <= 0:
+        return {"gas_price_wei": None, "status": "insufficient_agreement", "observations": fresh, "anomalies": anomalies}
+
+    def close(price: int) -> bool:
+        return abs(price - median) / float(median) <= max(0.0, float(agreement_ratio))
+
+    inliers = [item for item in fresh if close(int(item["gas_price_wei"]))]
+    if len(inliers) >= 2:
+        consensus_prices = sorted(int(item["gas_price_wei"]) for item in inliers)
+        consensus = consensus_prices[len(consensus_prices) // 2]
+        for item in fresh:
+            if item not in inliers:
+                ratio = max(int(item["gas_price_wei"]), consensus) / float(max(1, min(int(item["gas_price_wei"]), consensus)))
+                anomalies.append({**item, "reason": "gas_price_outlier", "ratio_to_consensus": ratio})
+        return {
+            "gas_price_wei": int(consensus),
+            "status": "consensus",
+            "observations": fresh,
+            "inliers": inliers,
+            "anomalies": anomalies,
+        }
+
+    return {
+        "gas_price_wei": None,
+        "status": "insufficient_agreement",
+        "observations": fresh,
+        "anomalies": anomalies,
+    }
+
+
+BASE_CHAIN_ID = 8453
+BASE_GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F"
+
+
+async def estimate_base_l1_fee_wei(
+    rpc: Any,
+    calldata_hex: str,
+    *,
+    block: str = "latest",
+) -> int | None:
+    """Query Base's canonical GasPriceOracle for the exact calldata L1 fee."""
+    if not isinstance(calldata_hex, str) or not calldata_hex.startswith("0x"):
+        return None
+    try:
+        raw = bytes.fromhex(calldata_hex[2:])
+    except (TypeError, ValueError):
+        return None
+    if not raw:
+        return None
+
+    # getL1Fee(bytes): selector + ABI dynamic-bytes argument.
+    data = selector("getL1Fee(bytes)") + enc_uint(32) + enc_bytes_dyn(raw)
+    result = await rpc.eth_call(
+        BASE_GAS_PRICE_ORACLE,
+        "0x" + data.hex(),
+        block=block,
+    )
+    if not getattr(result, "ok", False) or not isinstance(getattr(result, "result", None), str):
+        return None
+    try:
+        fee = int(str(result.result), 16)
+    except (TypeError, ValueError):
+        return None
+    return fee if fee >= 0 else None
 
 
 def _gwei_to_wei(gwei: int) -> int:

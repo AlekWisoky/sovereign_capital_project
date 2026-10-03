@@ -286,3 +286,32 @@ def test_three_leg_adjacency_prioritizes_late_discovered_cycle_edge():
     assert cycle_edge in adjacency[anchor]
     assert reverse in adjacency[cycle_token]
     assert cycle_edge not in pruned
+
+
+@pytest.mark.asyncio
+async def test_quote_batch_attributes_unclassified_failures(monkeypatch):
+    edge = arb.Edge(
+        "univ3",
+        "0x" + "11" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"fee": 3000},
+    )
+
+    class _Cache:
+        def get(self, _key):
+            return None
+
+        def set(self, _key, _value):
+            return None
+
+    async def fake_batch(*args, **kwargs):
+        return [None]
+
+    monkeypatch.setattr(arb, "quote_exact_input_single_batch", fake_batch)
+    cfg = SimpleNamespace(chain=SimpleNamespace(univ3_quoter_v2="0x" + "44" * 20))
+    metrics = {}
+    out = await arb.quote_edges_batch(object(), cfg, _Cache(), [edge], 100, metrics=metrics)
+    assert out[arb.edge_key(edge)] is None
+    assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 1
+

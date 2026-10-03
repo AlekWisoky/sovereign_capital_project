@@ -319,6 +319,7 @@ async def quote_edges_batch(
     if metrics is None:
         metrics = {}
     quote_diagnostics: Dict[str, Any] = {}
+    quote_successes_before = int(metrics.get("quote_successes", 0) or 0)
     metrics.setdefault("quote_failure_reasons", {})
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
@@ -430,8 +431,22 @@ async def quote_edges_batch(
                 cache.set(ck, None)
                 _record_failed_edge(e)
 
-    failure_counts = quote_diagnostics.get("failure_reasons") or {}
-    metrics["quote_failure_reasons"] = {str(k): int(v) for k, v in failure_counts.items()}
+    failure_counts = {
+        str(k): int(v)
+        for k, v in dict(quote_diagnostics.get("failure_reasons") or {}).items()
+    }
+    # A failed edge without a lower-layer classification is still a concrete
+    # observation. Attribute the residual instead of silently losing it from
+    # the quote failure denominator; never convert it into a successful quote.
+    classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
+    batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) - batch_successes)
+    residual_unknown = max(0, requested_failures - classified_failures)
+    if residual_unknown:
+        failure_counts["unknown_quote_failure"] = int(
+            failure_counts.get("unknown_quote_failure", 0) + residual_unknown
+        )
+    metrics["quote_failure_reasons"] = failure_counts
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
     metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
     metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
@@ -1107,8 +1122,88 @@ async def find_three_leg_opportunities(
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
 
+    # Adaptive frontier: first-leg quotes have already been acquired for the
+    # complete graph. Use a small supplemental budget to admit pruned edges only
+    # when they are quote-viable, can close a triangle in the full graph, and add
+    # venue diversity. The original per-token adjacency cap remains unchanged;
+    # the frontier has its own hard global/per-token bounds.
+    frontier_per_token = max(
+        1,
+        min(
+            2,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_PER_TOKEN", "2") or 2),
+        ),
+    )
+    frontier_global = max(
+        0,
+        min(
+            32,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_MAX_EDGES", "24") or 24),
+        ),
+    )
+    frontier_by_token: Dict[str, List[Edge]] = {}
+    frontier_selected: List[Edge] = []
+    active_venues_by_token = {
+        token: {str(edge.venue).lower() for edge in items}
+        for token, items in adj.items()
+    }
+    frontier_scored: List[Tuple[int, int, int, Edge]] = []
+    for order, edge in enumerate(pruned_edges):
+        if not qmap1_3.get(edge_key(edge)):
+            continue
+        closes = any(
+            bool(by_pair.get((middle.token_out, edge.token_in)))
+            for middle in edges
+            if middle.token_in == edge.token_out and middle.token_out != edge.token_in
+        )
+        if not closes:
+            continue
+        venue_new = int(
+            str(edge.venue).lower()
+            not in active_venues_by_token.get(edge.token_in, set())
+        )
+        # Successful first-leg quote is the viability gate; closure and venue
+        # diversity break ties without pretending raw token amounts are
+        # economically comparable across different output tokens.
+        frontier_scored.append((int(closes), venue_new, -order, edge))
+    frontier_scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    for _closure, _venue_new, _order, edge in frontier_scored:
+        if len(frontier_selected) >= frontier_global:
+            break
+        bucket = frontier_by_token.setdefault(edge.token_in, [])
+        if len(bucket) >= frontier_per_token:
+            continue
+        bucket.append(edge)
+        frontier_selected.append(edge)
+
+    frontier_adj: Dict[str, List[Edge]] = {
+        token: list(items) for token, items in adj.items()
+    }
+    for token, items in frontier_by_token.items():
+        frontier_adj.setdefault(token, []).extend(items)
+
+    if telemetry is not None:
+        telemetry["three_leg_frontier"] = {
+            "enabled": bool(frontier_selected),
+            "initial_pruned_edges": int(len(pruned_edges)),
+            "selected_edges": int(len(frontier_selected)),
+            "per_token_cap": int(frontier_per_token),
+            "global_cap": int(frontier_global),
+            "quote_viable_edges": int(
+                sum(1 for edge in pruned_edges if qmap1_3.get(edge_key(edge)))
+            ),
+            "venue_diverse_edges": int(
+                sum(
+                    1
+                    for edge in frontier_selected
+                    if str(edge.venue).lower()
+                    not in active_venues_by_token.get(edge.token_in, set())
+                )
+            ),
+        }
+
     # iterate first edge; use time budget
-    for a_in, outs in adj.items():
+    for a_in, outs in frontier_adj.items():
         for e1 in outs:
             if (
                 route_groups_evaluated > 0
@@ -1132,7 +1227,7 @@ async def find_three_leg_opportunities(
                 continue
             out1, meta1 = q1
             # second leg candidates from token_out
-            e2_cands = [e2 for e2 in adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
+            e2_cands = [e2 for e2 in frontier_adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
             metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
             qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
             route_groups_evaluated += 1
