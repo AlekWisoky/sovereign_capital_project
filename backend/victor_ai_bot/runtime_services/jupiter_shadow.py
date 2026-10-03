@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from .solana_jupiter import JupiterQuote, JupiterSwapV2Client
+from .solana_jupiter import JupiterNotConfigured, JupiterSwapV2Client
 from .solana_raydium import RaydiumQuoteClient
 
 
@@ -167,33 +167,25 @@ class JupiterShadowService:
                 amount = int(round(usd * (10 ** input_decimals)))
                 requests += 2
                 try:
-                    j_fwd, r_rev = await asyncio.gather(
-                        self.client.quote(input_mint=input_mint, output_mint=output_mint, amount=amount),
-                        self.raydium.quote(input_mint=output_mint, output_mint=input_mint, amount=0),
+                    j_fwd = await self.client.quote(
+                        input_mint=input_mint,
+                        output_mint=output_mint,
+                        amount=amount,
                     )
-                except Exception:
-                    # The reverse Raydium amount is unknown until Jupiter gives
-                    # the forward output, so retry with the actual output below.
-                    try:
-                        j_fwd = await self.client.quote(input_mint=input_mint, output_mint=output_mint, amount=amount)
-                        successes += 1
-                        ray_amount = int(j_fwd.out_amount)
-                        r_rev = await self.raydium.quote(input_mint=output_mint, output_mint=input_mint, amount=ray_amount)
-                        successes += 1
-                    except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
-                        failures += 2
-                        continue
-                else:
-                    # The first Raydium call above intentionally cannot quote
-                    # amount=0; only the successful Jupiter leg is retained.
-                    try:
-                        ray_amount = int(j_fwd.out_amount)
-                        r_rev = await self.raydium.quote(input_mint=output_mint, output_mint=input_mint, amount=ray_amount)
-                        successes += 2
-                    except (httpx.HTTPError, TypeError, ValueError):
-                        successes += 1
+                    successes += 1
+                    ray_amount = int(j_fwd.out_amount)
+                    if ray_amount <= 0:
                         failures += 1
                         continue
+                    r_rev = await self.raydium.quote(
+                        input_mint=output_mint,
+                        output_mint=input_mint,
+                        amount=ray_amount,
+                    )
+                    successes += 1
+                except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
+                    failures += 2
+                    continue
 
                 if j_fwd.out_amount <= 0 or r_rev.out_amount <= 0:
                     failures += 1
