@@ -68,11 +68,9 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
     async def sol_price():
         return 100.0
     monkeypatch.setattr(service, "_sol_price_usd", sol_price)
-    monkeypatch.setattr(
-        service,
-        "_network_cost_usd",
-        lambda price: {"available": True, "usd": 0.01, "lamports": 100000, "source": "test", "verified": False},
-    )
+    async def network_cost(price):
+        return {"available": True, "usd": 0.01, "lamports": 100000, "source": "test", "verified": False}
+    monkeypatch.setattr(service, "_network_cost_usd", network_cost)
 
     async def j_quote(*, input_mint, output_mint, amount, taker=None):
         if input_mint == "USDC":
