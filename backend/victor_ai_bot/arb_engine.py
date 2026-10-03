@@ -1122,8 +1122,82 @@ async def find_three_leg_opportunities(
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
 
+    # Adaptive frontier: first-leg quotes have already been acquired for the
+    # complete graph. Use a small supplemental budget to admit pruned edges only
+    # when they are quote-viable, can close a triangle in the full graph, and add
+    # venue diversity. The original per-token adjacency cap remains unchanged;
+    # the frontier has its own hard global/per-token bounds.
+    frontier_per_token = max(
+        1,
+        min(
+            2,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_PER_TOKEN", "2") or 2),
+        ),
+    )
+    frontier_global = max(
+        0,
+        min(
+            32,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_MAX_EDGES", "24") or 24),
+        ),
+    )
+    frontier_by_token: Dict[str, List[Edge]] = {}
+    frontier_selected: List[Edge] = []
+    active_venues_by_token = {
+        token: {str(edge.venue).lower() for edge in items}
+        for token, items in adj.items()
+    }
+    for edge in pruned_edges:
+        if len(frontier_selected) >= frontier_global:
+            break
+        if not qmap1_3.get(edge_key(edge)):
+            continue
+        closes = any(
+            bool(by_pair.get((middle.token_out, edge.token_in)))
+            for middle in adj.get(edge.token_out, [])
+            if middle.token_out != edge.token_in
+        ) or any(
+            bool(by_pair.get((middle.token_out, edge.token_in)))
+            for middle in edges
+            if middle.token_in == edge.token_out and middle.token_out != edge.token_in
+        )
+        if not closes:
+            continue
+        venue_new = str(edge.venue).lower() not in active_venues_by_token.get(edge.token_in, set())
+        bucket = frontier_by_token.setdefault(edge.token_in, [])
+        if len(bucket) >= frontier_per_token:
+            continue
+        bucket.append(edge)
+        frontier_selected.append(edge)
+
+    frontier_adj: Dict[str, List[Edge]] = {
+        token: list(items) for token, items in adj.items()
+    }
+    for token, items in frontier_by_token.items():
+        frontier_adj.setdefault(token, []).extend(items)
+
+    if telemetry is not None:
+        telemetry["three_leg_frontier"] = {
+            "enabled": bool(frontier_selected),
+            "initial_pruned_edges": int(len(pruned_edges)),
+            "selected_edges": int(len(frontier_selected)),
+            "per_token_cap": int(frontier_per_token),
+            "global_cap": int(frontier_global),
+            "quote_viable_edges": int(
+                sum(1 for edge in pruned_edges if qmap1_3.get(edge_key(edge)))
+            ),
+            "venue_diverse_edges": int(
+                sum(
+                    1
+                    for edge in frontier_selected
+                    if str(edge.venue).lower()
+                    not in active_venues_by_token.get(edge.token_in, set())
+                )
+            ),
+        }
+
     # iterate first edge; use time budget
-    for a_in, outs in adj.items():
+    for a_in, outs in frontier_adj.items():
         for e1 in outs:
             if (
                 route_groups_evaluated > 0
@@ -1147,7 +1221,7 @@ async def find_three_leg_opportunities(
                 continue
             out1, meta1 = q1
             # second leg candidates from token_out
-            e2_cands = [e2 for e2 in adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
+            e2_cands = [e2 for e2 in frontier_adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
             metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
             qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
             route_groups_evaluated += 1
