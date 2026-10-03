@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from victor_ai_bot.solana.jupiter import JupiterQuote, after_cost_profit_usd, economic_frontier
