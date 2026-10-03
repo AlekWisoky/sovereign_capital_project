@@ -115,3 +115,34 @@ def test_gas_price_consensus_rejects_stale_provider():
     ], max_block_lag=2)
     assert result["gas_price_wei"] in {100, 105}
     assert any(row.get("reason") == "stale_block" for row in result["anomalies"])
+
+
+@pytest.mark.asyncio
+async def test_base_l1_fee_uses_exact_calldata():
+    class _Result:
+        ok = True
+        result = hex(123456)
+
+    class _Rpc:
+        async def eth_call(self, to, data, *, block="latest", from_addr=None):
+            assert to.lower() == gas_model.BASE_GAS_PRICE_ORACLE.lower()
+            raw = bytes.fromhex(data[2:])
+            assert len(raw) > 4
+            assert raw[:4] == gas_model.selector("getL1Fee(bytes)")
+            return _Result()
+
+    fee = await gas_model.estimate_base_l1_fee_wei(_Rpc(), "0x12345678", block="0x10")
+    assert fee == 123456
+
+
+@pytest.mark.asyncio
+async def test_base_l1_fee_fails_closed_on_oracle_failure():
+    class _Result:
+        ok = False
+        result = None
+
+    class _Rpc:
+        async def eth_call(self, *args, **kwargs):
+            return _Result()
+
+    assert await gas_model.estimate_base_l1_fee_wei(_Rpc(), "0x1234") is None
