@@ -75,17 +75,22 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
     async def j_quote(*, input_mint, output_mint, amount, taker=None):
         if input_mint == "USDC":
             return JupiterQuote("USDC", "SOL", amount, 1_000_000_000, "metis", "j", 10, "USDC", 0, 0, False, "ultra", None)
-        return JupiterQuote("SOL", "USDC", amount, 100_000_000, "metis", "p", 10, "USDC", 0, 0, False, "ultra", None)
+        return JupiterQuote("SOL", "USDC", amount, 102_000_000, "metis", "p", 10, "USDC", 0, 0, False, "ultra", None)
 
     async def r_quote(*, input_mint, output_mint, amount):
-        return RaydiumQuote(input_mint, output_mint, amount, 101_000_000, 0.01, (), "r")
+        out_amount = 1_010_000_000 if input_mint == "USDC" else 101_000_000
+        return RaydiumQuote(input_mint, output_mint, amount, out_amount, 0.01, (), "r")
 
     monkeypatch.setattr(service.client, "quote", j_quote)
     monkeypatch.setattr(service.raydium, "quote", r_quote)
 
     result = await service.discover()
-    assert result["discovery"]["cross_venue_routes"] == 1
-    assert result["candidates"][0]["quote_derived"] is True
+    assert result["discovery"]["cross_venue_routes"] == 2
+    assert {row["route_id"] for row in result["candidates"]} == {
+        "solana:SOL/USDC:jupiter-to-raydium",
+        "solana:SOL/USDC:raydium-to-jupiter",
+    }
+    assert all(row["quote_derived"] is True for row in result["candidates"])
     assert result["candidates"][0]["after_cost_profit_usd"] > 0
     assert result["candidates"][0]["authoritative"] is False
     assert result["execution_authority"] is False
