@@ -106,3 +106,19 @@ def test_build_opportunity_envelope_unexpected_token_path_bug_is_not_swallowed()
     opp = _opp(legs=[BadTokenOut()], meta={'margin_ratio': '0.05'})
     with pytest.raises(RuntimeError, match='boom'):
         build_opportunity_envelope(opp, chain_id=1)
+
+
+
+def test_build_opportunity_envelope_prefers_quote_derived_size_curve():
+    opp = _opp(meta={
+        "quote_economic_size_curve": [
+            {"size_mult": 0.5, "after_cost_profit_usd": 4.0},
+            {"size_mult": 1.0, "after_cost_profit_usd": 10.0},
+            {"size_mult": 2.0, "after_cost_profit_usd": 7.0},
+        ]
+    })
+    env = build_opportunity_envelope(opp, chain_id=1)
+    assert [p.size_mult for p in env.safe_size_curve] == [0.5, 1.0, 2.0]
+    assert [p.expected_profit_usd for p in env.safe_size_curve] == [4.0, 10.0, 7.0]
+    assert all(p.slippage_cost_usd == 0.0 for p in env.safe_size_curve)
+    assert env.metadata["economic_model_source"] == "quote_derived_size_curve"
