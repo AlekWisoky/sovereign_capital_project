@@ -109,13 +109,30 @@ class RuntimeMultiruntimeStateFacade:
             except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
                 return name, {"ok": False, "status": "unavailable", "reason_code": "market_pipeline_telemetry_unavailable", "error": str(exc)}
         pairs = await asyncio.gather(*[one(name, rt) for name, rt in self._runtimes.items()])
-        jupiter = self._solana_jupiter.snapshot() if hasattr(self, "_solana_jupiter") else {"status": "unavailable", "execution_authority": False}
-        return {"ok": True, "active": self._active_chain, "chains": {k: v for k, v in pairs}, "solana_jupiter": jupiter, "active_chain_changed": False}
+        jupiter = {"status": "unavailable", "execution_authority": False}
+        if hasattr(self, "_solana_jupiter"):
+            try:
+                jupiter = await asyncio.wait_for(self._solana_jupiter.discover(), timeout=90.0)
+            except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError):
+                jupiter = self._solana_jupiter.snapshot()
+        return {
+            "ok": True,
+            "active": self._active_chain,
+            "chains": {k: v for k, v in pairs},
+            "solana_jupiter": jupiter,
+            "active_chain_changed": False,
+        }
 
     async def select_best_opportunity_readonly(self) -> dict:
-        """Return global opportunity-selection evidence without changing runtime state."""
+        """Return global EVM + Solana discovery evidence without changing runtime state."""
         selector = MultiRuntimeOpportunitySelector()
-        return await selector.select(self._runtimes)
+        jupiter = {"status": "unavailable", "execution_authority": False}
+        if hasattr(self, "_solana_jupiter"):
+            try:
+                jupiter = await asyncio.wait_for(self._solana_jupiter.discover(), timeout=90.0)
+            except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError):
+                jupiter = self._solana_jupiter.snapshot()
+        return await selector.select(self._runtimes, external_discovery=jupiter)
 
     async def dispatch_selected_auto_trade(self, *, current_block: int) -> bool:
         """Dispatch the globally selected candidate to its owning runtime.

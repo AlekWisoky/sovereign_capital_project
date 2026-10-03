@@ -525,8 +525,18 @@ class MultiRuntimeOpportunitySelector:
         ]
         return evidence, error
 
-    async def select(self, runtimes: Mapping[str, Any]) -> dict[str, Any]:
-        """Inspect every configured runtime without changing active-chain state."""
+    async def select(
+        self,
+        runtimes: Mapping[str, Any],
+        *,
+        external_discovery: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Inspect runtimes plus readonly external discovery evidence.
+
+        External discovery is evidence-only and can never become execution
+        selection authority until a native runtime candidate passes all
+        canonical profitability, sizing, governance, and execution gates.
+        """
 
         evidence: list[RuntimeOpportunityEvidence] = []
         runtime_errors: dict[str, str] = {}
@@ -542,6 +552,35 @@ class MultiRuntimeOpportunitySelector:
         eligible = [item for item in evidence if item.eligible]
         selected = max(eligible, key=lambda item: item.selection_score) if eligible else None
 
+        discovery_rows: list[dict[str, Any]] = []
+        if isinstance(external_discovery, Mapping):
+            raw_rows = external_discovery.get("candidates")
+            if isinstance(raw_rows, list):
+                for row in raw_rows:
+                    if not isinstance(row, Mapping):
+                        continue
+                    discovery_rows.append({
+                        "runtime": "solana",
+                        "source": "jupiter+raydium",
+                        "opportunity_id": str(row.get("id") or ""),
+                        "route_id": str(row.get("route_id") or ""),
+                        "amount_in": str(row.get("amount_in") or "0"),
+                        "gross_profit_usd": float(row.get("gross_profit_usd") or 0.0),
+                        "after_cost_profit_usd": float(row.get("after_cost_profit_usd") or 0.0),
+                        "after_cost_profit_usd_micro": int(row.get("after_cost_profit_usd_micro") or 0),
+                        "quote_derived": bool(row.get("quote_derived", False)),
+                        "observed": bool(row.get("observed", False)),
+                        "extrapolated": bool(row.get("extrapolated", False)),
+                        "authoritative": False,
+                        "diagnostic_only": True,
+                        "execution_authority": False,
+                        "reason": str(row.get("reason") or "awaiting_canonical_solana_revalidation"),
+                    })
+
+        best_discovery = max(
+            discovery_rows, key=lambda row: row["after_cost_profit_usd"]
+        ) if discovery_rows else None
+
         return {
             "ok": True,
             "selected_runtime": selected.runtime if selected else "",
@@ -550,6 +589,8 @@ class MultiRuntimeOpportunitySelector:
             "runtime_count": len(runtimes),
             "runtimes_inspected": [str(name) for name in runtimes.keys()],
             "candidates": [item.to_dict() for item in evidence],
+            "global_discovery_candidates": discovery_rows,
+            "global_discovery_best": best_discovery,
             "blocked_candidates": [
                 item.to_dict() for item in evidence if not item.eligible
             ],

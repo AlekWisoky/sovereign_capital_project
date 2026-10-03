@@ -1897,8 +1897,8 @@
   "runtime_bundle_definition_count": 1,
   "runtime_legacy_broad_except_count": 0,
   "runtime_legacy_lines": 189,
-  "runtime_service_count": 106,
-  "runtime_service_module_count": 106,
+  "runtime_service_count": 107,
+  "runtime_service_module_count": 107,
   "runtime_services": [
     "admission_service",
     "agent_service",
@@ -1996,6 +1996,7 @@
     "runtime_treasury_overlay_facade",
     "runtime_unit_econ_facade",
     "solana_jupiter",
+    "solana_raydium",
     "state_service",
     "state_summary_service",
     "summary_read_contract",
