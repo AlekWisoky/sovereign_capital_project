@@ -162,7 +162,7 @@ class JupiterShadowService:
         failures = 0
         cross_venue_routes = 0
 
-        for input_mint, output_mint, input_decimals, output_decimals, symbol in pairs:
+        for input_mint, output_mint, input_decimals, _output_decimals, symbol in pairs:
             for usd in sizes:
                 amount = int(round(usd * (10 ** input_decimals)))
                 requests += 2
