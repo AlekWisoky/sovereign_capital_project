@@ -165,7 +165,9 @@ class JupiterShadowService:
         for input_mint, output_mint, input_decimals, _output_decimals, symbol in pairs:
             for usd in sizes:
                 amount = int(round(usd * (10 ** input_decimals)))
-                requests += 2
+                requests += 4
+
+                # Direction A: Jupiter input -> Raydium return.
                 try:
                     j_fwd = await self.client.quote(
                         input_mint=input_mint,
@@ -176,53 +178,108 @@ class JupiterShadowService:
                     ray_amount = int(j_fwd.out_amount)
                     if ray_amount <= 0:
                         failures += 1
-                        continue
+                        raise ValueError("jupiter_zero_output")
                     r_rev = await self.raydium.quote(
                         input_mint=output_mint,
                         output_mint=input_mint,
                         amount=ray_amount,
                     )
                     successes += 1
+                    final_raw = int(r_rev.out_amount)
+                    if final_raw <= 0:
+                        failures += 1
+                        raise ValueError("raydium_zero_output")
+                    cross_venue_routes += 1
+                    profit_raw = final_raw - amount
+                    profit_usd = profit_raw / float(10 ** input_decimals)
+                    after_cost_usd = profit_usd - float(network["usd"] or 0.0)
+                    candidates.append({
+                        "id": f"solana:{symbol}:jupiter-to-raydium:{amount}",
+                        "route_id": f"solana:{symbol}:jupiter-to-raydium",
+                        "chain": "solana",
+                        "strategy": "cross_venue_arb_shadow",
+                        "symbol": symbol,
+                        "amount_in": str(amount),
+                        "amount_in_usd": usd,
+                        "gross_profit_usd": profit_usd,
+                        "after_cost_profit_usd": after_cost_usd,
+                        "after_cost_profit_usd_micro": int(round(after_cost_usd * 1_000_000.0)),
+                        "network_cost_usd": float(network["usd"] or 0.0),
+                        "network_cost": dict(network),
+                        "jupiter_out_amount": str(j_fwd.out_amount),
+                        "raydium_final_amount": str(final_raw),
+                        "jupiter_router": j_fwd.router,
+                        "jupiter_fee_bps": j_fwd.fee_bps,
+                        "jupiter_platform_fee_bps": j_fwd.platform_fee_bps,
+                        "raydium_price_impact_pct": r_rev.price_impact_pct,
+                        "quote_derived": True,
+                        "economic_model_source": "quote_derived_cross_venue",
+                        "observed": True,
+                        "extrapolated": False,
+                        "authoritative": False,
+                        "diagnostic_only": True,
+                        "execution_authority": False,
+                        "reason": "awaiting_canonical_solana_revalidation",
+                    })
                 except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
                     failures += 2
-                    continue
 
-                if j_fwd.out_amount <= 0 or r_rev.out_amount <= 0:
-                    failures += 1
-                    continue
-                cross_venue_routes += 1
-                final_raw = int(r_rev.out_amount)
-                profit_raw = final_raw - amount
-                profit_usd = profit_raw / float(10 ** input_decimals)
-                after_cost_usd = profit_usd - float(network["usd"] or 0.0)
-                candidates.append({
-                    "id": f"solana:{symbol}:jupiter-to-raydium:{amount}",
-                    "route_id": f"solana:{symbol}:jupiter-to-raydium",
-                    "chain": "solana",
-                    "strategy": "cross_venue_arb_shadow",
-                    "symbol": symbol,
-                    "amount_in": str(amount),
-                    "amount_in_usd": usd,
-                    "gross_profit_usd": profit_usd,
-                    "after_cost_profit_usd": after_cost_usd,
-                    "after_cost_profit_usd_micro": int(round(after_cost_usd * 1_000_000.0)),
-                    "network_cost_usd": float(network["usd"] or 0.0),
-                    "network_cost": dict(network),
-                    "jupiter_out_amount": str(j_fwd.out_amount),
-                    "raydium_final_amount": str(final_raw),
-                    "jupiter_router": j_fwd.router,
-                    "jupiter_fee_bps": j_fwd.fee_bps,
-                    "jupiter_platform_fee_bps": j_fwd.platform_fee_bps,
-                    "raydium_price_impact_pct": r_rev.price_impact_pct,
-                    "quote_derived": True,
-                    "economic_model_source": "quote_derived_cross_venue",
-                    "observed": True,
-                    "extrapolated": False,
-                    "authoritative": False,
-                    "diagnostic_only": True,
-                    "execution_authority": False,
-                    "reason": "awaiting_canonical_solana_revalidation",
-                })
+                # Direction B: Raydium input -> Jupiter return.
+                try:
+                    r_fwd = await self.raydium.quote(
+                        input_mint=input_mint,
+                        output_mint=output_mint,
+                        amount=amount,
+                    )
+                    successes += 1
+                    j_amount = int(r_fwd.out_amount)
+                    if j_amount <= 0:
+                        failures += 1
+                        raise ValueError("raydium_zero_output")
+                    j_rev = await self.client.quote(
+                        input_mint=output_mint,
+                        output_mint=input_mint,
+                        amount=j_amount,
+                    )
+                    successes += 1
+                    final_raw = int(j_rev.out_amount)
+                    if final_raw <= 0:
+                        failures += 1
+                        raise ValueError("jupiter_zero_output")
+                    cross_venue_routes += 1
+                    profit_raw = final_raw - amount
+                    profit_usd = profit_raw / float(10 ** input_decimals)
+                    after_cost_usd = profit_usd - float(network["usd"] or 0.0)
+                    candidates.append({
+                        "id": f"solana:{symbol}:raydium-to-jupiter:{amount}",
+                        "route_id": f"solana:{symbol}:raydium-to-jupiter",
+                        "chain": "solana",
+                        "strategy": "cross_venue_arb_shadow",
+                        "symbol": symbol,
+                        "amount_in": str(amount),
+                        "amount_in_usd": usd,
+                        "gross_profit_usd": profit_usd,
+                        "after_cost_profit_usd": after_cost_usd,
+                        "after_cost_profit_usd_micro": int(round(after_cost_usd * 1_000_000.0)),
+                        "network_cost_usd": float(network["usd"] or 0.0),
+                        "network_cost": dict(network),
+                        "raydium_out_amount": str(r_fwd.out_amount),
+                        "jupiter_final_amount": str(final_raw),
+                        "jupiter_router": j_rev.router,
+                        "jupiter_fee_bps": j_rev.fee_bps,
+                        "jupiter_platform_fee_bps": j_rev.platform_fee_bps,
+                        "raydium_price_impact_pct": r_fwd.price_impact_pct,
+                        "quote_derived": True,
+                        "economic_model_source": "quote_derived_cross_venue",
+                        "observed": True,
+                        "extrapolated": False,
+                        "authoritative": False,
+                        "diagnostic_only": True,
+                        "execution_authority": False,
+                        "reason": "awaiting_canonical_solana_revalidation",
+                    })
+                except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
+                    failures += 2
 
         candidates.sort(key=lambda row: float(row.get("after_cost_profit_usd") or 0.0), reverse=True)
         frontier = {
