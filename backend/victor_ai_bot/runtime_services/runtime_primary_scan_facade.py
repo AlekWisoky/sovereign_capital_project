@@ -9,8 +9,9 @@ from urllib.parse import urlsplit
 from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
 from ..execution_capture.final_quote import FinalQuoteError, produce_market_price_evidence
 from ..cache import PerBlockCache
-from ..gas_model import estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
+from ..gas_model import BASE_CHAIN_ID, estimate_base_l1_fee_wei, estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
 from ..models import Opportunity
+from ..calldata_builder import build_execute_calldata
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from ..profitability_state import revalidate_profitability_state
@@ -411,6 +412,75 @@ class RuntimePrimaryScanFacade:
                 )
             else:
                 gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
+
+            l1_fee_wei = 0
+            l1_fee_status = "not_applicable"
+            if int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID:
+                l1_fee_status = "calldata_unavailable"
+                try:
+                    execution_cfg = getattr(self.cfg, "execution", None)
+                    profit_to = str(getattr(execution_cfg, "profit_to", "") or "")
+                    provider = str(getattr(execution_cfg, "flash_provider", "aave") or "aave")
+                    executor = str(getattr(execution_cfg, "executor_address", "") or "")
+                    legs = list(getattr(getattr(opportunity, "route", None), "legs", []) or [])
+                    if profit_to and executor and legs:
+                        min_abs = int(getattr(getattr(self.cfg, "safety", None), "minProfitAbs", 0) or 0)
+                        min_bps = int(getattr(getattr(self.cfg, "safety", None), "minProfitBps", 0) or 0)
+                        amount_borrow = int(getattr(legs[0], "amount_in", 0) or 0)
+                        if amount_borrow <= 0:
+                            amount_borrow = int(meta.get("amount_in") or 0)
+                        min_profit_onchain = max(min_abs, amount_borrow * min_bps // 10_000)
+                        deadline = int(time.time()) + int(getattr(execution_cfg, "deadline_seconds", 30) or 30)
+                        calldata_legs = [
+                            {
+                                "dex": str(leg.dex),
+                                "venue": str(leg.venue),
+                                "token_in": str(leg.token_in),
+                                "token_out": str(leg.token_out),
+                                "min_out": int(str(leg.min_out)),
+                                "aux": str(leg.data or "0x"),
+                            }
+                            for leg in legs
+                        ]
+                        calldata, _ = build_execute_calldata(
+                            provider=provider,
+                            borrow_token=str(legs[0].token_in),
+                            amount_borrow=amount_borrow,
+                            min_profit=min_profit_onchain,
+                            profit_to=profit_to,
+                            deadline=deadline,
+                            legs=calldata_legs,
+                        )
+                        cache_key = f"base:l1fee:{calldata}"
+                        cached_l1 = scan_cache.get(cache_key)
+                        if cached_l1 is not None:
+                            l1_fee_wei = int(cached_l1)
+                            l1_fee_status = "exact_calldata_cached"
+                        else:
+                            queried_l1 = await estimate_base_l1_fee_wei(
+                                rpc,
+                                calldata,
+                                block=f"0x{int(current_block):x}",
+                            )
+                            if queried_l1 is not None:
+                                l1_fee_wei = int(queried_l1)
+                                scan_cache.set(cache_key, l1_fee_wei)
+                                l1_fee_status = "exact_calldata"
+                            else:
+                                l1_fee_status = "oracle_unavailable"
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+                    l1_fee_status = "calldata_build_failed"
+
+                if l1_fee_status in {"oracle_unavailable", "calldata_build_failed", "calldata_unavailable"}:
+                    # Base economics must not be authorized without the L1 data
+                    # component when the exact executor envelope cannot be priced.
+                    l1_fee_wei = 0
+
+            gas_cost_wei += int(l1_fee_wei)
+            if isinstance(meta, dict):
+                meta["base_l1_fee_wei"] = str(int(l1_fee_wei))
+                meta["base_l1_fee_status"] = l1_fee_status
+
             gas_cost_in_profit_token_wei: int | None = None
             profit_token = ""
             try:
