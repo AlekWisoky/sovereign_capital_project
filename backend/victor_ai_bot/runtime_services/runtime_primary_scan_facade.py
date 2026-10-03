@@ -944,7 +944,7 @@ class RuntimePrimaryScanFacade:
                     current_block=int(current_block),
                     cache=scan_cache,
                     observed_gas_price_wei=observed_gas_price_wei,
-                    gas_price_integrity=gas_price_integrity,
+                    gas_price_integrity=gas_price_consensus,
                 )
                 authoritative_positive_candidates_before_probe = (
                     _authoritative_positive_after_cost_count([*opps2, *opps3])
