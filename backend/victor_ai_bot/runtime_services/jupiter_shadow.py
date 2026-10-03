@@ -39,6 +39,7 @@ class JupiterShadowService:
         self.max_pairs = max(1, int(os.getenv("VICTOR_SOLANA_JUPITER_MAX_PAIRS", "4") or 4))
         self.max_sizes = max(1, int(os.getenv("VICTOR_SOLANA_JUPITER_MAX_SIZES", "5") or 5))
         self.base_notional_usd = max(10.0, float(os.getenv("VICTOR_SOLANA_JUPITER_BASE_NOTIONAL_USD", "1000") or 1000))
+        self.discovery_concurrency = max(1, int(os.getenv("VICTOR_SOLANA_JUPITER_CONCURRENCY", "4") or 4))
         self.client = JupiterSwapV2Client()
         self.raydium = RaydiumQuoteClient()
         self._last = {
@@ -94,11 +95,12 @@ class JupiterShadowService:
         return [self.base_notional_usd * x for x in multipliers[: self.max_sizes]]
 
     async def _sol_price_usd(self) -> float | None:
+        # Keep network-cost accounting independent of Jupiter availability.
         try:
-            quote = await self.client.quote(input_mint=SOL_MINT, output_mint=USDC_MINT, amount=1_000_000_000)
+            quote = await self.raydium.quote(input_mint=SOL_MINT, output_mint=USDC_MINT, amount=1_000_000_000)
             if quote.in_amount > 0 and quote.out_amount > 0:
                 return float(quote.out_amount) / 1_000_000.0
-        except (httpx.HTTPError, ValueError, JupiterNotConfigured, TypeError):
+        except (httpx.HTTPError, ValueError, TypeError):
             return None
         return None
 
@@ -145,11 +147,72 @@ class JupiterShadowService:
                 "verified": False,
             }
 
+    async def _discover_direction(
+        self,
+        *,
+        input_mint: str,
+        output_mint: str,
+        input_decimals: int,
+        symbol: str,
+        usd: float,
+        network: dict[str, Any],
+        jupiter_first: bool,
+    ) -> tuple[dict[str, Any] | None, int, int, str | None]:
+        amount = int(round(usd * (10 ** input_decimals)))
+        try:
+            if jupiter_first:
+                first = await self.client.quote(input_mint=input_mint, output_mint=output_mint, amount=amount)
+                second = await self.raydium.quote(input_mint=output_mint, output_mint=input_mint, amount=int(first.out_amount))
+            else:
+                first = await self.raydium.quote(input_mint=input_mint, output_mint=output_mint, amount=amount)
+                second = await self.client.quote(input_mint=output_mint, output_mint=input_mint, amount=int(first.out_amount))
+            if int(first.out_amount) <= 0 or int(second.out_amount) <= 0:
+                return None, 2, 2, "zero_output"
+            final_raw = int(second.out_amount)
+            profit_usd = (final_raw - amount) / float(10 ** input_decimals)
+            after_cost_usd = profit_usd - float(network.get("usd") or 0.0)
+            route_name = "jupiter-to-raydium" if jupiter_first else "raydium-to-jupiter"
+            row = {
+                "id": f"solana:{symbol}:{route_name}:{amount}",
+                "route_id": f"solana:{symbol}:{route_name}",
+                "chain": "solana", "strategy": "cross_venue_arb_shadow", "symbol": symbol,
+                "amount_in": str(amount), "amount_in_usd": usd,
+                "gross_profit_usd": profit_usd, "after_cost_profit_usd": after_cost_usd,
+                "after_cost_profit_usd_micro": int(round(after_cost_usd * 1_000_000.0)),
+                "network_cost_usd": float(network.get("usd") or 0.0), "network_cost": dict(network),
+                "quote_derived": True, "economic_model_source": "quote_derived_cross_venue",
+                "observed": True, "extrapolated": False, "authoritative": False,
+                "diagnostic_only": True, "execution_authority": False,
+                "reason": "awaiting_canonical_solana_revalidation",
+            }
+            if jupiter_first:
+                row.update({
+                    "jupiter_out_amount": str(first.out_amount), "raydium_final_amount": str(final_raw),
+                    "jupiter_router": first.router, "jupiter_fee_bps": first.fee_bps,
+                    "jupiter_platform_fee_bps": first.platform_fee_bps, "raydium_price_impact_pct": second.price_impact_pct,
+                })
+            else:
+                row.update({
+                    "raydium_out_amount": str(first.out_amount), "jupiter_final_amount": str(final_raw),
+                    "jupiter_router": second.router, "jupiter_fee_bps": second.fee_bps,
+                    "jupiter_platform_fee_bps": second.platform_fee_bps, "raydium_price_impact_pct": first.price_impact_pct,
+                })
+            return row, 2, 2, None
+        except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError) as exc:
+            return None, 2, 1, type(exc).__name__
+
     async def discover(self) -> dict[str, Any]:
         if not self.enabled:
             return self.snapshot()
         if not self.client.configured:
             self._last = {**self._last, "status": "unconfigured", "execution_authority": False}
+            return self.snapshot()
+        if not self.client.default_taker:
+            self._last = {
+                **self._last, "status": "taker_unconfigured",
+                "discovery": {**self._last.get("discovery", {}), "reason": "VICTOR_SOLANA_JUPITER_TAKER_required_by_live_order_boundary"},
+                "execution_authority": False,
+            }
             return self.snapshot()
 
         pairs = self._pair_universe()
@@ -157,164 +220,54 @@ class JupiterShadowService:
         sol_price = await self._sol_price_usd()
         network = await self._network_cost_usd(sol_price)
         candidates: list[dict[str, Any]] = []
-        requests = 0
-        successes = 0
-        failures = 0
-        cross_venue_routes = 0
+        quote_attempts = quote_successes = quote_failures = 0
+        failure_reasons: dict[str, int] = {}
+        sem = asyncio.Semaphore(self.discovery_concurrency)
 
-        for input_mint, output_mint, input_decimals, _output_decimals, symbol in pairs:
-            for usd in sizes:
-                amount = int(round(usd * (10 ** input_decimals)))
-                requests += 4
+        async def one(pair: tuple[str, str, int, int, str], usd: float):
+            async with sem:
+                input_mint, output_mint, input_decimals, _output_decimals, symbol = pair
+                return await asyncio.gather(
+                    self._discover_direction(input_mint=input_mint, output_mint=output_mint, input_decimals=input_decimals, symbol=symbol, usd=usd, network=network, jupiter_first=True),
+                    self._discover_direction(input_mint=input_mint, output_mint=output_mint, input_decimals=input_decimals, symbol=symbol, usd=usd, network=network, jupiter_first=False),
+                )
 
-                # Direction A: Jupiter input -> Raydium return.
-                try:
-                    j_fwd = await self.client.quote(
-                        input_mint=input_mint,
-                        output_mint=output_mint,
-                        amount=amount,
-                    )
-                    successes += 1
-                    ray_amount = int(j_fwd.out_amount)
-                    if ray_amount <= 0:
-                        failures += 1
-                        raise ValueError("jupiter_zero_output")
-                    r_rev = await self.raydium.quote(
-                        input_mint=output_mint,
-                        output_mint=input_mint,
-                        amount=ray_amount,
-                    )
-                    successes += 1
-                    final_raw = int(r_rev.out_amount)
-                    if final_raw <= 0:
-                        failures += 1
-                        raise ValueError("raydium_zero_output")
-                    cross_venue_routes += 1
-                    profit_raw = final_raw - amount
-                    profit_usd = profit_raw / float(10 ** input_decimals)
-                    after_cost_usd = profit_usd - float(network["usd"] or 0.0)
-                    candidates.append({
-                        "id": f"solana:{symbol}:jupiter-to-raydium:{amount}",
-                        "route_id": f"solana:{symbol}:jupiter-to-raydium",
-                        "chain": "solana",
-                        "strategy": "cross_venue_arb_shadow",
-                        "symbol": symbol,
-                        "amount_in": str(amount),
-                        "amount_in_usd": usd,
-                        "gross_profit_usd": profit_usd,
-                        "after_cost_profit_usd": after_cost_usd,
-                        "after_cost_profit_usd_micro": int(round(after_cost_usd * 1_000_000.0)),
-                        "network_cost_usd": float(network["usd"] or 0.0),
-                        "network_cost": dict(network),
-                        "jupiter_out_amount": str(j_fwd.out_amount),
-                        "raydium_final_amount": str(final_raw),
-                        "jupiter_router": j_fwd.router,
-                        "jupiter_fee_bps": j_fwd.fee_bps,
-                        "jupiter_platform_fee_bps": j_fwd.platform_fee_bps,
-                        "raydium_price_impact_pct": r_rev.price_impact_pct,
-                        "quote_derived": True,
-                        "economic_model_source": "quote_derived_cross_venue",
-                        "observed": True,
-                        "extrapolated": False,
-                        "authoritative": False,
-                        "diagnostic_only": True,
-                        "execution_authority": False,
-                        "reason": "awaiting_canonical_solana_revalidation",
-                    })
-                except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
-                    failures += 2
-
-                # Direction B: Raydium input -> Jupiter return.
-                try:
-                    r_fwd = await self.raydium.quote(
-                        input_mint=input_mint,
-                        output_mint=output_mint,
-                        amount=amount,
-                    )
-                    successes += 1
-                    j_amount = int(r_fwd.out_amount)
-                    if j_amount <= 0:
-                        failures += 1
-                        raise ValueError("raydium_zero_output")
-                    j_rev = await self.client.quote(
-                        input_mint=output_mint,
-                        output_mint=input_mint,
-                        amount=j_amount,
-                    )
-                    successes += 1
-                    final_raw = int(j_rev.out_amount)
-                    if final_raw <= 0:
-                        failures += 1
-                        raise ValueError("jupiter_zero_output")
-                    cross_venue_routes += 1
-                    profit_raw = final_raw - amount
-                    profit_usd = profit_raw / float(10 ** input_decimals)
-                    after_cost_usd = profit_usd - float(network["usd"] or 0.0)
-                    candidates.append({
-                        "id": f"solana:{symbol}:raydium-to-jupiter:{amount}",
-                        "route_id": f"solana:{symbol}:raydium-to-jupiter",
-                        "chain": "solana",
-                        "strategy": "cross_venue_arb_shadow",
-                        "symbol": symbol,
-                        "amount_in": str(amount),
-                        "amount_in_usd": usd,
-                        "gross_profit_usd": profit_usd,
-                        "after_cost_profit_usd": after_cost_usd,
-                        "after_cost_profit_usd_micro": int(round(after_cost_usd * 1_000_000.0)),
-                        "network_cost_usd": float(network["usd"] or 0.0),
-                        "network_cost": dict(network),
-                        "raydium_out_amount": str(r_fwd.out_amount),
-                        "jupiter_final_amount": str(final_raw),
-                        "jupiter_router": j_rev.router,
-                        "jupiter_fee_bps": j_rev.fee_bps,
-                        "jupiter_platform_fee_bps": j_rev.platform_fee_bps,
-                        "raydium_price_impact_pct": r_fwd.price_impact_pct,
-                        "quote_derived": True,
-                        "economic_model_source": "quote_derived_cross_venue",
-                        "observed": True,
-                        "extrapolated": False,
-                        "authoritative": False,
-                        "diagnostic_only": True,
-                        "execution_authority": False,
-                        "reason": "awaiting_canonical_solana_revalidation",
-                    })
-                except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
-                    failures += 2
+        results = await asyncio.gather(*[one(pair, usd) for pair in pairs for usd in sizes])
+        for pair_results in results:
+            for row, attempted, successes, reason in pair_results:
+                quote_attempts += attempted
+                quote_successes += successes
+                if row is not None:
+                    candidates.append(row)
+                else:
+                    quote_failures += attempted - successes
+                    if reason:
+                        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
 
         candidates.sort(key=lambda row: float(row.get("after_cost_profit_usd") or 0.0), reverse=True)
+        frontier_points = [
+            {"amount": int(row["amount_in"]), "amount_in_usd": float(row["amount_in_usd"]), "after_cost_profit_usd": float(row["after_cost_profit_usd"]), "route_id": str(row["route_id"])}
+            for row in candidates[:16]
+        ]
+        best = frontier_points[0] if frontier_points else None
         frontier = {
-            "points": [
-                {"amount": int(row["amount_in"]), "after_cost_profit_usd": float(row["after_cost_profit_usd"])}
-                for row in candidates[:16]
-            ],
-            "best_observed": (
-                {
-                    "amount": int(candidates[0]["amount_in"]),
-                    "after_cost_profit_usd": float(candidates[0]["after_cost_profit_usd"]),
-                }
-                if candidates else None
-            ),
-            "model_source": "quote_derived_cross_venue",
-            "extrapolated": False,
+            "points": frontier_points, "best_observed": best,
+            "optimal_observed_amount": int(best["amount"]) if best else None,
+            "optimal_observed_notional_usd": float(best["amount_in_usd"]) if best else None,
+            "optimal_observed_after_cost_profit_usd": float(best["after_cost_profit_usd"]) if best else None,
+            "model_source": "quote_derived_cross_venue_observed_only", "extrapolated": False,
         }
         self._last = {
             **self._last,
-            "status": "healthy" if candidates or successes else "quote_unavailable",
-            "quotes": {"requests": requests, "successes": successes, "failures": failures},
-            "opportunities": {
-                "authoritative": 0,
-                "diagnostic": sum(1 for row in candidates if float(row["after_cost_profit_usd"]) > 0.0),
-            },
+            "status": "healthy" if candidates else ("quote_unavailable" if quote_failures else "no_cross_venue_edges"),
+            "quotes": {"requests": quote_attempts, "successes": quote_successes, "failures": quote_failures, "failure_reasons": failure_reasons},
+            "opportunities": {"authoritative": 0, "diagnostic": sum(1 for row in candidates if float(row["after_cost_profit_usd"]) > 0.0)},
             "economic_frontier": frontier,
             "discovery": {
-                "universe_pairs": len(pairs),
-                "sizes": sizes,
-                "cross_venue_routes": cross_venue_routes,
-                "candidates": len(candidates),
-                "quote_failures": failures,
-                "network_cost": network,
+                "universe_pairs": len(pairs), "sizes": sizes, "cross_venue_routes": len(candidates),
+                "candidates": len(candidates), "quote_failures": quote_failures, "failure_reasons": failure_reasons,
+                "network_cost": network, "concurrency": self.discovery_concurrency,
             },
-            "candidates": candidates[:32],
-            "execution_authority": False,
+            "candidates": candidates[:32], "execution_authority": False,
         }
         return self.snapshot()
