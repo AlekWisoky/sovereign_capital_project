@@ -501,11 +501,16 @@ class RuntimePrimaryScanFacade:
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
                     gas_cost_in_profit_token_wei = None
 
-            if has_route_gas_inputs and observed_gas_price_wei is None:
+            base_l1_pricing_required = int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID
+            if has_route_gas_inputs and (observed_gas_price_wei is None or (base_l1_pricing_required and l1_fee_status not in {"exact_calldata", "exact_calldata_cached"})):
                 state = {
                     "stage": "scan_after_fee_revalidation",
                     "source": "runtime_primary_scan",
-                    "reason": "gas_price_consensus_unavailable",
+                    "reason": (
+                        "gas_price_consensus_unavailable"
+                        if observed_gas_price_wei is None
+                        else "base_l1_fee_unavailable"
+                    ),
                     "revalidated": False,
                     "stale": True,
                     "valid": False,
