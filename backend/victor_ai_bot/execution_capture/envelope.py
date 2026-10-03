@@ -170,25 +170,44 @@ def build_opportunity_envelope(
     failure_cost_estimate = max(
         0.0, gas_estimate_usd + (expected_profit_usd * (0.06 + (0.08 * liquidity_fragility)))
     )
+    quote_curve = meta.get("quote_economic_size_curve") if isinstance(meta.get("quote_economic_size_curve"), list) else []
     safe_curve: List[SafeSizePoint] = []
-    base_expected = max(0.0, expected_profit_usd)
-    for mult in (0.35, 0.50, 0.75, 1.00, 1.25):
-        scaled_profit = base_expected * mult
-        safe_curve.append(
-            SafeSizePoint(
-                size_mult=float(mult),
-                expected_profit_usd=float(scaled_profit),
-                slippage_cost_usd=float(
-                    scaled_profit * slippage_sensitivity * max(0.03, mult - 0.10) * 0.14
-                ),
-                interference_penalty_usd=float(
-                    scaled_profit * max(mev, 0.0) * max(0.0, mult - 0.20) * 0.14
-                ),
-                latency_decay_cost_usd=float(
-                    scaled_profit * max(0.0, 1.0 - freshness_score) * 0.08
-                ),
+    if quote_curve:
+        for point in quote_curve[:16]:
+            if not isinstance(point, dict):
+                continue
+            mult = _safe_float(point.get("size_mult"), 0.0)
+            net_profit = _safe_float(point.get("after_cost_profit_usd"), 0.0)
+            if mult <= 0.0:
+                continue
+            safe_curve.append(
+                SafeSizePoint(
+                    size_mult=float(mult),
+                    expected_profit_usd=float(net_profit),
+                    slippage_cost_usd=0.0,
+                    interference_penalty_usd=0.0,
+                    latency_decay_cost_usd=0.0,
+                )
             )
-        )
+    if not safe_curve:
+        base_expected = max(0.0, expected_profit_usd)
+        for mult in (0.35, 0.50, 0.75, 1.00, 1.25):
+            scaled_profit = base_expected * mult
+            safe_curve.append(
+                SafeSizePoint(
+                    size_mult=float(mult),
+                    expected_profit_usd=float(scaled_profit),
+                    slippage_cost_usd=float(
+                        scaled_profit * slippage_sensitivity * max(0.03, mult - 0.10) * 0.14
+                    ),
+                    interference_penalty_usd=float(
+                        scaled_profit * max(mev, 0.0) * max(0.0, mult - 0.20) * 0.14
+                    ),
+                    latency_decay_cost_usd=float(
+                        scaled_profit * max(0.0, 1.0 - freshness_score) * 0.08
+                    ),
+                )
+            )
     return OpportunityEnvelope(
         opportunity_id=str(getattr(opp, "id", "") or ""),
         route_id=str(getattr(opp, "route_id", "") or ""),
@@ -212,6 +231,7 @@ def build_opportunity_envelope(
         venues=venues,
         metadata={
             "regime": str(regime),
+            "economic_model_source": "quote_derived_size_curve" if quote_curve and safe_curve else "heuristic_fallback",
             "meta": meta,
             "strategy_family": strategy_family,
             "capital_required_usd": _capital_required_usd(opp, meta),

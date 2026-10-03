@@ -26,8 +26,10 @@ chain:
   - '0x4200000000000000000000000000000000000006'
   - '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
   - '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'
+  - '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf'
+  - '0x940181a94A35A4569E4529A3CDfB74e38FD98631'
   discovery_interval_blocks: 40
-  discovery_max_calls: 12
+  discovery_max_calls: 24
   rpc_private: []
 v3_pairs: []
 curve_pools: []
