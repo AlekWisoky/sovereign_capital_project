@@ -430,8 +430,21 @@ async def quote_edges_batch(
                 cache.set(ck, None)
                 _record_failed_edge(e)
 
-    failure_counts = quote_diagnostics.get("failure_reasons") or {}
-    metrics["quote_failure_reasons"] = {str(k): int(v) for k, v in failure_counts.items()}
+    failure_counts = {
+        str(k): int(v)
+        for k, v in dict(quote_diagnostics.get("failure_reasons") or {}).items()
+    }
+    # A failed edge without a lower-layer classification is still a concrete
+    # observation. Attribute the residual instead of silently losing it from
+    # the quote failure denominator; never convert it into a successful quote.
+    classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) - int(metrics.get("quote_successes", 0)))
+    residual_unknown = max(0, requested_failures - classified_failures)
+    if residual_unknown:
+        failure_counts["unknown_quote_failure"] = int(
+            failure_counts.get("unknown_quote_failure", 0) + residual_unknown
+        )
+    metrics["quote_failure_reasons"] = failure_counts
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
     metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
     metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
