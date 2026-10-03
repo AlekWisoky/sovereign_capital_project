@@ -169,6 +169,88 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
     }
 
 @pytest.mark.asyncio
+async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_candidates(monkeypatch):
+    class _Manager:
+        def __init__(self):
+            self.telemetry = []
+
+        def read_candidates(self):
+            return ["https://rpc-a.example"]
+
+        def observe_quote_telemetry(self, url, **kwargs):
+            self.telemetry.append((url, kwargs))
+
+        def snapshot(self):
+            return {
+                "read": [
+                    {"url": "https://rpc-a.example", "ok": True, "score": 10.0},
+                ]
+            }
+
+    class _Rpc:
+        def __init__(self, url):
+            self.url = url
+
+    runtime = RuntimePrimaryScanFacade()
+    runtime.rpc_manager = _Manager()
+    runtime.cfg = SimpleNamespace()
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": [], "runtime": {}}
+
+    calls = []
+
+    async def fake_scan(
+        rpc,
+        *,
+        current_block,
+        amount_in,
+        cache,
+        discovery_context,
+        telemetry_sink,
+        shared_token_scan_amounts=None,
+        force_adaptive_size_scan=False,
+    ):
+        calls.append(bool(force_adaptive_size_scan))
+        telemetry_sink.update({
+            "quotes": {"requests": 7, "successes": 7, "failure_reasons": {}},
+            "scan_latency_ms": 2.0,
+            "route_universe": {"edges_by_dex": {"univ3": 2}},
+            "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
+            "adaptive_size_discovery": {
+                "enabled": True,
+                "amounts_scanned": ["1000", "500", "1500", "2000", "4000", "8000", "16000"],
+                "probe_triggered": True,
+                "economic_matrix_complete": True,
+            },
+            "size_economic_matrix": [
+                {"amount_in": "1000", "economic_optimum_after_cost_profit_wei": "0"},
+            ],
+            "size_economic_evidence": [],
+        })
+        return []
+
+    runtime._build_discovery_context = fake_discovery
+    runtime._scan_primary_opportunities = fake_scan
+    runtime.cache = object()
+
+    result = await runtime._select_rpc_and_scan(
+        bootstrap_rpc=_Rpc("https://rpc-a.example"),
+        current_block=123,
+        amount_in=1_000,
+    )
+
+    assert calls == [False, True]
+    telemetry = result["telemetry"]
+    assert telemetry["adaptive_size_discovery"]["amounts_scanned"] == [
+        "1000", "500", "1500", "2000", "4000", "8000", "16000"
+    ]
+    assert telemetry["selected_provider_adaptive"]["adaptive_size_discovery"]["probe_triggered"] is True
+    assert telemetry["size_economic_matrix"][0]["economic_optimum_after_cost_profit_wei"] == "0"
+    assert result["opps"] == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(monkeypatch):
     class _Manager:
         def __init__(self):
