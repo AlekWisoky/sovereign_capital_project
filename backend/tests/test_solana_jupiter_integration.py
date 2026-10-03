@@ -40,7 +40,7 @@ def test_after_cost_profit_is_dimensionally_bounded_by_explicit_costs():
         input_mint="SOL", output_mint="USDC", in_amount=100, out_amount=200,
         router="metis", request_id="r", fee_bps=10, fee_mint="USDC",
         platform_fee_bps=10, platform_fee_amount=2, transaction_available=False,
-        mode="ultra", error_code=None,
+        mode="ultra", error_code=None, error_message="",
     )
     assert after_cost_profit_usd(
         input_usd=10.0, output_usd=20.0, quote=quote, network_cost_usd=1.0
@@ -70,6 +70,7 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
     from victor_ai_bot.runtime_services.solana_raydium import RaydiumQuote
 
     monkeypatch.setenv("VICTOR_SOLANA_JUPITER_ENABLED", "1")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
     service = JupiterShadowService()
     service.client.api_key = "test-key"
     monkeypatch.setattr(service, "_pair_universe", lambda: [("USDC", "SOL", 6, 9, "SOL/USDC")])
