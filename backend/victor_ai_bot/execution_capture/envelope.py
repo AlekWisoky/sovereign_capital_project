@@ -192,22 +192,22 @@ def build_opportunity_envelope(
     if not safe_curve:
         base_expected = max(0.0, expected_profit_usd)
         for mult in (0.35, 0.50, 0.75, 1.00, 1.25):
-        scaled_profit = base_expected * mult
-        safe_curve.append(
-            SafeSizePoint(
-                size_mult=float(mult),
-                expected_profit_usd=float(scaled_profit),
-                slippage_cost_usd=float(
-                    scaled_profit * slippage_sensitivity * max(0.03, mult - 0.10) * 0.14
-                ),
-                interference_penalty_usd=float(
-                    scaled_profit * max(mev, 0.0) * max(0.0, mult - 0.20) * 0.14
-                ),
-                latency_decay_cost_usd=float(
-                    scaled_profit * max(0.0, 1.0 - freshness_score) * 0.08
-                ),
+            scaled_profit = base_expected * mult
+            safe_curve.append(
+                SafeSizePoint(
+                    size_mult=float(mult),
+                    expected_profit_usd=float(scaled_profit),
+                    slippage_cost_usd=float(
+                        scaled_profit * slippage_sensitivity * max(0.03, mult - 0.10) * 0.14
+                    ),
+                    interference_penalty_usd=float(
+                        scaled_profit * max(mev, 0.0) * max(0.0, mult - 0.20) * 0.14
+                    ),
+                    latency_decay_cost_usd=float(
+                        scaled_profit * max(0.0, 1.0 - freshness_score) * 0.08
+                    ),
+                )
             )
-        )
     return OpportunityEnvelope(
         opportunity_id=str(getattr(opp, "id", "") or ""),
         route_id=str(getattr(opp, "route_id", "") or ""),
