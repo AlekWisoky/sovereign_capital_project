@@ -24,6 +24,15 @@ def test_jupiter_quote_parses_quote_only_response():
     assert quote.router == "metis"
     assert quote.transaction_available is False
     assert quote.platform_fee_amount == 20
+    assert quote.error_message == ""
+
+
+def test_jupiter_client_uses_explicit_discovery_taker(monkeypatch):
+    monkeypatch.setenv("JUPITER_API_KEY", "test-key")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
+    from victor_ai_bot.runtime_services.solana_jupiter import JupiterSwapV2Client
+    client = JupiterSwapV2Client()
+    assert client.default_taker == "11111111111111111111111111111111"
 
 
 def test_after_cost_profit_is_dimensionally_bounded_by_explicit_costs():
@@ -74,8 +83,8 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
 
     async def j_quote(*, input_mint, output_mint, amount, taker=None):
         if input_mint == "USDC":
-            return JupiterQuote("USDC", "SOL", amount, 1_000_000_000, "metis", "j", 10, "USDC", 0, 0, False, "ultra", None)
-        return JupiterQuote("SOL", "USDC", amount, 102_000_000, "metis", "p", 10, "USDC", 0, 0, False, "ultra", None)
+            return JupiterQuote("USDC", "SOL", amount, 1_000_000_000, "metis", "j", 10, "USDC", 0, 0, False, "ultra", None, "")
+        return JupiterQuote("SOL", "USDC", amount, 102_000_000, "metis", "p", 10, "USDC", 0, 0, False, "ultra", None, "")
 
     async def r_quote(*, input_mint, output_mint, amount):
         out_amount = 1_010_000_000 if input_mint == "USDC" else 101_000_000
