@@ -1654,8 +1654,34 @@ class RuntimePrimaryScanFacade:
             adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
             adaptive_opps = []
 
-        if adaptive_telemetry and adaptive_opps:
-            selected_telemetry = dict(adaptive_telemetry)
+        # Keep provider-comparison telemetry as the symmetric baseline, but
+        # always preserve the selected provider's adaptive pass separately.
+        # An adaptive scan can legitimately produce zero executable candidates
+        # while still producing the size/economic matrix needed to prove that
+        # the full frontier was modeled. Never let an empty opportunity list
+        # erase that evidence.
+        if adaptive_telemetry:
+            selected_telemetry = dict(selected_telemetry)
+            selected_adaptive = dict(adaptive_telemetry)
+            selected_adaptive["rpc"] = dict(selected_adaptive.get("rpc") or {})
+            selected_adaptive["rpc"].update({
+                "endpoint": selected_url,
+                "provider": str(urlsplit(selected_url).hostname or ""),
+            })
+            selected_telemetry["selected_provider_adaptive"] = selected_adaptive
+            if selected_adaptive.get("adaptive_size_discovery"):
+                selected_telemetry["adaptive_size_discovery"] = dict(
+                    selected_adaptive["adaptive_size_discovery"]
+                )
+            if "size_economic_matrix" in selected_adaptive:
+                selected_telemetry["size_economic_matrix"] = list(
+                    selected_adaptive.get("size_economic_matrix") or []
+                )
+            if "size_economic_evidence" in selected_adaptive:
+                selected_telemetry["size_economic_evidence"] = list(
+                    selected_adaptive.get("size_economic_evidence") or []
+                )
+        if adaptive_opps:
             selected_telemetry["rpc"] = dict(selected_telemetry.get("rpc") or {})
             selected_telemetry["rpc"].update({
                 "endpoint": selected_url,
