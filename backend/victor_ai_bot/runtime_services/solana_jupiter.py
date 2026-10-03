@@ -27,6 +27,7 @@ class JupiterQuote:
     transaction_available: bool
     mode: str
     error_code: int | None
+    error_message: str
 
     @classmethod
     def from_response(cls, payload: Mapping[str, Any]) -> "JupiterQuote":
@@ -39,6 +40,7 @@ class JupiterQuote:
         if not isinstance(platform, Mapping):
             platform = {}
         raw_error = payload.get("errorCode")
+        error_message = str(payload.get("errorMessage") or payload.get("error") or "")
         try:
             error_code = int(raw_error) if raw_error is not None else None
         except (TypeError, ValueError):
@@ -49,6 +51,7 @@ class JupiterQuote:
             request_id=str(payload.get("requestId") or ""), fee_bps=integer("feeBps"), fee_mint=str(payload.get("feeMint") or ""),
             platform_fee_bps=_mapping_int(platform, "feeBps"), platform_fee_amount=_mapping_int(platform, "amount"),
             transaction_available=bool(payload.get("transaction")), mode=str(payload.get("mode") or ""), error_code=error_code,
+            error_message=error_message,
         )
 
 def _mapping_int(mapping: Mapping[str, Any], key: str) -> int:
@@ -61,6 +64,7 @@ class JupiterSwapV2Client:
     """Read-only Jupiter Swap V2 meta-aggregator quote boundary."""
     def __init__(self, *, api_key: str | None = None, timeout_s: float = 8.0):
         self.api_key = str(api_key or os.getenv("JUPITER_API_KEY") or "").strip()
+        self.default_taker = str(os.getenv("VICTOR_SOLANA_JUPITER_TAKER") or "").strip()
         self.timeout_s = max(1.0, float(timeout_s))
     @property
     def configured(self) -> bool:
@@ -70,9 +74,10 @@ class JupiterSwapV2Client:
             raise JupiterNotConfigured("JUPITER_API_KEY is not configured")
         if not input_mint or not output_mint or int(amount) <= 0:
             raise ValueError("input_mint, output_mint and positive amount are required")
+        effective_taker = str(taker or self.default_taker).strip()
         params = {"inputMint": str(input_mint), "outputMint": str(output_mint), "amount": str(int(amount))}
-        if taker:
-            params["taker"] = str(taker)
+        if effective_taker:
+            params["taker"] = effective_taker
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             response = await client.get(f"{JUPITER_SWAP_V2_BASE}/order", params=params, headers={"x-api-key": self.api_key})
             response.raise_for_status()
