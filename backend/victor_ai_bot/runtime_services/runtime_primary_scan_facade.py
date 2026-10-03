@@ -1391,7 +1391,7 @@ class RuntimePrimaryScanFacade:
                             discovery_context=discovery_context,
                             telemetry_sink=telemetry,
                             shared_token_scan_amounts=shared_token_scan_amounts,
-                            force_adaptive_size_scan=force_symmetric_sizing,
+                            force_adaptive_size_scan=False,
                         )
             except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                 telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
