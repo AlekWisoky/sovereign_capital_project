@@ -109,7 +109,8 @@ class RuntimeMultiruntimeStateFacade:
             except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
                 return name, {"ok": False, "status": "unavailable", "reason_code": "market_pipeline_telemetry_unavailable", "error": str(exc)}
         pairs = await asyncio.gather(*[one(name, rt) for name, rt in self._runtimes.items()])
-        return {"ok": True, "active": self._active_chain, "chains": {k: v for k, v in pairs}, "active_chain_changed": False}
+        jupiter = self._solana_jupiter.snapshot() if hasattr(self, "_solana_jupiter") else {"status": "unavailable", "execution_authority": False}
+        return {"ok": True, "active": self._active_chain, "chains": {k: v for k, v in pairs}, "solana_jupiter": jupiter, "active_chain_changed": False}
 
     async def select_best_opportunity_readonly(self) -> dict:
         """Return global opportunity-selection evidence without changing runtime state."""
