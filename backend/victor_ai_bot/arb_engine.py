@@ -319,6 +319,7 @@ async def quote_edges_batch(
     if metrics is None:
         metrics = {}
     quote_diagnostics: Dict[str, Any] = {}
+    quote_successes_before = int(metrics.get("quote_successes", 0) or 0)
     metrics.setdefault("quote_failure_reasons", {})
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
@@ -438,7 +439,8 @@ async def quote_edges_batch(
     # observation. Attribute the residual instead of silently losing it from
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
-    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) - int(metrics.get("quote_successes", 0)))
+    batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) - batch_successes)
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
