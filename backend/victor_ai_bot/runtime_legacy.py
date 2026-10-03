@@ -60,7 +60,7 @@ from .runtime_services.runtime_tick_scan_facade import RuntimeTickScanFacade
 from .runtime_services.runtime_treasury_guidance_facade import RuntimeTreasuryGuidanceFacade
 from .runtime_services.runtime_treasury_overlay_facade import RuntimeTreasuryOverlayFacade
 from .runtime_services.runtime_unit_econ_facade import RuntimeUnitEconFacade
-from .aqe.solana.jupiter_shadow import JupiterShadowService
+from .runtime_services.jupiter_shadow import JupiterShadowService
 
 __all__ = ["RuntimeBundle", "MultiRuntimeBundle"]
 
