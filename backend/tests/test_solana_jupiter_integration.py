@@ -1,7 +1,7 @@
 import pytest
 
-from victor_ai_bot.aqe.solana.jupiter import JupiterQuote, after_cost_profit_usd, economic_frontier
-from victor_ai_bot.aqe.solana.jupiter_shadow import JupiterShadowService
+from victor_ai_bot.runtime_services.solana_jupiter import JupiterQuote, after_cost_profit_usd, economic_frontier
+from victor_ai_bot.runtime_services.jupiter_shadow import JupiterShadowService
 
 
 def test_jupiter_quote_parses_quote_only_response():
