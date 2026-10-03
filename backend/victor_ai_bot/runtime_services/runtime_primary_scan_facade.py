@@ -164,6 +164,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "gross_minus_flashloan_fee_minus_gas_wei": str(fields["gross_minus_flashloan_fee_minus_gas_wei"]),
         "repayment_valid": fields["repayment_valid"],
         "after_cost_profit_wei": str(profitability.get("profit_after_costs_wei") or "0"),
+        "after_cost_profit_usd_micro": str((meta.get("canonical_after_fee_usd") or {}).get("profit_after_costs_usd_micro") or "0"),
         "economic_after_cost_profit_wei": str(fields["economic_after_cost_profit_wei"]),
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
@@ -298,6 +299,52 @@ def _build_size_matrix_row(
         "economic_optimum_authoritative": bool(economic and economic["authoritative"]),
         "economic_optimum_executable": bool(selected),
     }
+
+
+def _attach_quote_economic_size_curves(
+    opportunities: List[Opportunity], size_matrix: List[Dict[str, Any]]
+) -> None:
+    """Attach the observed quote-derived economic frontier to each route."""
+    curves: Dict[str, List[Dict[str, Any]]] = {}
+    bases: Dict[str, int] = {}
+    for matrix_row in list(size_matrix or []):
+        for candidate in list(matrix_row.get("candidates") or []):
+            if not isinstance(candidate, dict):
+                continue
+            route_id = str(candidate.get("route_id") or "")
+            if not route_id:
+                continue
+            try:
+                candidate_amount = int(candidate.get("amount_in") or 0)
+                usd_micro = int(candidate.get("after_cost_profit_usd_micro") or 0)
+            except (TypeError, ValueError):
+                continue
+            if candidate_amount <= 0:
+                continue
+            bases[route_id] = min(bases.get(route_id, candidate_amount), candidate_amount)
+            curves.setdefault(route_id, []).append(
+                {
+                    "amount_in": candidate_amount,
+                    "after_cost_profit_usd": float(usd_micro) / 1_000_000.0,
+                }
+            )
+    for opportunity in list(opportunities or []):
+        route_id = str(getattr(opportunity, "route_id", "") or getattr(opportunity, "id", "") or "")
+        points = curves.get(route_id) or []
+        base = int(bases.get(route_id) or 0)
+        if not points or base <= 0:
+            continue
+        points.sort(key=lambda row: int(row.get("amount_in") or 0))
+        meta = getattr(opportunity, "meta", None)
+        if not isinstance(meta, dict):
+            continue
+        meta["quote_economic_size_curve"] = [
+            {
+                "size_mult": float(int(point["amount_in"]) / base),
+                "after_cost_profit_usd": float(point["after_cost_profit_usd"]),
+            }
+            for point in points[:16]
+        ]
 
 
 def _build_size_economic_matrix(size_scan_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1215,6 +1262,7 @@ class RuntimePrimaryScanFacade:
             # "no route quoted" from "route quoted but economically rejected".
             size_matrix = _build_size_economic_matrix(size_scan_records)
             telemetry["size_economic_matrix"] = size_matrix
+            _attach_quote_economic_size_curves([*opps2, *opps3], size_matrix)
 
             telemetry["adaptive_size_discovery"] = {
                 "enabled": bool(len(adaptive_amounts) > 1),
