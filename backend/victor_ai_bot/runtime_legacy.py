@@ -60,6 +60,7 @@ from .runtime_services.runtime_tick_scan_facade import RuntimeTickScanFacade
 from .runtime_services.runtime_treasury_guidance_facade import RuntimeTreasuryGuidanceFacade
 from .runtime_services.runtime_treasury_overlay_facade import RuntimeTreasuryOverlayFacade
 from .runtime_services.runtime_unit_econ_facade import RuntimeUnitEconFacade
+from .runtime_services.jupiter_shadow import JupiterShadowService
 
 __all__ = ["RuntimeBundle", "MultiRuntimeBundle"]
 
@@ -90,6 +91,7 @@ class MultiRuntimeBundle(
             cfgs = cfgs[: self.MAX_CHAINS]
         self._runtimes: Dict[str, RuntimeBundle] = {c.chain.name: RuntimeBundle(c) for c in cfgs}
         self._active_chain = cfgs[0].chain.name
+        self._solana_jupiter = JupiterShadowService()
         self._global_auto_task: asyncio.Task | None = None
         for runtime in self._runtimes.values():
             runtime._multiruntime_owner = self

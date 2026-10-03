@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 363,
+  "backend_test_file_count": 364,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -326,6 +326,7 @@
     "test_shadow_venue_discovery.py",
     "test_size_economic_matrix_diagnostics.py",
     "test_smmae_engine.py",
+    "test_solana_jupiter_integration.py",
     "test_spread_engine_hardening.py",
     "test_spread_formulas.py",
     "test_stability_maintenance.py",
@@ -1895,9 +1896,9 @@
   ],
   "runtime_bundle_definition_count": 1,
   "runtime_legacy_broad_except_count": 0,
-  "runtime_legacy_lines": 187,
-  "runtime_service_count": 104,
-  "runtime_service_module_count": 104,
+  "runtime_legacy_lines": 189,
+  "runtime_service_count": 106,
+  "runtime_service_module_count": 106,
   "runtime_services": [
     "admission_service",
     "agent_service",
@@ -1934,6 +1935,7 @@
     "family_hardening_service",
     "fund_service",
     "institutional_sizing_runtime",
+    "jupiter_shadow",
     "launch_service",
     "lifecycle_service",
     "multiruntime_opportunity_selector",
@@ -1993,6 +1995,7 @@
     "runtime_treasury_guidance_facade",
     "runtime_treasury_overlay_facade",
     "runtime_unit_econ_facade",
+    "solana_jupiter",
     "state_service",
     "state_summary_service",
     "summary_read_contract",
