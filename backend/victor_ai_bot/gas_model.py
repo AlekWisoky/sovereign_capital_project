@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Dict, Mapping
 
+from .ethabi import enc_bytes_dyn, enc_uint, selector
+
 # Conservative route-level gas model used for *ranking only*.
 # Execution still uses estimateGas/simulation gates when enabled.
 
@@ -123,6 +125,42 @@ def select_consensus_gas_price(
         "observations": fresh,
         "anomalies": anomalies,
     }
+
+
+BASE_CHAIN_ID = 8453
+BASE_GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F"
+
+
+async def estimate_base_l1_fee_wei(
+    rpc: Any,
+    calldata_hex: str,
+    *,
+    block: str = "latest",
+) -> int | None:
+    """Query Base's canonical GasPriceOracle for the exact calldata L1 fee."""
+    if not isinstance(calldata_hex, str) or not calldata_hex.startswith("0x"):
+        return None
+    try:
+        raw = bytes.fromhex(calldata_hex[2:])
+    except (TypeError, ValueError):
+        return None
+    if not raw:
+        return None
+
+    # getL1Fee(bytes): selector + ABI dynamic-bytes argument.
+    data = selector("getL1Fee(bytes)") + enc_uint(32) + enc_bytes_dyn(raw)
+    result = await rpc.eth_call(
+        BASE_GAS_PRICE_ORACLE,
+        "0x" + data.hex(),
+        block=block,
+    )
+    if not getattr(result, "ok", False) or not isinstance(getattr(result, "result", None), str):
+        return None
+    try:
+        fee = int(str(result.result), 16)
+    except (TypeError, ValueError):
+        return None
+    return fee if fee >= 0 else None
 
 
 def _gwei_to_wei(gwei: int) -> int:
