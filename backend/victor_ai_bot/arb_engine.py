@@ -1147,23 +1147,29 @@ async def find_three_leg_opportunities(
         token: {str(edge.venue).lower() for edge in items}
         for token, items in adj.items()
     }
-    for edge in pruned_edges:
-        if len(frontier_selected) >= frontier_global:
-            break
+    frontier_scored: List[Tuple[int, int, int, Edge]] = []
+    for order, edge in enumerate(pruned_edges):
         if not qmap1_3.get(edge_key(edge)):
             continue
         closes = any(
-            bool(by_pair.get((middle.token_out, edge.token_in)))
-            for middle in adj.get(edge.token_out, [])
-            if middle.token_out != edge.token_in
-        ) or any(
             bool(by_pair.get((middle.token_out, edge.token_in)))
             for middle in edges
             if middle.token_in == edge.token_out and middle.token_out != edge.token_in
         )
         if not closes:
             continue
-        venue_new = str(edge.venue).lower() not in active_venues_by_token.get(edge.token_in, set())
+        venue_new = int(
+            str(edge.venue).lower()
+            not in active_venues_by_token.get(edge.token_in, set())
+        )
+        # Successful first-leg quote is the viability gate; closure and venue
+        # diversity break ties without pretending raw token amounts are
+        # economically comparable across different output tokens.
+        frontier_scored.append((int(closes), venue_new, -order, edge))
+    frontier_scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    for _closure, _venue_new, _order, edge in frontier_scored:
+        if len(frontier_selected) >= frontier_global:
+            break
         bucket = frontier_by_token.setdefault(edge.token_in, [])
         if len(bucket) >= frontier_per_token:
             continue
