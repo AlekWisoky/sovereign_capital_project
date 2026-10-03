@@ -1071,6 +1071,8 @@ class RuntimePrimaryScanFacade:
                 rpc=rpc,
                 current_block=int(current_block),
                 cache=scan_cache,
+                observed_gas_price_wei=observed_gas_price_wei,
+                gas_price_integrity=gas_price_consensus,
             )
 
             def _candidate_profitability(candidate: Opportunity) -> Dict[str, Any]:
