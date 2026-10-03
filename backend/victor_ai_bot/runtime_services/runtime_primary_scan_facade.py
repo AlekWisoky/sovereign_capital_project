@@ -339,6 +339,8 @@ class RuntimePrimaryScanFacade:
         rpc: Any,
         current_block: int,
         cache: PerBlockCache | None = None,
+        observed_gas_price_wei: int | None = None,
+        gas_price_integrity: Dict[str, Any] | None = None,
     ) -> None:
         """Attach explicit USD value for canonical scan-time after-fee truth.
 
@@ -366,11 +368,17 @@ class RuntimePrimaryScanFacade:
             and flashloan_fee_observation.get("fee_bps") is not None
             else None
         )
-        observed_gas_price_wei: int | None = None
-        try:
-            observed_gas_price_wei = await rpc.gas_price()
-        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
-            observed_gas_price_wei = None
+        if gas_price_integrity is None:
+            try:
+                consensus = await self.rpc_manager.gas_price_consensus()
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                consensus = {"gas_price_wei": None, "status": "insufficient_agreement", "observations": [], "anomalies": []}
+            observed_gas_price_wei = (
+                int(consensus.get("gas_price_wei"))
+                if consensus.get("gas_price_wei") not in (None, "")
+                else None
+            )
+            gas_price_integrity = dict(consensus)
         for opportunity in list(opps):
             meta = opportunity.meta if isinstance(getattr(opportunity, "meta", None), dict) else {}
             if isinstance(meta, dict):
@@ -414,6 +422,23 @@ class RuntimePrimaryScanFacade:
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
                     gas_cost_in_profit_token_wei = None
 
+            if has_route_gas_inputs and observed_gas_price_wei is None:
+                state = {
+                    "stage": "scan_after_fee_revalidation",
+                    "source": "runtime_primary_scan",
+                    "reason": "gas_price_consensus_unavailable",
+                    "revalidated": False,
+                    "stale": True,
+                    "valid": False,
+                    "authoritative": False,
+                    "gross_profit_wei": str(getattr(opportunity, "expected_profit_raw", "0") or "0"),
+                    "profit_after_costs_wei": "0",
+                    "gas_cost_wei": str(max(0, gas_cost_wei)),
+                    "gas_cost_profit_token_wei": "0",
+                    "flashloan_fee_wei": "0",
+                }
+                meta["profitability_diagnostic"] = dict(state)
+                continue
             existing_profitability = meta.get("profitability")
             if (
                 isinstance(existing_profitability, dict)
@@ -769,11 +794,6 @@ class RuntimePrimaryScanFacade:
         three_leg_telemetry: Dict[str, Any] = {}
         opps2: List[Opportunity] = []
         opps3: List[Opportunity] = []
-        observed_gas_price_wei: int | None = None
-        try:
-            observed_gas_price_wei = await rpc.gas_price()
-        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
-            observed_gas_price_wei = None
         if shared_token_scan_amounts is None:
             token_scan_amounts, token_scan_telemetry = await self._build_token_scan_amounts(
                 rpc,
@@ -796,6 +816,21 @@ class RuntimePrimaryScanFacade:
                 "unpriced_tokens": [],
             }
         telemetry["scan_sizing"] = dict(token_scan_telemetry)
+        try:
+            gas_price_consensus = await self.rpc_manager.gas_price_consensus()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            gas_price_consensus = {
+                "gas_price_wei": None,
+                "status": "insufficient_agreement",
+                "observations": [],
+                "anomalies": [],
+            }
+        observed_gas_price_wei = (
+            int(gas_price_consensus.get("gas_price_wei"))
+            if gas_price_consensus.get("gas_price_wei") not in (None, "")
+            else None
+        )
+        telemetry["gas_price_integrity"] = dict(gas_price_consensus)
         try:
             size_amounts = [int(amount_in)]
             adaptive_amounts = self._adaptive_scan_amounts(int(amount_in))
@@ -908,6 +943,8 @@ class RuntimePrimaryScanFacade:
                     rpc=rpc,
                     current_block=int(current_block),
                     cache=scan_cache,
+                    observed_gas_price_wei=observed_gas_price_wei,
+                    gas_price_integrity=gas_price_integrity,
                 )
                 authoritative_positive_candidates_before_probe = (
                     _authoritative_positive_after_cost_count([*opps2, *opps3])
