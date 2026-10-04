@@ -182,6 +182,7 @@
       "backend/tests/test_quicksight_dashboards_maintenance.py",
       "backend/tests/test_quicksight_datasets_maintenance.py",
       "backend/tests/test_quicksight_runtime_maintenance.py",
+      "backend/tests/test_quote_derived_sizing.py",
       "backend/tests/test_quote_balancer_batch_diagnostics.py",
       "backend/tests/test_quote_diagnostics.py",
       "backend/tests/test_ratelimit_env.py",
@@ -678,5 +679,5 @@
     "mobile_inventory": true,
     "runtime_surface_summary": true
   },
-  "backend_test_file_count": 364
+  "backend_test_file_count": 365
 }
