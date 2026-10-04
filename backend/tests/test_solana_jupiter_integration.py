@@ -1,6 +1,11 @@
 import pytest
 
-from victor_ai_bot.runtime_services.solana_jupiter import JupiterQuote, after_cost_profit_usd, economic_frontier
+from victor_ai_bot.runtime_services.solana_jupiter import (
+    JupiterQuote,
+    JupiterQuoteHTTPError,
+    after_cost_profit_usd,
+    economic_frontier,
+)
 from victor_ai_bot.runtime_services.jupiter_shadow import JupiterShadowService
 
 
@@ -126,3 +131,9 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
     assert result["candidates"][0]["after_cost_profit_usd"] > 0
     assert result["candidates"][0]["authoritative"] is False
     assert result["execution_authority"] is False
+
+
+def test_jupiter_http_failure_preserves_status_without_body():
+    exc = JupiterQuoteHTTPError(429)
+    assert exc.status_code == 429
+    assert str(exc) == "http_429"
