@@ -64,6 +64,28 @@ def test_jupiter_shadow_is_fail_closed_without_enablement(monkeypatch):
     assert service.snapshot()["execution_authority"] is False
 
 
+def test_solana_shadow_quote_telemetry_does_not_overcount_first_quote_failure(monkeypatch):
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_ENABLED", "1")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
+    service = JupiterShadowService()
+
+    async def failing_quote(**kwargs):
+        raise ValueError("first_quote_failed")
+
+    monkeypatch.setattr(service.client, "quote", failing_quote)
+
+    import asyncio
+    row, attempts, successes, reason = asyncio.run(service._discover_direction(
+        input_mint="USDC", output_mint="SOL", input_decimals=6,
+        symbol="SOL/USDC", usd=100.0,
+        network={"usd": 0.01}, jupiter_first=True,
+    ))
+    assert row is None
+    assert attempts == 1
+    assert successes == 0
+    assert reason == "ValueError"
+
+
 @pytest.mark.asyncio
 async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_execution(monkeypatch):
     from victor_ai_bot.runtime_services.solana_jupiter import JupiterQuote
