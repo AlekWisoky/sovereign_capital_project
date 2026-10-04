@@ -7,6 +7,7 @@ from .models import Opportunity, Route, RouteLeg
 from .quote_univ3 import quote_exact_input_single, quote_exact_input_single_batch
 from .quote_curve import quote_curve, quote_curve_many
 from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_many
+from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
 from .gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from .route_encoding import EncLeg, route_id_hex
 from .opportunity_density import scan_efficiency_snapshot
@@ -324,6 +325,7 @@ async def quote_edges_batch(
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
     missing_bal: List[Tuple[int, Edge]] = []
+    missing_aero: List[Tuple[int, Edge]] = []
 
     # read cache first
     for idx, e in enumerate(edges):
@@ -340,11 +342,13 @@ async def quote_edges_batch(
             missing_curve.append((idx, e))
         elif e.dex == "balancer":
             missing_bal.append((idx, e))
+        elif e.dex == "aerodrome":
+            missing_aero.append((idx, e))
         else:
             out[ek] = None
 
-    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal)
-    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal))
+    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero)
+    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero))
     metrics.setdefault("failed_quote_edge_samples", [])
     successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
     successful_pools = metrics.setdefault("_successful_quote_pool_keys", set())
@@ -417,9 +421,29 @@ async def quote_edges_batch(
                 )
                 out[ek] = val
                 cache.set(ck, val)
+                _record_success_edge(e)
             else:
                 out[ek] = None
                 cache.set(ck, None)
+                _record_failed_edge(e)
+
+    # Aerodrome V1 batch
+    if missing_aero and getattr(cfg.chain, "aerodrome_router", ""):
+        reqs = [
+            (e.token_in, e.token_out, int(amount_in), bool(e.params.get("stable", False)), str(e.params.get("factory") or ""))
+            for _, e in missing_aero
+        ]
+        order = [e for _, e in missing_aero]
+        quotes = await quote_aerodrome_many(rpc, cfg.chain.aerodrome_router, reqs, diagnostics=quote_diagnostics)
+        for e, q in zip(order, quotes):
+            ek = edge_key(e)
+            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            out[ek] = None if q is None else (q.amount_out, {"stable": q.stable, "factory": q.factory})
+            cache.set(ck, out[ek])
+            if q is not None:
+                _record_success_edge(e)
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
+            else:
                 _record_failed_edge(e)
 
     # Balancer batch
@@ -439,6 +463,7 @@ async def quote_edges_batch(
                 val = (int(q.amount_out), {"pool_id": str(e.params.get("pool_id") or "")})
                 out[ek] = val
                 cache.set(ck, val)
+                _record_success_edge(e)
             else:
                 out[ek] = None
                 cache.set(ck, None)
@@ -453,7 +478,7 @@ async def quote_edges_batch(
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
-    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) - batch_successes)
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) - batch_successes)
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
@@ -489,6 +514,7 @@ def build_edges(
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
+    extra_aerodrome_pools: Optional[List[dict]] = None,
 ) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
@@ -581,6 +607,20 @@ def build_edges(
                     {"pool_id": p["pool_id"]},
                 )
             )
+    if getattr(cfg.chain, "aerodrome_router", ""):
+        aerodrome_pools = list(getattr(cfg.chain, "aerodrome_pools", []) or [])
+        if extra_aerodrome_pools:
+            aerodrome_pools.extend(list(extra_aerodrome_pools))
+        for p in aerodrome_pools:
+            params = {
+                "stable": bool(p.get("stable", False)),
+                "factory": str(p.get("factory") or getattr(cfg.chain, "aerodrome_default_factory", "")),
+                **({"pool": str(p.get("pool"))} if p.get("pool") else {}),
+            }
+            if not params["factory"]:
+                continue
+            edges.append(Edge("aerodrome", str(cfg.chain.aerodrome_router), p["token_in"], p["token_out"], params))
+            edges.append(Edge("aerodrome", str(cfg.chain.aerodrome_router), p["token_out"], p["token_in"], params))
     # remove empty-token curve edges if unspecified
     edges = [e for e in edges if e.token_in and e.token_out]
     # de-dupe
@@ -719,6 +759,7 @@ async def find_two_leg_opportunities(
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
+    extra_aerodrome_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -729,6 +770,7 @@ async def find_two_leg_opportunities(
         extra_v3_pairs=extra_v3_pairs,
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
+        extra_aerodrome_pools=extra_aerodrome_pools,
     )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
@@ -829,6 +871,9 @@ async def find_two_leg_opportunities(
                 aux1 = aux_curve_from_meta(meta1, e1.params)
             elif e1.dex == "balancer":
                 aux1 = str(e1.params.get("pool_id") or "0x")
+            elif e1.dex == "aerodrome":
+                raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
+                aux1 = _aux_u256_to_b32_hex(raw)
 
             aux2 = "0x"
             if e2.dex == "univ3":
@@ -837,6 +882,9 @@ async def find_two_leg_opportunities(
                 aux2 = aux_curve_from_meta(meta2, e2.params)
             elif e2.dex == "balancer":
                 aux2 = str(e2.params.get("pool_id") or "0x")
+            elif e2.dex == "aerodrome":
+                raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
+                aux2 = _aux_u256_to_b32_hex(raw)
 
             rid = route_id_hex(
                 [
@@ -1088,6 +1136,7 @@ async def find_three_leg_opportunities(
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
+    extra_aerodrome_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -1105,6 +1154,7 @@ async def find_three_leg_opportunities(
         extra_v3_pairs=extra_v3_pairs,
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
+        extra_aerodrome_pools=extra_aerodrome_pools,
     )
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
@@ -1304,6 +1354,11 @@ async def find_three_leg_opportunities(
                             return aux_curve_from_meta(meta, edge.params)
                         if edge.dex == "balancer":
                             return str(edge.params.get("pool_id") or "0x")
+                        if edge.dex == "aerodrome":
+                            factory = str(meta.get("factory", edge.params.get("factory", "")) or "")
+                            stable = bool(meta.get("stable", edge.params.get("stable", False)))
+                            raw = int(factory, 16) | ((1 if stable else 0) << 160)
+                            return _aux_u256_to_b32_hex(raw)
                         return "0x"
 
                     aux1 = _aux_for(e1, meta1)

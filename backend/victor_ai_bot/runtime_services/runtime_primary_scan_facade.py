@@ -883,6 +883,7 @@ class RuntimePrimaryScanFacade:
         extra_v3_pairs = list(discovery_context.get("v3_pairs") or [])
         extra_curve_pools = list(discovery_context.get("curve_pools") or [])
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
+        extra_aerodrome_pools = list(discovery_context.get("aerodrome_pools") or [])
 
         discovery = getattr(self, "_discovery", None)
         candidate_token_telemetry = (
@@ -918,6 +919,7 @@ class RuntimePrimaryScanFacade:
                 "v3_pairs": len(extra_v3_pairs),
                 "curve_pools": len(extra_curve_pools),
                 "balancer_pools": len(extra_balancer_pools),
+                "aerodrome_pools": len(extra_aerodrome_pools),
             },
             "candidate_token_discovery": candidate_token_telemetry,
         }
@@ -998,6 +1000,7 @@ class RuntimePrimaryScanFacade:
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
+                        extra_aerodrome_pools=extra_aerodrome_pools,
                     )
 
                 if bool(
@@ -1999,6 +2002,12 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "balancer_pools", None))
                 else []
             ),
+            "aerodrome": (
+                list(discovery.aerodrome_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "aerodrome_pools", None))
+                else []
+            ),
         }
         stages: List[Dict[str, Any]] = []
 
@@ -2072,6 +2081,7 @@ class RuntimePrimaryScanFacade:
             "v3_pairs": list(extra_v3_pairs or []),
             "curve_pools": list(venue_pools.get("curve") or []),
             "balancer_pools": list(venue_pools.get("balancer") or []),
+            "aerodrome_pools": list(venue_pools.get("aerodrome") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,

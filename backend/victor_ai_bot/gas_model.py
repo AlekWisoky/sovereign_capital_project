@@ -13,6 +13,7 @@ LEG_GAS_HEURISTICS = {
     "univ3": 120_000,  # fallback when quoter gas_estimate missing
     "curve": 160_000,
     "balancer": 200_000,
+    "aerodrome": 140_000,
 }
 
 _SAFE_META_ACCESS_EXCEPTIONS = (AttributeError, TypeError, ValueError)

@@ -338,6 +338,8 @@ class ChainConfig:
     univ3_factory: str = ""  # optional; enables bounded discovery
     univ3_swap_router: str = ""  # executor uses SwapRouter; quoting uses QuoterV2
     balancer_vault: str = ""
+    aerodrome_router: str = ""
+    aerodrome_factory_registry: str = ""
     # Canonical protocol registries used only for bounded read-only discovery.
     curve_address_provider: str = ""
     enable_venue_discovery: bool = False
@@ -356,6 +358,7 @@ class ChainConfig:
     v3_pairs: List[dict] = field(default_factory=list)
     curve_pools: List[dict] = field(default_factory=list)
     balancer_pools: List[dict] = field(default_factory=list)
+    aerodrome_pools: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -414,6 +417,7 @@ def load_config(path: str) -> AppConfig:
     v3_pairs = chain_raw.get("v3_pairs") or raw.get("v3_pairs") or []
     curve_pools = chain_raw.get("curve_pools") or raw.get("curve_pools") or []
     balancer_pools = chain_raw.get("balancer_pools") or raw.get("balancer_pools") or []
+    aerodrome_pools = chain_raw.get("aerodrome_pools") or raw.get("aerodrome_pools") or []
 
     chain = ChainConfig(
         name=name,
@@ -426,6 +430,8 @@ def load_config(path: str) -> AppConfig:
         univ3_factory=str(chain_raw.get("univ3_factory") or ""),
         univ3_swap_router=str(chain_raw.get("univ3_swap_router") or ""),
         balancer_vault=str(chain_raw.get("balancer_vault") or ""),
+        aerodrome_router=str(chain_raw.get("aerodrome_router") or ""),
+        aerodrome_factory_registry=str(chain_raw.get("aerodrome_factory_registry") or ""),
         curve_address_provider=str(chain_raw.get("curve_address_provider") or ""),
         enable_venue_discovery=bool(chain_raw.get("enable_venue_discovery", False)),
         discovery_pool_max_candidates=int(chain_raw.get("discovery_pool_max_candidates") or 24),
@@ -440,6 +446,7 @@ def load_config(path: str) -> AppConfig:
         v3_pairs=v3_pairs,
         curve_pools=curve_pools,
         balancer_pools=balancer_pools,
+        aerodrome_pools=aerodrome_pools,
     )
     sraw = raw.get("safety") or {}
     safety = SafetyConfig(

@@ -18,6 +18,7 @@ _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS = (
 )
 _ZERO_ADDRESS = "0x" + "00" * 20
 _UNIV3_POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
+_AERODROME_POOL_CREATED_TOPIC = "0x" + __import__("victor_ai_bot.ethabi", fromlist=["keccak256"]).keccak256(b"PoolCreated(address,address,bool,address,uint256)").hex()
 
 
 def _hex0x(b: bytes) -> str:
@@ -120,6 +121,26 @@ class DiscoveredCurve:
 
 
 @dataclass
+class DiscoveredAerodrome:
+    pool: str
+    token_in: str
+    token_out: str
+    stable: bool
+    factory: str
+    first_seen_block: int
+    last_seen_block: int
+
+    def to_pool(self) -> Dict[str, Any]:
+        return {
+            "pool": self.pool,
+            "token_in": self.token_in,
+            "token_out": self.token_out,
+            "stable": bool(self.stable),
+            "factory": self.factory,
+        }
+
+
+@dataclass
 class DiscoveredBalancer:
     pool_id: str
     token_in: str
@@ -158,6 +179,7 @@ class DiscoveryManager:
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
+        self._aerodrome: Dict[str, DiscoveredAerodrome] = {}
         self._candidate_tokens_observed: Dict[str, set[str]] = {}
         self._candidate_token_observation_cap = max(
             1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
@@ -243,6 +265,14 @@ class DiscoveryManager:
                         )
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
+            for it in j.get("aerodrome") or []:
+                try:
+                    da = DiscoveredAerodrome(pool=str(it.get("pool") or ""), token_in=str(it.get("token_in") or ""), token_out=str(it.get("token_out") or ""), stable=bool(it.get("stable", False)), factory=str(it.get("factory") or ""), first_seen_block=int(it.get("first_seen_block") or 0), last_seen_block=int(it.get("last_seen_block") or 0))
+                    if da.pool and da.token_in and da.token_out and da.factory:
+                        self._aerodrome[self._aerodrome_key(da.pool, da.token_in, da.token_out, da.stable, da.factory)] = da
+                        self._observe_candidate_tokens([da.token_in, da.token_out], source="aerodrome_persisted")
+                except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
+                    continue
             for it in j.get("balancer") or []:
                 try:
                     db = DiscoveredBalancer(
@@ -272,6 +302,7 @@ class DiscoveryManager:
                 "v3": [vars(v) for v in self._v3.values()],
                 "curve": [vars(v) for v in self._curve.values()],
                 "balancer": [vars(v) for v in self._balancer.values()],
+                "aerodrome": [vars(v) for v in self._aerodrome.values()],
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -293,6 +324,10 @@ class DiscoveryManager:
     def _balancer_key(pool_id: str, token_in: str, token_out: str) -> str:
         return f"{pool_id.lower()}:{token_in.lower()}:{token_out.lower()}"
 
+    @staticmethod
+    def _aerodrome_key(pool: str, token_in: str, token_out: str, stable: bool, factory: str) -> str:
+        return f"{pool.lower()}:{token_in.lower()}:{token_out.lower()}:{int(bool(stable))}:{factory.lower()}"
+
     def v3_pairs(self) -> List[Dict[str, Any]]:
         return [dv.to_pair() for dv in self._v3.values()]
 
@@ -301,6 +336,9 @@ class DiscoveryManager:
 
     def balancer_pools(self) -> List[Dict[str, Any]]:
         return [db.to_pool() for db in self._balancer.values()]
+
+    def aerodrome_pools(self) -> List[Dict[str, Any]]:
+        return [da.to_pool() for da in self._aerodrome.values()]
 
     def _venue_discovery_enabled(self, cfg: Any) -> bool:
         return bool(getattr(cfg.chain, "enable_venue_discovery", False))
@@ -359,6 +397,55 @@ class DiscoveryManager:
                 seen.add(key)
                 pairs.append((i, token_i, j, token_j))
         return pairs
+
+    async def maybe_discover_aerodrome(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
+        try:
+            router = str(getattr(cfg.chain, "aerodrome_router", "") or "")
+            if not router or not bool(getattr(cfg.flags, "enable_discovery", False)):
+                return self.aerodrome_pools()
+            interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
+            if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
+                return self.aerodrome_pools()
+            self._last_venue_run_block = int(block_number)
+            registry_call = await rpc.eth_call(router, "0x" + selector("factoryRegistry()").hex())
+            registry = _decode_address(registry_call.result) if registry_call.ok else ""
+            if not registry:
+                registry = str(getattr(cfg.chain, "aerodrome_factory_registry", "") or "")
+            if not registry:
+                return self.aerodrome_pools()
+            factories_call = await rpc.eth_call(registry, "0x" + selector("poolFactories()").hex())
+            factory_words = _decode_dynamic_array(factories_call.result, 0) if factories_call.ok else []
+            factories = ["0x" + word[-20:].hex() for word in factory_words[:16]]
+            anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
+            window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
+            max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
+            changed = False
+            for factory in factories[:16]:
+                try:
+                    logs = await rpc.eth_get_logs(address=factory, from_block=max(0, int(block_number)-window), to_block=int(block_number), topics=[_AERODROME_POOL_CREATED_TOPIC])
+                except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+                    continue
+                for log in list(logs or [])[-max_pools:]:
+                    topics = log.get("topics") if isinstance(log, dict) else None
+                    if not isinstance(topics, list) or len(topics) < 4:
+                        continue
+                    token0, token1 = _decode_address(str(topics[1] or "")), _decode_address(str(topics[2] or ""))
+                    stable = bool(int(str(topics[3] or "0"), 16))
+                    words = _words(log.get("data") if isinstance(log, dict) else "")
+                    pool = "0x" + words[0][-20:].hex() if words else ""
+                    if not token0 or not token1 or not pool or not ({token0.lower(), token1.lower()} & anchors):
+                        continue
+                    self._observe_candidate_tokens([token0, token1], source="aerodrome_pool_created")
+                    key = self._aerodrome_key(pool, token0, token1, stable, factory)
+                    if key in self._aerodrome:
+                        continue
+                    self._aerodrome[key] = DiscoveredAerodrome(pool, token0, token1, stable, factory, int(block_number), int(block_number))
+                    changed = True
+            if changed:
+                self._save()
+            return self.aerodrome_pools()
+        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+            return self.aerodrome_pools()
 
     async def maybe_discover_univ3(
         self, rpc: JsonRpcClient, cfg: Any, block_number: int
@@ -523,21 +610,35 @@ class DiscoveryManager:
 
     async def maybe_discover_venues(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> Dict[str, List[Dict[str, Any]]]:
         if not self._venue_discovery_enabled(cfg):
-            return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+            return {"curve": self.curve_pools(), "balancer": self.balancer_pools(), "aerodrome": self.aerodrome_pools()}
         interval = max(1, int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50))
         if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
-            return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+            return {"curve": self.curve_pools(), "balancer": self.balancer_pools(), "aerodrome": self.aerodrome_pools()}
         self._last_venue_run_block = int(block_number)
         changed = False
         try:
             curve_changed = await self._discover_curve(rpc, cfg, block_number)
             balancer_changed = await self._discover_balancer(rpc, cfg, block_number)
-            changed = curve_changed or balancer_changed
+            aerodrome_changed = await self._discover_aerodrome(rpc, cfg, block_number)
+            changed = curve_changed or balancer_changed or aerodrome_changed
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
         if changed:
             self._save()
         return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+
+    async def _discover_aerodrome(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
+        if not str(getattr(cfg.chain, "aerodrome_router", "") or ""):
+            return False
+        result = await self.maybe_discover_aerodrome(rpc, cfg, block_number)
+        before = len(self._aerodrome)
+        for row in result:
+            if not isinstance(row, dict):
+                continue
+            key = self._aerodrome_key(str(row.get("pool") or ""), str(row.get("token_in") or ""), str(row.get("token_out") or ""), bool(row.get("stable", False)), str(row.get("factory") or ""))
+            if key not in self._aerodrome and row.get("pool") and row.get("factory"):
+                self._aerodrome[key] = DiscoveredAerodrome(str(row["pool"]), str(row["token_in"]), str(row["token_out"]), bool(row.get("stable", False)), str(row["factory"]), int(block_number), int(block_number))
+        return len(self._aerodrome) > before
 
     async def _discover_curve(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         provider = str(getattr(cfg.chain, "curve_address_provider", "") or "")
