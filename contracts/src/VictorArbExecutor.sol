@@ -569,6 +569,25 @@ contract VictorArbExecutor {
                 uint256 out = ICamelotAlgebraSwapRouter(leg.venue).exactInputSingle(p);
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
+            } else if (leg.dex == 7) {
+                // Camelot V2: aux low 160 bits = factory. Router observes the
+                // pair's current directional fee; quote and execution use the
+                // same canonical router path.
+                _approveIfNeeded(leg.tokenIn, leg.venue, amountIn);
+                address[] memory path = new address[](2);
+                path[0] = leg.tokenIn;
+                path[1] = leg.tokenOut;
+                ICamelotV2Router(leg.venue).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    amountIn,
+                    leg.minOut,
+                    path,
+                    address(this),
+                    address(0),
+                    deadline
+                );
+                uint256 out = IERC20(leg.tokenOut).balanceOf(address(this));
+                if (out < leg.minOut) revert MinOut();
+                amountIn = out;
             } else if (leg.dex == 4) {
                 // Aerodrome V1: aux low 160 bits = factory, bit 160 = stable.
                 address factory = address(uint160(uint256(leg.aux)));
