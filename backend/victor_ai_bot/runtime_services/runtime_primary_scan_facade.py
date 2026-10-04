@@ -1008,6 +1008,7 @@ class RuntimePrimaryScanFacade:
                         extra_aerodrome_pools=extra_aerodrome_pools,
                         extra_slipstream_pools=extra_slipstream_pools,
                         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
+                        extra_camelot_v2_pools=extra_camelot_v2_pools,
                     )
 
                 if bool(
