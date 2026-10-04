@@ -516,6 +516,12 @@ class DiscoveryManager:
         allowed = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
         return [(i, t) for i, t in enumerate(tokens) if t and t.lower() in allowed]
 
+    def _research_frontier_tokens(self, cfg: Any) -> set[str]:
+        """Bounded research tokens observed from verified pools; never execution authority."""
+        anchors = {str(token).lower() for token in (getattr(cfg.chain, "token_universe", []) or []) if token}
+        cap = max(1, min(8, int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8)))
+        observed = sorted(token for token in self._candidate_tokens_observed if token not in anchors)
+        return anchors | set(observed[:cap])
     def _supported_discovery_pairs(
         self,
         cfg: Any,
@@ -531,11 +537,13 @@ class DiscoveryManager:
         cross-venue/triangle discovery is permanently blind to newly discovered
         edges.
         """
-        anchors = {
+        research_frontier = self._research_frontier_tokens(cfg)
+        execution_anchors = {
             str(token).lower()
             for token in (getattr(cfg.chain, "token_universe", []) or [])
             if token
         }
+        observed_frontier = research_frontier - execution_anchors
         liquid: List[Tuple[int, str]] = []
         for index, token in enumerate(tokens):
             normalized = str(token or "").lower()
@@ -547,17 +555,35 @@ class DiscoveryManager:
             ):
                 continue
             liquid.append((index, str(token)))
-        anchor_positions = [item for item in liquid if item[1].lower() in anchors]
-        if len(anchor_positions) < 1:
+
+        anchor_positions = [item for item in liquid if item[1].lower() in execution_anchors]
+        if not anchor_positions:
             return []
+        observed_positions = [
+            item for item in liquid if item[1].lower() in observed_frontier
+        ]
+        frontier_positions = list(dict.fromkeys(anchor_positions + observed_positions))
 
         pairs: List[Tuple[int, str, int, str]] = []
         seen: set[tuple[int, int]] = set()
-        # Anchor-to-anchor and anchor-to-discovered-token edges are both useful.
-        # Unknown-to-unknown edges are intentionally excluded to keep discovery
-        # bounded and anchored to the configured execution universe.
+
+        # Preserve the safe first-hop rule: a verified pool touching an execution
+        # anchor may reveal one new liquid token. That token is observational only.
         for i, token_i in anchor_positions:
             for j, token_j in liquid:
+                if i == j:
+                    continue
+                key = (min(i, j), max(i, j))
+                if key in seen:
+                    continue
+                seen.add(key)
+                pairs.append((i, token_i, j, token_j))
+
+        # Once tokens have been observed on verified venues, allow bounded
+        # observed-to-observed links so other venues can discover the missing
+        # cross-venue edge. Unknown-to-unknown edges remain excluded.
+        for i, token_i in frontier_positions:
+            for j, token_j in frontier_positions:
                 if i == j:
                     continue
                 key = (min(i, j), max(i, j))
@@ -585,7 +611,7 @@ class DiscoveryManager:
             factories_call = await rpc.eth_call(registry, "0x" + selector("poolFactories()").hex())
             factory_words = _decode_dynamic_array(factories_call.result, 0) if factories_call.ok else []
             factories = ["0x" + word[-20:].hex() for word in factory_words[:16]]
-            anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
+            anchors = self._research_frontier_tokens(cfg)
             window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
             max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
             changed = False
@@ -625,7 +651,7 @@ class DiscoveryManager:
             if self._last_slipstream_run_block and (int(block_number) - self._last_slipstream_run_block) < interval:
                 return self.slipstream_pools()
             self._last_slipstream_run_block = int(block_number)
-            anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
+            anchors = self._research_frontier_tokens(cfg)
             window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
             max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
             changed = False
@@ -882,11 +908,7 @@ class DiscoveryManager:
             )
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return False
-        anchors = {
-            str(token).lower()
-            for token in (getattr(cfg.chain, "token_universe", []) or [])
-            if token
-        }
+        anchors = self._research_frontier_tokens(cfg)
         changed = False
         for log in list(logs or [])[-max_pools:]:
             topics = log.get("topics") if isinstance(log, dict) else None

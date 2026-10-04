@@ -106,6 +106,27 @@ def test_discovery_venue_pairs_expand_from_anchor_to_observed_liquid_token(tmp_p
     assert pairs == [(0, anchor, 1, discovered)]
 
 
+def test_discovery_venue_pairs_cross_link_observed_frontier(tmp_path):
+    anchor = "0x" + "33" * 20
+    observed_a = "0x" + "55" * 20
+    observed_b = "0x" + "66" * 20
+    manager = DiscoveryManager(chain_name="base", data_dir=str(tmp_path))
+    cfg = _cfg(chain={"token_universe": [anchor]})
+    manager._observe_candidate_tokens([anchor, observed_a], source="verified_venue_a")
+    manager._observe_candidate_tokens([anchor, observed_b], source="verified_venue_b")
+
+    pairs = manager._supported_discovery_pairs(
+        cfg,
+        [anchor, observed_a, observed_b],
+        [10**18, 10**18, 10**18],
+    )
+
+    assert (1, observed_a, 2, observed_b) in pairs or (2, observed_b, 1, observed_a) in pairs
+    assert observed_a not in {
+        str(token).lower() for token in cfg.chain.token_universe
+    }
+
+
 def test_discovery_venue_pairs_ignore_unanchored_unknown_tokens(tmp_path):
     anchor = "0x" + "33" * 20
     discovered_a = "0x" + "55" * 20
