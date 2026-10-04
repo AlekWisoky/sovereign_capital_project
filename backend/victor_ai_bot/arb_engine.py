@@ -10,6 +10,7 @@ from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_man
 from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
 from .quote_slipstream import quote_slipstream, quote_slipstream_many
 from .quote_camelot_algebra import quote_camelot_algebra, quote_camelot_algebra_many
+from .quote_camelot_v2 import quote_camelot_v2, quote_camelot_v2_many
 from .gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from .route_encoding import EncLeg, route_id_hex
 from .opportunity_density import scan_efficiency_snapshot
