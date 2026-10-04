@@ -57,7 +57,6 @@
   ],
   "backend_test_file_count": 373,
   "backend_test_files": [
-    "backend/tests/test_camelot_v2_venue.py",
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
     "test_agent_hub_maintenance.py",
@@ -91,6 +90,7 @@
     "test_camelot_algebra_quote.py",
     "test_camelot_algebra_route_execution.py",
     "test_camelot_algebra_scan_wiring.py",
+    "test_camelot_v2_venue.py",
     "test_candidate_token_discovery_telemetry.py",
     "test_canonical_omar_closed_loop.py",
     "test_canonical_omar_decision_context.py",
