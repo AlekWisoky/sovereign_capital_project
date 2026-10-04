@@ -64,6 +64,22 @@ interface ISwapRouterV3 {
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
+interface IAerodromeRouter {
+    struct Route {
+        address from;
+        address to;
+        bool stable;
+        address factory;
+    }
+    function swapExactTokensForTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        Route[] calldata routes,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
+}
+
 interface IBalancerVault {
     enum SwapKind { GIVEN_IN, GIVEN_OUT }
     struct SingleSwap {
@@ -100,7 +116,7 @@ contract VictorArbExecutor {
 
     // --- types ---
     struct Leg {
-        uint8 dex;            // 1=univ3, 2=curve, 3=balancer
+        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome
         address venue;        // router/pool/vault
         address tokenIn;
         address tokenOut;
@@ -480,6 +496,28 @@ contract VictorArbExecutor {
                     toInternalBalance: false
                 });
                 uint256 out = balancerVault.swap(s, f, leg.minOut, deadline);
+                if (out < leg.minOut) revert MinOut();
+                amountIn = out;
+            } else if (leg.dex == 4) {
+                // Aerodrome V1: aux low 160 bits = factory, bit 160 = stable.
+                address factory = address(uint160(uint256(leg.aux)));
+                bool stable = ((uint256(leg.aux) >> 160) & 0x1) == 1;
+                _approveIfNeeded(leg.tokenIn, leg.venue, amountIn);
+                IAerodromeRouter.Route[] memory routes = new IAerodromeRouter.Route[](1);
+                routes[0] = IAerodromeRouter.Route({
+                    from: leg.tokenIn,
+                    to: leg.tokenOut,
+                    stable: stable,
+                    factory: factory
+                });
+                uint256[] memory amounts = IAerodromeRouter(leg.venue).swapExactTokensForTokens(
+                    amountIn,
+                    leg.minOut,
+                    routes,
+                    address(this),
+                    deadline
+                );
+                uint256 out = amounts[amounts.length - 1];
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
             } else {
