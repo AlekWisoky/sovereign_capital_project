@@ -946,6 +946,7 @@ async def find_two_leg_opportunities(
         extra_aerodrome_pools=extra_aerodrome_pools,
         extra_slipstream_pools=extra_slipstream_pools,
         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
+        extra_camelot_v2_pools=extra_camelot_v2_pools,
     )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
