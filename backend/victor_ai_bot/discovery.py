@@ -420,17 +420,19 @@ class DiscoveryManager:
             ):
                 continue
             liquid.append((index, str(token)))
-        anchor_positions = [item for item in liquid if item[1].lower() in anchors]
-        if len(anchor_positions) < 1:
+        frontier_positions = [item for item in liquid if item[1].lower() in anchors]
+        if len(frontier_positions) < 1:
             return []
 
         pairs: List[Tuple[int, str, int, str]] = []
         seen: set[tuple[int, int]] = set()
-        # Anchor-to-anchor and anchor-to-discovered-token edges are both useful.
-        # Unknown-to-unknown edges are intentionally excluded to keep discovery
-        # bounded and anchored to the configured execution universe.
-        for i, token_i in anchor_positions:
-            for j, token_j in liquid:
+        # The research frontier contains only execution anchors plus tokens
+        # previously observed on verified/liquid venues. Allowing frontier-to-
+        # frontier edges is what turns discovery into a cross-venue graph rather
+        # than a collection of anchor spokes. Unobserved/unadmitted tokens remain
+        # excluded, and the execution token universe is never mutated.
+        for i, token_i in frontier_positions:
+            for j, token_j in frontier_positions:
                 if i == j:
                     continue
                 key = (min(i, j), max(i, j))
