@@ -14,6 +14,7 @@ LEG_GAS_HEURISTICS = {
     "curve": 160_000,
     "balancer": 200_000,
     "aerodrome": 140_000,
+    "slipstream": 165_000,
 }
 
 _SAFE_META_ACCESS_EXCEPTIONS = (AttributeError, TypeError, ValueError)
