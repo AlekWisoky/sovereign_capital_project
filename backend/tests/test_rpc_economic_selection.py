@@ -405,7 +405,7 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
             "gas_cost_estimate_wei": "0",
             "profitability": {
                 "revalidated": True,
-                "authoritative": False,
+                "authoritative": True,
                 "valid": True,
                 "profit_after_costs_wei": "-250",
                 "gas_cost_wei": "0",
