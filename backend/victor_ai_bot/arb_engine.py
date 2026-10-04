@@ -354,6 +354,8 @@ async def quote_edges_batch(
             missing_slipstream.append((idx, e))
         elif e.dex == "camelot_algebra":
             missing_camelot_algebra.append((idx, e))
+        elif e.dex == "camelot_v2":
+            missing_camelot_v2.append((idx, e))
         else:
             out[ek] = None
 
