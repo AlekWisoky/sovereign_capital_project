@@ -346,6 +346,10 @@ class ChainConfig:
     slipstream_quoter_v2: str = ""
     slipstream_swap_router: str = ""
     slipstream_factories: List[str] = field(default_factory=list)
+    camelot_algebra_factory: str = ""
+    camelot_algebra_quoter_v2: str = ""
+    camelot_algebra_swap_router: str = ""
+    camelot_algebra_pools: List[dict] = field(default_factory=list)
     # Canonical protocol registries used only for bounded read-only discovery.
     curve_address_provider: str = ""
     enable_venue_discovery: bool = False
@@ -365,7 +369,6 @@ class ChainConfig:
     curve_pools: List[dict] = field(default_factory=list)
     balancer_pools: List[dict] = field(default_factory=list)
     aerodrome_pools: List[dict] = field(default_factory=list)
-    slipstream_pools: List[dict] = field(default_factory=list)
     slipstream_pools: List[dict] = field(default_factory=list)
 
 
