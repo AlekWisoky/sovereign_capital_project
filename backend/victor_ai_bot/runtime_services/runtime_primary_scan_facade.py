@@ -1031,6 +1031,9 @@ class RuntimePrimaryScanFacade:
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
+                        extra_aerodrome_pools=extra_aerodrome_pools,
+                        extra_slipstream_pools=extra_slipstream_pools,
+                        extra_camelot_algebra_pools=extra_camelot_algebra_pools,
                     )
                 return list(two), list(three), two_metrics, three_metrics
 
