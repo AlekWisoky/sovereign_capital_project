@@ -346,6 +346,18 @@ async def quote_edges_batch(
     metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal)
     metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal))
     metrics.setdefault("failed_quote_edge_samples", [])
+    successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
+    successful_pools = metrics.setdefault("_successful_quote_pool_keys", set())
+    successful_pairs = metrics.setdefault("_successful_quote_pair_keys", set())
+
+    def _record_success_edge(edge: Edge) -> None:
+        if isinstance(successful_edges, set):
+            successful_edges.add(edge_key(edge))
+        if isinstance(successful_pools, set):
+            pool = str(edge.params.get("pool") or edge.params.get("pool_id") or edge.venue or "").lower()
+            successful_pools.add(f"{edge.dex}:{pool}")
+        if isinstance(successful_pairs, set):
+            successful_pairs.add(f"{edge.token_in.lower()}:{edge.token_out.lower()}")
 
     def _record_failed_edge(edge: Edge) -> None:
         samples = metrics["failed_quote_edge_samples"]
@@ -372,6 +384,7 @@ async def quote_edges_batch(
                 )
                 out[ek] = val
                 cache.set(ck, val)
+                _record_success_edge(e)
             else:
                 out[ek] = None
                 cache.set(ck, None)
@@ -448,6 +461,8 @@ async def quote_edges_batch(
         )
     metrics["quote_failure_reasons"] = failure_counts
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
+    # Coverage sets intentionally persist across all quote batches for a scan;
+    # the caller finalizes them once after both first- and second-leg phases.
     metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
     metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
     # ensure all are present
@@ -455,6 +470,17 @@ async def quote_edges_batch(
         ek = edge_key(e)
         out.setdefault(ek, None)
     return out
+
+
+def _finalize_quote_coverage(metrics: Dict[str, Any]) -> None:
+    for public_name, internal_name in (
+        ("successful_quote_edge_count", "_successful_quote_edge_keys"),
+        ("successful_quote_pool_count", "_successful_quote_pool_keys"),
+        ("successful_quote_pair_count", "_successful_quote_pair_keys"),
+    ):
+        values = metrics.get(internal_name)
+        metrics[public_name] = int(len(values)) if isinstance(values, set) else 0
+        metrics.pop(internal_name, None)
 
 
 def build_edges(
@@ -955,6 +981,8 @@ async def find_two_leg_opportunities(
                     },
                 )
             )
+    _finalize_quote_coverage(metrics)
+    _finalize_quote_coverage(metrics)
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
