@@ -577,6 +577,7 @@ contract VictorArbExecutor {
                 address[] memory path = new address[](2);
                 path[0] = leg.tokenIn;
                 path[1] = leg.tokenOut;
+                uint256 beforeOut = IERC20(leg.tokenOut).balanceOf(address(this));
                 ICamelotV2Router(leg.venue).swapExactTokensForTokensSupportingFeeOnTransferTokens(
                     amountIn,
                     leg.minOut,
@@ -585,7 +586,9 @@ contract VictorArbExecutor {
                     address(0),
                     deadline
                 );
-                uint256 out = IERC20(leg.tokenOut).balanceOf(address(this));
+                uint256 afterOut = IERC20(leg.tokenOut).balanceOf(address(this));
+                if (afterOut < beforeOut) revert MinOut();
+                uint256 out = afterOut - beforeOut;
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
             } else if (leg.dex == 4) {
