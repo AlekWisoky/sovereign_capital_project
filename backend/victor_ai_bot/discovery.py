@@ -410,6 +410,7 @@ class DiscoveryManager:
                 "aerodrome": [vars(v) for v in self._aerodrome.values()],
                 "slipstream": [vars(v) for v in self._slipstream.values()],
                 "camelot_algebra": [vars(v) for v in self._camelot_algebra.values()],
+                "camelot_v2": [vars(v) for v in self._camelot_v2.values()],
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
