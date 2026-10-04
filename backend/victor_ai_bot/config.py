@@ -445,9 +445,6 @@ def load_config(path: str) -> AppConfig:
         slipstream_quoter_v2=str(chain_raw.get("slipstream_quoter_v2") or ""),
         slipstream_swap_router=str(chain_raw.get("slipstream_swap_router") or ""),
         slipstream_factories=[str(x) for x in _as_list(chain_raw.get("slipstream_factories") or []) if x],
-        slipstream_quoter_v2=str(chain_raw.get("slipstream_quoter_v2") or ""),
-        slipstream_swap_router=str(chain_raw.get("slipstream_swap_router") or ""),
-        slipstream_factories=[str(x) for x in _as_list(chain_raw.get("slipstream_factories") or []) if x],
         curve_address_provider=str(chain_raw.get("curve_address_provider") or ""),
         enable_venue_discovery=bool(chain_raw.get("enable_venue_discovery", False)),
         discovery_pool_max_candidates=int(chain_raw.get("discovery_pool_max_candidates") or 24),
@@ -463,7 +460,6 @@ def load_config(path: str) -> AppConfig:
         curve_pools=curve_pools,
         balancer_pools=balancer_pools,
         aerodrome_pools=aerodrome_pools,
-        slipstream_pools=slipstream_pools,
         slipstream_pools=slipstream_pools,
     )
     sraw = raw.get("safety") or {}
