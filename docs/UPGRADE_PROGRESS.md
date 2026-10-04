@@ -399,4 +399,4 @@ Validation:
 - Added native int24 tickSpacing QuoterV2 and SwapRouter execution support.
 - Preserved the research-universe versus execution-universe boundary.
 - Wired Slipstream into route construction, observed sizing/economics, gas pricing, canonical route identity, and guarded executor legs.
-- Added regression coverage for quote encoding, discovery verification, and executor calldata.
+- Added regression coverage for quote encoding, discovery verification, executor calldata, and the bumped executor implementation version.
