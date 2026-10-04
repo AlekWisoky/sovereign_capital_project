@@ -42,7 +42,8 @@ from .ethabi import keccak256
 DexType = Literal["univ3", "curve", "balancer", "aerodrome", "slipstream", "camelot_algebra", "camelot_v2"]
 
 
-DEX_ID = {
+DEX_ID = {    "constant_product": 8,
+
     "univ3": 1,
     "curve": 2,
     "balancer": 3,
