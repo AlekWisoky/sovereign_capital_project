@@ -17,6 +17,16 @@ chain:
   univ3_quoter_v2: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e'
   univ3_factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984'
   univ3_swap_router: '0xE592427A0AEce92De3Edee1F18E0157C05861564'
+  # UniswapV2-compatible Ethereum venues. Discovery remains bounded by
+  # token_universe/frontier and only verified getPair pools enter the route graph.
+  constant_product_venues:
+  - name: uniswap_v2
+    factory: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f'
+    router: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'
+  - name: sushiswap_v2
+    factory: '0xC0AEe478e3658e2610c5F7A4A2E1777ce9e4f2Ac'
+    router: '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F'
+  constant_product_pools: []
   aave_v3_pool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'
   balancer_vault: '0xba12222222228d8ba445958a75a0704d566bf2c8'
   curve_address_provider: '0x0000000022D53366457F9d5E68Ec105046FC4383'
