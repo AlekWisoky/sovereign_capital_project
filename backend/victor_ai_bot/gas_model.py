@@ -16,6 +16,7 @@ LEG_GAS_HEURISTICS = {
     "aerodrome": 140_000,
     "slipstream": 165_000,
     "camelot_algebra": 170_000,
+    "camelot_v2": 125_000,
 }
 
 _SAFE_META_ACCESS_EXCEPTIONS = (AttributeError, TypeError, ValueError)

@@ -91,6 +91,17 @@ interface ICamelotAlgebraSwapRouter {
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
+interface ICamelotV2Router {
+    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        address referrer,
+        uint256 deadline
+    ) external;
+}
+
 interface IAerodromeRouter {
     struct Route {
         address from;
@@ -143,7 +154,7 @@ contract VictorArbExecutor {
 
     // --- types ---
     struct Leg {
-        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra
+        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra, 7=Camelot V2
         address venue;        // router/pool/vault
         address tokenIn;
         address tokenOut;
@@ -556,6 +567,28 @@ contract VictorArbExecutor {
                     limitSqrtPrice: 0
                 });
                 uint256 out = ICamelotAlgebraSwapRouter(leg.venue).exactInputSingle(p);
+                if (out < leg.minOut) revert MinOut();
+                amountIn = out;
+            } else if (leg.dex == 7) {
+                // Camelot V2: aux low 160 bits = factory. Router observes the
+                // pair's current directional fee; quote and execution use the
+                // same canonical router path.
+                _approveIfNeeded(leg.tokenIn, leg.venue, amountIn);
+                address[] memory path = new address[](2);
+                path[0] = leg.tokenIn;
+                path[1] = leg.tokenOut;
+                uint256 beforeOut = IERC20(leg.tokenOut).balanceOf(address(this));
+                ICamelotV2Router(leg.venue).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    amountIn,
+                    leg.minOut,
+                    path,
+                    address(this),
+                    address(0),
+                    deadline
+                );
+                uint256 afterOut = IERC20(leg.tokenOut).balanceOf(address(this));
+                if (afterOut < beforeOut) revert MinOut();
+                uint256 out = afterOut - beforeOut;
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
             } else if (leg.dex == 4) {

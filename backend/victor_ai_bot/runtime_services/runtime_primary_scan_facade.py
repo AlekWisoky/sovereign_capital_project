@@ -886,6 +886,7 @@ class RuntimePrimaryScanFacade:
         extra_aerodrome_pools = list(discovery_context.get("aerodrome_pools") or [])
         extra_slipstream_pools = list(discovery_context.get("slipstream_pools") or [])
         extra_camelot_algebra_pools = list(discovery_context.get("camelot_algebra_pools") or [])
+        extra_camelot_v2_pools = list(discovery_context.get("camelot_v2_pools") or [])
 
         discovery = getattr(self, "_discovery", None)
         candidate_token_telemetry = (
@@ -1007,6 +1008,7 @@ class RuntimePrimaryScanFacade:
                         extra_aerodrome_pools=extra_aerodrome_pools,
                         extra_slipstream_pools=extra_slipstream_pools,
                         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
+                        extra_camelot_v2_pools=extra_camelot_v2_pools,
                     )
 
                 if bool(
@@ -2029,6 +2031,12 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "camelot_algebra_pools", None))
                 else []
             ),
+            "camelot_v2": (
+                list(discovery.camelot_v2_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "camelot_v2_pools", None))
+                else []
+            ),
         }
         stages: List[Dict[str, Any]] = []
 
@@ -2105,6 +2113,7 @@ class RuntimePrimaryScanFacade:
             "aerodrome_pools": list(venue_pools.get("aerodrome") or []),
             "slipstream_pools": list(venue_pools.get("slipstream") or []),
             "camelot_algebra_pools": list(venue_pools.get("camelot_algebra") or []),
+            "camelot_v2_pools": list(venue_pools.get("camelot_v2") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,

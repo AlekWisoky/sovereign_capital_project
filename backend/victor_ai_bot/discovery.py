@@ -183,6 +183,24 @@ class DiscoveredCamelotAlgebra:
 
 
 @dataclass
+class DiscoveredCamelotV2:
+    pool: str
+    token_in: str
+    token_out: str
+    factory: str
+    first_seen_block: int
+    last_seen_block: int
+
+    def to_pool(self) -> Dict[str, Any]:
+        return {
+            "pool": self.pool,
+            "token_in": self.token_in,
+            "token_out": self.token_out,
+            "factory": self.factory,
+        }
+
+
+@dataclass
 class DiscoveredBalancer:
     pool_id: str
     token_in: str
@@ -221,12 +239,14 @@ class DiscoveryManager:
         self._last_aerodrome_run_block: int = 0
         self._last_slipstream_run_block: int = 0
         self._last_camelot_algebra_run_block: int = 0
+        self._last_camelot_v2_run_block: int = 0
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
         self._aerodrome: Dict[str, DiscoveredAerodrome] = {}
         self._slipstream: Dict[str, DiscoveredSlipstream] = {}
         self._camelot_algebra: Dict[str, DiscoveredCamelotAlgebra] = {}
+        self._camelot_v2: Dict[str, DiscoveredCamelotV2] = {}
         self._candidate_tokens_observed: Dict[str, set[str]] = {}
         self._candidate_token_observation_cap = max(
             1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
@@ -344,6 +364,21 @@ class DiscoveryManager:
                         self._observe_candidate_tokens([dc.token_in, dc.token_out], source="camelot_algebra_persisted")
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
+            for it in j.get("camelot_v2") or []:
+                try:
+                    dc = DiscoveredCamelotV2(
+                        pool=str(it.get("pool") or ""),
+                        token_in=str(it.get("token_in") or ""),
+                        token_out=str(it.get("token_out") or ""),
+                        factory=str(it.get("factory") or ""),
+                        first_seen_block=int(it.get("first_seen_block") or 0),
+                        last_seen_block=int(it.get("last_seen_block") or 0),
+                    )
+                    if dc.pool and dc.token_in and dc.token_out and dc.factory:
+                        self._camelot_v2[f"{dc.pool.lower()}:{dc.token_in.lower()}:{dc.token_out.lower()}:{dc.factory.lower()}"] = dc
+                        self._observe_candidate_tokens([dc.token_in, dc.token_out], source="camelot_v2_persisted")
+                except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
+                    continue
             for it in j.get("balancer") or []:
                 try:
                     db = DiscoveredBalancer(
@@ -376,6 +411,7 @@ class DiscoveryManager:
                 "aerodrome": [vars(v) for v in self._aerodrome.values()],
                 "slipstream": [vars(v) for v in self._slipstream.values()],
                 "camelot_algebra": [vars(v) for v in self._camelot_algebra.values()],
+                "camelot_v2": [vars(v) for v in self._camelot_v2.values()],
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -426,6 +462,9 @@ class DiscoveryManager:
 
     def camelot_algebra_pools(self) -> List[Dict[str, Any]]:
         return [dc.to_pool() for dc in self._camelot_algebra.values()]
+
+    def camelot_v2_pools(self) -> List[Dict[str, Any]]:
+        return [dc.to_pool() for dc in self._camelot_v2.values()]
 
     def _venue_discovery_enabled(self, cfg: Any) -> bool:
         return bool(getattr(cfg.chain, "enable_venue_discovery", False))
@@ -590,6 +629,43 @@ class DiscoveryManager:
             return self.slipstream_pools()
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return self.slipstream_pools()
+
+    async def maybe_discover_camelot_v2(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
+        try:
+            factory = str(getattr(cfg.chain, "camelot_v2_factory", "") or "")
+            if not factory or not bool(getattr(cfg.flags, "enable_discovery", False)):
+                return self.camelot_v2_pools()
+            interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
+            if getattr(self, "_last_camelot_v2_run_block", 0) and int(block_number) - int(self._last_camelot_v2_run_block) < interval:
+                return self.camelot_v2_pools()
+            self._last_camelot_v2_run_block = int(block_number)
+            tokens = [str(t) for t in (getattr(cfg.chain, "token_universe", []) or []) if t]
+            max_calls = max(1, int(getattr(cfg.chain, "discovery_max_calls", 24) or 24))
+            pairs: List[Tuple[str, str]] = []
+            for i, token_a in enumerate(tokens):
+                for token_b in tokens[i + 1:]:
+                    pairs.append((token_a, token_b))
+            pairs = pairs[:max_calls]
+            sel = selector("getPair(address,address)")
+            changed = False
+            for token_a, token_b in pairs:
+                result = await rpc.eth_call(factory, _hex0x(sel + enc_address(token_a) + enc_address(token_b)))
+                if not result.ok:
+                    continue
+                pool = _decode_address(result.result)
+                if not pool or pool.lower() == _ZERO_ADDRESS.lower():
+                    continue
+                self._observe_candidate_tokens([token_a, token_b], source="camelot_v2_pair")
+                key = f"{pool.lower()}:{token_a.lower()}:{token_b.lower()}:{factory.lower()}"
+                if key in self._camelot_v2:
+                    continue
+                self._camelot_v2[key] = DiscoveredCamelotV2(pool, token_a, token_b, factory, int(block_number), int(block_number))
+                changed = True
+            if changed:
+                self._save()
+            return self.camelot_v2_pools()
+        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+            return self.camelot_v2_pools()
 
     async def maybe_discover_camelot_algebra(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
         try:
@@ -810,6 +886,7 @@ class DiscoveryManager:
                 "aerodrome": self.aerodrome_pools(),
                 "slipstream": self.slipstream_pools(),
                 "camelot_algebra": self.camelot_algebra_pools(),
+                "camelot_v2": self.camelot_v2_pools(),
             }
         changed = False
         try:
@@ -818,7 +895,8 @@ class DiscoveryManager:
             aerodrome_changed = await self._discover_aerodrome(rpc, cfg, block_number)
             slipstream_changed = await self._discover_slipstream(rpc, cfg, block_number)
             camelot_algebra_changed = await self._discover_camelot_algebra(rpc, cfg, block_number)
-            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed
+            camelot_v2_changed = await self._discover_camelot_v2(rpc, cfg, block_number)
+            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed or camelot_v2_changed
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return {
                 "curve": self.curve_pools(),
@@ -826,6 +904,7 @@ class DiscoveryManager:
                 "aerodrome": self.aerodrome_pools(),
                 "slipstream": self.slipstream_pools(),
                 "camelot_algebra": self.camelot_algebra_pools(),
+                "camelot_v2": self.camelot_v2_pools(),
             }
         if changed:
             self._save()
@@ -835,7 +914,24 @@ class DiscoveryManager:
             "aerodrome": self.aerodrome_pools(),
             "slipstream": self.slipstream_pools(),
             "camelot_algebra": self.camelot_algebra_pools(),
+            "camelot_v2": self.camelot_v2_pools(),
         }
+
+    async def _discover_camelot_v2(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
+        if not str(getattr(cfg.chain, "camelot_v2_factory", "") or ""):
+            return False
+        result = await self.maybe_discover_camelot_v2(rpc, cfg, block_number)
+        before = len(self._camelot_v2)
+        for row in result:
+            if not isinstance(row, dict):
+                continue
+            key = f"{str(row.get('pool') or '').lower()}:{str(row.get('token_in') or '').lower()}:{str(row.get('token_out') or '').lower()}:{str(row.get('factory') or '').lower()}"
+            if key not in self._camelot_v2 and row.get("pool") and row.get("factory"):
+                self._camelot_v2[key] = DiscoveredCamelotV2(
+                    str(row["pool"]), str(row["token_in"]), str(row["token_out"]),
+                    str(row["factory"]), int(block_number), int(block_number)
+                )
+        return len(self._camelot_v2) > before
 
     async def _discover_camelot_algebra(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         if not str(getattr(cfg.chain, "camelot_algebra_quoter_v2", "") or "") or not str(getattr(cfg.chain, "camelot_algebra_factory", "") or ""):

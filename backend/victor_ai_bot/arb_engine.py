@@ -10,6 +10,7 @@ from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_man
 from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
 from .quote_slipstream import quote_slipstream, quote_slipstream_many
 from .quote_camelot_algebra import quote_camelot_algebra, quote_camelot_algebra_many
+from .quote_camelot_v2 import quote_camelot_v2, quote_camelot_v2_many
 from .gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from .route_encoding import EncLeg, route_id_hex
 from .opportunity_density import scan_efficiency_snapshot
@@ -295,7 +296,7 @@ def _route_universe_snapshot(
                 ),
                 "params": {
                     str(k): v for k, v in dict(edge.params or {}).items()
-                    if str(k) in {"fee", "pool", "pool_id", "i", "j", "underlying"}
+                    if str(k) in {"fee", "pool", "pool_id", "factory", "i", "j", "underlying", "tick_spacing"}
                 },
             }
             for edge in pruned[:80]
@@ -330,6 +331,7 @@ async def quote_edges_batch(
     missing_aero: List[Tuple[int, Edge]] = []
     missing_slipstream: List[Tuple[int, Edge]] = []
     missing_camelot_algebra: List[Tuple[int, Edge]] = []
+    missing_camelot_v2: List[Tuple[int, Edge]] = []
 
     # read cache first
     for idx, e in enumerate(edges):
@@ -352,11 +354,13 @@ async def quote_edges_batch(
             missing_slipstream.append((idx, e))
         elif e.dex == "camelot_algebra":
             missing_camelot_algebra.append((idx, e))
+        elif e.dex == "camelot_v2":
+            missing_camelot_v2.append((idx, e))
         else:
             out[ek] = None
 
-    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream)
-    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero))
+    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) + len(missing_camelot_v2)
+    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero)) + int(bool(missing_slipstream)) + int(bool(missing_camelot_algebra)) + int(bool(missing_camelot_v2))
     metrics.setdefault("failed_quote_edge_samples", [])
     successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
     successful_pools = metrics.setdefault("_successful_quote_pool_keys", set())
@@ -505,6 +509,29 @@ async def quote_edges_batch(
                 cache.set(ck, None)
                 _record_failed_edge(e)
 
+    # Camelot V2 constant-product batch. Router getAmountsOut is canonical and
+    # captures the pair's current directional fee rather than assuming a fixed
+    # fee in the economic model.
+    if missing_camelot_v2 and getattr(cfg.chain, "camelot_v2_router", ""):
+        reqs = [(e.token_in, e.token_out, int(amount_in)) for _, e in missing_camelot_v2]
+        order = [e for _, e in missing_camelot_v2]
+        quotes = await quote_camelot_v2_many(
+            rpc, cfg.chain.camelot_v2_router, reqs, diagnostics=quote_diagnostics
+        )
+        for e, q in zip(order, quotes):
+            ek = edge_key(e)
+            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
+                val = (int(q.amount_out), {"fee_model": "router_observed", "pool": str(e.params.get("pool") or "")})
+                out[ek] = val
+                cache.set(ck, val)
+                _record_success_edge(e)
+            else:
+                out[ek] = None
+                cache.set(ck, None)
+                _record_failed_edge(e)
+
     # Balancer batch
     if missing_bal and getattr(cfg.chain, "balancer_vault", ""):
         reqs = []
@@ -537,7 +564,7 @@ async def quote_edges_batch(
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
-    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) - batch_successes)
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) + len(missing_camelot_v2) - batch_successes)
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
@@ -576,6 +603,7 @@ def build_edges(
     extra_aerodrome_pools: Optional[List[dict]] = None,
     extra_slipstream_pools: Optional[List[dict]] = None,
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
+    extra_camelot_v2_pools: Optional[List[dict]] = None,
 ) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
@@ -715,6 +743,20 @@ def build_edges(
             venue = str(getattr(cfg.chain, "camelot_algebra_swap_router", "") or getattr(cfg.chain, "camelot_algebra_quoter_v2", ""))
             edges.append(Edge("camelot_algebra", venue, p["token_in"], p["token_out"], params))
             edges.append(Edge("camelot_algebra", venue, p["token_out"], p["token_in"], params))
+    if getattr(cfg.chain, "camelot_v2_router", ""):
+        camelot_v2_pools = list(getattr(cfg.chain, "camelot_v2_pools", []) or [])
+        if extra_camelot_v2_pools:
+            camelot_v2_pools.extend(list(extra_camelot_v2_pools))
+        for p in camelot_v2_pools:
+            factory = str(p.get("factory") or getattr(cfg.chain, "camelot_v2_factory", "") or "")
+            if not factory:
+                continue
+            params = {"factory": factory}
+            if p.get("pool"):
+                params["pool"] = str(p.get("pool"))
+            venue = str(cfg.chain.camelot_v2_router)
+            edges.append(Edge("camelot_v2", venue, p["token_in"], p["token_out"], params))
+            edges.append(Edge("camelot_v2", venue, p["token_out"], p["token_in"], params))
 
     # remove empty-token curve edges if unspecified
     edges = [e for e in edges if e.token_in and e.token_out]
@@ -890,6 +932,7 @@ async def find_two_leg_opportunities(
     extra_aerodrome_pools: Optional[List[dict]] = None,
     extra_slipstream_pools: Optional[List[dict]] = None,
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
+    extra_camelot_v2_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -903,6 +946,7 @@ async def find_two_leg_opportunities(
         extra_aerodrome_pools=extra_aerodrome_pools,
         extra_slipstream_pools=extra_slipstream_pools,
         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
+        extra_camelot_v2_pools=extra_camelot_v2_pools,
     )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
@@ -1010,6 +1054,8 @@ async def find_two_leg_opportunities(
                 aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
             elif e1.dex == "camelot_algebra":
                 aux1 = "0x"
+            elif e1.dex == "camelot_v2":
+                aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
 
             aux2 = "0x"
             if e2.dex == "univ3":
@@ -1025,6 +1071,8 @@ async def find_two_leg_opportunities(
                 aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
             elif e2.dex == "camelot_algebra":
                 aux2 = "0x"
+            elif e2.dex == "camelot_v2":
+                aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
 
             rid = route_id_hex(
                 [

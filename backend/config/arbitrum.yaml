@@ -20,6 +20,8 @@ chain:
   camelot_algebra_factory: '0x1a3c9B1d2F0529D97f2afC5136Cc23e58f1FD35B'
   camelot_algebra_quoter_v2: '0x0Fc73040b26E9bC8514fA028D998E73A254Fa76E'
   camelot_algebra_swap_router: '0x1F721E2E82F6676FCE4eA07A5958cF098D339e18'
+  camelot_v2_factory: '0x6EcCab422D763aC031210895C81787E87B43A652'
+  camelot_v2_router: '0xc873fEcbd354f5A56E00E710B90EF4201db2448d'
   curve_address_provider: '0x0000000022D53366457F9d5E68Ec105046FC4383'
   enable_venue_discovery: true
   discovery_pool_max_candidates: 48
