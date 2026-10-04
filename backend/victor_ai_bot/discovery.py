@@ -19,6 +19,7 @@ _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS = (
 _ZERO_ADDRESS = "0x" + "00" * 20
 _UNIV3_POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 _AERODROME_POOL_CREATED_TOPIC = "0x" + __import__("victor_ai_bot.ethabi", fromlist=["keccak256"]).keccak256(b"PoolCreated(address,address,bool,address,uint256)").hex()
+_SLIPSTREAM_POOL_CREATED_TOPIC = "0x" + __import__("victor_ai_bot.ethabi", fromlist=["keccak256"]).keccak256(b"PoolCreated(address,address,int24,address)").hex()
 
 
 def _hex0x(b: bytes) -> str:
@@ -141,6 +142,26 @@ class DiscoveredAerodrome:
 
 
 @dataclass
+class DiscoveredSlipstream:
+    pool: str
+    token_in: str
+    token_out: str
+    tick_spacing: int
+    factory: str
+    first_seen_block: int
+    last_seen_block: int
+
+    def to_pool(self) -> Dict[str, Any]:
+        return {
+            "pool": self.pool,
+            "token_in": self.token_in,
+            "token_out": self.token_out,
+            "tick_spacing": int(self.tick_spacing),
+            "factory": self.factory,
+        }
+
+
+@dataclass
 class DiscoveredBalancer:
     pool_id: str
     token_in: str
@@ -180,6 +201,7 @@ class DiscoveryManager:
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
         self._aerodrome: Dict[str, DiscoveredAerodrome] = {}
+        self._slipstream: Dict[str, DiscoveredSlipstream] = {}
         self._candidate_tokens_observed: Dict[str, set[str]] = {}
         self._candidate_token_observation_cap = max(
             1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
@@ -273,6 +295,14 @@ class DiscoveryManager:
                         self._observe_candidate_tokens([da.token_in, da.token_out], source="aerodrome_persisted")
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
+            for it in j.get("slipstream") or []:
+                try:
+                    ds = DiscoveredSlipstream(pool=str(it.get("pool") or ""), token_in=str(it.get("token_in") or ""), token_out=str(it.get("token_out") or ""), tick_spacing=int(it.get("tick_spacing") or 0), factory=str(it.get("factory") or ""), first_seen_block=int(it.get("first_seen_block") or 0), last_seen_block=int(it.get("last_seen_block") or 0))
+                    if ds.pool and ds.token_in and ds.token_out and ds.tick_spacing > 0 and ds.factory:
+                        self._slipstream[self._slipstream_key(ds.pool, ds.token_in, ds.token_out, ds.tick_spacing, ds.factory)] = ds
+                        self._observe_candidate_tokens([ds.token_in, ds.token_out], source="slipstream_persisted")
+                except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
+                    continue
             for it in j.get("balancer") or []:
                 try:
                     db = DiscoveredBalancer(
@@ -303,6 +333,7 @@ class DiscoveryManager:
                 "curve": [vars(v) for v in self._curve.values()],
                 "balancer": [vars(v) for v in self._balancer.values()],
                 "aerodrome": [vars(v) for v in self._aerodrome.values()],
+                "slipstream": [vars(v) for v in self._slipstream.values()],
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -339,6 +370,13 @@ class DiscoveryManager:
 
     def aerodrome_pools(self) -> List[Dict[str, Any]]:
         return [da.to_pool() for da in self._aerodrome.values()]
+
+    @staticmethod
+    def _slipstream_key(pool: str, token_in: str, token_out: str, tick_spacing: int, factory: str) -> str:
+        return f"{pool.lower()}:{token_in.lower()}:{token_out.lower()}:{int(tick_spacing)}:{factory.lower()}"
+
+    def slipstream_pools(self) -> List[Dict[str, Any]]:
+        return [ds.to_pool() for ds in self._slipstream.values()]
 
     def _venue_discovery_enabled(self, cfg: Any) -> bool:
         return bool(getattr(cfg.chain, "enable_venue_discovery", False))
@@ -446,6 +484,63 @@ class DiscoveryManager:
             return self.aerodrome_pools()
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return self.aerodrome_pools()
+
+    async def maybe_discover_slipstream(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
+        try:
+            factories = [str(x) for x in (getattr(cfg.chain, "slipstream_factories", []) or []) if x]
+            if not factories or not bool(getattr(cfg.flags, "enable_discovery", False)):
+                return self.slipstream_pools()
+            interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
+            if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
+                return self.slipstream_pools()
+            self._last_venue_run_block = int(block_number)
+            anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
+            window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
+            max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
+            changed = False
+            for factory in factories[:8]:
+                try:
+                    logs = await rpc.eth_get_logs(
+                        address=factory,
+                        from_block=max(0, int(block_number) - window),
+                        to_block=int(block_number),
+                        topics=[_SLIPSTREAM_POOL_CREATED_TOPIC],
+                    )
+                except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+                    continue
+                for log in list(logs or [])[-max_pools:]:
+                    topics = log.get("topics") if isinstance(log, dict) else None
+                    if not isinstance(topics, list) or len(topics) < 4:
+                        continue
+                    token0 = _decode_address(str(topics[1] or ""))
+                    token1 = _decode_address(str(topics[2] or ""))
+                    try:
+                        raw_spacing = int(str(topics[3] or "0"), 16)
+                        tick_spacing = raw_spacing - (1 << 256) if raw_spacing >= (1 << 255) else raw_spacing
+                    except (TypeError, ValueError):
+                        continue
+                    words = _words(log.get("data") if isinstance(log, dict) else "")
+                    pool = "0x" + words[0][-20:].hex() if words else ""
+                    if not token0 or not token1 or not pool or tick_spacing <= 0 or not ({token0.lower(), token1.lower()} & anchors):
+                        continue
+                    is_pool_data = "0x" + selector("isPool(address)").hex() + enc_address(pool).hex()
+                    membership = await rpc.eth_call(factory, is_pool_data)
+                    if not membership.ok or not isinstance(membership.result, str) or int(membership.result, 16) == 0:
+                        continue
+                    liquidity = await rpc.eth_call(pool, "0x" + selector("liquidity()").hex())
+                    if not liquidity.ok or not isinstance(liquidity.result, str) or int(liquidity.result, 16) <= 0:
+                        continue
+                    self._observe_candidate_tokens([token0, token1], source="slipstream_pool_created")
+                    key = self._slipstream_key(pool, token0, token1, tick_spacing, factory)
+                    if key in self._slipstream:
+                        continue
+                    self._slipstream[key] = DiscoveredSlipstream(pool, token0, token1, tick_spacing, factory, int(block_number), int(block_number))
+                    changed = True
+            if changed:
+                self._save()
+            return self.slipstream_pools()
+        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+            return self.slipstream_pools()
 
     async def maybe_discover_univ3(
         self, rpc: JsonRpcClient, cfg: Any, block_number: int
