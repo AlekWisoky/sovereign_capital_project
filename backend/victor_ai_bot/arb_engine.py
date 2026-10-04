@@ -360,7 +360,7 @@ async def quote_edges_batch(
             out[ek] = None
 
     metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) + len(missing_camelot_v2)
-    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero))
+    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero)) + int(bool(missing_slipstream)) + int(bool(missing_camelot_algebra)) + int(bool(missing_camelot_v2))
     metrics.setdefault("failed_quote_edge_samples", [])
     successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
     successful_pools = metrics.setdefault("_successful_quote_pool_keys", set())
