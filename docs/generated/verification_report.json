@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 365,
+    "test_file_count": 368,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -544,9 +544,9 @@
       ]
     }
   },
-  "generated_at": "2026-09-29T19:58:05.285000Z",
-  "generated_at_iso": "2026-09-29T19:58:05.285000Z",
-  "generated_at_ms": 1790711885285,
+  "generated_at": "2026-10-04T05:53:50.848Z",
+  "generated_at_iso": "2026-10-04T05:53:50.848Z",
+  "generated_at_ms": 1791093230848,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
