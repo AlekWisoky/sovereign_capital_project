@@ -410,7 +410,6 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
                 "flashloan_fee_wei": "0",
             },
             "venues": ["univ3"],
-            },
         },
     )
     await runtime._annotate_canonical_after_fee_usd(
