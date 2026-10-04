@@ -159,15 +159,25 @@ class JupiterShadowService:
         jupiter_first: bool,
     ) -> tuple[dict[str, Any] | None, int, int, str | None]:
         amount = int(round(usd * (10 ** input_decimals)))
+        attempts = 0
+        successes = 0
         try:
             if jupiter_first:
+                attempts += 1
                 first = await self.client.quote(input_mint=input_mint, output_mint=output_mint, amount=amount)
+                successes += 1
+                attempts += 1
                 second = await self.raydium.quote(input_mint=output_mint, output_mint=input_mint, amount=int(first.out_amount))
+                successes += 1
             else:
+                attempts += 1
                 first = await self.raydium.quote(input_mint=input_mint, output_mint=output_mint, amount=amount)
+                successes += 1
+                attempts += 1
                 second = await self.client.quote(input_mint=output_mint, output_mint=input_mint, amount=int(first.out_amount))
+                successes += 1
             if int(first.out_amount) <= 0 or int(second.out_amount) <= 0:
-                return None, 2, 2, "zero_output"
+                return None, attempts, successes, "zero_output"
             final_raw = int(second.out_amount)
             profit_usd = (final_raw - amount) / float(10 ** input_decimals)
             after_cost_usd = profit_usd - float(network.get("usd") or 0.0)
@@ -197,9 +207,9 @@ class JupiterShadowService:
                     "jupiter_router": second.router, "jupiter_fee_bps": second.fee_bps,
                     "jupiter_platform_fee_bps": second.platform_fee_bps, "raydium_price_impact_pct": first.price_impact_pct,
                 })
-            return row, 2, 2, None
+            return row, attempts, successes, None
         except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError) as exc:
-            return None, 2, 1, type(exc).__name__
+            return None, attempts, successes, type(exc).__name__
 
     async def discover(self) -> dict[str, Any]:
         if not self.enabled:
