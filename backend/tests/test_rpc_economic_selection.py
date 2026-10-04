@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from victor_ai_bot.cache import PerBlockCache
 from victor_ai_bot.rpc_manager import RpcManager
 from victor_ai_bot.rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import RuntimePrimaryScanFacade
@@ -380,3 +381,72 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
     assert shared.meta["canonical_after_fee_usd"]["profit_after_costs_usd_micro"] == 300
     assert shared.meta["quote_provider"] == "rpc-b.example"
     assert result["selected_endpoint"] == "https://rpc-b.example"
+
+
+@pytest.mark.asyncio
+async def test_canonical_after_fee_usd_preserves_negative_observed_economics(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cache = PerBlockCache()
+    runtime.cfg = SimpleNamespace(
+        execution=SimpleNamespace(
+            usd_accounting_enabled=True,
+            usd_stable_preference="usdc",
+            flash_provider="aave",
+        ),
+        chain=SimpleNamespace(chain_id=1),
+    )
+
+    class _Rpc:
+        async def gas_price(self):
+            return 1
+
+    async def fake_flash(*args, **kwargs):
+        return {"ok": True, "fee_bps": 9}
+
+    async def fake_usd(*args, **kwargs):
+        assert kwargs["amount_wei"] == 250
+        return 500
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.observe_flashloan_fee_bps",
+        fake_flash,
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.token_to_usd_micro",
+        fake_usd,
+    )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.estimate_route_gas_units",
+        lambda meta: 0,
+    )
+    async def fake_gas(*args, **kwargs):
+        return 0
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.gas_wei_to_token_wei",
+        fake_gas,
+    )
+
+    opportunity = SimpleNamespace(
+        expected_profit_raw="-250",
+        route=SimpleNamespace(
+            legs=[SimpleNamespace(token_in="0xprofit", token_out="0xother", amount_in=1000, min_out=1, dex="univ3", venue="test")],
+        ),
+        meta={
+            "gas_cost_estimate_wei": "0",
+            "profitability": {
+                "revalidated": True,
+                "authoritative": True,
+                "valid": True,
+                "profit_after_costs_wei": "-250",
+                "gas_cost_wei": "0",
+                "flashloan_fee_wei": "0",
+            },
+            "venues": ["univ3"],
+        },
+    )
+    await runtime._annotate_canonical_after_fee_usd(
+        opps=[opportunity],
+        rpc=_Rpc(),
+        current_block=1,
+    )
+    assert opportunity.meta["canonical_after_fee_usd"]["profit_after_costs_usd_micro"] == "-500"

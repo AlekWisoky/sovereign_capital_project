@@ -638,7 +638,7 @@ class RuntimePrimaryScanFacade:
                 continue
             meta["profitability"] = dict(state)
             profit_after_wei = int(state.get("profit_after_costs_wei") or 0)
-            if profit_after_wei <= 0 or not usd_enabled:
+            if profit_after_wei == 0 or not usd_enabled:
                 continue
             try:
                 profit_token = str(opportunity.route.legs[0].token_in)
@@ -648,14 +648,15 @@ class RuntimePrimaryScanFacade:
                 rpc,
                 chain=self.cfg.chain,
                 token=profit_token,
-                amount_wei=profit_after_wei,
+                amount_wei=abs(profit_after_wei),
                 block_number=int(current_block),
                 cache=scan_cache,
                 preference=preference,
             )
             if usd_after is None or int(usd_after) <= 0:
                 continue
-            state["profit_after_costs_usd_micro"] = int(usd_after)
+            signed_usd_after = int(usd_after) if profit_after_wei > 0 else -int(usd_after)
+            state["profit_after_costs_usd_micro"] = int(signed_usd_after)
             meta["profitability"] = dict(state)
             safety = meta.get("safety") if isinstance(meta.get("safety"), dict) else {}
             safety["profit_after_costs_usd_micro"] = str(int(usd_after))
@@ -666,7 +667,7 @@ class RuntimePrimaryScanFacade:
                 "source": "quote_derived_canonical_after_fee",
                 "profit_token": profit_token,
                 "profit_after_costs_wei": str(profit_after_wei),
-                "profit_after_costs_usd_micro": str(int(usd_after)),
+                "profit_after_costs_usd_micro": str(int(signed_usd_after)),
                 "block_number": int(current_block),
             }
 
