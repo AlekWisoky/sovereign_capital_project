@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from victor_ai_bot.cache import PerBlockCache
 from victor_ai_bot.rpc_manager import RpcManager
 from victor_ai_bot.rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import RuntimePrimaryScanFacade
