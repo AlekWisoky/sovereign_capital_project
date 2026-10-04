@@ -331,6 +331,7 @@ async def quote_edges_batch(
     missing_aero: List[Tuple[int, Edge]] = []
     missing_slipstream: List[Tuple[int, Edge]] = []
     missing_camelot_algebra: List[Tuple[int, Edge]] = []
+    missing_camelot_v2: List[Tuple[int, Edge]] = []
 
     # read cache first
     for idx, e in enumerate(edges):
