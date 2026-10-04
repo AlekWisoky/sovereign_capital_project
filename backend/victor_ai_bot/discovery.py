@@ -809,6 +809,7 @@ class DiscoveryManager:
                 "balancer": self.balancer_pools(),
                 "aerodrome": self.aerodrome_pools(),
                 "slipstream": self.slipstream_pools(),
+                "camelot_algebra": self.camelot_algebra_pools(),
             }
         changed = False
         try:
@@ -816,13 +817,15 @@ class DiscoveryManager:
             balancer_changed = await self._discover_balancer(rpc, cfg, block_number)
             aerodrome_changed = await self._discover_aerodrome(rpc, cfg, block_number)
             slipstream_changed = await self._discover_slipstream(rpc, cfg, block_number)
-            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed
+            camelot_algebra_changed = await self._discover_camelot_algebra(rpc, cfg, block_number)
+            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return {
                 "curve": self.curve_pools(),
                 "balancer": self.balancer_pools(),
                 "aerodrome": self.aerodrome_pools(),
                 "slipstream": self.slipstream_pools(),
+                "camelot_algebra": self.camelot_algebra_pools(),
             }
         if changed:
             self._save()
@@ -831,7 +834,21 @@ class DiscoveryManager:
             "balancer": self.balancer_pools(),
             "aerodrome": self.aerodrome_pools(),
             "slipstream": self.slipstream_pools(),
+            "camelot_algebra": self.camelot_algebra_pools(),
         }
+
+    async def _discover_camelot_algebra(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
+        if not str(getattr(cfg.chain, "camelot_algebra_quoter_v2", "") or "") or not str(getattr(cfg.chain, "camelot_algebra_factory", "") or ""):
+            return False
+        result = await self.maybe_discover_camelot_algebra(rpc, cfg, block_number)
+        before = len(self._camelot_algebra)
+        for row in result:
+            if not isinstance(row, dict):
+                continue
+            key = self._camelot_algebra_key(str(row.get("pool") or ""), str(row.get("token_in") or ""), str(row.get("token_out") or ""), str(row.get("factory") or ""))
+            if key not in self._camelot_algebra and row.get("pool") and row.get("factory"):
+                self._camelot_algebra[key] = DiscoveredCamelotAlgebra(str(row["pool"]), str(row["token_in"]), str(row["token_out"]), int(row.get("tick_spacing") or 0), str(row["factory"]), int(block_number), int(block_number))
+        return len(self._camelot_algebra) > before
 
     async def _discover_slipstream(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         if not str(getattr(cfg.chain, "slipstream_quoter_v2", "") or ""):
