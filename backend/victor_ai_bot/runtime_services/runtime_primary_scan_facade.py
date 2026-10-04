@@ -2029,6 +2029,12 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "camelot_algebra_pools", None))
                 else []
             ),
+            "camelot_v2": (
+                list(discovery.camelot_v2_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "camelot_v2_pools", None))
+                else []
+            ),
         }
         stages: List[Dict[str, Any]] = []
 
