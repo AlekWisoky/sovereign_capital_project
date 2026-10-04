@@ -1,6 +1,11 @@
 import pytest
 
-from victor_ai_bot.runtime_services.solana_jupiter import JupiterQuote, after_cost_profit_usd, economic_frontier
+from victor_ai_bot.runtime_services.solana_jupiter import (
+    JupiterQuote,
+    JupiterQuoteHTTPError,
+    after_cost_profit_usd,
+    economic_frontier,
+)
 from victor_ai_bot.runtime_services.jupiter_shadow import JupiterShadowService
 
 
@@ -126,3 +131,31 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
     assert result["candidates"][0]["after_cost_profit_usd"] > 0
     assert result["candidates"][0]["authoritative"] is False
     assert result["execution_authority"] is False
+
+
+def test_jupiter_http_failure_preserves_status_without_body():
+    exc = JupiterQuoteHTTPError(429)
+    assert exc.status_code == 429
+    assert str(exc) == "http_429"
+
+
+@pytest.mark.asyncio
+async def test_solana_shadow_preserves_jupiter_http_status(monkeypatch):
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_ENABLED", "1")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
+    service = JupiterShadowService()
+
+    async def failing_quote(**kwargs):
+        from victor_ai_bot.runtime_services.solana_jupiter import JupiterQuoteHTTPError
+        raise JupiterQuoteHTTPError(400)
+
+    monkeypatch.setattr(service.client, "quote", failing_quote)
+    row, attempts, successes, reason = await service._discover_direction(
+        input_mint="USDC", output_mint="SOL", input_decimals=6,
+        symbol="SOL/USDC", usd=100.0,
+        network={"usd": 0.01}, jupiter_first=True,
+    )
+    assert row is None
+    assert attempts == 1
+    assert successes == 0
+    assert reason == "http_400"

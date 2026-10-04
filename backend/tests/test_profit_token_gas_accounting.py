@@ -119,3 +119,20 @@ async def test_scan_revalidation_wires_converted_gas_into_profitability(monkeypa
     assert state["authoritative"] is True
     assert state["gas_cost_profit_token_wei"] == "1000"
     assert state["profit_after_costs_wei"] == "10000"
+
+
+def test_build_profitability_state_preserves_signed_gross_diagnostic():
+    from victor_ai_bot.profitability_state import build_profitability_state
+
+    state = build_profitability_state(
+        stage="scan",
+        source="test",
+        reason="non_positive_gross_profit",
+        revalidated=True,
+        stale=False,
+        valid=False,
+        gross_profit_wei=-123,
+        profit_after_costs_wei=-456,
+    )
+    assert state["gross_profit_wei"] == "-123"
+    assert state["profit_after_costs_wei"] == "-456"

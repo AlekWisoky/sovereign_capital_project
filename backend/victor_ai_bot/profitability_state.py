@@ -274,7 +274,7 @@ def build_profitability_state(
         "stale": bool(stale),
         "valid": bool(valid),
         "authoritative": bool(revalidated and valid and not stale),
-        "gross_profit_wei": str(max(0, int(gross_profit_wei))),
+        "gross_profit_wei": str(int(gross_profit_wei)),
         "expected_profit_usd": float(expected_profit_usd or 0.0),
         "profit_after_costs_wei": str(int(profit_after_costs_wei)),
         "economic_profit_after_costs_wei": str(
