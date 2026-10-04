@@ -629,6 +629,43 @@ class DiscoveryManager:
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return self.slipstream_pools()
 
+    async def maybe_discover_camelot_v2(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
+        try:
+            factory = str(getattr(cfg.chain, "camelot_v2_factory", "") or "")
+            if not factory or not bool(getattr(cfg.flags, "enable_discovery", False)):
+                return self.camelot_v2_pools()
+            interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
+            if getattr(self, "_last_camelot_v2_run_block", 0) and int(block_number) - int(self._last_camelot_v2_run_block) < interval:
+                return self.camelot_v2_pools()
+            self._last_camelot_v2_run_block = int(block_number)
+            tokens = [str(t) for t in (getattr(cfg.chain, "token_universe", []) or []) if t]
+            max_calls = max(1, int(getattr(cfg.chain, "discovery_max_calls", 24) or 24))
+            pairs: List[Tuple[str, str]] = []
+            for i, token_a in enumerate(tokens):
+                for token_b in tokens[i + 1:]:
+                    pairs.append((token_a, token_b))
+            pairs = pairs[:max_calls]
+            sel = selector("getPair(address,address)")
+            changed = False
+            for token_a, token_b in pairs:
+                result = await rpc.eth_call(factory, _hex0x(sel + enc_address(token_a) + enc_address(token_b)))
+                if not result.ok:
+                    continue
+                pool = _decode_address(result.result)
+                if not pool or pool.lower() == _ZERO_ADDRESS.lower():
+                    continue
+                self._observe_candidate_tokens([token_a, token_b], source="camelot_v2_pair")
+                key = f"{pool.lower()}:{token_a.lower()}:{token_b.lower()}:{factory.lower()}"
+                if key in self._camelot_v2:
+                    continue
+                self._camelot_v2[key] = DiscoveredCamelotV2(pool, token_a, token_b, factory, int(block_number), int(block_number))
+                changed = True
+            if changed:
+                self._save()
+            return self.camelot_v2_pools()
+        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+            return self.camelot_v2_pools()
+
     async def maybe_discover_camelot_algebra(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
         try:
             factory = str(getattr(cfg.chain, "camelot_algebra_factory", "") or "")
