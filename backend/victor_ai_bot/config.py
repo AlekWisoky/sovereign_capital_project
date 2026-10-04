@@ -433,7 +433,7 @@ def load_config(path: str) -> AppConfig:
     balancer_pools = chain_raw.get("balancer_pools") or raw.get("balancer_pools") or []
     aerodrome_pools = chain_raw.get("aerodrome_pools") or raw.get("aerodrome_pools") or []
     slipstream_pools = chain_raw.get("slipstream_pools") or raw.get("slipstream_pools") or []
-    slipstream_pools = chain_raw.get("slipstream_pools") or raw.get("slipstream_pools") or []
+    camelot_v2_pools = chain_raw.get("camelot_v2_pools") or raw.get("camelot_v2_pools") or []
 
     chain = ChainConfig(
         name=name,
