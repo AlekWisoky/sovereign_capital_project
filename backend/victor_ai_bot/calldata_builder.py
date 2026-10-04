@@ -47,6 +47,7 @@ DEX_ID = {
     "slipstream": 5,
     "camelot_algebra": 6,
     "camelot_v2": 7,
+    "constant_product": 8,
 }
 
 

@@ -887,6 +887,7 @@ class RuntimePrimaryScanFacade:
         extra_slipstream_pools = list(discovery_context.get("slipstream_pools") or [])
         extra_camelot_algebra_pools = list(discovery_context.get("camelot_algebra_pools") or [])
         extra_camelot_v2_pools = list(discovery_context.get("camelot_v2_pools") or [])
+        extra_constant_product_pools = list(discovery_context.get("constant_product_pools") or [])
 
         discovery = getattr(self, "_discovery", None)
         candidate_token_telemetry = (
@@ -925,6 +926,7 @@ class RuntimePrimaryScanFacade:
                 "aerodrome_pools": len(extra_aerodrome_pools),
                 "slipstream_pools": len(extra_slipstream_pools),
                 "camelot_algebra_pools": len(extra_camelot_algebra_pools),
+            "constant_product_pools": len(extra_constant_product_pools),
             },
             "candidate_token_discovery": candidate_token_telemetry,
         }
@@ -1009,6 +1011,7 @@ class RuntimePrimaryScanFacade:
                         extra_slipstream_pools=extra_slipstream_pools,
                         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
                         extra_camelot_v2_pools=extra_camelot_v2_pools,
+                        extra_constant_product_pools=extra_constant_product_pools,
                     )
 
                 if bool(
@@ -1036,6 +1039,7 @@ class RuntimePrimaryScanFacade:
                         extra_aerodrome_pools=extra_aerodrome_pools,
                         extra_slipstream_pools=extra_slipstream_pools,
                         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
+                        extra_constant_product_pools=extra_constant_product_pools,
                     )
                 return list(two), list(three), two_metrics, three_metrics
 
@@ -2037,6 +2041,7 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "camelot_v2_pools", None))
                 else []
             ),
+            "constant_product": [v.to_pool() for v in getattr(discovery, "_constant_product", {}).values()] if discovery is not None else [],
         }
         stages: List[Dict[str, Any]] = []
 
@@ -2114,6 +2119,7 @@ class RuntimePrimaryScanFacade:
             "slipstream_pools": list(venue_pools.get("slipstream") or []),
             "camelot_algebra_pools": list(venue_pools.get("camelot_algebra") or []),
             "camelot_v2_pools": list(venue_pools.get("camelot_v2") or []),
+            "constant_product_pools": list(venue_pools.get("constant_product") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,

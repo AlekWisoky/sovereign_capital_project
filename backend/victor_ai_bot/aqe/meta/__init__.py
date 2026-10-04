@@ -9,4 +9,13 @@ Additive module that:
 This module does NOT mutate core engine architecture.
 """
 
-from .runtime import MetaStrategyRuntime
+__all__ = ["MetaStrategyRuntime"]
+
+
+def __getattr__(name: str):
+    if name == "MetaStrategyRuntime":
+        # Lazy import avoids the package-initialization cycle: alpha_marketplace.intake
+        # imports aqe.meta.types while meta.runtime imports alpha_marketplace.intake.
+        from .runtime import MetaStrategyRuntime
+        return MetaStrategyRuntime
+    raise AttributeError(name)

@@ -201,6 +201,28 @@ class DiscoveredCamelotV2:
 
 
 @dataclass
+class DiscoveredConstantProduct:
+    pool: str
+    token_in: str
+    token_out: str
+    factory: str
+    router: str
+    venue_name: str
+    first_seen_block: int
+    last_seen_block: int
+
+    def to_pool(self) -> Dict[str, Any]:
+        return {
+            "pool": self.pool,
+            "token_in": self.token_in,
+            "token_out": self.token_out,
+            "factory": self.factory,
+            "router": self.router,
+            "venue_name": self.venue_name,
+        }
+
+
+@dataclass
 class DiscoveredBalancer:
     pool_id: str
     token_in: str
@@ -240,6 +262,7 @@ class DiscoveryManager:
         self._last_slipstream_run_block: int = 0
         self._last_camelot_algebra_run_block: int = 0
         self._last_camelot_v2_run_block: int = 0
+        self._last_constant_product_run_block: int = 0
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
@@ -247,6 +270,7 @@ class DiscoveryManager:
         self._slipstream: Dict[str, DiscoveredSlipstream] = {}
         self._camelot_algebra: Dict[str, DiscoveredCamelotAlgebra] = {}
         self._camelot_v2: Dict[str, DiscoveredCamelotV2] = {}
+        self._constant_product: Dict[str, DiscoveredConstantProduct] = {}
         self._candidate_tokens_observed: Dict[str, set[str]] = {}
         self._candidate_token_observation_cap = max(
             1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
@@ -379,6 +403,24 @@ class DiscoveryManager:
                         self._observe_candidate_tokens([dc.token_in, dc.token_out], source="camelot_v2_persisted")
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
+            for it in j.get("constant_product") or []:
+                try:
+                    dv = DiscoveredConstantProduct(
+                        pool=str(it.get("pool") or ""),
+                        token_in=str(it.get("token_in") or ""),
+                        token_out=str(it.get("token_out") or ""),
+                        factory=str(it.get("factory") or ""),
+                        router=str(it.get("router") or ""),
+                        venue_name=str(it.get("venue_name") or ""),
+                        first_seen_block=int(it.get("first_seen_block") or 0),
+                        last_seen_block=int(it.get("last_seen_block") or 0),
+                    )
+                    if dv.pool and dv.token_in and dv.token_out and dv.factory and dv.router and dv.venue_name:
+                        key = f"{dv.venue_name.lower()}:{dv.pool.lower()}:{dv.token_in.lower()}:{dv.token_out.lower()}"
+                        self._constant_product[key] = dv
+                        self._observe_candidate_tokens([dv.token_in, dv.token_out], source=f"{dv.venue_name}_persisted")
+                except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
+                    continue
             for it in j.get("balancer") or []:
                 try:
                     db = DiscoveredBalancer(
@@ -412,6 +454,7 @@ class DiscoveryManager:
                 "slipstream": [vars(v) for v in self._slipstream.values()],
                 "camelot_algebra": [vars(v) for v in self._camelot_algebra.values()],
                 "camelot_v2": [vars(v) for v in self._camelot_v2.values()],
+                "constant_product": [vars(v) for v in self._constant_product.values()],
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -878,6 +921,70 @@ class DiscoveryManager:
             self._save()
         return changed
 
+    async def maybe_discover_constant_product(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> List[Dict[str, Any]]:
+        try:
+            venues = [v for v in (getattr(cfg.chain, "constant_product_venues", []) or []) if isinstance(v, dict)]
+            if not venues or not bool(getattr(cfg.flags, "enable_discovery", False)):
+                return [v.to_pool() for v in self._constant_product.values()]
+            interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
+            if self._last_constant_product_run_block and int(block_number) - self._last_constant_product_run_block < interval:
+                return [v.to_pool() for v in self._constant_product.values()]
+            self._last_constant_product_run_block = int(block_number)
+            anchors = [str(t) for t in (getattr(cfg.chain, "token_universe", []) or []) if t]
+            observed = sorted(self._candidate_tokens_observed.keys())
+            anchor_set = {a.lower() for a in anchors}
+            frontier_cap = max(1, min(8, int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8)))
+            tokens = anchors + [t for t in observed if t.lower() not in anchor_set][:frontier_cap]
+            max_calls = max(1, int(getattr(cfg.chain, "discovery_max_calls", 24) or 24))
+            per_venue_calls = max(4, max_calls // max(1, len(venues)))
+            changed = False
+
+            for venue in venues:
+                factory = str(venue.get("factory") or "")
+                router = str(venue.get("router") or "")
+                name = str(venue.get("name") or "").strip().lower()
+                if not factory or not router or not name:
+                    continue
+                pairs: List[Tuple[str, str]] = []
+                for i, token_a in enumerate(tokens):
+                    for token_b in tokens[i + 1:]:
+                        pairs.append((token_a, token_b))
+                        if len(pairs) >= per_venue_calls:
+                            break
+                    if len(pairs) >= per_venue_calls:
+                        break
+                if not pairs:
+                    continue
+                selector_get_pair = selector("getPair(address,address)")
+                calls = [
+                    {
+                        "to": factory,
+                        "data": _hex0x(selector_get_pair + enc_address(a) + enc_address(b)),
+                    }
+                    for a, b in pairs
+                ]
+                results = await rpc.eth_call_batch(calls)
+                for (token_a, token_b), result in zip(pairs, results):
+                    if not result.ok:
+                        continue
+                    pool = _decode_address(result.result)
+                    if not pool or pool.lower() == _ZERO_ADDRESS.lower():
+                        continue
+                    self._observe_candidate_tokens([token_a, token_b], source=f"{name}_pair")
+                    key = f"{name}:{pool.lower()}:{token_a.lower()}:{token_b.lower()}"
+                    if key in self._constant_product:
+                        continue
+                    self._constant_product[key] = DiscoveredConstantProduct(
+                        pool, token_a, token_b, factory, router, name,
+                        int(block_number), int(block_number)
+                    )
+                    changed = True
+            if changed:
+                self._save()
+            return [v.to_pool() for v in self._constant_product.values()]
+        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+            return [v.to_pool() for v in self._constant_product.values()]
+
     async def maybe_discover_venues(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> Dict[str, List[Dict[str, Any]]]:
         if not self._venue_discovery_enabled(cfg):
             return {
@@ -896,7 +1003,10 @@ class DiscoveryManager:
             slipstream_changed = await self._discover_slipstream(rpc, cfg, block_number)
             camelot_algebra_changed = await self._discover_camelot_algebra(rpc, cfg, block_number)
             camelot_v2_changed = await self._discover_camelot_v2(rpc, cfg, block_number)
-            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed or camelot_v2_changed
+            constant_product_before = len(self._constant_product)
+            constant_product = await self.maybe_discover_constant_product(rpc, cfg, block_number)
+            constant_product_changed = len(self._constant_product) > constant_product_before
+            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed or camelot_v2_changed or constant_product_changed
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return {
                 "curve": self.curve_pools(),
@@ -905,6 +1015,7 @@ class DiscoveryManager:
                 "slipstream": self.slipstream_pools(),
                 "camelot_algebra": self.camelot_algebra_pools(),
                 "camelot_v2": self.camelot_v2_pools(),
+                "constant_product": [v.to_pool() for v in self._constant_product.values()],
             }
         if changed:
             self._save()
@@ -915,6 +1026,7 @@ class DiscoveryManager:
             "slipstream": self.slipstream_pools(),
             "camelot_algebra": self.camelot_algebra_pools(),
             "camelot_v2": self.camelot_v2_pools(),
+            "constant_product": [v.to_pool() for v in self._constant_product.values()],
         }
 
     async def _discover_camelot_v2(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:

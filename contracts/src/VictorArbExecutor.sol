@@ -102,6 +102,16 @@ interface ICamelotV2Router {
     ) external;
 }
 
+interface IConstantProductRouter {
+    function swapExactTokensForTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
+}
+
 interface IAerodromeRouter {
     struct Route {
         address from;
@@ -154,7 +164,7 @@ contract VictorArbExecutor {
 
     // --- types ---
     struct Leg {
-        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra, 7=Camelot V2
+        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra, 7=Camelot V2, 8=constant-product V2 family
         address venue;        // router/pool/vault
         address tokenIn;
         address tokenOut;
@@ -589,6 +599,24 @@ contract VictorArbExecutor {
                 uint256 afterOut = IERC20(leg.tokenOut).balanceOf(address(this));
                 if (afterOut < beforeOut) revert MinOut();
                 uint256 out = afterOut - beforeOut;
+                if (out < leg.minOut) revert MinOut();
+                amountIn = out;
+            } else if (leg.dex == 8) {
+                // Canonical UniswapV2-compatible constant-product router.
+                // aux low 160 bits is the factory identity for route binding;
+                // the router is the venue and must be explicitly allowlisted.
+                _approveIfNeeded(leg.tokenIn, leg.venue, amountIn);
+                address[] memory path = new address[](2);
+                path[0] = leg.tokenIn;
+                path[1] = leg.tokenOut;
+                uint256[] memory amounts = IConstantProductRouter(leg.venue).swapExactTokensForTokens(
+                    amountIn,
+                    leg.minOut,
+                    path,
+                    address(this),
+                    deadline
+                );
+                uint256 out = amounts[amounts.length - 1];
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
             } else if (leg.dex == 4) {

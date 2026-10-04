@@ -353,6 +353,8 @@ class ChainConfig:
     camelot_v2_factory: str = ""
     camelot_v2_router: str = ""
     camelot_v2_pools: List[dict] = field(default_factory=list)
+    constant_product_venues: List[dict] = field(default_factory=list)
+    constant_product_pools: List[dict] = field(default_factory=list)
     # Canonical protocol registries used only for bounded read-only discovery.
     curve_address_provider: str = ""
     enable_venue_discovery: bool = False
@@ -434,6 +436,8 @@ def load_config(path: str) -> AppConfig:
     aerodrome_pools = chain_raw.get("aerodrome_pools") or raw.get("aerodrome_pools") or []
     slipstream_pools = chain_raw.get("slipstream_pools") or raw.get("slipstream_pools") or []
     camelot_v2_pools = chain_raw.get("camelot_v2_pools") or raw.get("camelot_v2_pools") or []
+    constant_product_venues = chain_raw.get("constant_product_venues") or raw.get("constant_product_venues") or []
+    constant_product_pools = chain_raw.get("constant_product_pools") or raw.get("constant_product_pools") or []
 
     chain = ChainConfig(
         name=name,
@@ -458,6 +462,8 @@ def load_config(path: str) -> AppConfig:
         camelot_v2_factory=str(chain_raw.get("camelot_v2_factory") or ""),
         camelot_v2_router=str(chain_raw.get("camelot_v2_router") or ""),
         camelot_v2_pools=camelot_v2_pools,
+        constant_product_venues=constant_product_venues,
+        constant_product_pools=constant_product_pools,
         curve_address_provider=str(chain_raw.get("curve_address_provider") or ""),
         enable_venue_discovery=bool(chain_raw.get("enable_venue_discovery", False)),
         discovery_pool_max_candidates=int(chain_raw.get("discovery_pool_max_candidates") or 24),
