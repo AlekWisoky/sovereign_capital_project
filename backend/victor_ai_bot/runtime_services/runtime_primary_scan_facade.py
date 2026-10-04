@@ -1636,6 +1636,21 @@ class RuntimePrimaryScanFacade:
                 > 0
             )
             quote_quarantined = float(row.get("quote_unhealthy_until", 0.0) or 0.0) > time.time()
+            economic_rows = [
+                item
+                for item in list(telemetry.get("size_economic_evidence") or [])
+                if isinstance(item, dict) and bool(item.get("revalidated"))
+            ]
+            best_return_bps = -1e18
+            for item in economic_rows:
+                try:
+                    amount = int(item.get("amount_in") or 0)
+                    economic = int(item.get("economic_after_cost_profit_wei") or 0)
+                    if amount > 0:
+                        best_return_bps = max(best_return_bps, (float(economic) / float(amount)) * 10_000.0)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+            best_return_bps = float(best_return_bps)
             evidence = RpcEconomicEvidence(
                 endpoint=url,
                 provider=str(urlsplit(url).hostname or ""),
@@ -1643,6 +1658,16 @@ class RuntimePrimaryScanFacade:
                 profitable_opportunity_count=int(profitable_count),
                 quote_requests=quote_requests,
                 quote_successes=quote_successes,
+                observed_after_cost_return_bps=best_return_bps,
+                successful_quote_edge_count=int(
+                    telemetry.get("successful_quote_edge_count", 0) or 0
+                ),
+                successful_quote_pool_count=int(
+                    telemetry.get("successful_quote_pool_count", 0) or 0
+                ),
+                successful_quote_pair_count=int(
+                    telemetry.get("successful_quote_pair_count", 0) or 0
+                ),
                 operational_score=float(row.get("score") or 1e18),
                 block_number=int(current_block),
                 scan_latency_ms=float(telemetry.get("scan_latency_ms") or 0.0),
@@ -1653,6 +1678,7 @@ class RuntimePrimaryScanFacade:
             telemetry["rpc"].update(
                 {
                     "endpoint": url,
+                    "observed_after_cost_return_bps": best_return_bps,
                     "provider": str(urlsplit(url).hostname or ""),
                     "score": row.get("score"),
                     "ok": row.get("ok"),

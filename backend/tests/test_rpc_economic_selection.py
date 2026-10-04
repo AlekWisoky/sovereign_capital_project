@@ -66,6 +66,36 @@ def test_rpc_economic_selector_prefers_higher_after_fee_profit_and_ignores_unhea
     ]
 
 
+def test_rpc_economic_selector_uses_signed_observed_return_when_no_provider_is_profitable():
+    evidence = [
+        RpcEconomicEvidence(
+            endpoint="https://rpc-a.example",
+            provider="rpc-a.example",
+            profit_after_costs_usd_micro=0,
+            profitable_opportunity_count=0,
+            quote_requests=20,
+            quote_successes=18,
+            observed_after_cost_return_bps=-42.0,
+            successful_quote_edge_count=12,
+            operational_score=5.0,
+        ),
+        RpcEconomicEvidence(
+            endpoint="https://rpc-b.example",
+            provider="rpc-b.example",
+            profit_after_costs_usd_micro=0,
+            profitable_opportunity_count=0,
+            quote_requests=20,
+            quote_successes=19,
+            observed_after_cost_return_bps=-7.5,
+            successful_quote_edge_count=10,
+            operational_score=1.0,
+        ),
+    ]
+    selected, _ = select_best_rpc_evidence(evidence)
+    assert selected is not None
+    assert selected.endpoint == "https://rpc-b.example"
+
+
 @pytest.mark.asyncio
 async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadcast(monkeypatch):
     class _Manager:
