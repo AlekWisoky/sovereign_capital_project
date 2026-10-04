@@ -701,6 +701,10 @@ def _classify_two_leg_family(legs: List[Edge], stable_tokens: set[str]) -> str |
         return "stablecoin_dislocation" if stable_tokens and tokens & stable_tokens else "univ3_curve"
     if dexes == {"univ3", "balancer"}:
         return "univ3_balancer"
+    if dexes == {"univ3", "slipstream"}:
+        return "univ3_slipstream"
+    if dexes == {"aerodrome", "slipstream"}:
+        return "aerodrome_slipstream"
     return None
 
 
@@ -757,6 +761,16 @@ def _is_same_pool_roundtrip(e1: Edge, e2: Edge) -> bool:
         p2 = str(e2.params.get("pool_id") or "").strip().lower()
         return bool(p1 and p2 and p1 == p2)
 
+    if dex == "aerodrome":
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2 and bool(e1.params.get("stable", False)) == bool(e2.params.get("stable", False)) and str(e1.params.get("factory") or "").lower() == str(e2.params.get("factory") or "").lower())
+
+    if dex == "slipstream":
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2 and int(e1.params.get("tick_spacing", 0)) == int(e2.params.get("tick_spacing", 0)))
+
     return False
 
 
@@ -789,6 +803,13 @@ def _pool_keys_for_leg(
         if dex == "balancer":
             pid = str(params.get("pool_id") or aux_hex or "")
             return f"bal:{pid.lower()}"
+        if dex == "aerodrome":
+            pool = str(params.get("pool") or "")
+            return f"aero:{pool.lower()}"
+        if dex == "slipstream":
+            pool = str(params.get("pool") or "")
+            spacing = int(params.get("tick_spacing", 0))
+            return f"slipstream:{pool.lower()}:{spacing}"
     except _SAFE_POOL_KEY_EXCEPTIONS:
         return f"{dex}:{token_in.lower()}:{token_out.lower()}:{json_key(params)}"
     # fallback (worst-case): route-level uniqueness
@@ -1082,7 +1103,6 @@ async def find_two_leg_opportunities(
                 )
             )
     _finalize_quote_coverage(metrics)
-    _finalize_quote_coverage(metrics)
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
@@ -1189,6 +1209,7 @@ async def find_three_leg_opportunities(
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
     extra_aerodrome_pools: Optional[List[dict]] = None,
+    extra_slipstream_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -1207,6 +1228,7 @@ async def find_three_leg_opportunities(
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
         extra_aerodrome_pools=extra_aerodrome_pools,
+        extra_slipstream_pools=extra_slipstream_pools,
     )
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
