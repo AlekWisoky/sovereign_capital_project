@@ -37,7 +37,6 @@ def test_camelot_v2_quote_parse_reads_dynamic_amount_array():
     amount_out = 456
     raw = (
         (32).to_bytes(32, "big")
-        + (0).to_bytes(32, "big")
         + (2).to_bytes(32, "big")
         + amount_in.to_bytes(32, "big")
         + amount_out.to_bytes(32, "big")
