@@ -12,6 +12,14 @@ JUPITER_SWAP_V2_BASE = "https://api.jup.ag/swap/v2"
 class JupiterNotConfigured(RuntimeError):
     """Jupiter credentials are not configured for live quote discovery."""
 
+
+class JupiterQuoteHTTPError(RuntimeError):
+    """A bounded Jupiter HTTP response failure with a safe status-only reason."""
+
+    def __init__(self, status_code: int):
+        self.status_code = int(status_code)
+        super().__init__(f"http_{self.status_code}")
+
 @dataclass(frozen=True)
 class JupiterQuote:
     input_mint: str
@@ -79,8 +87,18 @@ class JupiterSwapV2Client:
         if effective_taker:
             params["taker"] = effective_taker
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
-            response = await client.get(f"{JUPITER_SWAP_V2_BASE}/order", params=params, headers={"x-api-key": self.api_key})
-            response.raise_for_status()
+            response = await client.get(
+                f"{JUPITER_SWAP_V2_BASE}/order",
+                params=params,
+                headers={"x-api-key": self.api_key},
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                # Never expose response bodies here: Jupiter error payloads can
+                # contain request metadata. Status-only telemetry is sufficient
+                # to distinguish bad requests, auth/rate limits, and upstream 5xx.
+                raise JupiterQuoteHTTPError(response.status_code) from exc
             payload = response.json()
         if not isinstance(payload, Mapping):
             raise ValueError("Jupiter order response is not an object")
@@ -91,7 +109,7 @@ class JupiterSwapV2Client:
             async with semaphore:
                 try:
                     return await self.quote(**request)
-                except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError):
+                except (httpx.HTTPError, JupiterQuoteHTTPError, JupiterNotConfigured, TypeError, ValueError):
                     return None
         return await asyncio.gather(*(one(request) for request in requests))
 
