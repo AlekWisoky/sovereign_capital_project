@@ -743,6 +743,20 @@ def build_edges(
             venue = str(getattr(cfg.chain, "camelot_algebra_swap_router", "") or getattr(cfg.chain, "camelot_algebra_quoter_v2", ""))
             edges.append(Edge("camelot_algebra", venue, p["token_in"], p["token_out"], params))
             edges.append(Edge("camelot_algebra", venue, p["token_out"], p["token_in"], params))
+    if getattr(cfg.chain, "camelot_v2_router", ""):
+        camelot_v2_pools = list(getattr(cfg.chain, "camelot_v2_pools", []) or [])
+        if extra_camelot_v2_pools:
+            camelot_v2_pools.extend(list(extra_camelot_v2_pools))
+        for p in camelot_v2_pools:
+            factory = str(p.get("factory") or getattr(cfg.chain, "camelot_v2_factory", "") or "")
+            if not factory:
+                continue
+            params = {"factory": factory}
+            if p.get("pool"):
+                params["pool"] = str(p.get("pool"))
+            venue = str(cfg.chain.camelot_v2_router)
+            edges.append(Edge("camelot_v2", venue, p["token_in"], p["token_out"], params))
+            edges.append(Edge("camelot_v2", venue, p["token_out"], p["token_in"], params))
 
     # remove empty-token curve edges if unspecified
     edges = [e for e in edges if e.token_in and e.token_out]
