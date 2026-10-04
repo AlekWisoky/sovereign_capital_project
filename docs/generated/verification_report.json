@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 368,
+    "test_file_count": 371,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -32,6 +32,9 @@
       "backend/tests/test_bankroll_native_timestamp_persistence.py",
       "backend/tests/test_behaveagent_runtime_maintenance.py",
       "backend/tests/test_cache.py",
+      "backend/tests/test_camelot_algebra_discovery.py",
+      "backend/tests/test_camelot_algebra_quote.py",
+      "backend/tests/test_camelot_algebra_route_execution.py",
       "backend/tests/test_candidate_token_discovery_telemetry.py",
       "backend/tests/test_canonical_omar_closed_loop.py",
       "backend/tests/test_canonical_omar_decision_context.py",
@@ -182,8 +185,8 @@
       "backend/tests/test_quicksight_dashboards_maintenance.py",
       "backend/tests/test_quicksight_datasets_maintenance.py",
       "backend/tests/test_quicksight_runtime_maintenance.py",
-      "backend/tests/test_quote_derived_sizing.py",
       "backend/tests/test_quote_balancer_batch_diagnostics.py",
+      "backend/tests/test_quote_derived_sizing.py",
       "backend/tests/test_quote_diagnostics.py",
       "backend/tests/test_ratelimit_env.py",
       "backend/tests/test_receipt_settlement_truth_path.py",
