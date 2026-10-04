@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 371,
+    "test_file_count": 372,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -35,6 +35,7 @@
       "backend/tests/test_camelot_algebra_discovery.py",
       "backend/tests/test_camelot_algebra_quote.py",
       "backend/tests/test_camelot_algebra_route_execution.py",
+      "backend/tests/test_camelot_algebra_scan_wiring.py",
       "backend/tests/test_candidate_token_discovery_telemetry.py",
       "backend/tests/test_canonical_omar_closed_loop.py",
       "backend/tests/test_canonical_omar_decision_context.py",
