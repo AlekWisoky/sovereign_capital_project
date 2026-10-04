@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from .solana_jupiter import JupiterNotConfigured, JupiterSwapV2Client
+from .solana_jupiter import JupiterNotConfigured, JupiterQuoteHTTPError, JupiterSwapV2Client
 from .solana_raydium import RaydiumQuoteClient
 
 
@@ -208,6 +208,8 @@ class JupiterShadowService:
                     "jupiter_platform_fee_bps": second.platform_fee_bps, "raydium_price_impact_pct": first.price_impact_pct,
                 })
             return row, attempts, successes, None
+        except JupiterQuoteHTTPError as exc:
+            return None, attempts, successes, f"http_{int(exc.status_code)}"
         except (httpx.HTTPError, JupiterNotConfigured, TypeError, ValueError) as exc:
             return None, attempts, successes, type(exc).__name__
 
