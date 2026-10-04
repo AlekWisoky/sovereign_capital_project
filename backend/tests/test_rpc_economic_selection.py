@@ -389,6 +389,10 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
         "victor_ai_bot.runtime_services.runtime_primary_scan_facade.estimate_route_gas_units",
         lambda meta: 0,
     )
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.gas_wei_to_token_wei",
+        fake_usd,
+    )
 
     opportunity = SimpleNamespace(
         expected_profit_raw="-250",
@@ -402,6 +406,8 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
                 "profit_after_costs_wei": "-250",
                 "gas_cost_wei": "0",
                 "flashloan_fee_wei": "0",
+            },
+            "venues": ["univ3"],
             },
         },
     )
