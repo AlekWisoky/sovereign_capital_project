@@ -388,7 +388,7 @@
   "critical_hardening": {
     "counts": {
       "capital_and_fund_truth": 45,
-      "execution_hardening": 25,
+      "execution_hardening": 26,
       "runtime_compatibility": 78
     },
     "files": {
@@ -441,6 +441,7 @@
       ],
       "execution_hardening": [
         "backend/tests/test_b4_execution_binding_runtime.py",
+        "backend/tests/test_camelot_algebra_route_execution.py",
         "backend/tests/test_execution_capital_portfolio_upgrades.py",
         "backend/tests/test_execution_capture.py",
         "backend/tests/test_execution_capture_calibration.py",
