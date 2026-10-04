@@ -947,6 +947,8 @@ async def find_two_leg_opportunities(
             elif e1.dex == "aerodrome":
                 raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
                 aux1 = _aux_u256_to_b32_hex(raw)
+            elif e1.dex == "slipstream":
+                aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
 
             aux2 = "0x"
             if e2.dex == "univ3":
@@ -958,6 +960,8 @@ async def find_two_leg_opportunities(
             elif e2.dex == "aerodrome":
                 raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
                 aux2 = _aux_u256_to_b32_hex(raw)
+            elif e2.dex == "slipstream":
+                aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
 
             rid = route_id_hex(
                 [
@@ -1433,6 +1437,8 @@ async def find_three_leg_opportunities(
                             stable = bool(meta.get("stable", edge.params.get("stable", False)))
                             raw = int(factory, 16) | ((1 if stable else 0) << 160)
                             return _aux_u256_to_b32_hex(raw)
+                        if edge.dex == "slipstream":
+                            return _aux_u256_to_b32_hex(int(meta.get("tick_spacing", edge.params.get("tick_spacing", 0))) & 0xFFFFFF)
                         return "0x"
 
                     aux1 = _aux_for(e1, meta1)
