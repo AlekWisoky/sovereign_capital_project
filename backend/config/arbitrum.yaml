@@ -17,6 +17,9 @@ chain:
   univ3_quoter_v2: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e'
   univ3_factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984'
   univ3_swap_router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
+  camelot_algebra_factory: '0x1a3c9B1d2F0529D97f2afC5136Cc23e58f1FD35B'
+  camelot_algebra_quoter_v2: '0x0Fc73040b26E9bC8514fA028D998E73A254Fa76E'
+  camelot_algebra_swap_router: '0x1F721E2E82F6676FCE4eA07A5958cF098D339e18'
   curve_address_provider: '0x0000000022D53366457F9d5E68Ec105046FC4383'
   enable_venue_discovery: true
   discovery_pool_max_candidates: 48

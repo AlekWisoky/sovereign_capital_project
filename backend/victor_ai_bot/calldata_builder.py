@@ -45,6 +45,7 @@ DEX_ID = {
     "balancer": 3,
     "aerodrome": 4,
     "slipstream": 5,
+    "camelot_algebra": 6,
 }
 
 

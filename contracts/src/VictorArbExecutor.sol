@@ -78,6 +78,19 @@ interface ISlipstreamSwapRouter {
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
+interface ICamelotAlgebraSwapRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 limitSqrtPrice;
+    }
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
+}
+
 interface IAerodromeRouter {
     struct Route {
         address from;
@@ -130,7 +143,7 @@ contract VictorArbExecutor {
 
     // --- types ---
     struct Leg {
-        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream
+        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra
         address venue;        // router/pool/vault
         address tokenIn;
         address tokenOut;
@@ -527,6 +540,22 @@ contract VictorArbExecutor {
                     sqrtPriceLimitX96: 0
                 });
                 uint256 out = ISlipstreamSwapRouter(leg.venue).exactInputSingle(p);
+                if (out < leg.minOut) revert MinOut();
+                amountIn = out;
+            } else if (leg.dex == 6) {
+                // Camelot AMMv3 / Algebra: dynamic fee is determined by the pool,
+                // so execution only needs the canonical router and token pair.
+                _approveIfNeeded(leg.tokenIn, leg.venue, amountIn);
+                ICamelotAlgebraSwapRouter.ExactInputSingleParams memory p = ICamelotAlgebraSwapRouter.ExactInputSingleParams({
+                    tokenIn: leg.tokenIn,
+                    tokenOut: leg.tokenOut,
+                    recipient: address(this),
+                    deadline: deadline,
+                    amountIn: amountIn,
+                    amountOutMinimum: leg.minOut,
+                    limitSqrtPrice: 0
+                });
+                uint256 out = ICamelotAlgebraSwapRouter(leg.venue).exactInputSingle(p);
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
             } else if (leg.dex == 4) {
