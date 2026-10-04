@@ -387,6 +387,12 @@ class DiscoveryManager:
         allowed = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
         return [(i, t) for i, t in enumerate(tokens) if t and t.lower() in allowed]
 
+    def _research_frontier_tokens(self, cfg: Any) -> set[str]:
+        """Bounded research tokens observed from verified pools; never execution authority."""
+        anchors = {str(token).lower() for token in (getattr(cfg.chain, "token_universe", []) or []) if token}
+        cap = max(1, min(8, int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8)))
+        observed = sorted(token for token in self._candidate_tokens_observed if token not in anchors)
+        return anchors | set(observed[:cap])
     def _supported_discovery_pairs(
         self,
         cfg: Any,
@@ -402,11 +408,7 @@ class DiscoveryManager:
         cross-venue/triangle discovery is permanently blind to newly discovered
         edges.
         """
-        anchors = {
-            str(token).lower()
-            for token in (getattr(cfg.chain, "token_universe", []) or [])
-            if token
-        }
+        anchors = self._research_frontier_tokens(cfg)
         liquid: List[Tuple[int, str]] = []
         for index, token in enumerate(tokens):
             normalized = str(token or "").lower()
@@ -456,7 +458,7 @@ class DiscoveryManager:
             factories_call = await rpc.eth_call(registry, "0x" + selector("poolFactories()").hex())
             factory_words = _decode_dynamic_array(factories_call.result, 0) if factories_call.ok else []
             factories = ["0x" + word[-20:].hex() for word in factory_words[:16]]
-            anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
+            anchors = self._research_frontier_tokens(cfg)
             window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
             max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
             changed = False
