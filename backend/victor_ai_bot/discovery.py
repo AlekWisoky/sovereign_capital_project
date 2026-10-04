@@ -904,6 +904,7 @@ class DiscoveryManager:
                 "aerodrome": self.aerodrome_pools(),
                 "slipstream": self.slipstream_pools(),
                 "camelot_algebra": self.camelot_algebra_pools(),
+                "camelot_v2": self.camelot_v2_pools(),
             }
         if changed:
             self._save()
