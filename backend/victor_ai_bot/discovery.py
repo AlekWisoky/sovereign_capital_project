@@ -414,7 +414,8 @@ class DiscoveryManager:
             if not registry:
                 return self.aerodrome_pools()
             factories_call = await rpc.eth_call(registry, "0x" + selector("poolFactories()").hex())
-            factories = _decode_fixed_addresses(factories_call.result, size=16) if factories_call.ok else []
+            factory_words = _decode_dynamic_array(factories_call.result, 0) if factories_call.ok else []
+            factories = ["0x" + word[-20:].hex() for word in factory_words[:16]]
             anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
             window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
             max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
