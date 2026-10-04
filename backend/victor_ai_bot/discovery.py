@@ -197,6 +197,8 @@ class DiscoveryManager:
         self.path = os.path.join(data_dir, "discovery", f"{chain_name}.json")
         self._last_run_block: int = 0
         self._last_venue_run_block: int = 0
+        self._last_aerodrome_run_block: int = 0
+        self._last_slipstream_run_block: int = 0
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
@@ -442,9 +444,9 @@ class DiscoveryManager:
             if not router or not bool(getattr(cfg.flags, "enable_discovery", False)):
                 return self.aerodrome_pools()
             interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
-            if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
+            if self._last_aerodrome_run_block and (int(block_number) - self._last_aerodrome_run_block) < interval:
                 return self.aerodrome_pools()
-            self._last_venue_run_block = int(block_number)
+            self._last_aerodrome_run_block = int(block_number)
             registry_call = await rpc.eth_call(router, "0x" + selector("factoryRegistry()").hex())
             registry = _decode_address(registry_call.result) if registry_call.ok else ""
             if not registry:
@@ -491,9 +493,9 @@ class DiscoveryManager:
             if not factories or not bool(getattr(cfg.flags, "enable_discovery", False)):
                 return self.slipstream_pools()
             interval = int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
-            if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
+            if self._last_slipstream_run_block and (int(block_number) - self._last_slipstream_run_block) < interval:
                 return self.slipstream_pools()
-            self._last_venue_run_block = int(block_number)
+            self._last_slipstream_run_block = int(block_number)
             anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
             window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
             max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
@@ -705,22 +707,57 @@ class DiscoveryManager:
 
     async def maybe_discover_venues(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> Dict[str, List[Dict[str, Any]]]:
         if not self._venue_discovery_enabled(cfg):
-            return {"curve": self.curve_pools(), "balancer": self.balancer_pools(), "aerodrome": self.aerodrome_pools()}
-        interval = max(1, int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50))
-        if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
-            return {"curve": self.curve_pools(), "balancer": self.balancer_pools(), "aerodrome": self.aerodrome_pools()}
-        self._last_venue_run_block = int(block_number)
+            return {
+                "curve": self.curve_pools(),
+                "balancer": self.balancer_pools(),
+                "aerodrome": self.aerodrome_pools(),
+                "slipstream": self.slipstream_pools(),
+            }
         changed = False
         try:
             curve_changed = await self._discover_curve(rpc, cfg, block_number)
             balancer_changed = await self._discover_balancer(rpc, cfg, block_number)
             aerodrome_changed = await self._discover_aerodrome(rpc, cfg, block_number)
-            changed = curve_changed or balancer_changed or aerodrome_changed
+            slipstream_changed = await self._discover_slipstream(rpc, cfg, block_number)
+            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
-            return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+            return {
+                "curve": self.curve_pools(),
+                "balancer": self.balancer_pools(),
+                "aerodrome": self.aerodrome_pools(),
+                "slipstream": self.slipstream_pools(),
+            }
         if changed:
             self._save()
-        return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+        return {
+            "curve": self.curve_pools(),
+            "balancer": self.balancer_pools(),
+            "aerodrome": self.aerodrome_pools(),
+            "slipstream": self.slipstream_pools(),
+        }
+
+    async def _discover_slipstream(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
+        if not str(getattr(cfg.chain, "slipstream_quoter_v2", "") or ""):
+            return False
+        result = await self.maybe_discover_slipstream(rpc, cfg, block_number)
+        before = len(self._slipstream)
+        for row in result:
+            if not isinstance(row, dict):
+                continue
+            key = self._slipstream_key(
+                str(row.get("pool") or ""),
+                str(row.get("token_in") or ""),
+                str(row.get("token_out") or ""),
+                int(row.get("tick_spacing") or 0),
+                str(row.get("factory") or ""),
+            )
+            if key not in self._slipstream and row.get("pool") and row.get("factory"):
+                self._slipstream[key] = DiscoveredSlipstream(
+                    str(row["pool"]), str(row["token_in"]), str(row["token_out"]),
+                    int(row["tick_spacing"]), str(row["factory"]),
+                    int(block_number), int(block_number),
+                )
+        return len(self._slipstream) > before
 
     async def _discover_aerodrome(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         if not str(getattr(cfg.chain, "aerodrome_router", "") or ""):
