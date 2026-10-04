@@ -398,7 +398,9 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
 
     opportunity = SimpleNamespace(
         expected_profit_raw="-250",
-        route=SimpleNamespace(legs=[]),
+        route=SimpleNamespace(
+            legs=[SimpleNamespace(token_in="0xprofit", token_out="0xother", amount_in=1000, min_out=1, dex="univ3", venue="test")],
+        ),
         meta={
             "gas_cost_estimate_wei": "0",
             "profitability": {
