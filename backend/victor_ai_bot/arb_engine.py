@@ -932,6 +932,7 @@ async def find_two_leg_opportunities(
     extra_aerodrome_pools: Optional[List[dict]] = None,
     extra_slipstream_pools: Optional[List[dict]] = None,
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
+    extra_camelot_v2_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
