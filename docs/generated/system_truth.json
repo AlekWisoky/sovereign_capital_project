@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 371,
+  "backend_test_file_count": 372,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -89,6 +89,7 @@
     "test_camelot_algebra_discovery.py",
     "test_camelot_algebra_quote.py",
     "test_camelot_algebra_route_execution.py",
+    "test_camelot_algebra_scan_wiring.py",
     "test_candidate_token_discovery_telemetry.py",
     "test_canonical_omar_closed_loop.py",
     "test_canonical_omar_decision_context.py",
