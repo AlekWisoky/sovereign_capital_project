@@ -389,9 +389,11 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
         "victor_ai_bot.runtime_services.runtime_primary_scan_facade.estimate_route_gas_units",
         lambda meta: 0,
     )
+    async def fake_gas(*args, **kwargs):
+        return 0
     monkeypatch.setattr(
         "victor_ai_bot.runtime_services.runtime_primary_scan_facade.gas_wei_to_token_wei",
-        fake_usd,
+        fake_gas,
     )
 
     opportunity = SimpleNamespace(
