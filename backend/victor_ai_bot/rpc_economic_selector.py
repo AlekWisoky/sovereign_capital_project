@@ -12,7 +12,11 @@ class RpcEconomicEvidence:
     profitable_opportunity_count: int
     quote_requests: int
     quote_successes: int
-    operational_score: float
+    observed_after_cost_return_bps: float = -1e18
+    successful_quote_edge_count: int = 0
+    successful_quote_pool_count: int = 0
+    successful_quote_pair_count: int = 0
+    operational_score: float = 0.0
     block_number: int | None = None
     scan_latency_ms: float = 0.0
     healthy: bool = True
@@ -34,9 +38,13 @@ class RpcEconomicEvidence:
 def _selection_key(evidence: RpcEconomicEvidence) -> tuple:
     return (
         1 if evidence.economically_eligible else 0,
-        int(evidence.profit_after_costs_usd_micro),
+        int(evidence.profit_after_costs_usd_micro) if int(evidence.profit_after_costs_usd_micro) > 0 else 0,
         int(evidence.profitable_opportunity_count),
+        float(evidence.observed_after_cost_return_bps),
         float(evidence.quote_success_rate),
+        int(evidence.successful_quote_edge_count),
+        int(evidence.successful_quote_pool_count),
+        int(evidence.successful_quote_pair_count),
         -float(evidence.operational_score),
         str(evidence.endpoint),
     )
