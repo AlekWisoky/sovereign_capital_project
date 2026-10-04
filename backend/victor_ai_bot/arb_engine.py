@@ -421,6 +421,7 @@ async def quote_edges_batch(
                 )
                 out[ek] = val
                 cache.set(ck, val)
+                _record_success_edge(e)
             else:
                 out[ek] = None
                 cache.set(ck, None)
@@ -462,6 +463,7 @@ async def quote_edges_batch(
                 val = (int(q.amount_out), {"pool_id": str(e.params.get("pool_id") or "")})
                 out[ek] = val
                 cache.set(ck, val)
+                _record_success_edge(e)
             else:
                 out[ek] = None
                 cache.set(ck, None)
@@ -476,7 +478,7 @@ async def quote_edges_batch(
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
-    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) - batch_successes)
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) - batch_successes)
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
