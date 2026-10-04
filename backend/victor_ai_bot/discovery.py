@@ -183,6 +183,24 @@ class DiscoveredCamelotAlgebra:
 
 
 @dataclass
+class DiscoveredCamelotV2:
+    pool: str
+    token_in: str
+    token_out: str
+    factory: str
+    first_seen_block: int
+    last_seen_block: int
+
+    def to_pool(self) -> Dict[str, Any]:
+        return {
+            "pool": self.pool,
+            "token_in": self.token_in,
+            "token_out": self.token_out,
+            "factory": self.factory,
+        }
+
+
+@dataclass
 class DiscoveredBalancer:
     pool_id: str
     token_in: str
