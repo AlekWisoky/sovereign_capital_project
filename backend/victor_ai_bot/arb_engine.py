@@ -989,6 +989,7 @@ async def find_two_leg_opportunities(
     extra_slipstream_pools: Optional[List[dict]] = None,
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
     extra_camelot_v2_pools: Optional[List[dict]] = None,
+    extra_constant_product_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -1003,6 +1004,7 @@ async def find_two_leg_opportunities(
         extra_slipstream_pools=extra_slipstream_pools,
         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
         extra_camelot_v2_pools=extra_camelot_v2_pools,
+        extra_constant_product_pools=extra_constant_product_pools,
     )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
@@ -1386,6 +1388,7 @@ async def find_three_leg_opportunities(
     extra_aerodrome_pools: Optional[List[dict]] = None,
     extra_slipstream_pools: Optional[List[dict]] = None,
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
+    extra_constant_product_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -1406,6 +1409,7 @@ async def find_three_leg_opportunities(
         extra_aerodrome_pools=extra_aerodrome_pools,
         extra_slipstream_pools=extra_slipstream_pools,
         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
+        extra_constant_product_pools=extra_constant_product_pools,
     )
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
