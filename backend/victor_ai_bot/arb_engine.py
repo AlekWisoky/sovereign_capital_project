@@ -1054,6 +1054,8 @@ async def find_two_leg_opportunities(
                 aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
             elif e1.dex == "camelot_algebra":
                 aux1 = "0x"
+            elif e1.dex == "camelot_v2":
+                aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
 
             aux2 = "0x"
             if e2.dex == "univ3":
