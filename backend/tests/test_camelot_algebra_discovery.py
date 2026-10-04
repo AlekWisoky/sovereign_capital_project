@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from victor_ai_bot.discovery import DiscoveryManager, _CAMELOT_ALGEBRA_POOL_TOPIC
+from victor_ai_bot.ethabi import selector
 
 
 class FakeRpc:
@@ -24,7 +25,7 @@ class FakeRpc:
         }]
 
     async def eth_call(self, address, data, block="latest"):
-        selectors = {"5c1a5e27": 60, "1a686502": 10**18}
+        selectors = {selector("tickSpacing()").hex(): 60, selector("liquidity()").hex(): 10**18}
         if address == self.pool and data[2:10] in selectors:
             return SimpleNamespace(ok=True, result=hex(selectors[data[2:10]]))
         return SimpleNamespace(ok=False, result="0x")
