@@ -2111,6 +2111,7 @@ class RuntimePrimaryScanFacade:
             "aerodrome_pools": list(venue_pools.get("aerodrome") or []),
             "slipstream_pools": list(venue_pools.get("slipstream") or []),
             "camelot_algebra_pools": list(venue_pools.get("camelot_algebra") or []),
+            "camelot_v2_pools": list(venue_pools.get("camelot_v2") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,
