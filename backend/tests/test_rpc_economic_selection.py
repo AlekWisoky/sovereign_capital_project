@@ -355,6 +355,7 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
 @pytest.mark.asyncio
 async def test_canonical_after_fee_usd_preserves_negative_observed_economics(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
+    runtime.cache = PerBlockCache()
     runtime.cfg = SimpleNamespace(
         execution=SimpleNamespace(
             usd_accounting_enabled=True,
