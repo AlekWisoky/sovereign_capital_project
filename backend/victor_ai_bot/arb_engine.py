@@ -461,12 +461,8 @@ async def quote_edges_batch(
         )
     metrics["quote_failure_reasons"] = failure_counts
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
-    metrics["successful_quote_edge_count"] = int(len(successful_edges)) if isinstance(successful_edges, set) else 0
-    metrics["successful_quote_pool_count"] = int(len(successful_pools)) if isinstance(successful_pools, set) else 0
-    metrics["successful_quote_pair_count"] = int(len(successful_pairs)) if isinstance(successful_pairs, set) else 0
-    metrics.pop("_successful_quote_edge_keys", None)
-    metrics.pop("_successful_quote_pool_keys", None)
-    metrics.pop("_successful_quote_pair_keys", None)
+    # Coverage sets intentionally persist across all quote batches for a scan;
+    # the caller finalizes them once after both first- and second-leg phases.
     metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
     metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
     # ensure all are present
@@ -474,6 +470,17 @@ async def quote_edges_batch(
         ek = edge_key(e)
         out.setdefault(ek, None)
     return out
+
+
+def _finalize_quote_coverage(metrics: Dict[str, Any]) -> None:
+    for public_name, internal_name in (
+        ("successful_quote_edge_count", "_successful_quote_edge_keys"),
+        ("successful_quote_pool_count", "_successful_quote_pool_keys"),
+        ("successful_quote_pair_count", "_successful_quote_pair_keys"),
+    ):
+        values = metrics.get(internal_name)
+        metrics[public_name] = int(len(values)) if isinstance(values, set) else 0
+        metrics.pop(internal_name, None)
 
 
 def build_edges(
@@ -974,6 +981,8 @@ async def find_two_leg_opportunities(
                     },
                 )
             )
+    _finalize_quote_coverage(metrics)
+    _finalize_quote_coverage(metrics)
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
