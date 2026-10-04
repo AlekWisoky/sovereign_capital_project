@@ -462,6 +462,9 @@ class DiscoveryManager:
     def camelot_algebra_pools(self) -> List[Dict[str, Any]]:
         return [dc.to_pool() for dc in self._camelot_algebra.values()]
 
+    def camelot_v2_pools(self) -> List[Dict[str, Any]]:
+        return [dc.to_pool() for dc in self._camelot_v2.values()]
+
     def _venue_discovery_enabled(self, cfg: Any) -> bool:
         return bool(getattr(cfg.chain, "enable_venue_discovery", False))
 
