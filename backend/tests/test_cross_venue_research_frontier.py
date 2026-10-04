@@ -20,7 +20,7 @@ def test_observed_liquid_token_enters_research_graph_without_execution_admission
 
     pairs = dm._supported_discovery_pairs(
         cfg,
-        [anchor, observed, unrelated],
+        [anchor, observed, observed_two, unrelated],
         [10**18, 10**18, 10**18],
     )
 
