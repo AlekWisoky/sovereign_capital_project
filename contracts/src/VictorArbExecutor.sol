@@ -147,7 +147,7 @@ contract VictorArbExecutor {
 
     // Versioning (prevents silent ABI drift).
     uint32 public constant EXECUTOR_ABI_VERSION = 2;
-    uint32 public constant EXECUTOR_IMPL_VERSION = 2;
+    uint32 public constant EXECUTOR_IMPL_VERSION = 3;
     IAaveV3Pool public immutable aavePool;
     IBalancerVault public immutable balancerVault;
     ISwapRouterV3 public immutable univ3SwapRouter;
