@@ -24,6 +24,15 @@ def test_jupiter_quote_parses_quote_only_response():
     assert quote.router == "metis"
     assert quote.transaction_available is False
     assert quote.platform_fee_amount == 20
+    assert quote.error_message == ""
+
+
+def test_jupiter_client_uses_explicit_discovery_taker(monkeypatch):
+    monkeypatch.setenv("JUPITER_API_KEY", "test-key")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
+    from victor_ai_bot.runtime_services.solana_jupiter import JupiterSwapV2Client
+    client = JupiterSwapV2Client()
+    assert client.default_taker == "11111111111111111111111111111111"
 
 
 def test_after_cost_profit_is_dimensionally_bounded_by_explicit_costs():
@@ -31,7 +40,7 @@ def test_after_cost_profit_is_dimensionally_bounded_by_explicit_costs():
         input_mint="SOL", output_mint="USDC", in_amount=100, out_amount=200,
         router="metis", request_id="r", fee_bps=10, fee_mint="USDC",
         platform_fee_bps=10, platform_fee_amount=2, transaction_available=False,
-        mode="ultra", error_code=None,
+        mode="ultra", error_code=None, error_message="",
     )
     assert after_cost_profit_usd(
         input_usd=10.0, output_usd=20.0, quote=quote, network_cost_usd=1.0
@@ -55,12 +64,35 @@ def test_jupiter_shadow_is_fail_closed_without_enablement(monkeypatch):
     assert service.snapshot()["execution_authority"] is False
 
 
+def test_solana_shadow_quote_telemetry_does_not_overcount_first_quote_failure(monkeypatch):
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_ENABLED", "1")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
+    service = JupiterShadowService()
+
+    async def failing_quote(**kwargs):
+        raise ValueError("first_quote_failed")
+
+    monkeypatch.setattr(service.client, "quote", failing_quote)
+
+    import asyncio
+    row, attempts, successes, reason = asyncio.run(service._discover_direction(
+        input_mint="USDC", output_mint="SOL", input_decimals=6,
+        symbol="SOL/USDC", usd=100.0,
+        network={"usd": 0.01}, jupiter_first=True,
+    ))
+    assert row is None
+    assert attempts == 1
+    assert successes == 0
+    assert reason == "ValueError"
+
+
 @pytest.mark.asyncio
 async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_execution(monkeypatch):
     from victor_ai_bot.runtime_services.solana_jupiter import JupiterQuote
     from victor_ai_bot.runtime_services.solana_raydium import RaydiumQuote
 
     monkeypatch.setenv("VICTOR_SOLANA_JUPITER_ENABLED", "1")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_TAKER", "11111111111111111111111111111111")
     service = JupiterShadowService()
     service.client.api_key = "test-key"
     monkeypatch.setattr(service, "_pair_universe", lambda: [("USDC", "SOL", 6, 9, "SOL/USDC")])
@@ -74,8 +106,8 @@ async def test_solana_shadow_discovers_quote_derived_cross_venue_edge_without_ex
 
     async def j_quote(*, input_mint, output_mint, amount, taker=None):
         if input_mint == "USDC":
-            return JupiterQuote("USDC", "SOL", amount, 1_000_000_000, "metis", "j", 10, "USDC", 0, 0, False, "ultra", None)
-        return JupiterQuote("SOL", "USDC", amount, 102_000_000, "metis", "p", 10, "USDC", 0, 0, False, "ultra", None)
+            return JupiterQuote("USDC", "SOL", amount, 1_000_000_000, "metis", "j", 10, "USDC", 0, 0, False, "ultra", None, "")
+        return JupiterQuote("SOL", "USDC", amount, 102_000_000, "metis", "p", 10, "USDC", 0, 0, False, "ultra", None, "")
 
     async def r_quote(*, input_mint, output_mint, amount):
         out_amount = 1_010_000_000 if input_mint == "USDC" else 101_000_000
