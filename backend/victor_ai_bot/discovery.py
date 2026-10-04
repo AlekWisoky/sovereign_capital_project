@@ -517,10 +517,37 @@ class DiscoveryManager:
         return [(i, t) for i, t in enumerate(tokens) if t and t.lower() in allowed]
 
     def _research_frontier_tokens(self, cfg: Any) -> set[str]:
-        """Bounded research tokens observed from verified pools; never execution authority."""
-        anchors = {str(token).lower() for token in (getattr(cfg.chain, "token_universe", []) or []) if token}
-        cap = max(1, min(8, int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8)))
-        observed = sorted(token for token in self._candidate_tokens_observed if token not in anchors)
+        """Bounded research tokens observed from verified pools; never execution authority.
+
+        Frontier selection favors tokens observed across multiple verified venue/source
+        classes, then uses a deterministic tie-breaker. This improves cross-venue
+        discovery coverage without granting execution authority to any observed token.
+        """
+        anchors = {
+            str(token).lower()
+            for token in (getattr(cfg.chain, "token_universe", []) or [])
+            if token
+        }
+        try:
+            cap = max(
+                1,
+                min(
+                    16,
+                    int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "16") or 16),
+                ),
+            )
+        except (TypeError, ValueError):
+            cap = 16
+        observed = [
+            token for token in self._candidate_tokens_observed
+            if token not in anchors
+        ]
+        observed.sort(
+            key=lambda token: (
+                -len(self._candidate_tokens_observed.get(token, set())),
+                stable_hash_int(f"research-frontier:{self.chain_name}:{token}"),
+            )
+        )
         return anchors | set(observed[:cap])
     def _supported_discovery_pairs(
         self,

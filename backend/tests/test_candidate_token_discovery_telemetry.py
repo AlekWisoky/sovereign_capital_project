@@ -41,3 +41,24 @@ def test_candidate_token_observation_hard_cap_does_not_expand_execution_universe
     assert telemetry["observation_truncated"] is True
     assert tokens[0] in telemetry["execution_universe"]
     assert tokens[1] in telemetry["observed_not_admitted"]
+
+
+def test_research_frontier_prefers_cross_venue_observations_and_remains_read_only(tmp_path, monkeypatch):
+    manager = DiscoveryManager(chain_name="base", data_dir=str(tmp_path))
+    tokens = ["0x" + f"{i:040x}" for i in range(1, 19)]
+    manager._candidate_token_observation_cap = 32
+    for token in tokens:
+        manager._observe_candidate_tokens([token], source="univ3_pool_candidate")
+    manager._observe_candidate_tokens([tokens[0]], source="aerodrome_pool_candidate")
+    manager._observe_candidate_tokens([tokens[1]], source="slipstream_pool_candidate")
+    monkeypatch.setenv("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "16")
+
+    anchor = "0x" + "aa" * 20
+    cfg = SimpleNamespace(chain=SimpleNamespace(token_universe=[anchor]))
+    frontier = manager._research_frontier_tokens(cfg)
+
+    assert anchor in frontier
+    assert tokens[0] in frontier
+    assert tokens[1] in frontier
+    assert len(frontier) == 17
+    assert anchor not in manager._candidate_tokens_observed
