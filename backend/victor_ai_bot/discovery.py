@@ -914,7 +914,24 @@ class DiscoveryManager:
             "aerodrome": self.aerodrome_pools(),
             "slipstream": self.slipstream_pools(),
             "camelot_algebra": self.camelot_algebra_pools(),
+            "camelot_v2": self.camelot_v2_pools(),
         }
+
+    async def _discover_camelot_v2(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
+        if not str(getattr(cfg.chain, "camelot_v2_factory", "") or ""):
+            return False
+        result = await self.maybe_discover_camelot_v2(rpc, cfg, block_number)
+        before = len(self._camelot_v2)
+        for row in result:
+            if not isinstance(row, dict):
+                continue
+            key = f"{str(row.get('pool') or '').lower()}:{str(row.get('token_in') or '').lower()}:{str(row.get('token_out') or '').lower()}:{str(row.get('factory') or '').lower()}"
+            if key not in self._camelot_v2 and row.get("pool") and row.get("factory"):
+                self._camelot_v2[key] = DiscoveredCamelotV2(
+                    str(row["pool"]), str(row["token_in"]), str(row["token_out"]),
+                    str(row["factory"]), int(block_number), int(block_number)
+                )
+        return len(self._camelot_v2) > before
 
     async def _discover_camelot_algebra(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         if not str(getattr(cfg.chain, "camelot_algebra_quoter_v2", "") or "") or not str(getattr(cfg.chain, "camelot_algebra_factory", "") or ""):
