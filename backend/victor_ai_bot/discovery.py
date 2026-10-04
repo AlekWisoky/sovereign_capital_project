@@ -894,7 +894,8 @@ class DiscoveryManager:
             aerodrome_changed = await self._discover_aerodrome(rpc, cfg, block_number)
             slipstream_changed = await self._discover_slipstream(rpc, cfg, block_number)
             camelot_algebra_changed = await self._discover_camelot_algebra(rpc, cfg, block_number)
-            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed
+            camelot_v2_changed = await self._discover_camelot_v2(rpc, cfg, block_number)
+            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed or camelot_v2_changed
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return {
                 "curve": self.curve_pools(),
