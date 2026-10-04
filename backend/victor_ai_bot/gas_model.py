@@ -17,6 +17,7 @@ LEG_GAS_HEURISTICS = {
     "slipstream": 165_000,
     "camelot_algebra": 170_000,
     "camelot_v2": 125_000,
+    "constant_product": 125_000,
 }
 
 _SAFE_META_ACCESS_EXCEPTIONS = (AttributeError, TypeError, ValueError)
