@@ -91,6 +91,17 @@ interface ICamelotAlgebraSwapRouter {
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
+interface ICamelotV2Router {
+    function swapExactTokensForTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 referrer,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
+}
+
 interface IAerodromeRouter {
     struct Route {
         address from;
