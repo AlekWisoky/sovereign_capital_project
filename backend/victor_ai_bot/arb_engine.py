@@ -9,6 +9,7 @@ from .quote_curve import quote_curve, quote_curve_many
 from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_many
 from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
 from .quote_slipstream import quote_slipstream, quote_slipstream_many
+from .quote_camelot_algebra import quote_camelot_algebra, quote_camelot_algebra_many
 from .gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from .route_encoding import EncLeg, route_id_hex
 from .opportunity_density import scan_efficiency_snapshot
@@ -328,6 +329,7 @@ async def quote_edges_batch(
     missing_bal: List[Tuple[int, Edge]] = []
     missing_aero: List[Tuple[int, Edge]] = []
     missing_slipstream: List[Tuple[int, Edge]] = []
+    missing_camelot_algebra: List[Tuple[int, Edge]] = []
 
     # read cache first
     for idx, e in enumerate(edges):
@@ -348,6 +350,8 @@ async def quote_edges_batch(
             missing_aero.append((idx, e))
         elif e.dex == "slipstream":
             missing_slipstream.append((idx, e))
+        elif e.dex == "camelot_algebra":
+            missing_camelot_algebra.append((idx, e))
         else:
             out[ek] = None
 
@@ -477,6 +481,30 @@ async def quote_edges_batch(
                 cache.set(ck, None)
                 _record_failed_edge(e)
 
+    # Camelot AMMv3 / Algebra batch. Algebra returns its current dynamic fee.
+    if missing_camelot_algebra and getattr(cfg.chain, "camelot_algebra_quoter_v2", ""):
+        reqs = [(e.token_in, e.token_out, int(amount_in)) for _, e in missing_camelot_algebra]
+        order = [e for _, e in missing_camelot_algebra]
+        quotes = await quote_camelot_algebra_many(
+            rpc, cfg.chain.camelot_algebra_quoter_v2, reqs, diagnostics=quote_diagnostics
+        )
+        for e, q in zip(order, quotes):
+            ek = edge_key(e)
+            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
+                val = (
+                    int(q.amount_out),
+                    {"gas_estimate": int(q.gas_estimate), "fee": int(q.fee), "factory": str(e.params.get("factory") or "")},
+                )
+                out[ek] = val
+                cache.set(ck, val)
+                _record_success_edge(e)
+            else:
+                out[ek] = None
+                cache.set(ck, None)
+                _record_failed_edge(e)
+
     # Balancer batch
     if missing_bal and getattr(cfg.chain, "balancer_vault", ""):
         reqs = []
@@ -509,7 +537,7 @@ async def quote_edges_batch(
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
-    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) - batch_successes)
+    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) - batch_successes)
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
@@ -547,6 +575,7 @@ def build_edges(
     extra_balancer_pools: Optional[List[dict]] = None,
     extra_aerodrome_pools: Optional[List[dict]] = None,
     extra_slipstream_pools: Optional[List[dict]] = None,
+    extra_camelot_algebra_pools: Optional[List[dict]] = None,
 ) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
@@ -671,6 +700,22 @@ def build_edges(
             venue = str(getattr(cfg.chain, "slipstream_swap_router", "") or getattr(cfg.chain, "slipstream_quoter_v2", ""))
             edges.append(Edge("slipstream", venue, p["token_in"], p["token_out"], params))
             edges.append(Edge("slipstream", venue, p["token_out"], p["token_in"], params))
+    if getattr(cfg.chain, "camelot_algebra_quoter_v2", ""):
+        camelot_pools = list(getattr(cfg.chain, "camelot_algebra_pools", []) or [])
+        if extra_camelot_algebra_pools:
+            camelot_pools.extend(list(extra_camelot_algebra_pools))
+        for p in camelot_pools:
+            factory = str(p.get("factory") or getattr(cfg.chain, "camelot_algebra_factory", "") or "")
+            spacing = int(p.get("tick_spacing", 0) or 0)
+            if not factory or spacing <= 0:
+                continue
+            params = {"factory": factory, "tick_spacing": spacing}
+            if p.get("pool"):
+                params["pool"] = str(p.get("pool"))
+            venue = str(getattr(cfg.chain, "camelot_algebra_swap_router", "") or getattr(cfg.chain, "camelot_algebra_quoter_v2", ""))
+            edges.append(Edge("camelot_algebra", venue, p["token_in"], p["token_out"], params))
+            edges.append(Edge("camelot_algebra", venue, p["token_out"], p["token_in"], params))
+
     # remove empty-token curve edges if unspecified
     edges = [e for e in edges if e.token_in and e.token_out]
     # de-dupe
@@ -705,6 +750,10 @@ def _classify_two_leg_family(legs: List[Edge], stable_tokens: set[str]) -> str |
         return "univ3_slipstream"
     if dexes == {"aerodrome", "slipstream"}:
         return "aerodrome_slipstream"
+    if dexes == {"univ3", "camelot_algebra"}:
+        return "univ3_camelot_algebra"
+    if dexes == {"camelot_algebra", "slipstream"}:
+        return "camelot_algebra_slipstream"
     return None
 
 
@@ -771,6 +820,11 @@ def _is_same_pool_roundtrip(e1: Edge, e2: Edge) -> bool:
         p2 = str(e2.params.get("pool") or "").strip().lower()
         return bool(p1 and p2 and p1 == p2 and int(e1.params.get("tick_spacing", 0)) == int(e2.params.get("tick_spacing", 0)))
 
+    if dex == "camelot_algebra":
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2)
+
     return False
 
 
@@ -810,6 +864,9 @@ def _pool_keys_for_leg(
             pool = str(params.get("pool") or "")
             spacing = int(params.get("tick_spacing", 0))
             return f"slipstream:{pool.lower()}:{spacing}"
+        if dex == "camelot_algebra":
+            pool = str(params.get("pool") or "")
+            return f"camelot_algebra:{pool.lower()}"
     except _SAFE_POOL_KEY_EXCEPTIONS:
         return f"{dex}:{token_in.lower()}:{token_out.lower()}:{json_key(params)}"
     # fallback (worst-case): route-level uniqueness
@@ -949,6 +1006,8 @@ async def find_two_leg_opportunities(
                 aux1 = _aux_u256_to_b32_hex(raw)
             elif e1.dex == "slipstream":
                 aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
+            elif e1.dex == "camelot_algebra":
+                aux1 = "0x"
 
             aux2 = "0x"
             if e2.dex == "univ3":
@@ -962,6 +1021,8 @@ async def find_two_leg_opportunities(
                 aux2 = _aux_u256_to_b32_hex(raw)
             elif e2.dex == "slipstream":
                 aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
+            elif e2.dex == "camelot_algebra":
+                aux2 = "0x"
 
             rid = route_id_hex(
                 [
