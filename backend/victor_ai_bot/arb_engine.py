@@ -603,6 +603,7 @@ def build_edges(
     extra_aerodrome_pools: Optional[List[dict]] = None,
     extra_slipstream_pools: Optional[List[dict]] = None,
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
+    extra_camelot_v2_pools: Optional[List[dict]] = None,
 ) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
