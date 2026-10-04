@@ -932,43 +932,53 @@ class DiscoveryManager:
             self._last_constant_product_run_block = int(block_number)
             anchors = [str(t) for t in (getattr(cfg.chain, "token_universe", []) or []) if t]
             observed = sorted(self._candidate_tokens_observed.keys())
+            anchor_set = {a.lower() for a in anchors}
             frontier_cap = max(1, min(8, int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8)))
-            tokens = anchors + [t for t in observed if t.lower() not in {a.lower() for a in anchors}][:frontier_cap]
+            tokens = anchors + [t for t in observed if t.lower() not in anchor_set][:frontier_cap]
             max_calls = max(1, int(getattr(cfg.chain, "discovery_max_calls", 24) or 24))
-            calls = 0
+            per_venue_calls = max(4, max_calls // max(1, len(venues)))
             changed = False
+
             for venue in venues:
                 factory = str(venue.get("factory") or "")
                 router = str(venue.get("router") or "")
                 name = str(venue.get("name") or "").strip().lower()
                 if not factory or not router or not name:
                     continue
+                pairs: List[Tuple[str, str]] = []
                 for i, token_a in enumerate(tokens):
                     for token_b in tokens[i + 1:]:
-                        if calls >= max_calls:
+                        pairs.append((token_a, token_b))
+                        if len(pairs) >= per_venue_calls:
                             break
-                        result = await rpc.eth_call(
-                            factory,
-                            _hex0x(selector("getPair(address,address)") + enc_address(token_a) + enc_address(token_b)),
-                        )
-                        calls += 1
-                        if not result.ok:
-                            continue
-                        pool = _decode_address(result.result)
-                        if not pool or pool.lower() == _ZERO_ADDRESS.lower():
-                            continue
-                        self._observe_candidate_tokens([token_a, token_b], source=f"{name}_pair")
-                        key = f"{name}:{pool.lower()}:{token_a.lower()}:{token_b.lower()}"
-                        if key not in self._constant_product:
-                            self._constant_product[key] = DiscoveredConstantProduct(
-                                pool, token_a, token_b, factory, router, name,
-                                int(block_number), int(block_number)
-                            )
-                            changed = True
-                    if calls >= max_calls:
+                    if len(pairs) >= per_venue_calls:
                         break
-                if calls >= max_calls:
-                    break
+                if not pairs:
+                    continue
+                selector_get_pair = selector("getPair(address,address)")
+                calls = [
+                    {
+                        "to": factory,
+                        "data": _hex0x(selector_get_pair + enc_address(a) + enc_address(b)),
+                    }
+                    for a, b in pairs
+                ]
+                results = await rpc.eth_call_batch(calls)
+                for (token_a, token_b), result in zip(pairs, results):
+                    if not result.ok:
+                        continue
+                    pool = _decode_address(result.result)
+                    if not pool or pool.lower() == _ZERO_ADDRESS.lower():
+                        continue
+                    self._observe_candidate_tokens([token_a, token_b], source=f"{name}_pair")
+                    key = f"{name}:{pool.lower()}:{token_a.lower()}:{token_b.lower()}"
+                    if key in self._constant_product:
+                        continue
+                    self._constant_product[key] = DiscoveredConstantProduct(
+                        pool, token_a, token_b, factory, router, name,
+                        int(block_number), int(block_number)
+                    )
+                    changed = True
             if changed:
                 self._save()
             return [v.to_pool() for v in self._constant_product.values()]
