@@ -1128,6 +1128,7 @@ async def find_three_leg_opportunities(
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
+    extra_aerodrome_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -1145,6 +1146,7 @@ async def find_three_leg_opportunities(
         extra_v3_pairs=extra_v3_pairs,
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
+        extra_aerodrome_pools=extra_aerodrome_pools,
     )
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
@@ -1344,6 +1346,11 @@ async def find_three_leg_opportunities(
                             return aux_curve_from_meta(meta, edge.params)
                         if edge.dex == "balancer":
                             return str(edge.params.get("pool_id") or "0x")
+                        if edge.dex == "aerodrome":
+                            factory = str(meta.get("factory", edge.params.get("factory", "")) or "")
+                            stable = bool(meta.get("stable", edge.params.get("stable", False)))
+                            raw = int(factory, 16) | ((1 if stable else 0) << 160)
+                            return _aux_u256_to_b32_hex(raw)
                         return "0x"
 
                     aux1 = _aux_for(e1, meta1)
