@@ -64,6 +64,20 @@ interface ISwapRouterV3 {
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
+interface ISlipstreamSwapRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        int24 tickSpacing;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
+}
+
 interface IAerodromeRouter {
     struct Route {
         address from;
@@ -116,7 +130,7 @@ contract VictorArbExecutor {
 
     // --- types ---
     struct Leg {
-        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome
+        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream
         address venue;        // router/pool/vault
         address tokenIn;
         address tokenOut;
@@ -133,7 +147,7 @@ contract VictorArbExecutor {
 
     // Versioning (prevents silent ABI drift).
     uint32 public constant EXECUTOR_ABI_VERSION = 2;
-    uint32 public constant EXECUTOR_IMPL_VERSION = 2;
+    uint32 public constant EXECUTOR_IMPL_VERSION = 3;
     IAaveV3Pool public immutable aavePool;
     IBalancerVault public immutable balancerVault;
     ISwapRouterV3 public immutable univ3SwapRouter;
@@ -496,6 +510,23 @@ contract VictorArbExecutor {
                     toInternalBalance: false
                 });
                 uint256 out = balancerVault.swap(s, f, leg.minOut, deadline);
+                if (out < leg.minOut) revert MinOut();
+                amountIn = out;
+            } else if (leg.dex == 5) {
+                // Aerodrome Slipstream CL: aux low 24 bits = positive tickSpacing.
+                int24 tickSpacing = int24(uint24(uint256(leg.aux) & 0xFFFFFF));
+                _approveIfNeeded(leg.tokenIn, leg.venue, amountIn);
+                ISlipstreamSwapRouter.ExactInputSingleParams memory p = ISlipstreamSwapRouter.ExactInputSingleParams({
+                    tokenIn: leg.tokenIn,
+                    tokenOut: leg.tokenOut,
+                    tickSpacing: tickSpacing,
+                    recipient: address(this),
+                    deadline: deadline,
+                    amountIn: amountIn,
+                    amountOutMinimum: leg.minOut,
+                    sqrtPriceLimitX96: 0
+                });
+                uint256 out = ISlipstreamSwapRouter(leg.venue).exactInputSingle(p);
                 if (out < leg.minOut) revert MinOut();
                 amountIn = out;
             } else if (leg.dex == 4) {

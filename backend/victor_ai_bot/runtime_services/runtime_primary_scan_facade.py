@@ -884,6 +884,7 @@ class RuntimePrimaryScanFacade:
         extra_curve_pools = list(discovery_context.get("curve_pools") or [])
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
         extra_aerodrome_pools = list(discovery_context.get("aerodrome_pools") or [])
+        extra_slipstream_pools = list(discovery_context.get("slipstream_pools") or [])
 
         discovery = getattr(self, "_discovery", None)
         candidate_token_telemetry = (
@@ -920,6 +921,7 @@ class RuntimePrimaryScanFacade:
                 "curve_pools": len(extra_curve_pools),
                 "balancer_pools": len(extra_balancer_pools),
                 "aerodrome_pools": len(extra_aerodrome_pools),
+                "slipstream_pools": len(extra_slipstream_pools),
             },
             "candidate_token_discovery": candidate_token_telemetry,
         }
@@ -1001,6 +1003,7 @@ class RuntimePrimaryScanFacade:
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
                         extra_aerodrome_pools=extra_aerodrome_pools,
+                        extra_slipstream_pools=extra_slipstream_pools,
                     )
 
                 if bool(
@@ -2008,6 +2011,12 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "aerodrome_pools", None))
                 else []
             ),
+            "slipstream": (
+                list(discovery.slipstream_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "slipstream_pools", None))
+                else []
+            ),
         }
         stages: List[Dict[str, Any]] = []
 
@@ -2082,6 +2091,7 @@ class RuntimePrimaryScanFacade:
             "curve_pools": list(venue_pools.get("curve") or []),
             "balancer_pools": list(venue_pools.get("balancer") or []),
             "aerodrome_pools": list(venue_pools.get("aerodrome") or []),
+            "slipstream_pools": list(venue_pools.get("slipstream") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,

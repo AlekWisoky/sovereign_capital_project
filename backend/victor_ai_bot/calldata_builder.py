@@ -43,6 +43,8 @@ DEX_ID = {
     "univ3": 1,
     "curve": 2,
     "balancer": 3,
+    "aerodrome": 4,
+    "slipstream": 5,
 }
 
 

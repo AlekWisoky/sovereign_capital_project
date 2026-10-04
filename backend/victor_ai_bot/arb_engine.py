@@ -8,6 +8,7 @@ from .quote_univ3 import quote_exact_input_single, quote_exact_input_single_batc
 from .quote_curve import quote_curve, quote_curve_many
 from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_many
 from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
+from .quote_slipstream import quote_slipstream, quote_slipstream_many
 from .gas_model import estimate_route_gas_units, estimate_gas_cost_wei_from_cfg
 from .route_encoding import EncLeg, route_id_hex
 from .opportunity_density import scan_efficiency_snapshot
@@ -326,6 +327,7 @@ async def quote_edges_batch(
     missing_curve: List[Tuple[int, Edge]] = []
     missing_bal: List[Tuple[int, Edge]] = []
     missing_aero: List[Tuple[int, Edge]] = []
+    missing_slipstream: List[Tuple[int, Edge]] = []
 
     # read cache first
     for idx, e in enumerate(edges):
@@ -344,10 +346,12 @@ async def quote_edges_batch(
             missing_bal.append((idx, e))
         elif e.dex == "aerodrome":
             missing_aero.append((idx, e))
+        elif e.dex == "slipstream":
+            missing_slipstream.append((idx, e))
         else:
             out[ek] = None
 
-    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero)
+    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream)
     metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero))
     metrics.setdefault("failed_quote_edge_samples", [])
     successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
@@ -446,6 +450,33 @@ async def quote_edges_batch(
             else:
                 _record_failed_edge(e)
 
+    # Slipstream CL batch. tickSpacing is the native pool key, not a synthetic fee tier.
+    if missing_slipstream and getattr(cfg.chain, "slipstream_quoter_v2", ""):
+        reqs = [
+            (e.token_in, e.token_out, int(e.params.get("tick_spacing", 0)), int(amount_in))
+            for _, e in missing_slipstream
+        ]
+        order = [e for _, e in missing_slipstream]
+        quotes = await quote_slipstream_many(
+            rpc, cfg.chain.slipstream_quoter_v2, reqs, diagnostics=quote_diagnostics
+        )
+        for e, q in zip(order, quotes):
+            ek = edge_key(e)
+            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
+                val = (
+                    int(q.amount_out),
+                    {"gas_estimate": int(q.gas_estimate), "tick_spacing": int(q.tick_spacing), "factory": str(e.params.get("factory") or "")},
+                )
+                out[ek] = val
+                cache.set(ck, val)
+                _record_success_edge(e)
+            else:
+                out[ek] = None
+                cache.set(ck, None)
+                _record_failed_edge(e)
+
     # Balancer batch
     if missing_bal and getattr(cfg.chain, "balancer_vault", ""):
         reqs = []
@@ -515,6 +546,7 @@ def build_edges(
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
     extra_aerodrome_pools: Optional[List[dict]] = None,
+    extra_slipstream_pools: Optional[List[dict]] = None,
 ) -> List[Edge]:
     edges: List[Edge] = []
     if cfg.chain.univ3_quoter_v2:
@@ -621,6 +653,24 @@ def build_edges(
                 continue
             edges.append(Edge("aerodrome", str(cfg.chain.aerodrome_router), p["token_in"], p["token_out"], params))
             edges.append(Edge("aerodrome", str(cfg.chain.aerodrome_router), p["token_out"], p["token_in"], params))
+    if getattr(cfg.chain, "slipstream_quoter_v2", ""):
+        slipstream_pools = list(getattr(cfg.chain, "slipstream_pools", []) or [])
+        if extra_slipstream_pools:
+            slipstream_pools.extend(list(extra_slipstream_pools))
+        for p in slipstream_pools:
+            tick_spacing = int(p.get("tick_spacing", 0))
+            if tick_spacing <= 0:
+                continue
+            params = {
+                "tick_spacing": tick_spacing,
+                "factory": str(p.get("factory") or ""),
+                **({"pool": str(p.get("pool"))} if p.get("pool") else {}),
+            }
+            if not params["factory"]:
+                continue
+            venue = str(getattr(cfg.chain, "slipstream_swap_router", "") or getattr(cfg.chain, "slipstream_quoter_v2", ""))
+            edges.append(Edge("slipstream", venue, p["token_in"], p["token_out"], params))
+            edges.append(Edge("slipstream", venue, p["token_out"], p["token_in"], params))
     # remove empty-token curve edges if unspecified
     edges = [e for e in edges if e.token_in and e.token_out]
     # de-dupe
@@ -651,6 +701,10 @@ def _classify_two_leg_family(legs: List[Edge], stable_tokens: set[str]) -> str |
         return "stablecoin_dislocation" if stable_tokens and tokens & stable_tokens else "univ3_curve"
     if dexes == {"univ3", "balancer"}:
         return "univ3_balancer"
+    if dexes == {"univ3", "slipstream"}:
+        return "univ3_slipstream"
+    if dexes == {"aerodrome", "slipstream"}:
+        return "aerodrome_slipstream"
     return None
 
 
@@ -707,6 +761,16 @@ def _is_same_pool_roundtrip(e1: Edge, e2: Edge) -> bool:
         p2 = str(e2.params.get("pool_id") or "").strip().lower()
         return bool(p1 and p2 and p1 == p2)
 
+    if dex == "aerodrome":
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2 and bool(e1.params.get("stable", False)) == bool(e2.params.get("stable", False)) and str(e1.params.get("factory") or "").lower() == str(e2.params.get("factory") or "").lower())
+
+    if dex == "slipstream":
+        p1 = str(e1.params.get("pool") or "").strip().lower()
+        p2 = str(e2.params.get("pool") or "").strip().lower()
+        return bool(p1 and p2 and p1 == p2 and int(e1.params.get("tick_spacing", 0)) == int(e2.params.get("tick_spacing", 0)))
+
     return False
 
 
@@ -739,6 +803,13 @@ def _pool_keys_for_leg(
         if dex == "balancer":
             pid = str(params.get("pool_id") or aux_hex or "")
             return f"bal:{pid.lower()}"
+        if dex == "aerodrome":
+            pool = str(params.get("pool") or "")
+            return f"aero:{pool.lower()}"
+        if dex == "slipstream":
+            pool = str(params.get("pool") or "")
+            spacing = int(params.get("tick_spacing", 0))
+            return f"slipstream:{pool.lower()}:{spacing}"
     except _SAFE_POOL_KEY_EXCEPTIONS:
         return f"{dex}:{token_in.lower()}:{token_out.lower()}:{json_key(params)}"
     # fallback (worst-case): route-level uniqueness
@@ -760,6 +831,7 @@ async def find_two_leg_opportunities(
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
     extra_aerodrome_pools: Optional[List[dict]] = None,
+    extra_slipstream_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -771,6 +843,7 @@ async def find_two_leg_opportunities(
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
         extra_aerodrome_pools=extra_aerodrome_pools,
+        extra_slipstream_pools=extra_slipstream_pools,
     )
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
@@ -874,6 +947,8 @@ async def find_two_leg_opportunities(
             elif e1.dex == "aerodrome":
                 raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
                 aux1 = _aux_u256_to_b32_hex(raw)
+            elif e1.dex == "slipstream":
+                aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
 
             aux2 = "0x"
             if e2.dex == "univ3":
@@ -885,6 +960,8 @@ async def find_two_leg_opportunities(
             elif e2.dex == "aerodrome":
                 raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
                 aux2 = _aux_u256_to_b32_hex(raw)
+            elif e2.dex == "slipstream":
+                aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
 
             rid = route_id_hex(
                 [
@@ -1030,7 +1107,6 @@ async def find_two_leg_opportunities(
                 )
             )
     _finalize_quote_coverage(metrics)
-    _finalize_quote_coverage(metrics)
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
@@ -1137,6 +1213,7 @@ async def find_three_leg_opportunities(
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
     extra_aerodrome_pools: Optional[List[dict]] = None,
+    extra_slipstream_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
 ) -> List[Opportunity]:
@@ -1155,6 +1232,7 @@ async def find_three_leg_opportunities(
         extra_curve_pools=extra_curve_pools,
         extra_balancer_pools=extra_balancer_pools,
         extra_aerodrome_pools=extra_aerodrome_pools,
+        extra_slipstream_pools=extra_slipstream_pools,
     )
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
@@ -1359,6 +1437,8 @@ async def find_three_leg_opportunities(
                             stable = bool(meta.get("stable", edge.params.get("stable", False)))
                             raw = int(factory, 16) | ((1 if stable else 0) << 160)
                             return _aux_u256_to_b32_hex(raw)
+                        if edge.dex == "slipstream":
+                            return _aux_u256_to_b32_hex(int(meta.get("tick_spacing", edge.params.get("tick_spacing", 0))) & 0xFFFFFF)
                         return "0x"
 
                     aux1 = _aux_for(e1, meta1)

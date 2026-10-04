@@ -391,3 +391,12 @@ Validation:
 - Added a real-time execution learning engine with route/venue/path priors, quarantine, and confidence-to-size scaling.
 - Added governed launch modes and family readiness gating for V1-first rollout.
 - Added backend launch APIs and mobile setup/home rollout controls.
+
+
+## 2026-10-04 — Base Aerodrome Slipstream venue gate
+
+- Added bounded Slipstream CL discovery across the verified Base CL factory set.
+- Added native int24 tickSpacing QuoterV2 and SwapRouter execution support.
+- Preserved the research-universe versus execution-universe boundary.
+- Wired Slipstream into route construction, observed sizing/economics, gas pricing, canonical route identity, and guarded executor legs.
+- Added regression coverage for quote encoding, discovery verification, executor calldata, and the bumped executor implementation version.

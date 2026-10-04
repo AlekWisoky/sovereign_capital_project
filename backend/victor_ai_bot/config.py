@@ -340,6 +340,12 @@ class ChainConfig:
     balancer_vault: str = ""
     aerodrome_router: str = ""
     aerodrome_factory_registry: str = ""
+    slipstream_quoter_v2: str = ""
+    slipstream_swap_router: str = ""
+    slipstream_factories: List[str] = field(default_factory=list)
+    slipstream_quoter_v2: str = ""
+    slipstream_swap_router: str = ""
+    slipstream_factories: List[str] = field(default_factory=list)
     # Canonical protocol registries used only for bounded read-only discovery.
     curve_address_provider: str = ""
     enable_venue_discovery: bool = False
@@ -359,6 +365,8 @@ class ChainConfig:
     curve_pools: List[dict] = field(default_factory=list)
     balancer_pools: List[dict] = field(default_factory=list)
     aerodrome_pools: List[dict] = field(default_factory=list)
+    slipstream_pools: List[dict] = field(default_factory=list)
+    slipstream_pools: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -418,6 +426,8 @@ def load_config(path: str) -> AppConfig:
     curve_pools = chain_raw.get("curve_pools") or raw.get("curve_pools") or []
     balancer_pools = chain_raw.get("balancer_pools") or raw.get("balancer_pools") or []
     aerodrome_pools = chain_raw.get("aerodrome_pools") or raw.get("aerodrome_pools") or []
+    slipstream_pools = chain_raw.get("slipstream_pools") or raw.get("slipstream_pools") or []
+    slipstream_pools = chain_raw.get("slipstream_pools") or raw.get("slipstream_pools") or []
 
     chain = ChainConfig(
         name=name,
@@ -432,6 +442,9 @@ def load_config(path: str) -> AppConfig:
         balancer_vault=str(chain_raw.get("balancer_vault") or ""),
         aerodrome_router=str(chain_raw.get("aerodrome_router") or ""),
         aerodrome_factory_registry=str(chain_raw.get("aerodrome_factory_registry") or ""),
+        slipstream_quoter_v2=str(chain_raw.get("slipstream_quoter_v2") or ""),
+        slipstream_swap_router=str(chain_raw.get("slipstream_swap_router") or ""),
+        slipstream_factories=[str(x) for x in _as_list(chain_raw.get("slipstream_factories") or []) if x],
         curve_address_provider=str(chain_raw.get("curve_address_provider") or ""),
         enable_venue_discovery=bool(chain_raw.get("enable_venue_discovery", False)),
         discovery_pool_max_candidates=int(chain_raw.get("discovery_pool_max_candidates") or 24),
@@ -447,6 +460,7 @@ def load_config(path: str) -> AppConfig:
         curve_pools=curve_pools,
         balancer_pools=balancer_pools,
         aerodrome_pools=aerodrome_pools,
+        slipstream_pools=slipstream_pools,
     )
     sraw = raw.get("safety") or {}
     safety = SafetyConfig(

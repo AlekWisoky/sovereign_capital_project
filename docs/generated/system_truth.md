@@ -1,11 +1,11 @@
 # System Truth
 
-- generated_at: 2026-09-21T20:24:37.421Z
-- generated_at_ms: 1790022277421
-- generated_at_iso: 2026-09-21T20:24:37.421Z
+- generated_at: 2026-10-04T05:51:11.946Z
+- generated_at_ms: 1791093071946
+- generated_at_iso: 2026-10-04T05:51:11.946Z
 - thin_shell_runtime_py_lines: 47
 - thin_shell_api_py_lines: 21
-- backend_test_file_count: 345
+- backend_test_file_count: 368
 - mobile_test_file_count: 15
 - route_count: 165
 - route_count_basis: app_routes

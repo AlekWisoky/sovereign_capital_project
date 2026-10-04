@@ -248,7 +248,7 @@ contract VictorArbExecutorTest {
     function test_executor_version_exposed() public view {
         (uint32 abiVersion, uint32 implVersion) = ex.executorVersion();
         require(abiVersion == 2, "abi version mismatch");
-        require(implVersion == 2, "impl version mismatch");
+        require(implVersion == 3, "impl version mismatch");
     }
 
     function test_convert_rejects_non_stable_out() public {
