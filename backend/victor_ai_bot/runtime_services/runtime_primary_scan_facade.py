@@ -885,6 +885,7 @@ class RuntimePrimaryScanFacade:
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
         extra_aerodrome_pools = list(discovery_context.get("aerodrome_pools") or [])
         extra_slipstream_pools = list(discovery_context.get("slipstream_pools") or [])
+        extra_camelot_algebra_pools = list(discovery_context.get("camelot_algebra_pools") or [])
 
         discovery = getattr(self, "_discovery", None)
         candidate_token_telemetry = (
@@ -922,6 +923,7 @@ class RuntimePrimaryScanFacade:
                 "balancer_pools": len(extra_balancer_pools),
                 "aerodrome_pools": len(extra_aerodrome_pools),
                 "slipstream_pools": len(extra_slipstream_pools),
+                "camelot_algebra_pools": len(extra_camelot_algebra_pools),
             },
             "candidate_token_discovery": candidate_token_telemetry,
         }
@@ -1004,6 +1006,7 @@ class RuntimePrimaryScanFacade:
                         extra_balancer_pools=extra_balancer_pools,
                         extra_aerodrome_pools=extra_aerodrome_pools,
                         extra_slipstream_pools=extra_slipstream_pools,
+                        extra_camelot_algebra_pools=extra_camelot_algebra_pools,
                     )
 
                 if bool(
@@ -2017,6 +2020,12 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "slipstream_pools", None))
                 else []
             ),
+            "camelot_algebra": (
+                list(discovery.camelot_algebra_pools())
+                if discovery is not None
+                and callable(getattr(discovery, "camelot_algebra_pools", None))
+                else []
+            ),
         }
         stages: List[Dict[str, Any]] = []
 
@@ -2092,6 +2101,7 @@ class RuntimePrimaryScanFacade:
             "balancer_pools": list(venue_pools.get("balancer") or []),
             "aerodrome_pools": list(venue_pools.get("aerodrome") or []),
             "slipstream_pools": list(venue_pools.get("slipstream") or []),
+            "camelot_algebra_pools": list(venue_pools.get("camelot_algebra") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,
