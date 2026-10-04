@@ -245,6 +245,7 @@ class DiscoveryManager:
         self._aerodrome: Dict[str, DiscoveredAerodrome] = {}
         self._slipstream: Dict[str, DiscoveredSlipstream] = {}
         self._camelot_algebra: Dict[str, DiscoveredCamelotAlgebra] = {}
+        self._camelot_v2: Dict[str, DiscoveredCamelotV2] = {}
         self._candidate_tokens_observed: Dict[str, set[str]] = {}
         self._candidate_token_observation_cap = max(
             1, int(os.environ.get("VICTOR_CANDIDATE_TOKEN_OBSERVATION_CAP", "64") or 64)
