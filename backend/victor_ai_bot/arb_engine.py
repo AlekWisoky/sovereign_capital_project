@@ -871,6 +871,9 @@ async def find_two_leg_opportunities(
                 aux1 = aux_curve_from_meta(meta1, e1.params)
             elif e1.dex == "balancer":
                 aux1 = str(e1.params.get("pool_id") or "0x")
+            elif e1.dex == "aerodrome":
+                raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
+                aux1 = _aux_u256_to_b32_hex(raw)
 
             aux2 = "0x"
             if e2.dex == "univ3":
@@ -879,6 +882,9 @@ async def find_two_leg_opportunities(
                 aux2 = aux_curve_from_meta(meta2, e2.params)
             elif e2.dex == "balancer":
                 aux2 = str(e2.params.get("pool_id") or "0x")
+            elif e2.dex == "aerodrome":
+                raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
+                aux2 = _aux_u256_to_b32_hex(raw)
 
             rid = route_id_hex(
                 [
