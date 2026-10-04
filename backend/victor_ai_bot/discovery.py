@@ -498,7 +498,7 @@ class DiscoveryManager:
             if self._last_slipstream_run_block and (int(block_number) - self._last_slipstream_run_block) < interval:
                 return self.slipstream_pools()
             self._last_slipstream_run_block = int(block_number)
-            anchors = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
+            anchors = self._research_frontier_tokens(cfg)
             window = max(1, int(getattr(cfg.chain, "discovery_log_window_blocks", 50_000) or 50_000))
             max_pools = max(1, int(getattr(cfg.chain, "discovery_pool_max_candidates", 48) or 48))
             changed = False
@@ -668,11 +668,7 @@ class DiscoveryManager:
             )
         except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
             return False
-        anchors = {
-            str(token).lower()
-            for token in (getattr(cfg.chain, "token_universe", []) or [])
-            if token
-        }
+        anchors = self._research_frontier_tokens(cfg)
         changed = False
         for log in list(logs or [])[-max_pools:]:
             topics = log.get("topics") if isinstance(log, dict) else None
