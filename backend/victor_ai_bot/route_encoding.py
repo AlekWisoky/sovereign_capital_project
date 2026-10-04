@@ -39,7 +39,7 @@ from typing import Iterable, List, Literal
 from .ethabi import keccak256
 
 
-DexType = Literal["univ3", "curve", "balancer", "aerodrome", "slipstream", "camelot_algebra"]
+DexType = Literal["univ3", "curve", "balancer", "aerodrome", "slipstream", "camelot_algebra", "camelot_v2"]
 
 
 DEX_ID = {
