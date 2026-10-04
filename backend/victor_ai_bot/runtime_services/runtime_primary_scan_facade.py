@@ -886,6 +886,7 @@ class RuntimePrimaryScanFacade:
         extra_aerodrome_pools = list(discovery_context.get("aerodrome_pools") or [])
         extra_slipstream_pools = list(discovery_context.get("slipstream_pools") or [])
         extra_camelot_algebra_pools = list(discovery_context.get("camelot_algebra_pools") or [])
+        extra_camelot_v2_pools = list(discovery_context.get("camelot_v2_pools") or [])
 
         discovery = getattr(self, "_discovery", None)
         candidate_token_telemetry = (
