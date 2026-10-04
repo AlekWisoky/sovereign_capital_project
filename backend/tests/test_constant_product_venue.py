@@ -18,7 +18,6 @@ def test_constant_product_quote_uses_canonical_get_amounts_out_abi():
 
 def test_constant_product_quote_parser_reads_terminal_amount():
     raw = (
-        b"\x00" * 32
         + (32).to_bytes(32, "big")
         + (2).to_bytes(32, "big")
         + (123).to_bytes(32, "big")
