@@ -613,7 +613,7 @@ class DiscoveryManager:
             return {"curve": self.curve_pools(), "balancer": self.balancer_pools(), "aerodrome": self.aerodrome_pools()}
         interval = max(1, int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50))
         if self._last_venue_run_block and (int(block_number) - self._last_venue_run_block) < interval:
-            return {"curve": self.curve_pools(), "balancer": self.balancer_pools()}
+            return {"curve": self.curve_pools(), "balancer": self.balancer_pools(), "aerodrome": self.aerodrome_pools()}
         self._last_venue_run_block = int(block_number)
         changed = False
         try:
