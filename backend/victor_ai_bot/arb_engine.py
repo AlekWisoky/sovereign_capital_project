@@ -346,6 +346,18 @@ async def quote_edges_batch(
     metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal)
     metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal))
     metrics.setdefault("failed_quote_edge_samples", [])
+    successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
+    successful_pools = metrics.setdefault("_successful_quote_pool_keys", set())
+    successful_pairs = metrics.setdefault("_successful_quote_pair_keys", set())
+
+    def _record_success_edge(edge: Edge) -> None:
+        if isinstance(successful_edges, set):
+            successful_edges.add(edge_key(edge))
+        if isinstance(successful_pools, set):
+            pool = str(edge.params.get("pool") or edge.params.get("pool_id") or edge.venue or "").lower()
+            successful_pools.add(f"{edge.dex}:{pool}")
+        if isinstance(successful_pairs, set):
+            successful_pairs.add(f"{edge.token_in.lower()}:{edge.token_out.lower()}")
 
     def _record_failed_edge(edge: Edge) -> None:
         samples = metrics["failed_quote_edge_samples"]
@@ -372,6 +384,7 @@ async def quote_edges_batch(
                 )
                 out[ek] = val
                 cache.set(ck, val)
+                _record_success_edge(e)
             else:
                 out[ek] = None
                 cache.set(ck, None)
@@ -448,6 +461,12 @@ async def quote_edges_batch(
         )
     metrics["quote_failure_reasons"] = failure_counts
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
+    metrics["successful_quote_edge_count"] = int(len(successful_edges)) if isinstance(successful_edges, set) else 0
+    metrics["successful_quote_pool_count"] = int(len(successful_pools)) if isinstance(successful_pools, set) else 0
+    metrics["successful_quote_pair_count"] = int(len(successful_pairs)) if isinstance(successful_pairs, set) else 0
+    metrics.pop("_successful_quote_edge_keys", None)
+    metrics.pop("_successful_quote_pool_keys", None)
+    metrics.pop("_successful_quote_pair_keys", None)
     metrics["quote_fallback_attempts"] = int(quote_diagnostics.get("fallback_attempts", 0) or 0)
     metrics["quote_fallback_successes"] = int(quote_diagnostics.get("fallback_successes", 0) or 0)
     # ensure all are present
