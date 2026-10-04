@@ -154,7 +154,7 @@ contract VictorArbExecutor {
 
     // --- types ---
     struct Leg {
-        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra
+        uint8 dex;            // 1=univ3, 2=curve, 3=balancer, 4=aerodrome V1, 5=aerodrome Slipstream, 6=Camelot Algebra, 7=Camelot V2
         address venue;        // router/pool/vault
         address tokenIn;
         address tokenOut;
