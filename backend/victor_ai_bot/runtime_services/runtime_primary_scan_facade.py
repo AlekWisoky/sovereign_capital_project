@@ -2037,6 +2037,7 @@ class RuntimePrimaryScanFacade:
                 and callable(getattr(discovery, "camelot_v2_pools", None))
                 else []
             ),
+            "constant_product": list(getattr(discovery, "_constant_product", {}).values()) if discovery is not None else [],
         }
         stages: List[Dict[str, Any]] = []
 
@@ -2114,6 +2115,7 @@ class RuntimePrimaryScanFacade:
             "slipstream_pools": list(venue_pools.get("slipstream") or []),
             "camelot_algebra_pools": list(venue_pools.get("camelot_algebra") or []),
             "camelot_v2_pools": list(venue_pools.get("camelot_v2") or []),
+            "constant_product_pools": list(venue_pools.get("constant_product") or []),
             "runtime": {
                 "budget_timeout_s": float(timeout_s),
                 "stages": stages,
