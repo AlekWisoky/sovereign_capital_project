@@ -27,6 +27,7 @@ dex_id mapping:
   1 = univ3
   2 = curve
   3 = balancer
+  4 = aerodrome V1
 
 aux is a bytes32 (hex string) used by the executor for dex-specific parameters.
 """
@@ -37,13 +38,14 @@ from typing import Iterable, List, Literal
 from .ethabi import keccak256
 
 
-DexType = Literal["univ3", "curve", "balancer"]
+DexType = Literal["univ3", "curve", "balancer", "aerodrome"]
 
 
 DEX_ID = {
     "univ3": 1,
     "curve": 2,
     "balancer": 3,
+    "aerodrome": 4,
 }
 
 
