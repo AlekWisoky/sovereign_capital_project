@@ -363,6 +363,21 @@ class DiscoveryManager:
                         self._observe_candidate_tokens([dc.token_in, dc.token_out], source="camelot_algebra_persisted")
                 except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
                     continue
+            for it in j.get("camelot_v2") or []:
+                try:
+                    dc = DiscoveredCamelotV2(
+                        pool=str(it.get("pool") or ""),
+                        token_in=str(it.get("token_in") or ""),
+                        token_out=str(it.get("token_out") or ""),
+                        factory=str(it.get("factory") or ""),
+                        first_seen_block=int(it.get("first_seen_block") or 0),
+                        last_seen_block=int(it.get("last_seen_block") or 0),
+                    )
+                    if dc.pool and dc.token_in and dc.token_out and dc.factory:
+                        self._camelot_v2[f"{dc.pool.lower()}:{dc.token_in.lower()}:{dc.token_out.lower()}:{dc.factory.lower()}"] = dc
+                        self._observe_candidate_tokens([dc.token_in, dc.token_out], source="camelot_v2_persisted")
+                except _SAFE_DISCOVERY_ENTRY_EXCEPTIONS:
+                    continue
             for it in j.get("balancer") or []:
                 try:
                     db = DiscoveredBalancer(
