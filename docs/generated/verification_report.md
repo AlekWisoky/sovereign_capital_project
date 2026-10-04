@@ -10,7 +10,7 @@ Generator: `scripts/render_verification_report.py`
 
 ## Critical hardening tests
 - runtime_compatibility: **75**
-- execution_hardening: **24**
+- execution_hardening: **25**
 - capital_and_fund_truth: **44**
 
 ## Mobile / contracts
