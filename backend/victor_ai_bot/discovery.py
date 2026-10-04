@@ -239,6 +239,7 @@ class DiscoveryManager:
         self._last_aerodrome_run_block: int = 0
         self._last_slipstream_run_block: int = 0
         self._last_camelot_algebra_run_block: int = 0
+        self._last_camelot_v2_run_block: int = 0
         self._v3: Dict[str, DiscoveredV3] = {}
         self._curve: Dict[str, DiscoveredCurve] = {}
         self._balancer: Dict[str, DiscoveredBalancer] = {}
