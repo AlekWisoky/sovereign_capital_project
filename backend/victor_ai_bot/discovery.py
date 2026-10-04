@@ -408,7 +408,13 @@ class DiscoveryManager:
         cross-venue/triangle discovery is permanently blind to newly discovered
         edges.
         """
-        anchors = self._research_frontier_tokens(cfg)
+        research_frontier = self._research_frontier_tokens(cfg)
+        execution_anchors = {
+            str(token).lower()
+            for token in (getattr(cfg.chain, "token_universe", []) or [])
+            if token
+        }
+        observed_frontier = research_frontier - execution_anchors
         liquid: List[Tuple[int, str]] = []
         for index, token in enumerate(tokens):
             normalized = str(token or "").lower()
@@ -420,17 +426,33 @@ class DiscoveryManager:
             ):
                 continue
             liquid.append((index, str(token)))
-        frontier_positions = [item for item in liquid if item[1].lower() in anchors]
-        if len(frontier_positions) < 1:
+
+        anchor_positions = [item for item in liquid if item[1].lower() in execution_anchors]
+        if not anchor_positions:
             return []
+        observed_positions = [
+            item for item in liquid if item[1].lower() in observed_frontier
+        ]
+        frontier_positions = list(dict.fromkeys(anchor_positions + observed_positions))
 
         pairs: List[Tuple[int, str, int, str]] = []
         seen: set[tuple[int, int]] = set()
-        # The research frontier contains only execution anchors plus tokens
-        # previously observed on verified/liquid venues. Allowing frontier-to-
-        # frontier edges is what turns discovery into a cross-venue graph rather
-        # than a collection of anchor spokes. Unobserved/unadmitted tokens remain
-        # excluded, and the execution token universe is never mutated.
+
+        # Preserve the safe first-hop rule: a verified pool touching an execution
+        # anchor may reveal one new liquid token. That token is observational only.
+        for i, token_i in anchor_positions:
+            for j, token_j in liquid:
+                if i == j:
+                    continue
+                key = (min(i, j), max(i, j))
+                if key in seen:
+                    continue
+                seen.add(key)
+                pairs.append((i, token_i, j, token_j))
+
+        # Once tokens have been observed on verified venues, allow bounded
+        # observed-to-observed links so other venues can discover the missing
+        # cross-venue edge. Unknown-to-unknown edges remain excluded.
         for i, token_i in frontier_positions:
             for j, token_j in frontier_positions:
                 if i == j:
