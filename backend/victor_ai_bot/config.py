@@ -350,6 +350,9 @@ class ChainConfig:
     camelot_algebra_quoter_v2: str = ""
     camelot_algebra_swap_router: str = ""
     camelot_algebra_pools: List[dict] = field(default_factory=list)
+    camelot_v2_factory: str = ""
+    camelot_v2_router: str = ""
+    camelot_v2_pools: List[dict] = field(default_factory=list)
     # Canonical protocol registries used only for bounded read-only discovery.
     curve_address_provider: str = ""
     enable_venue_discovery: bool = False
