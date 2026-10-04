@@ -296,7 +296,7 @@ def _route_universe_snapshot(
                 ),
                 "params": {
                     str(k): v for k, v in dict(edge.params or {}).items()
-                    if str(k) in {"fee", "pool", "pool_id", "i", "j", "underlying"}
+                    if str(k) in {"fee", "pool", "pool_id", "factory", "i", "j", "underlying", "tick_spacing"}
                 },
             }
             for edge in pruned[:80]
