@@ -509,6 +509,29 @@ async def quote_edges_batch(
                 cache.set(ck, None)
                 _record_failed_edge(e)
 
+    # Camelot V2 constant-product batch. Router getAmountsOut is canonical and
+    # captures the pair's current directional fee rather than assuming a fixed
+    # fee in the economic model.
+    if missing_camelot_v2 and getattr(cfg.chain, "camelot_v2_router", ""):
+        reqs = [(e.token_in, e.token_out, int(amount_in)) for _, e in missing_camelot_v2]
+        order = [e for _, e in missing_camelot_v2]
+        quotes = await quote_camelot_v2_many(
+            rpc, cfg.chain.camelot_v2_router, reqs, diagnostics=quote_diagnostics
+        )
+        for e, q in zip(order, quotes):
+            ek = edge_key(e)
+            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            if q:
+                metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
+                val = (int(q.amount_out), {"fee_model": "router_observed", "pool": str(e.params.get("pool") or "")})
+                out[ek] = val
+                cache.set(ck, val)
+                _record_success_edge(e)
+            else:
+                out[ek] = None
+                cache.set(ck, None)
+                _record_failed_edge(e)
+
     # Balancer batch
     if missing_bal and getattr(cfg.chain, "balancer_vault", ""):
         reqs = []
