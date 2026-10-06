@@ -64,7 +64,7 @@ def test_research_frontier_prefers_cross_venue_observations_and_remains_read_onl
     assert anchor not in manager._candidate_tokens_observed
 
 
-def test_camelot_v2_discovery_consumes_bounded_research_frontier(tmp_path):
+async def test_camelot_v2_discovery_consumes_bounded_research_frontier(tmp_path):
     manager = DiscoveryManager(chain_name="arbitrum", data_dir=str(tmp_path))
     anchor = "0x" + "11" * 20
     observed = "0x" + "22" * 20
