@@ -735,13 +735,43 @@ class DiscoveryManager:
             if getattr(self, "_last_camelot_v2_run_block", 0) and int(block_number) - int(self._last_camelot_v2_run_block) < interval:
                 return self.camelot_v2_pools()
             self._last_camelot_v2_run_block = int(block_number)
-            tokens = [str(t) for t in (getattr(cfg.chain, "token_universe", []) or []) if t]
+            anchors = [
+                str(t).lower()
+                for t in (getattr(cfg.chain, "token_universe", []) or [])
+                if t
+            ]
+            observed = self._research_frontier_tokens(cfg) - set(anchors)
+            try:
+                frontier_cap = max(
+                    1,
+                    min(
+                        8,
+                        int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "8") or 8),
+                    ),
+                )
+            except (TypeError, ValueError):
+                frontier_cap = 8
+            frontier = sorted(
+                observed,
+                key=lambda token: stable_hash_int(
+                    f"camelot-v2-frontier:{self.chain_name}:{token}"
+                ),
+            )
+            tokens = anchors + frontier[:frontier_cap]
             max_calls = max(1, int(getattr(cfg.chain, "discovery_max_calls", 24) or 24))
             pairs: List[Tuple[str, str]] = []
+            seen_pairs: set[Tuple[str, str]] = set()
             for i, token_a in enumerate(tokens):
                 for token_b in tokens[i + 1:]:
+                    key = (str(token_a).lower(), str(token_b).lower())
+                    if key in seen_pairs:
+                        continue
+                    seen_pairs.add(key)
                     pairs.append((token_a, token_b))
-            pairs = pairs[:max_calls]
+                    if len(pairs) >= max_calls:
+                        break
+                if len(pairs) >= max_calls:
+                    break
             sel = selector("getPair(address,address)")
             changed = False
             for token_a, token_b in pairs:
