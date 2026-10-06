@@ -62,3 +62,42 @@ def test_research_frontier_prefers_cross_venue_observations_and_remains_read_onl
     assert tokens[1] in frontier
     assert len(frontier) == 17
     assert anchor not in manager._candidate_tokens_observed
+
+
+def test_camelot_v2_discovery_consumes_bounded_research_frontier(tmp_path):
+    manager = DiscoveryManager(chain_name="arbitrum", data_dir=str(tmp_path))
+    anchor = "0x" + "11" * 20
+    observed = "0x" + "22" * 20
+    factory = "0x" + "33" * 20
+    manager._observe_candidate_tokens([observed], source="univ3_pool_candidate")
+
+    class _Rpc:
+        def __init__(self):
+            self.calls = []
+
+        async def eth_call(self, target, data):
+            self.calls.append((target, data))
+            return SimpleNamespace(
+                ok=True,
+                result="0x" + "00" * 12 + "44" * 20,
+            )
+
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            token_universe=[anchor],
+            camelot_v2_factory=factory,
+            discovery_interval_blocks=1,
+            discovery_max_calls=24,
+        ),
+        flags=SimpleNamespace(enable_discovery=True),
+    )
+    rpc = _Rpc()
+
+    pools = await manager.maybe_discover_camelot_v2(rpc, cfg, 100)
+
+    assert rpc.calls
+    assert any(
+        {str(row["token_in"]).lower(), str(row["token_out"]).lower()}
+        == {anchor.lower(), observed.lower()}
+        for row in pools
+    )
