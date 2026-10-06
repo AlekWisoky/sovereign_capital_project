@@ -15,13 +15,17 @@ EXTRACTED_METHODS = {
 
 
 class _Discovery:
-    def __init__(self, pairs=None):
+    def __init__(self, pairs=None, venue_pools=None):
         self.pairs = list(pairs or [])
+        self.venue_pools = dict(venue_pools or {})
         self.calls = []
 
     async def maybe_discover_univ3(self, rpc, cfg, block_number):
         self.calls.append({'rpc': rpc, 'cfg': cfg, 'block_number': block_number})
         return list(self.pairs)
+
+    async def maybe_discover_venues(self, rpc, cfg, block_number):
+        return dict(self.venue_pools)
 
 
 class _Runtime(RuntimePrimaryScanFacade):
@@ -31,7 +35,15 @@ class _Runtime(RuntimePrimaryScanFacade):
             safety=SimpleNamespace(slippage_bps=75),
         )
         self.cache = object()
-        self._discovery = _Discovery(['v3-a', 'v3-b'])
+        self._discovery = _Discovery(
+            ['v3-a', 'v3-b'],
+            {'camelot_v2': [{
+                'pool': 'pool-v2',
+                'token_in': 'a',
+                'token_out': 'b',
+                'factory': 'factory-v2',
+            }]},
+        )
 
 
 def _opp(profit: int, *, expected: int | None = None, amount_in: int | None = None):
@@ -102,6 +114,12 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert calls['two']['amount_in'] == 10
     assert calls['two']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_v3_pairs'] == ['v3-a', 'v3-b']
+    assert calls['three']['extra_camelot_v2_pools'] == [{
+        'pool': 'pool-v2',
+        'token_in': 'a',
+        'token_out': 'b',
+        'factory': 'factory-v2',
+    }]
     assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12, 'failure_reasons': {}}
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
