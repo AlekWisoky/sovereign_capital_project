@@ -75,7 +75,7 @@ class RuntimeConstructorFacade:
         self._discovery = DiscoveryManager(chain_name=cfg.chain.name, data_dir=data_dir)
         self._pool_event_cache = PoolStateEventCache(
             chain_name=cfg.chain.name,
-            chain_id=int(cfg.chain.chain_id),
+            chain_id=int(getattr(cfg.chain, "chain_id", 0) or 0),
             ws_urls=list(getattr(cfg.chain, "ws", []) or []),
             rpc_urls=list(getattr(cfg.chain, "rpc_read", []) or []),
             max_addresses=int(os.environ.get("VICTOR_POOL_EVENT_MAX_ADDRESSES", "256") or 256),
