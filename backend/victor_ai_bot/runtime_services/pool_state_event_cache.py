@@ -420,6 +420,30 @@ class PoolStateEventCache:
             "dirty_pool_count": int(len(self._dirty)),
             "last_message_ts": float(self._last_message_ts),
             "last_error": str(self._last_error or ""),
+            "candidate_generation_mode": str(
+                self._last_candidate_metrics.get("candidate_generation_mode") or ""
+            ),
+            "candidate_edge_count": int(
+                self._last_candidate_metrics.get("candidate_edge_count", 0) or 0
+            ),
+            "candidate_edges_full": int(
+                self._last_candidate_metrics.get("candidate_edges_full", 0) or 0
+            ),
+            "candidate_edges_pruned": int(
+                self._last_candidate_metrics.get("candidate_edges_pruned", 0) or 0
+            ),
+            "exploration_edge_count": int(
+                self._last_candidate_metrics.get("exploration_edge_count", 0) or 0
+            ),
+            "hot_subgraph_edge_count": int(
+                self._last_candidate_metrics.get("hot_subgraph_edge_count", 0) or 0
+            ),
+            "fresh_dirty_pool_count": int(
+                self._last_candidate_metrics.get("fresh_dirty_pool_count", 0) or 0
+            ),
+            "candidate_affected_token_count": int(
+                self._last_candidate_metrics.get("affected_token_count", 0) or 0
+            ),
         }
 
     def state_for_pool(self, address: str) -> Optional[PoolEventState]:
