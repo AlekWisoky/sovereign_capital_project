@@ -94,6 +94,13 @@ class RuntimeStateFacade:
                 "last_block": telemetry.get("last_block"),
                 "scan_latency_ms": telemetry.get("scan_latency_ms"),
                 "scan_error": str(telemetry.get("scan_error") or ""),
+                "runtime_loop": dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
+                "pool_event_state": (
+                    dict(getattr(self, "_pool_event_cache", None).snapshot() or {})
+                    if getattr(self, "_pool_event_cache", None) is not None
+                    and callable(getattr(getattr(self, "_pool_event_cache", None), "snapshot", None))
+                    else {}
+                ),
             },
             "discovery": {
                 "pools_seen": int(discovery.get("pools_seen") or 0),

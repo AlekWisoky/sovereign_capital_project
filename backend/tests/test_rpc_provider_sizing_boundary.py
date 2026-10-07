@@ -85,3 +85,23 @@ async def test_provider_comparison_does_not_force_adaptive_scan():
     )
 
     assert calls == [False, True]
+
+
+def test_selected_provider_force_flag_bypasses_provider_comparison(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(
+        safety=SimpleNamespace(max_borrow_amount=100_000),
+        flags=SimpleNamespace(),
+    )
+    runtime._rpc_provider_comparison = True
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
+
+    amounts = runtime._adaptive_scan_amounts(
+        1_000,
+        force_adaptive_size_scan=True,
+    )
+
+    assert amounts[0] == 1_000
+    assert len(amounts) > 1
+    assert max(amounts) <= 100_000

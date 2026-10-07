@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List
@@ -52,6 +53,9 @@ def make_runtime_lifespan():
             except _SAFE_RUNTIME_LIFECYCLE_EXCEPTIONS as exc:
                 _record_runtime_lifecycle(app, phase="start", status="failed", error=exc)
             else:
+                # Yield once so newly scheduled per-chain scanner tasks take
+                # their first turn before the lifespan opens the API to traffic.
+                await asyncio.sleep(0)
                 _record_runtime_lifecycle(app, phase="start", status="ok")
         else:
             _record_runtime_lifecycle(app, phase="start", status="skipped")

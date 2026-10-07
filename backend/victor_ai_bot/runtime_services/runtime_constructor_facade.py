@@ -16,6 +16,7 @@ from ..models import Metrics
 from ..pathing import canonical_data_dir
 from ..persistence.db import PersistenceDB
 from ..rpc_manager import RpcManager
+from .pool_state_event_cache import PoolStateEventCache
 from ..security.audit import SecurityAuditStore
 from ..omar.config import OmarConfig
 from ..omar.runtime import OmarRuntime
@@ -35,6 +36,7 @@ class RuntimeConstructorFacade:
         self.metrics = Metrics(gas_mode=cfg.execution.gas_mode, send_mode=cfg.execution.send_mode)
         self._lat = LatencyProfiler(window=int(os.environ.get("VICTOR_LAT_WINDOW", "400")))
         self._task: asyncio.Task | None = None
+        self._runtime_loop_telemetry: dict[str, Any] = {"task_status": "created", "task_done": False}
         self._stop = asyncio.Event()
         self._state_lock = asyncio.Lock()
         self._opps = []
@@ -71,6 +73,15 @@ class RuntimeConstructorFacade:
             self._omar.start()
 
         self._discovery = DiscoveryManager(chain_name=cfg.chain.name, data_dir=data_dir)
+        self._pool_event_cache = PoolStateEventCache(
+            chain_name=cfg.chain.name,
+            chain_id=int(getattr(cfg.chain, "chain_id", 0) or 0),
+            ws_urls=list(getattr(cfg.chain, "ws", []) or []),
+            rpc_urls=list(getattr(cfg.chain, "rpc_read", []) or []),
+            max_addresses=int(os.environ.get("VICTOR_POOL_EVENT_MAX_ADDRESSES", "256") or 256),
+            reconcile_max_blocks=int(os.environ.get("VICTOR_POOL_EVENT_RECONCILE_BLOCKS", "200") or 200),
+            refresh_interval_s=float(os.environ.get("VICTOR_POOL_EVENT_REFRESH_S", "15") or 15),
+        )
         self._budget_day = time.strftime("%Y-%m-%d", time.gmtime())
         self._gas_spent_today_wei = 0
         self._pending_gas_est_wei = 0
