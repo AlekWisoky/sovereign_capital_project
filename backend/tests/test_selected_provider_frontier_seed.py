@@ -281,6 +281,7 @@ def test_frozen_provider_graph_slice_preserves_stable_edge_order():
         [],
         current_block=123,
     )[0] == ["e1", "e2"]
+    assert sliced.route_universe_edges() == edges
     assert sliced.edge_priority("e1", current_block=123) == 2
     assert sliced.edge_priority("e2", current_block=123) == 3
 
