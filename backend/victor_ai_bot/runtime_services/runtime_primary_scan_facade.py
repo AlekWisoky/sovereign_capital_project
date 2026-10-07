@@ -2343,6 +2343,14 @@ class RuntimePrimaryScanFacade:
             adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
             adaptive_opps = list(selected_opps or [])
 
+        # Preserve frontier-rescue telemetry inside the public adaptive-size
+        # payload so market-pipeline consumers can see exactly why alternate
+        # notionals were scanned and whether they introduced new routes.
+        if frontier_seed_telemetry:
+            adaptive_state = dict(adaptive_telemetry.get("adaptive_size_discovery") or {})
+            adaptive_state["frontier_seed"] = dict(frontier_seed_telemetry)
+            adaptive_telemetry["adaptive_size_discovery"] = adaptive_state
+
         # Keep provider-comparison telemetry as the symmetric baseline, but
         # always preserve the selected provider's adaptive pass separately.
         # An adaptive scan can legitimately produce zero executable candidates
