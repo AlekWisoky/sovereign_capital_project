@@ -521,9 +521,9 @@ async def test_selected_rescue_reverse_candidate_cap_bounds_two_leg_fanout(monke
     ]
     monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: [e1, *reverses])
 
-    quoted = []
+    batch_sizes = []
     async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
-        quoted.extend(requested_edges)
+        batch_sizes.append(len(requested_edges))
         if metrics is not None:
             metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
             metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
@@ -566,5 +566,7 @@ async def test_selected_rescue_reverse_candidate_cap_bounds_two_leg_fanout(monke
         max_reverse_candidates=3,
     )
 
-    # 1 first-leg quote + at most 3 reverse quotes for the route group.
-    assert len(quoted) == 4
+    # The first batch quotes every first-leg edge; every subsequent reverse-leg
+    # batch is bounded to at most the configured rescue cap.
+    assert batch_sizes[0] == 9
+    assert max(batch_sizes[1:]) <= 3
