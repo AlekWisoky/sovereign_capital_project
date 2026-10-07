@@ -2575,12 +2575,41 @@ class RuntimePrimaryScanFacade:
                 int(len(selected_opps)) - int(len(selected_result[1] or [])),
             )
 
-        if len(selected_opps or []) < min_opportunities:
+        authoritative_positive_selected = 0
+        for candidate in list(selected_opps or []):
+            meta = getattr(candidate, "meta", {}) or {}
+            profitability = meta.get("profitability") if isinstance(meta, dict) else None
+            if not isinstance(profitability, dict):
+                continue
+            if not bool(profitability.get("revalidated")) or not bool(
+                profitability.get("authoritative")
+            ):
+                continue
+            try:
+                if int(profitability.get("profit_after_costs_wei") or 0) > 0:
+                    authoritative_positive_selected += 1
+            except (TypeError, ValueError):
+                continue
+
+        full_graph_rescue_required = bool(
+            len(selected_opps or []) < min_opportunities
+            or authoritative_positive_selected < min_opportunities
+        )
+        if full_graph_rescue_required:
             # Provider comparison is intentionally capped. The selected provider
             # now receives the same immutable graph, but in bounded chunks so the
             # full graph is covered without one monolithic wall-clock timeout.
             full_scan_telemetry: Dict[str, Any] = {
                 "attempted": True,
+                "rescue_reason": (
+                    "insufficient_base_candidates"
+                    if len(selected_opps or []) < min_opportunities
+                    else "insufficient_authoritative_after_cost_positive_candidates"
+                ),
+                "base_candidate_count": int(len(selected_opps or [])),
+                "authoritative_positive_candidate_count": int(
+                    authoritative_positive_selected
+                ),
                 "chunk_size": int(self._selected_provider_full_scan_chunk_size()),
                 "chunk_timeout_s": float(self._selected_provider_full_scan_chunk_timeout_s()),
                 "budget_s": float(self._selected_provider_full_scan_budget_s()),
