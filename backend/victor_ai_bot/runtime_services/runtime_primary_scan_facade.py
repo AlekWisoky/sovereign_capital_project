@@ -2639,9 +2639,6 @@ class RuntimePrimaryScanFacade:
                     )
                     chunk_opps = list(chunk_opps or [])
                     full_scan_opps.extend(chunk_opps)
-                    full_scan_telemetry.setdefault("size_economic_matrices", []).extend(
-                        list(sink.get("size_economic_matrix") or [])
-                    )
                     full_scan_records.append({
                         "amount_in": int(amount_in),
                         "two": [
@@ -2794,9 +2791,6 @@ class RuntimePrimaryScanFacade:
                         },
                         "three_metrics": {},
                     })
-                    full_scan_telemetry.setdefault("size_economic_matrices", []).extend(
-                        list(sink.get("size_economic_matrix") or [])
-                    )
                     full_scan_telemetry["chunks_completed"] = 1
                     full_scan_telemetry["edges_covered"] = int(
                         sink.get("scan_edges_selected") or graph_edge_count
@@ -2819,21 +2813,49 @@ class RuntimePrimaryScanFacade:
                 (time.perf_counter() - full_scan_started) * 1000.0
             )
             if full_scan_records:
-                full_scan_telemetry["size_economic_matrix"] = (
-                    list(full_scan_telemetry.get("size_economic_matrices") or [])
-                    or _build_size_economic_matrix(full_scan_records)
-                )
-                full_scan_telemetry.pop("size_economic_matrices", None)
-                full_scan_telemetry["size_economic_evidence"] = [
-                    row
-                    for record in full_scan_records
-                    for row in [
-                        *[
-                            _size_economic_candidate_row(item)
-                            for item in list(record.get("two") or []) + list(record.get("three") or [])
+                combined_record = {
+                    "amount_in": int(amount_in),
+                    "two": [
+                        item
+                        for record in full_scan_records
+                        for item in list(record.get("two") or [])
+                    ],
+                    "three": [
+                        item
+                        for record in full_scan_records
+                        for item in list(record.get("three") or [])
+                    ],
+                    "two_metrics": {
+                        "size_economic_diagnostics": [
+                            diagnostic
+                            for record in full_scan_records
+                            for diagnostic in list(
+                                (record.get("two_metrics") or {}).get(
+                                    "size_economic_diagnostics"
+                                )
+                                or []
+                            )
                         ]
-                    ]
-                ]
+                    },
+                    "three_metrics": {
+                        "size_economic_diagnostics": [
+                            diagnostic
+                            for record in full_scan_records
+                            for diagnostic in list(
+                                (record.get("three_metrics") or {}).get(
+                                    "size_economic_diagnostics"
+                                )
+                                or []
+                            )
+                        ]
+                    },
+                }
+                full_scan_telemetry["size_economic_matrix"] = _build_size_economic_matrix(
+                    [combined_record]
+                )
+                full_scan_telemetry["size_economic_evidence"] = _size_route_rows(
+                    combined_record
+                )[0]
             selected_telemetry["selected_provider_full_scan"] = dict(full_scan_telemetry)
 
             adaptive_cache = selected_cache
