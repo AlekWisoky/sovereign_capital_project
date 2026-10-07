@@ -162,7 +162,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
-    assert result["telemetry"]["selected_provider_adaptive"]["frontier_seed"]["candidates_added"] == 1
+    assert result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]["candidates_added"] == 1
 
 
 def test_chain_scoped_execution_envelope_overrides_yaml(tmp_path, monkeypatch):
