@@ -129,6 +129,13 @@ def _execution_terminal_authority(profitability_plan: Dict[str, Any]) -> Dict[st
     return build_terminal_profitability_authority(profitability_plan, source="execution_plan")
 
 
+def _effective_flashloan_fee_bps(observed_fee_bps: int | None, configured_fee_bps: int) -> int:
+    """Return the provider-native fee when observed, otherwise the configured safe fallback."""
+    if observed_fee_bps is not None:
+        return max(0, int(observed_fee_bps))
+    return max(0, int(configured_fee_bps))
+
+
 def _execution_route_plan_already_applied(opp: Any, route_plan: Dict[str, Any]) -> bool:
     meta = getattr(opp, "meta", None)
     if not isinstance(meta, dict):
@@ -539,7 +546,13 @@ async def try_execute_opportunity(
     # Safety rails (CRITICAL RULE #1: repay + gas + thresholds)
     min_abs = int(cfg.safety.minProfitAbs)
     min_bps = int(cfg.safety.minProfitBps)
-    fee_bps = int(cfg.execution.flashloan_fee_bps)
+    # The on-chain premium observation is the economic authority for this
+    # execution attempt. Falling back to config is allowed only when the
+    # provider observation was unavailable in safe/dry-run mode.
+    fee_bps = _effective_flashloan_fee_bps(
+        native_flashloan_fee_bps,
+        int(cfg.execution.flashloan_fee_bps),
+    )
     sr = check_profit_and_repay(
         amount_in_wei=amount_in,
         amount_out_wei=amount_out,

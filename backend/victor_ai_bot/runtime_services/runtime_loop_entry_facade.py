@@ -31,6 +31,32 @@ class RuntimeLoopEntryFacade:
         # operator/provider-state mutation; in that case an empty candidate set
         # must not strand the scanner indefinitely.
         if not bootstrap_url:
+            # Never resurrect a provider while RpcManager has explicitly
+            # quarantined every read endpoint for quote-level throttling.
+            snapshot_fn = getattr(self.rpc_manager, "snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else {}
+            read_state = list((snapshot or {}).get("read") or {}) if isinstance(snapshot, dict) else []
+            now = time.time()
+            all_quote_quarantined = bool(read_state) and all(
+                float(row.get("quote_unhealthy_until") or 0.0) > now
+                for row in read_state
+                if isinstance(row, dict)
+            )
+            if all_quote_quarantined:
+                telemetry = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
+                telemetry["scan_status"] = "blocked_before_scan"
+                telemetry["scan_error"] = "all_read_rpcs_quote_quarantined"
+                telemetry["rpc"] = {
+                    "endpoint": "",
+                    "provider": "",
+                    "ok": False,
+                    "configured_read_count": len(read_state),
+                    "all_quote_quarantined": True,
+                }
+                self._market_pipeline_telemetry = telemetry
+                await self._sleep(1.0)
+                return
+
             configured = list(
                 getattr(getattr(self, "cfg", None), "chain", None)
                 and getattr(self.cfg.chain, "rpc_read", None)

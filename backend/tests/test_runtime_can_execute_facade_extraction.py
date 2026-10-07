@@ -106,3 +106,38 @@ def test_annotate_can_execute_blocks_research_token_borrow(monkeypatch):
     assert opp.can_execute is False
     assert opp.meta["safety"]["reason"] == "input_token_not_execution_authorized"
     assert opp.meta["safety"]["execution_authority"] is False
+
+
+
+def test_annotate_can_execute_uses_observed_flashloan_fee(monkeypatch):
+    monkeypatch.setattr(mod, "suggest_gas", _fake_suggest_gas)
+    monkeypatch.setattr(mod, "check_profit_and_repay", _fake_profit_ok)
+
+    async def _fake_flash_fee(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "provider": "aave",
+            "fee_bps": 12,
+            "source": "test_native_observation",
+        }
+
+    monkeypatch.setattr(mod, "observe_flashloan_fee_bps", _fake_flash_fee)
+    captured = {}
+
+    def _capture_profit(**kwargs):
+        captured.update(kwargs)
+        return _fake_profit_ok(**kwargs)
+
+    monkeypatch.setattr(mod, "check_profit_and_repay", _capture_profit)
+    runtime = _Runtime()
+    opp = _opp(1_000, 1_200)
+
+    asyncio.run(
+        runtime._annotate_can_execute(
+            SimpleNamespace(block_number=_fake_block_number), [opp]
+        )
+    )
+
+    assert captured["flashloan_fee_bps"] == 12
+    assert opp.meta["safety"]["flashloan_fee_bps"] == 12
+    assert opp.meta["safety"]["flashloan_fee_source"] == "provider_native_observation"

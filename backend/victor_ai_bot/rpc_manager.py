@@ -120,7 +120,17 @@ class RpcManager:
         ]
 
     def best_read(self) -> str:
-        return min(self._read.values(), key=lambda s: s.score()).url if self._read else ""
+        """Return the best currently usable read endpoint.
+
+        Quote-quarantined providers must not be reintroduced as bootstrap
+        endpoints. Returning an empty string is intentional when every read
+        endpoint is currently quarantined; the runtime should fail closed
+        rather than hammer a throttled provider.
+        """
+        candidates = self.read_candidates()
+        if candidates:
+            return candidates[0]
+        return ""
 
     def observe_quote_telemetry(
         self,

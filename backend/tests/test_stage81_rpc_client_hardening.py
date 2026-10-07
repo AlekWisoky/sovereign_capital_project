@@ -143,3 +143,102 @@ async def test_batch_supported_chunks_run_concurrently_and_preserve_order():
 
     assert [r.result for r in results] == ["0x1", "0x2", "0x3", "0x4", "0x5", "0x6"]
     assert session.max_active == 2
+
+
+
+@pytest.mark.asyncio
+async def test_batch_http_429_splits_large_batch_without_inflating_failures(monkeypatch):
+    monkeypatch.setenv("VICTOR_RPC_RATE_LIMIT_MIN_BATCH", "8")
+    monkeypatch.setenv("VICTOR_RPC_RATE_LIMIT_MAX_SPLITS", "4")
+    monkeypatch.setenv("VICTOR_RPC_RATE_LIMIT_BACKOFF_MS", "0")
+
+    class _Response:
+        def __init__(self, status, payload=None, json_error=None):
+            self.status = status
+            self.payload = payload
+            self.json_error = json_error
+
+        async def json(self):
+            if self.json_error is not None:
+                raise self.json_error
+            return self.payload
+
+    class _RateLimitSession:
+        def __init__(self):
+            self.batch_sizes = []
+
+        def post(self, *args, **kwargs):
+            payload = kwargs["json"]
+            self.batch_sizes.append(len(payload))
+            if len(payload) > 8:
+                return _Ctx(
+                    response=_Response(
+                        429, json_error=aiohttp.ClientError("rate limited")
+                    )
+                )
+            return _Ctx(
+                response=_Response(
+                    200,
+                    payload=[
+                        {"id": req["id"], "result": hex(req["id"])}
+                        for req in payload
+                    ],
+                )
+            )
+
+    session = _RateLimitSession()
+    client = JsonRpcClient("http://rpc", max_concurrency=4, max_batch=16)
+    client._session = session
+
+    results = await client.batch([("eth_call", [{}]) for _ in range(16)])
+
+    assert len(results) == 16
+    assert all(result.ok for result in results)
+    assert session.batch_sizes == [16, 8, 8]
+
+
+@pytest.mark.asyncio
+async def test_batch_json_rpc_rate_limit_error_splits_only_fully_limited_batch(monkeypatch):
+    monkeypatch.setenv("VICTOR_RPC_RATE_LIMIT_MIN_BATCH", "4")
+    monkeypatch.setenv("VICTOR_RPC_RATE_LIMIT_MAX_SPLITS", "4")
+    monkeypatch.setenv("VICTOR_RPC_RATE_LIMIT_BACKOFF_MS", "0")
+
+    class _Response:
+        def __init__(self, payload):
+            self.status = 200
+            self.payload = payload
+
+        async def json(self):
+            return self.payload
+
+    class _Session:
+        def __init__(self):
+            self.batch_sizes = []
+
+        def post(self, *args, **kwargs):
+            payload = kwargs["json"]
+            self.batch_sizes.append(len(payload))
+            if len(payload) > 4:
+                body = [
+                    {
+                        "id": req["id"],
+                        "error": {"code": -32016, "message": "rate limit"},
+                    }
+                    for req in payload
+                ]
+            else:
+                body = [
+                    {"id": req["id"], "result": hex(req["id"])}
+                    for req in payload
+                ]
+            return _Ctx(response=_Response(body))
+
+    session = _Session()
+    client = JsonRpcClient("http://rpc", max_concurrency=4, max_batch=16)
+    client._session = session
+
+    results = await client.batch([("eth_call", [{}]) for _ in range(16)])
+
+    assert len(results) == 16
+    assert all(result.ok for result in results)
+    assert session.batch_sizes == [16, 8, 4, 4, 8, 4, 4]

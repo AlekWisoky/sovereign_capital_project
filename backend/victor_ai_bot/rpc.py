@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import os
+from contextlib import asynccontextmanager
 import time
 from dataclasses import dataclass
 from typing import Any, List, Optional, Dict
@@ -110,8 +111,77 @@ class JsonRpcClient:
             for i in range(0, len(calls), chunk_size)
         ]
 
-        async def _send_chunk(chunk: List[tuple[str, list]]) -> List[RpcResult]:
-            async with self._batch_sem:
+        async def _send_chunk(
+            chunk: List[tuple[str, list]],
+            *,
+            rate_limit_depth: int = 0,
+        ) -> List[RpcResult]:
+            """Send one JSON-RPC batch, shrinking only after an actual rate-limit signal.
+
+            Public RPCs often accept large JSON-RPC arrays until their batch or burst
+            policy is crossed. Treating one HTTP 429 as N independent quote failures
+            destroys provider scoring and can trigger a retry storm. A rejected batch
+            is therefore retried as smaller sequential batches with bounded backoff.
+            """
+            rate_limit_min_batch = max(
+                1,
+                int(os.environ.get("VICTOR_RPC_RATE_LIMIT_MIN_BATCH", "8") or 8),
+            )
+            rate_limit_max_splits = max(
+                0,
+                min(
+                    6,
+                    int(os.environ.get("VICTOR_RPC_RATE_LIMIT_MAX_SPLITS", "4") or 4),
+                ),
+            )
+            try:
+                rate_limit_backoff_ms = max(
+                    0.0,
+                    min(
+                        2000.0,
+                        float(
+                            os.environ.get("VICTOR_RPC_RATE_LIMIT_BACKOFF_MS", "150") or 150
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                rate_limit_backoff_ms = 150.0
+
+            @asynccontextmanager
+            async def _batch_slot():
+                # Recursive rate-limit splits are sequential recovery work for one
+                # already-admitted batch; they must not acquire another batch slot.
+                if rate_limit_depth == 0:
+                    async with self._batch_sem:
+                        yield
+                else:
+                    yield
+
+            async def _rate_limit_retry(
+                retry_chunk: List[tuple[str, list]],
+            ) -> List[RpcResult] | None:
+                if (
+                    len(retry_chunk) <= rate_limit_min_batch
+                    or rate_limit_depth >= rate_limit_max_splits
+                ):
+                    return None
+                delay_s = (rate_limit_backoff_ms / 1000.0) * (2 ** rate_limit_depth)
+                if delay_s > 0:
+                    await asyncio.sleep(min(2.0, delay_s))
+                midpoint = max(
+                    rate_limit_min_batch,
+                    len(retry_chunk) // 2,
+                )
+                if midpoint >= len(retry_chunk):
+                    midpoint = len(retry_chunk) // 2
+                left = retry_chunk[:midpoint]
+                right = retry_chunk[midpoint:]
+                return [
+                    *await _send_chunk(left, rate_limit_depth=rate_limit_depth + 1),
+                    *await _send_chunk(right, rate_limit_depth=rate_limit_depth + 1),
+                ]
+
+            async with _batch_slot():
                 t0 = time.perf_counter()
                 reqs = []
                 ids: List[int] = []
@@ -127,17 +197,31 @@ class JsonRpcClient:
                 try:
                     assert self._session is not None, "Use as async context manager"
                     async with self._session.post(self.url, json=reqs) as r:
+                        # Test doubles and a few compatible session wrappers may
+                        # omit HTTP status; the JSON-RPC payload remains authoritative
+                        # in that case. Real aiohttp responses always expose .status.
+                        try:
+                            status = int(getattr(r, "status", 200) or 200)
+                        except (TypeError, ValueError):
+                            status = 200
                         try:
                             j = await r.json()
                         except aiohttp.ClientError:
                             dt = (time.perf_counter() - t0) * 1000.0
-                            if int(r.status) >= 400:
+                            if status >= 400:
+                                retry = (
+                                    await _rate_limit_retry(chunk)
+                                    if status == 429
+                                    else None
+                                )
+                                if retry is not None:
+                                    return retry
                                 return [
                                     RpcResult(
                                         False,
                                         error={
-                                            "code": int(r.status),
-                                            "message": f"http_status_{int(r.status)}",
+                                            "code": status,
+                                            "message": f"http_status_{status}",
                                         },
                                         latency_ms=dt,
                                     )
@@ -145,6 +229,22 @@ class JsonRpcClient:
                                 ]
                             raise
                     dt = (time.perf_counter() - t0) * 1000.0
+
+                    if status == 429:
+                        retry = await _rate_limit_retry(chunk)
+                        if retry is not None:
+                            return retry
+                        return [
+                            RpcResult(
+                                False,
+                                error={
+                                    "code": status,
+                                    "message": f"http_status_{status}",
+                                },
+                                latency_ms=dt,
+                            )
+                            for _ in chunk
+                        ]
 
                     if not isinstance(j, list):
                         self._batch_supported = False
@@ -163,6 +263,8 @@ class JsonRpcClient:
                                 by_id[int(resp["id"])] = resp
                         except _SAFE_RPC_BATCH_ID_EXCEPTIONS:
                             continue
+
+                    rate_limited_response_count = 0
                     results: List[RpcResult] = []
                     for rid in ids:
                         resp = by_id.get(rid)
@@ -171,13 +273,29 @@ class JsonRpcClient:
                                 False, error="missing_batch_response", latency_ms=dt
                             ))
                         elif "error" in resp:
-                            results.append(RpcResult(
-                                False, error=resp["error"], latency_ms=dt
-                            ))
+                            error = resp["error"]
+                            if (
+                                isinstance(error, dict)
+                                and (
+                                    error.get("code") in (429, -32016)
+                                    or "rate limit" in str(error.get("message") or "").lower()
+                                    or "too many requests" in str(error.get("message") or "").lower()
+                                )
+                            ):
+                                rate_limited_response_count += 1
+                            results.append(RpcResult(False, error=error, latency_ms=dt))
                         else:
                             results.append(RpcResult(
                                 True, result=resp.get("result"), latency_ms=dt
                             ))
+
+                    if (
+                        rate_limited_response_count == len(chunk)
+                        and len(chunk) > rate_limit_min_batch
+                    ):
+                        retry = await _rate_limit_retry(chunk)
+                        if retry is not None:
+                            return retry
                     return results
                 except _SAFE_RPC_CALL_EXCEPTIONS as exc:
                     dt = (time.perf_counter() - t0) * 1000.0
