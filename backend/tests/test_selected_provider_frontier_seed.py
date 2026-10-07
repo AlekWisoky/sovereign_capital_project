@@ -165,6 +165,86 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
     assert result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]["candidates_added"] == 1
 
 
+@pytest.mark.asyncio
+async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+
+    class Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = Manager()
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 1500, 2000],
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_annotate_canonical_after_fee_usd",
+        lambda *args, **kwargs: None,
+    )
+
+    class Candidate:
+        def __init__(self, amount_in="1500"):
+            self.id = "seed"
+            self.route_id = "seed-route"
+            self.strategy = "two-leg:univ3->univ3"
+            self.expected_profit_raw = "5270"
+            self.route = SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount_in))]
+            )
+            self.meta = {
+                "adaptive_seed_amount_in": "1500",
+                "profitability": {
+                    "revalidated": True,
+                    "authoritative": False,
+                    "profit_after_costs_wei": "-1",
+                },
+            }
+
+        def model_copy(self, *, deep=True):
+            return Candidate(self.route.legs[0].amount_in)
+
+    seen = []
+
+    async def fake_requote(
+        rpc,
+        cfg,
+        cache,
+        candidate,
+        *,
+        new_amount_in,
+        slippage_bps,
+    ):
+        seen.append(int(new_amount_in))
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[Candidate()],
+        cache=object(),
+    )
+
+    assert seen == [500, 1500, 2000]
+
+
 def test_chain_scoped_execution_envelope_overrides_yaml(tmp_path, monkeypatch):
     cfg_path = tmp_path / "base.yaml"
     cfg_path.write_text(
