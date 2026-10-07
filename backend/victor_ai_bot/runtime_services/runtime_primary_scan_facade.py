@@ -3200,7 +3200,7 @@ class RuntimePrimaryScanFacade:
             configured = int(
                 os.environ.get(
                     "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE",
-                    "96",
+                    "32",
                 )
                 or 96
             )
@@ -3242,7 +3242,7 @@ class RuntimePrimaryScanFacade:
             configured = int(
                 os.environ.get(
                     "VICTOR_SELECTED_PROVIDER_FRONTIER_EDGE_CAP",
-                    "96",
+                    "32",
                 )
                 or 96
             )
