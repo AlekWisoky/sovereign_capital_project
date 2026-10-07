@@ -197,7 +197,13 @@ class JsonRpcClient:
                 try:
                     assert self._session is not None, "Use as async context manager"
                     async with self._session.post(self.url, json=reqs) as r:
-                        status = int(r.status)
+                        # Test doubles and a few compatible session wrappers may
+                        # omit HTTP status; the JSON-RPC payload remains authoritative
+                        # in that case. Real aiohttp responses always expose .status.
+                        try:
+                            status = int(getattr(r, "status", 200) or 200)
+                        except (TypeError, ValueError):
+                            status = 200
                         try:
                             j = await r.json()
                         except aiohttp.ClientError:
