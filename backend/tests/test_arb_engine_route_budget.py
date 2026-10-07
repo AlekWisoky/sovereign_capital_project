@@ -315,3 +315,38 @@ async def test_quote_batch_attributes_unclassified_failures(monkeypatch):
     assert out[arb.edge_key(edge)] is None
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 1
 
+
+
+def test_reverse_prefilter_keeps_protocol_and_pool_diversity():
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    reverse_edges = []
+    qmap = {}
+    for i in range(10):
+        dex = "univ3" if i < 7 else "aerodrome" if i < 9 else "curve"
+        pool = "0x" + f"{i + 100:040x}"
+        edge = arb.Edge(
+            dex,
+            "0x" + f"{i + 200:040x}",
+            token_b,
+            token_a,
+            {"fee": 3000, "pool": pool},
+        )
+        reverse_edges.append(edge)
+        qmap[arb.edge_key(edge)] = (1_000 + i, {"fee": 3000})
+
+    selected, stats = arb._prefilter_reverse_candidates(
+        reverse_edges,
+        qmap1=qmap,
+        max_candidates=8,
+    )
+
+    assert len(selected) == 8
+    assert {"univ3", "aerodrome", "curve"} <= {edge.dex for edge in selected}
+    assert len({
+        str(edge.params.get("pool") or edge.venue).lower()
+        for edge in selected
+    }) == 8
+    assert stats["total"] == 10
+    assert stats["selected"] == 8
+    assert stats["filtered"] == 2
