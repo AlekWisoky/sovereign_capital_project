@@ -108,10 +108,10 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["scan_sizing"] == {
         "configured_tokens": 5,
         "research_tokens_considered": 2,
-        "research_tokens_priced": 1,
+        "research_tokens_priced": "1",
         "research_tokens_unpriced": ["0xResearchUnpriced"],
         "research_token_scan_notional_source": "bounded_research_frontier_quote_derived_usd_notional",
-        "research_token_scan_cap": 8,
+        "research_token_scan_cap": "8",
         "research_token_execution_universe_mutated": False,
     }
     assert out["quotes"] == {
