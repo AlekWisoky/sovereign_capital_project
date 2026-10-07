@@ -687,6 +687,34 @@ def _finalize_quote_coverage(metrics: Dict[str, Any]) -> None:
         metrics.pop(internal_name, None)
 
 
+def _apply_scan_edge_cap(
+    edges: List[Edge],
+    max_scan_edges: Optional[int],
+    metrics: Dict[str, Any],
+) -> List[Edge]:
+    """Bound a caller's scan graph without changing canonical route construction.
+
+    Provider comparison uses a representative, event-prioritized prefix so the
+    provider race cannot monopolize the chain scan. The selected provider later
+    runs without this cap and performs the full economic frontier.
+    """
+    selected = list(edges)
+    metrics["scan_edges_before_cap"] = int(len(selected))
+    if max_scan_edges in (None, ""):
+        metrics["scan_edges_selected"] = int(len(selected))
+        return selected
+    try:
+        cap = max(1, int(max_scan_edges))
+    except (TypeError, ValueError):
+        cap = len(selected)
+    metrics["scan_edge_cap"] = int(cap)
+    if len(selected) > cap:
+        selected = selected[:cap]
+    metrics["scan_edges_selected"] = int(len(selected))
+    metrics["scan_edges_capped"] = int(max(0, len(edges) - len(selected)))
+    return selected
+
+
 def build_edges(
     cfg,
     *,
@@ -1159,6 +1187,7 @@ async def find_two_leg_opportunities(
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
     pool_event_cache: Any = None,
+    max_scan_edges: Optional[int] = None,
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
     metrics: Dict[str, int] = {}
@@ -1194,6 +1223,7 @@ async def find_two_leg_opportunities(
             pool_event_metrics["full_edge_count"] = int(full_edge_count)
         except (AttributeError, TypeError, ValueError):
             pool_event_metrics = {}
+    edges = _apply_scan_edge_cap(edges, max_scan_edges, metrics)
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
     route_universe = _route_universe_snapshot(cfg, edges)
@@ -1612,6 +1642,7 @@ async def find_three_leg_opportunities(
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
     pool_event_cache: Any = None,
+    max_scan_edges: Optional[int] = None,
 ) -> List[Opportunity]:
     """Triangle / 3-hop cycle search A->B->C->A.
 
@@ -1654,6 +1685,7 @@ async def find_three_leg_opportunities(
             pool_event_metrics["full_edge_count"] = int(full_edge_count)
         except (AttributeError, TypeError, ValueError):
             pool_event_metrics = {}
+    edges = _apply_scan_edge_cap(edges, max_scan_edges, metrics)
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
     max_edges_per_token = max(
