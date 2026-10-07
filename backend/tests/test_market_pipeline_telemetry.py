@@ -23,6 +23,17 @@ class _Runtime(RuntimeStateFacade):
                 "balancer_pools": 1,
             },
             "quotes": {"requests": 10, "successes": 8},
+            "selected_provider_adaptive": {
+                "scan_sizing": {
+                    "configured_tokens": 5,
+                    "research_tokens_considered": 2,
+                    "research_tokens_priced": 1,
+                    "research_tokens_unpriced": ["0xResearchUnpriced"],
+                    "research_token_scan_notional_source": "bounded_research_frontier_quote_derived_usd_notional",
+                    "research_token_scan_cap": 8,
+                    "research_token_execution_universe_mutated": False,
+                }
+            },
             "rpc": {
                 "endpoint": "https://rpc.example",
                 "provider": "rpc.example",
@@ -94,6 +105,15 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["scanner"]["alive"] is True
     assert out["scanner"]["last_block"] == 200
     assert out["discovery"]["pools_seen"] == 7
+    assert out["scan_sizing"] == {
+        "configured_tokens": 5,
+        "research_tokens_considered": 2,
+        "research_tokens_priced": "1",
+        "research_tokens_unpriced": ["0xResearchUnpriced"],
+        "research_token_scan_notional_source": "bounded_research_frontier_quote_derived_usd_notional",
+        "research_token_scan_cap": "8",
+        "research_token_execution_universe_mutated": False,
+    }
     assert out["quotes"] == {
         "requests": 10,
         "successes": 8,
