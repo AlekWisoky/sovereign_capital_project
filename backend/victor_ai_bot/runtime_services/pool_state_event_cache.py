@@ -82,6 +82,7 @@ class PoolStateEventCache:
     max_addresses: int = 256
     reconcile_max_blocks: int = 200
     refresh_interval_s: float = 15.0
+    candidate_max_edges: int = 512
 
     def __post_init__(self) -> None:
         self.ws_urls = [
@@ -93,6 +94,9 @@ class PoolStateEventCache:
         self.max_addresses = max(16, min(1024, int(self.max_addresses)))
         self.reconcile_max_blocks = max(1, min(2000, int(self.reconcile_max_blocks)))
         self.refresh_interval_s = max(3.0, min(60.0, float(self.refresh_interval_s)))
+        self.candidate_max_edges = max(
+            64, min(4096, int(self.candidate_max_edges))
+        )
         self._tracked: Dict[str, Dict[str, Any]] = {}
         self._states: Dict[str, PoolEventState] = {}
         self._dirty: set[str] = set()
@@ -164,6 +168,10 @@ class PoolStateEventCache:
             or any(normalized.get(k) != self._tracked.get(k) for k in normalized)
         )
         self._tracked = normalized
+        for address in list(self._states):
+            if address not in normalized:
+                self._states.pop(address, None)
+                self._dirty.discard(address)
         for address, entry in normalized.items():
             tokens = list(entry.get("tokens") or [])
             state = self._states.get(address)
@@ -217,12 +225,84 @@ class PoolStateEventCache:
                 priority = max(priority, 4)
                 affected_subgraph_edges += 1
             scored.append((priority, last_block, -order, edge))
+
         scored.sort(
             key=lambda item: (int(item[0]), int(item[1]), int(item[2])),
             reverse=True,
         )
         ordered = [item[3] for item in scored]
-        return ordered, {
+
+        # With no recent events there is no safe basis for pruning, so preserve
+        # the complete graph and fall back to ordinary broad discovery.
+        if not dirty_addresses or not affected_tokens:
+            return ordered, {
+                "enabled": bool(self._tracked),
+                "tracked_pools": int(len(self._tracked)),
+                "tracked_states": int(sum(1 for state in self._states.values() if state.last_block)),
+                "dirty_edges": int(dirty_count),
+                "affected_token_count": int(len(affected_tokens)),
+                "affected_subgraph_edges": int(affected_subgraph_edges),
+                "last_event_block": int(self._last_seen_block),
+                "event_count": int(self._event_count),
+                "connected": bool(self._connected),
+                "subscribed_address_count": int(self._subscribed_address_count),
+                "subscription_truncated": bool(self._truncated),
+                "last_error": str(self._last_error or ""),
+                "candidate_generation_mode": "full_graph",
+                "candidate_edge_count": int(len(ordered)),
+                "candidate_edges_pruned": 0,
+                "exploration_edge_count": 0,
+                "candidate_edge_cap": int(self.candidate_max_edges),
+            }
+
+        cap = max(64, min(int(self.candidate_max_edges), len(ordered)))
+        hot = [edge for edge in ordered if self._edge_pool_address(edge) in dirty_addresses]
+        affected = [
+            edge
+            for edge in ordered
+            if self._edge_pool_address(edge) not in dirty_addresses
+            and (
+                str(getattr(edge, "token_in", "") or "").lower() in affected_tokens
+                or str(getattr(edge, "token_out", "") or "").lower() in affected_tokens
+            )
+        ]
+
+        # Preserve at least one representative route per protocol and pool,
+        # then fill the remaining budget by event/recency score.
+        selected: List[Any] = []
+        selected_ids: set[int] = set()
+
+        def add(edge: Any) -> None:
+            identity = id(edge)
+            if identity in selected_ids or len(selected) >= cap:
+                return
+            selected_ids.add(identity)
+            selected.append(edge)
+
+        for edge in hot:
+            add(edge)
+        protocols: set[str] = set()
+        pools: set[str] = set()
+        for edge in affected + ordered:
+            if len(selected) >= cap:
+                break
+            protocol = str(getattr(edge, "dex", "") or "").lower()
+            pool = self._edge_pool_address(edge)
+            if protocol and protocol not in protocols:
+                protocols.add(protocol)
+                add(edge)
+            if pool and pool not in pools:
+                pools.add(pool)
+                add(edge)
+        exploration_count = 0
+        for edge in affected:
+            before = len(selected)
+            add(edge)
+            exploration_count += int(len(selected) > before)
+            if len(selected) >= cap:
+                break
+
+        return selected[:cap], {
             "enabled": bool(self._tracked),
             "tracked_pools": int(len(self._tracked)),
             "tracked_states": int(sum(1 for state in self._states.values() if state.last_block)),
@@ -235,6 +315,11 @@ class PoolStateEventCache:
             "subscribed_address_count": int(self._subscribed_address_count),
             "subscription_truncated": bool(self._truncated),
             "last_error": str(self._last_error or ""),
+            "candidate_generation_mode": "affected_subgraph",
+            "candidate_edge_count": int(len(selected)),
+            "candidate_edges_pruned": int(max(0, len(ordered) - len(selected))),
+            "exploration_edge_count": int(exploration_count),
+            "candidate_edge_cap": int(cap),
         }
 
     def edge_priority(self, edge: Any, *, current_block: int) -> int:
@@ -270,6 +355,7 @@ class PoolStateEventCache:
             "dirty_pool_count": int(len(self._dirty)),
             "last_message_ts": float(self._last_message_ts),
             "last_error": str(self._last_error or ""),
+            "candidate_max_edges": int(self.candidate_max_edges),
         }
 
     def state_for_pool(self, address: str) -> Optional[PoolEventState]:
@@ -353,6 +439,9 @@ class PoolStateEventCache:
                 ack = await ws.receive(timeout=10)
                 if ack.type != aiohttp.WSMsgType.TEXT:
                     raise RuntimeError("pool_event_subscribe_failed")
+                ack_payload = ack.json()
+                if not isinstance(ack_payload, dict) or "error" in ack_payload:
+                    raise RuntimeError("pool_event_subscribe_rejected")
                 while not self._stop.is_set():
                     if int(version) != int(self._address_version):
                         return
