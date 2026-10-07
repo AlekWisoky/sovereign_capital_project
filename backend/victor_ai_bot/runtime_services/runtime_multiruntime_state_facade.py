@@ -93,21 +93,40 @@ class RuntimeMultiruntimeStateFacade:
         async def one(name: str, rt: Any):
             try:
                 telemetry = dict(rt.market_pipeline_telemetry_state())
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                return name, {
+                    "ok": False,
+                    "status": "unavailable",
+                    "reason_code": "market_pipeline_telemetry_unavailable",
+                    "error": str(exc),
+                }
+
+            gate = {}
+            recovery = {}
+            admission_error = ""
+            try:
                 summary = await asyncio.wait_for(rt.summary(), timeout=self.SNAPSHOT_TIMEOUT_S)
                 gate = dict(summary.get("auto_trade_gate") or {}) if isinstance(summary, dict) else {}
                 recovery = dict(summary.get("auto_trade_recovery") or {}) if isinstance(summary, dict) else {}
-                telemetry["admission"] = {
-                    "capital": None,
-                    "family": str(gate.get("stage") or ""),
-                    "treasury": None,
-                    "flashloan": None,
-                    "execution": {"allowed": bool(gate.get("allowed", False)), "reason_code": str(gate.get("reason_code") or "")},
-                    "auto_trade_gate": gate,
-                    "recovery": recovery,
-                }
-                return name, telemetry
             except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                return name, {"ok": False, "status": "unavailable", "reason_code": "market_pipeline_telemetry_unavailable", "error": str(exc)}
+                admission_error = str(exc)
+
+            telemetry["admission"] = {
+                "capital": None,
+                "family": str(gate.get("stage") or ""),
+                "treasury": None,
+                "flashloan": None,
+                "execution": {
+                    "allowed": bool(gate.get("allowed", False)),
+                    "reason_code": str(gate.get("reason_code") or ""),
+                },
+                "auto_trade_gate": gate,
+                "recovery": recovery,
+                "status": "available" if not admission_error else "unavailable",
+                "reason_code": "" if not admission_error else "market_pipeline_admission_summary_unavailable",
+                "error": admission_error,
+            }
+            return name, telemetry
         pairs = await asyncio.gather(*[one(name, rt) for name, rt in self._runtimes.items()])
         jupiter = {"status": "unavailable", "execution_authority": False}
         if hasattr(self, "_solana_jupiter"):
