@@ -971,6 +971,94 @@ def _pool_keys_for_leg(
     return f"{dex}:{token_in.lower()}:{token_out.lower()}:{json_key(params)}"
 
 
+
+def _prefilter_reverse_candidates(
+    revs: List[Edge],
+    *,
+    qmap1: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
+    max_candidates: int,
+    pool_event_cache: Any = None,
+    current_block: int = 0,
+) -> Tuple[List[Edge], Dict[str, int]]:
+    """Rank reverse legs locally before variable-notional quote fanout.
+
+    All reverse legs share the same token_in/token_out pair, so the already
+    acquired base-size qmap1 output is a valid first-order price signal. We
+    retain one candidate per protocol first, then expand across distinct pools,
+    then fill by score. Missing base quotes are retained only as diversity
+    fallbacks and never receive positive score.
+    """
+    cap = max(3, min(12, int(max_candidates)))
+    scored: List[Tuple[int, int, str, str, int, Edge]] = []
+    for order, edge in enumerate(list(revs or [])):
+        base_quote = qmap1.get(edge_key(edge))
+        local_output = int(base_quote[0]) if base_quote else -1
+        priority = 1
+        if pool_event_cache is not None:
+            try:
+                priority = int(
+                    pool_event_cache.edge_priority(
+                        edge, current_block=int(current_block)
+                    )
+                )
+            except (AttributeError, TypeError, ValueError):
+                priority = 1
+        protocol = str(edge.dex).lower()
+        pool = str(
+            edge.params.get("pool")
+            or edge.params.get("pool_id")
+            or edge.venue
+            or ""
+        ).lower()
+        scored.append((local_output, priority, protocol, pool, -order, edge))
+
+    scored.sort(key=lambda item: (item[0], item[1], item[3], item[4]), reverse=True)
+    selected: List[Edge] = []
+    selected_ids: set[str] = set()
+
+    def add_phase(
+        predicate,
+    ) -> None:
+        for item in scored:
+            edge = item[-1]
+            ek = edge_key(edge)
+            if ek in selected_ids or len(selected) >= cap:
+                continue
+            if not predicate(item):
+                continue
+            selected.append(edge)
+            selected_ids.add(ek)
+
+    protocols: set[str] = set()
+    add_phase(lambda item: item[2] not in protocols and not protocols.add(item[2]))
+    pools: set[str] = set()
+    add_phase(lambda item: item[3] not in pools and not pools.add(item[3]))
+    add_phase(lambda item: True)
+
+    return selected[:cap], {
+        "total": int(len(revs)),
+        "selected": int(len(selected[:cap])),
+        "filtered": int(max(0, len(revs) - len(selected[:cap]))),
+        "base_quote_available": int(
+            sum(1 for edge in revs if qmap1.get(edge_key(edge)))
+        ),
+        "protocols_selected": int(len({str(edge.dex).lower() for edge in selected[:cap]})),
+        "pools_selected": int(
+            len(
+                {
+                    str(
+                        edge.params.get("pool")
+                        or edge.params.get("pool_id")
+                        or edge.venue
+                        or ""
+                    ).lower()
+                    for edge in selected[:cap]
+                }
+            )
+        ),
+    }
+
+
 async def find_two_leg_opportunities(
     rpc,
     cfg,
@@ -992,6 +1080,7 @@ async def find_two_leg_opportunities(
     extra_constant_product_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
+    pool_event_cache: Any = None,
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
     metrics: Dict[str, int] = {}
@@ -1006,6 +1095,18 @@ async def find_two_leg_opportunities(
         extra_camelot_v2_pools=extra_camelot_v2_pools,
         extra_constant_product_pools=extra_constant_product_pools,
     )
+    pool_event_metrics: Dict[str, Any] = {}
+    if pool_event_cache is not None:
+        try:
+            pool_event_cache.refresh_edges(
+                edges,
+                balancer_vault=str(getattr(cfg.chain, "balancer_vault", "") or ""),
+            )
+            edges, pool_event_metrics = pool_event_cache.prioritize_edges(
+                edges, current_block=int(block_number)
+            )
+        except (AttributeError, TypeError, ValueError):
+            pool_event_metrics = {}
     # map reverse candidates by (token_in, token_out)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
     route_universe = _route_universe_snapshot(cfg, edges)
@@ -1067,6 +1168,22 @@ async def find_two_leg_opportunities(
         if not revs:
             continue
         metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(revs)
+        revs, reverse_prefilter = _prefilter_reverse_candidates(
+            revs,
+            qmap1=qmap1,
+            max_candidates=max_reverse_candidates,
+            pool_event_cache=pool_event_cache,
+            current_block=int(block_number),
+        )
+        metrics["reverse_candidates_total"] = int(
+            metrics.get("reverse_candidates_total", 0)
+        ) + int(reverse_prefilter["total"])
+        metrics["reverse_candidates_selected"] = int(
+            metrics.get("reverse_candidates_selected", 0)
+        ) + int(reverse_prefilter["selected"])
+        metrics["reverse_candidates_filtered"] = int(
+            metrics.get("reverse_candidates_filtered", 0)
+        ) + int(reverse_prefilter["filtered"])
         if normalized_amounts:
             effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
             if effective_amount_in <= 0:
@@ -1328,6 +1445,13 @@ async def find_two_leg_opportunities(
                 if str(k).startswith("route_rejections_")
             },
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
+            "reverse_leg_prefilter": {
+                "max_candidates": int(max_reverse_candidates),
+                "total": int(metrics.get("reverse_candidates_total", 0)),
+                "selected": int(metrics.get("reverse_candidates_selected", 0)),
+                "filtered": int(metrics.get("reverse_candidates_filtered", 0)),
+            },
+            "pool_event_state": dict(pool_event_metrics or {}),
         })
     # Rank the complete bounded scan result, then enforce the caller's output
     # cap. Discovery order must not hard-stop candidate generation.
@@ -1392,6 +1516,7 @@ async def find_three_leg_opportunities(
     extra_constant_product_pools: Optional[List[dict]] = None,
     amount_in_by_token: Optional[Dict[str, int]] = None,
     observed_gas_price_wei: Optional[int] = None,
+    pool_event_cache: Any = None,
 ) -> List[Opportunity]:
     """Triangle / 3-hop cycle search A->B->C->A.
 
@@ -1413,6 +1538,18 @@ async def find_three_leg_opportunities(
         extra_camelot_v2_pools=extra_camelot_v2_pools,
         extra_constant_product_pools=extra_constant_product_pools,
     )
+    pool_event_metrics: Dict[str, Any] = {}
+    if pool_event_cache is not None:
+        try:
+            pool_event_cache.refresh_edges(
+                edges,
+                balancer_vault=str(getattr(cfg.chain, "balancer_vault", "") or ""),
+            )
+            edges, pool_event_metrics = pool_event_cache.prioritize_edges(
+                edges, current_block=int(block_number)
+            )
+        except (AttributeError, TypeError, ValueError):
+            pool_event_metrics = {}
     # Keep a bounded graph, but spend the bound on edges that can actually
     # close an arbitrage cycle. Discovery order is no longer an economic filter.
     max_edges_per_token = max(
@@ -1857,6 +1994,7 @@ async def find_three_leg_opportunities(
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
+            "pool_event_state": dict(pool_event_metrics or {}),
         })
     # Rank the complete bounded scan result, then enforce the caller's output
     # cap. Discovery order must not hard-stop candidate generation.
