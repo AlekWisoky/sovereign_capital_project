@@ -115,6 +115,9 @@ def test_pool_event_cache_generates_dirty_subgraph_and_preserves_reverse_pair():
     assert telemetry["candidate_edges_pruned"] > 0
     assert telemetry["fresh_dirty_pool_count"] == 1
     assert telemetry["affected_token_count"] == 2
+    snapshot = cache.snapshot()
+    assert snapshot["candidate_generation_mode"] == "dirty_subgraph"
+    assert snapshot["candidate_edges_pruned"] > 0
 
 
 def test_pool_event_cache_keeps_full_graph_without_fresh_events():
