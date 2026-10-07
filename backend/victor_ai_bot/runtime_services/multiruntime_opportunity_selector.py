@@ -71,6 +71,8 @@ def _profitability_blocking_reason(
 
 
 def _execution_blocking_reason(state: Mapping[str, Any]) -> str:
+    if not state.get("execution_token_authorized", False):
+        return "input_token_not_execution_authorized"
     liquidity_capacity = state.get("liquidity_capacity")
     required_notional = state.get("required_notional")
     if not state.get("route_ready"):
@@ -201,6 +203,8 @@ class MultiRuntimeOpportunitySelector:
         candidate_count: int,
         candidate: Any,
         summary: Mapping[str, Any],
+        *,
+        execution_token_authorized: bool,
     ) -> RuntimeOpportunityEvidence:
         meta = _mapping(getattr(candidate, "meta", None))
         profitability = profitability_state_view(candidate)
@@ -429,6 +433,7 @@ class MultiRuntimeOpportunitySelector:
         )
 
         blocking_state = {
+            "execution_token_authorized": bool(execution_token_authorized),
             "route_ready": route_ready,
             "route_degraded": route_degraded,
             "route_reason": route_reason,
@@ -520,6 +525,48 @@ class MultiRuntimeOpportunitySelector:
                 len(opportunities),
                 candidate,
                 _mapping(summary),
+                execution_token_authorized=bool(
+                    (
+                        {
+                            str(token).lower()
+                            for token in (
+                                getattr(
+                                    getattr(runtime, "cfg", None),
+                                    "chain",
+                                    None,
+                                )
+                                and getattr(runtime.cfg.chain, "token_universe", [])
+                                or []
+                            )
+                            if token
+                        }
+                    )
+                    and str(
+                        getattr(
+                            getattr(
+                                getattr(candidate, "route", None),
+                                "legs",
+                                [None],
+                            )[0],
+                            "token_in",
+                            "",
+                        )
+                        or ""
+                    ).lower()
+                    in {
+                        str(token).lower()
+                        for token in (
+                            getattr(
+                                getattr(runtime, "cfg", None),
+                                "chain",
+                                None,
+                            )
+                            and getattr(runtime.cfg.chain, "token_universe", [])
+                            or []
+                        )
+                        if token
+                    }
+                ),
             )
             for candidate in opportunities
         ]
