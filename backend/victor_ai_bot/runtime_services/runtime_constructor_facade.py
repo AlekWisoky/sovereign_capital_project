@@ -81,6 +81,9 @@ class RuntimeConstructorFacade:
             max_addresses=int(os.environ.get("VICTOR_POOL_EVENT_MAX_ADDRESSES", "256") or 256),
             reconcile_max_blocks=int(os.environ.get("VICTOR_POOL_EVENT_RECONCILE_BLOCKS", "200") or 200),
             refresh_interval_s=float(os.environ.get("VICTOR_POOL_EVENT_REFRESH_S", "15") or 15),
+            candidate_max_edges=int(
+                os.environ.get("VICTOR_EVENT_CANDIDATE_MAX_EDGES", "512") or 512
+            ),
         )
         self._budget_day = time.strftime("%Y-%m-%d", time.gmtime())
         self._gas_spent_today_wei = 0
