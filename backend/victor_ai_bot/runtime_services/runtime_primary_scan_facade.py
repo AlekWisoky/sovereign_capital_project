@@ -461,16 +461,28 @@ class RuntimePrimaryScanFacade:
                 gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
 
             l1_fee_wei = 0
-            l1_fee_status = "not_applicable"
+            l1_fee_status = "execution_envelope_unconfigured"
             if int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID:
-                l1_fee_status = "calldata_unavailable"
+                l1_fee_status = "execution_envelope_unconfigured"
                 try:
                     execution_cfg = getattr(self.cfg, "execution", None)
                     profit_to = str(getattr(execution_cfg, "profit_to", "") or "")
                     provider = str(getattr(execution_cfg, "flash_provider", "aave") or "aave")
                     executor = str(getattr(execution_cfg, "executor_address", "") or "")
                     legs = list(getattr(getattr(opportunity, "route", None), "legs", []) or [])
-                    if profit_to and executor and legs:
+                    if not profit_to or not executor:
+                        missing = []
+                        if not executor:
+                            missing.append("executor_address")
+                        if not profit_to:
+                            missing.append("profit_to")
+                        meta["base_execution_envelope"] = {
+                            "configured": False,
+                            "missing_fields": missing,
+                        }
+                    elif not legs:
+                        l1_fee_status = "calldata_unavailable"
+                    else:
                         min_abs = int(getattr(getattr(self.cfg, "safety", None), "minProfitAbs", 0) or 0)
                         min_bps = int(getattr(getattr(self.cfg, "safety", None), "minProfitBps", 0) or 0)
                         amount_borrow = int(getattr(legs[0], "amount_in", 0) or 0)
@@ -518,7 +530,12 @@ class RuntimePrimaryScanFacade:
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
                     l1_fee_status = "calldata_build_failed"
 
-                if l1_fee_status in {"oracle_unavailable", "calldata_build_failed", "calldata_unavailable"}:
+                if l1_fee_status in {
+                    "oracle_unavailable",
+                    "calldata_build_failed",
+                    "calldata_unavailable",
+                    "execution_envelope_unconfigured",
+                }:
                     # Base economics must not be authorized without the L1 data
                     # component when the exact executor envelope cannot be priced.
                     l1_fee_wei = 0
@@ -556,7 +573,11 @@ class RuntimePrimaryScanFacade:
                     "reason": (
                         "gas_price_consensus_unavailable"
                         if observed_gas_price_wei is None
-                        else "base_l1_fee_unavailable"
+                        else (
+                            "base_execution_envelope_unconfigured"
+                            if l1_fee_status == "execution_envelope_unconfigured"
+                            else "base_l1_fee_unavailable"
+                        )
                     ),
                     "revalidated": False,
                     "stale": True,
