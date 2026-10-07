@@ -25,8 +25,17 @@ _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeErr
 class _FrozenProviderScanPoolEventCache:
     """Immutable provider-comparison graph and edge-priority view for one tick."""
 
-    def __init__(self, edges: List[Any], telemetry: Dict[str, Any], priorities: Dict[int, int]) -> None:
+    def __init__(
+        self,
+        edges: List[Any],
+        telemetry: Dict[str, Any],
+        priorities: Dict[int, int],
+        route_universe_edges: List[Any] | None = None,
+    ) -> None:
         self._edges = list(edges or [])
+        self._route_universe_edges = list(
+            route_universe_edges if route_universe_edges is not None else self._edges
+        )
         self._telemetry = dict(telemetry or {})
         self._priorities = dict(priorities or {})
 
@@ -51,6 +60,10 @@ class _FrozenProviderScanPoolEventCache:
     def edge_count(self) -> int:
         return int(len(self._edges))
 
+    def route_universe_edges(self) -> List[Any]:
+        """Return the immutable route universe retained across bounded scan slices."""
+        return list(self._route_universe_edges)
+
     def slice(self, start: int, limit: int) -> "_FrozenProviderScanPoolEventCache":
         offset = max(0, int(start))
         count = max(0, int(limit))
@@ -64,7 +77,12 @@ class _FrozenProviderScanPoolEventCache:
         telemetry["provider_comparison_slice_offset"] = int(offset)
         telemetry["provider_comparison_slice_limit"] = int(count)
         priorities = {id(edge): int(self._priorities.get(id(edge), 1)) for edge in selected}
-        return _FrozenProviderScanPoolEventCache(selected, telemetry, priorities)
+        return _FrozenProviderScanPoolEventCache(
+            selected,
+            telemetry,
+            priorities,
+            route_universe_edges=self._route_universe_edges,
+        )
 
 
 
@@ -3327,6 +3345,7 @@ class RuntimePrimaryScanFacade:
             selected_edges,
             telemetry,
             priorities,
+            route_universe_edges=selected_edges,
         )
 
     async def _build_discovery_context(
