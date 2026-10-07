@@ -539,7 +539,14 @@ async def try_execute_opportunity(
     # Safety rails (CRITICAL RULE #1: repay + gas + thresholds)
     min_abs = int(cfg.safety.minProfitAbs)
     min_bps = int(cfg.safety.minProfitBps)
-    fee_bps = int(cfg.execution.flashloan_fee_bps)
+    # The on-chain premium observation is the economic authority for this
+    # execution attempt. Falling back to config is allowed only when the
+    # provider observation was unavailable in safe/dry-run mode.
+    fee_bps = int(
+        native_flashloan_fee_bps
+        if native_flashloan_fee_bps is not None
+        else cfg.execution.flashloan_fee_bps
+    )
     sr = check_profit_and_repay(
         amount_in_wei=amount_in,
         amount_out_wei=amount_out,
