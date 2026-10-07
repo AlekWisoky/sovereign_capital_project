@@ -1755,9 +1755,24 @@ class RuntimePrimaryScanFacade:
                     base_raw = 0
                 if base_raw <= 0 or int(base_amount_in) <= 0:
                     continue
+                meta = getattr(candidate, "meta", {}) or {}
+                try:
+                    reference_amount_in = int(
+                        meta.get("adaptive_seed_amount_in") or base_amount_in
+                    )
+                except (TypeError, ValueError):
+                    reference_amount_in = int(base_amount_in)
+                if reference_amount_in <= 0:
+                    reference_amount_in = int(base_amount_in)
                 raw_probe = max(
                     1,
-                    int(round(float(base_raw) * float(probe_amount) / float(max(1, int(base_amount_in))))),
+                    int(
+                        round(
+                            float(base_raw)
+                            * float(probe_amount)
+                            / float(max(1, reference_amount_in))
+                        )
+                    ),
                 )
                 try:
                     clone = candidate.model_copy(deep=True)
@@ -2254,6 +2269,13 @@ class RuntimePrimaryScanFacade:
                             if key in seen_seed_keys:
                                 continue
                             seen_seed_keys.add(key)
+                            meta = getattr(candidate, "meta", None)
+                            if isinstance(meta, dict):
+                                meta["adaptive_seed_amount_in"] = str(int(seed_amount))
+                            else:
+                                candidate.meta = {
+                                    "adaptive_seed_amount_in": str(int(seed_amount))
+                                }
                             merged_seed_candidates.append(candidate)
                             additions += 1
 
