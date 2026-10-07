@@ -416,3 +416,88 @@ def test_reverse_prefilter_keeps_protocol_and_pool_diversity():
     assert stats["total"] == 10
     assert stats["selected"] == 8
     assert stats["filtered"] == 2
+
+
+
+@pytest.mark.asyncio
+async def test_two_leg_selected_chunk_uses_full_route_universe_for_cross_chunk_reverse(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    e1 = arb.Edge(
+        "univ3",
+        "0x" + "aa" * 20,
+        token_a,
+        token_b,
+        {"fee": 3000, "pool": "pool-a"},
+    )
+    e2 = arb.Edge(
+        "univ3",
+        "0x" + "bb" * 20,
+        token_b,
+        token_a,
+        {"fee": 3000, "pool": "pool-b"},
+    )
+
+    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: [e1, e2])
+
+    class RouteSlice:
+        def refresh_edges(self, *args, **kwargs):
+            return None
+
+        def candidate_edges(self, *args, **kwargs):
+            return [e1], {"candidate_edge_count": 1, "candidate_edges_full": 2}
+
+        def route_universe_edges(self):
+            return [e1, e2]
+
+        def edge_priority(self, edge, *, current_block):
+            return 1
+
+    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+        if metrics is not None:
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
+            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
+        return {
+            arb.edge_key(edge): (
+                110 if edge == e1 else 120,
+                {"gas_estimate": 1, "fee": 3000},
+            )
+            for edge in requested_edges
+        }
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
+    monkeypatch.setattr(
+        arb,
+        "scan_efficiency_snapshot",
+        lambda **kwargs: {
+            "elapsed_ms": 1.0,
+            "candidate_count": int(kwargs["candidate_count"]),
+            "quote_requests": int(kwargs["quote_requests"]),
+            "quote_successes": int(kwargs["quote_successes"]),
+            "quote_success_rate": 1.0,
+            "cache_hits": 0,
+            "network_batches": 2,
+        },
+    )
+
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="arbitrum"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    telemetry = {}
+    out = await arb.find_two_leg_opportunities(
+        object(),
+        cfg,
+        object(),
+        123,
+        amount_in=100,
+        slippage_bps=50,
+        telemetry=telemetry,
+        pool_event_cache=RouteSlice(),
+        max_scan_edges=1,
+    )
+
+    assert any(item.expected_profit_raw == "20" for item in out)
+    assert telemetry["scan_edges_selected"] == 1
+    assert telemetry["route_universe_edge_count"] == 2
+    assert telemetry["route_rejections"].get("no_reverse_route", 0) == 0
