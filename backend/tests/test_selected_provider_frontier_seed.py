@@ -187,10 +187,13 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
         "_adaptive_scan_amounts",
         lambda amount, **kwargs: [1000, 500, 1500, 2000],
     )
+    async def noop_annotate(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(
         runtime,
         "_annotate_canonical_after_fee_usd",
-        lambda *args, **kwargs: None,
+        noop_annotate,
     )
 
     class Candidate:
