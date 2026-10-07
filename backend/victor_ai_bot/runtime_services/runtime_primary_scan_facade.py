@@ -1570,22 +1570,9 @@ class RuntimePrimaryScanFacade:
             started = time.perf_counter()
             try:
                 if url == bootstrap_url:
-                    opps = await self._scan_primary_opportunities(
-                        bootstrap_rpc,
-                        current_block=int(current_block),
-                        amount_in=int(amount_in),
-                        cache=scan_cache,
-                        discovery_context=discovery_context,
-                        telemetry_sink=telemetry,
-                        shared_token_scan_amounts=shared_token_scan_amounts,
-                        force_adaptive_size_scan=False,
-                    )
-                else:
-                    async with JsonRpcClient(
-                        url, timeout_s=10.0, max_concurrency=30, max_batch=80
-                    ) as provider_rpc:
-                        opps = await self._scan_primary_opportunities(
-                            provider_rpc,
+                    opps = await asyncio.wait_for(
+                        self._scan_primary_opportunities(
+                            bootstrap_rpc,
                             current_block=int(current_block),
                             amount_in=int(amount_in),
                             cache=scan_cache,
@@ -1593,7 +1580,31 @@ class RuntimePrimaryScanFacade:
                             telemetry_sink=telemetry,
                             shared_token_scan_amounts=shared_token_scan_amounts,
                             force_adaptive_size_scan=False,
+                        ),
+                        timeout=self._provider_scan_timeout_s(),
+                    )
+                else:
+                    async with JsonRpcClient(
+                        url, timeout_s=10.0, max_concurrency=30, max_batch=80
+                    ) as provider_rpc:
+                        opps = await asyncio.wait_for(
+                            self._scan_primary_opportunities(
+                                provider_rpc,
+                                current_block=int(current_block),
+                                amount_in=int(amount_in),
+                                cache=scan_cache,
+                                discovery_context=discovery_context,
+                                telemetry_sink=telemetry,
+                                shared_token_scan_amounts=shared_token_scan_amounts,
+                                force_adaptive_size_scan=False,
+                            ),
+                            timeout=self._provider_scan_timeout_s(),
                         )
+            except asyncio.TimeoutError:
+                telemetry.setdefault("scan_error", "provider_scan_timeout")
+                telemetry["provider_scan_timeout_s"] = self._provider_scan_timeout_s()
+                telemetry["scan_latency_ms"] = float((time.perf_counter() - started) * 1000.0)
+                opps = []
             except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                 telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
                 telemetry["scan_latency_ms"] = float((time.perf_counter() - started) * 1000.0)
@@ -1699,6 +1710,13 @@ class RuntimePrimaryScanFacade:
             )
             return url, list(opps or []), scan_cache, telemetry, evidence
 
+        selection_timeout_s = self._provider_scan_timeout_s()
+        self._market_pipeline_telemetry = {
+            **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
+            "rpc_selection_phase": "provider_comparison",
+            "rpc_selection_started_ms": int(time.time() * 1000),
+            "rpc_provider_scan_timeout_s": float(selection_timeout_s),
+        }
         # Provider selection is a comparison gate, not the institutional sizing
         # pass. Keep all providers on the same base notional so quote volume and
         # latency remain bounded; the selected provider gets the full adaptive
@@ -1725,26 +1743,17 @@ class RuntimePrimaryScanFacade:
         # the size ladder across every RPC candidate.
         adaptive_cache = PerBlockCache()
         adaptive_telemetry: Dict[str, Any] = {}
+        self._market_pipeline_telemetry = {
+            **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
+            "rpc_selection_phase": "selected_provider_adaptive",
+        }
         adaptive_opps: List[Opportunity] = []
         selected_provider_url = str(selected_url)
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
-                adaptive_opps = await self._scan_primary_opportunities(
-                    selected_provider_rpc,
-                    current_block=int(current_block),
-                    amount_in=int(amount_in),
-                    cache=adaptive_cache,
-                    discovery_context=discovery_context,
-                    telemetry_sink=adaptive_telemetry,
-                    shared_token_scan_amounts=shared_token_scan_amounts,
-                    force_adaptive_size_scan=True,
-                )
-            else:
-                async with JsonRpcClient(
-                    selected_provider_url, timeout_s=10.0, max_concurrency=30, max_batch=80
-                ) as selected_provider_rpc:
-                    adaptive_opps = await self._scan_primary_opportunities(
+                adaptive_opps = await asyncio.wait_for(
+                    self._scan_primary_opportunities(
                         selected_provider_rpc,
                         current_block=int(current_block),
                         amount_in=int(amount_in),
@@ -1753,7 +1762,30 @@ class RuntimePrimaryScanFacade:
                         telemetry_sink=adaptive_telemetry,
                         shared_token_scan_amounts=shared_token_scan_amounts,
                         force_adaptive_size_scan=True,
+                    ),
+                    timeout=selection_timeout_s,
+                )
+            else:
+                async with JsonRpcClient(
+                    selected_provider_url, timeout_s=10.0, max_concurrency=30, max_batch=80
+                ) as selected_provider_rpc:
+                    adaptive_opps = await asyncio.wait_for(
+                        self._scan_primary_opportunities(
+                            selected_provider_rpc,
+                            current_block=int(current_block),
+                            amount_in=int(amount_in),
+                            cache=adaptive_cache,
+                            discovery_context=discovery_context,
+                            telemetry_sink=adaptive_telemetry,
+                            shared_token_scan_amounts=shared_token_scan_amounts,
+                            force_adaptive_size_scan=True,
+                        ),
+                        timeout=selection_timeout_s,
                     )
+        except asyncio.TimeoutError:
+            adaptive_telemetry.setdefault("scan_error", "selected_provider_adaptive_timeout")
+            adaptive_telemetry["provider_scan_timeout_s"] = selection_timeout_s
+            adaptive_opps = []
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
             adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
             adaptive_opps = []
@@ -1999,6 +2031,14 @@ class RuntimePrimaryScanFacade:
                 },
             },
         }
+        completed_ms = int(time.time() * 1000)
+        selected_telemetry["rpc_selection_phase"] = "complete"
+        selected_telemetry["rpc_selection_completed_ms"] = completed_ms
+        self._market_pipeline_telemetry = {
+            **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
+            "rpc_selection_phase": "complete",
+            "rpc_selection_completed_ms": completed_ms,
+        }
         return {
             "selected_endpoint": selected_url,
             "opps": selected_opps,
@@ -2006,6 +2046,17 @@ class RuntimePrimaryScanFacade:
             "telemetry": selected_telemetry,
             "evidence": evidence,
         }
+
+    @staticmethod
+    def _provider_scan_timeout_s() -> float:
+        """Bound one provider's read-only economic scan so one endpoint cannot starve a chain."""
+        try:
+            configured = float(
+                os.environ.get("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "35.0") or 35.0
+            )
+        except (TypeError, ValueError):
+            configured = 35.0
+        return max(5.0, min(configured, 120.0))
 
     @staticmethod
     def _discovery_timeout_s() -> float:
