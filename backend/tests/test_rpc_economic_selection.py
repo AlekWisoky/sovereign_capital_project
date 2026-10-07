@@ -231,7 +231,7 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": [], "runtime": {}}
 
-    calls = []
+    selected_probe_calls = []
 
     async def fake_scan(
         rpc,
@@ -244,15 +244,27 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
         shared_token_scan_amounts=None,
         force_adaptive_size_scan=False,
     ):
-        calls.append(bool(force_adaptive_size_scan))
         telemetry_sink.update({
             "quotes": {"requests": 7, "successes": 7, "failure_reasons": {}},
             "scan_latency_ms": 2.0,
             "route_universe": {"edges_by_dex": {"univ3": 2}},
             "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
+        })
+        return []
+
+    async def fake_selected_probe(
+        rpc,
+        *,
+        current_block,
+        base_amount_in,
+        base_opps,
+        cache,
+    ):
+        selected_probe_calls.append((rpc.url, list(base_opps), int(base_amount_in)))
+        return [], {
             "adaptive_size_discovery": {
                 "enabled": True,
-                "amounts_scanned": ["1000", "500", "1500", "2000", "4000", "8000", "16000"],
+                "amounts_scanned": ["1000", "500", "1500", "2000"],
                 "probe_triggered": True,
                 "economic_matrix_complete": True,
             },
@@ -260,11 +272,11 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
                 {"amount_in": "1000", "economic_optimum_after_cost_profit_wei": "0"},
             ],
             "size_economic_evidence": [],
-        })
-        return []
+        }
 
     runtime._build_discovery_context = fake_discovery
     runtime._scan_primary_opportunities = fake_scan
+    runtime._run_bounded_selected_provider_size_probe = fake_selected_probe
     runtime.cache = object()
 
     result = await runtime._select_rpc_and_scan(
@@ -273,14 +285,82 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
         amount_in=1_000,
     )
 
-    assert calls == [False, True]
+    assert selected_probe_calls == [("https://rpc-a.example", [], 1_000)]
     telemetry = result["telemetry"]
     assert telemetry["adaptive_size_discovery"]["amounts_scanned"] == [
-        "1000", "500", "1500", "2000", "4000", "8000", "16000"
+        "1000", "500", "1500", "2000"
     ]
     assert telemetry["selected_provider_adaptive"]["adaptive_size_discovery"]["probe_triggered"] is True
     assert telemetry["size_economic_matrix"][0]["economic_optimum_after_cost_profit_wei"] == "0"
     assert result["opps"] == []
+
+
+@pytest.mark.asyncio
+async def test_bounded_selected_provider_sizing_probes_promising_routes_only(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+
+    class _Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = _Manager()
+    monkeypatch.setattr(runtime, "_adaptive_scan_amounts", lambda amount, **kwargs: [amount, amount // 2, amount * 2])
+    async def noop_annotate(*args, **kwargs):
+        return None
+    monkeypatch.setattr(runtime, "_annotate_canonical_after_fee_usd", noop_annotate)
+
+    base = SimpleNamespace(
+        id="base",
+        route_id="route-base",
+        strategy="two-leg:univ3->univ3",
+        expected_profit_raw="100",
+        route=SimpleNamespace(
+            legs=[SimpleNamespace(amount_in="1000")]
+        ),
+        meta={
+            "route_edge_params": [
+                {"fee": 500},
+                {"fee": 3000},
+            ],
+            "profitability": {
+                "revalidated": True,
+                "authoritative": False,
+                "profit_after_costs_wei": "-1",
+            },
+        },
+    )
+
+    async def fake_requote(rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps):
+        candidate.route.legs[0].amount_in = str(new_amount_in)
+        candidate.expected_profit_raw = str(new_amount_in // 10)
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1_000,
+        base_opps=[base],
+        cache=PerBlockCache(),
+    )
+
+    assert len(sized) == 3
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["probe_triggered"] is True
+    assert adaptive["amounts_scanned"] == ["1000", "500", "2000"]
+    assert adaptive["selected_route_count"] == 1
 
 
 @pytest.mark.asyncio
