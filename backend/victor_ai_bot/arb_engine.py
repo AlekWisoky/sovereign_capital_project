@@ -1030,10 +1030,27 @@ def _prefilter_reverse_candidates(
             selected_ids.add(ek)
 
     protocols: set[str] = set()
-    add_phase(lambda item: item[2] not in protocols and not protocols.add(item[2]))
+
+    def _new_protocol(item: Tuple[int, int, str, str, int, Edge]) -> bool:
+        protocol = str(item[2])
+        if protocol in protocols:
+            return False
+        protocols.add(protocol)
+        return True
+
+    add_phase(_new_protocol)
+
     pools: set[str] = set()
-    add_phase(lambda item: item[3] not in pools and not pools.add(item[3]))
-    add_phase(lambda item: True)
+
+    def _new_pool(item: Tuple[int, int, str, str, int, Edge]) -> bool:
+        pool = str(item[3])
+        if pool in pools:
+            return False
+        pools.add(pool)
+        return True
+
+    add_phase(_new_pool)
+    add_phase(lambda _item: True)
 
     return selected[:cap], {
         "total": int(len(revs)),
