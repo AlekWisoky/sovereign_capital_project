@@ -1655,6 +1655,7 @@ async def find_three_leg_opportunities(
     time_budget_ms: int = 2200,
     max_opps: int = 40,
     telemetry: Optional[Dict[str, Any]] = None,
+    max_reverse_candidates: Optional[int] = None,
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
@@ -1877,12 +1878,14 @@ async def find_three_leg_opportunities(
                 revs = by_pair.get((e2.token_out, e1.token_in), [])
                 if not revs:
                     continue
+                configured_reverse_candidates = (
+                    max_reverse_candidates
+                    if max_reverse_candidates not in (None, "")
+                    else int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8)
+                )
                 max_reverse_candidates = max(
                     3,
-                    min(
-                        12,
-                        int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8),
-                    ),
+                    min(12, int(configured_reverse_candidates)),
                 )
                 e3_cands = list(revs[:max_reverse_candidates])
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
