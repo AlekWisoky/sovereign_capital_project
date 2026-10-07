@@ -2017,6 +2017,44 @@ class ExecutionService:
                     pass
         except _SAFE_RUNTIME_EXCEPTIONS:
             pass
+
+        chain = getattr(runtime.cfg, "chain", None)
+        execution_tokens = {
+            str(token).lower()
+            for token in (getattr(chain, "token_universe", []) or [])
+            if token
+        }
+        legs = list(getattr(getattr(opp, "route", None), "legs", []) or [])
+        input_token = (
+            str(getattr(legs[0], "token_in", "") or "").strip()
+            if legs
+            else ""
+        )
+        if execution_tokens and (
+            not input_token or input_token.lower() not in execution_tokens
+        ):
+            return AutoExecutionPreflightResult(
+                False,
+                opp,
+                decision,
+                force_dry,
+                old_gas_mode,
+                old_send_mode,
+                "",
+                "",
+                ExecResult(
+                    False,
+                    bool(runtime.cfg.execution.dry_run or force_dry),
+                    "input_token_not_execution_authorized",
+                    attempted=False,
+                ),
+                {
+                    "reason": "input_token_not_execution_authorized",
+                    "execution_authority": False,
+                    "input_token": input_token,
+                },
+            )
+
         send_url = runtime.rpc_manager.best_send()
         if str(getattr(runtime.cfg.execution, "send_mode", "public")) in {
             "private",

@@ -62,6 +62,7 @@ def _runtime(
                 gas_limit=200000,
             ),
             safety=SimpleNamespace(minProfitAbs=1, minProfitBps=0),
+            chain=SimpleNamespace(token_universe=["USDC"]),
         ),
         metrics=SimpleNamespace(gas_mode="standard", send_mode="public"),
         rpc_manager=_RpcManager(),
@@ -407,3 +408,23 @@ def test_capital_admission_service_denies_stale_capital_truth_before_family_chec
     assert result.details["capitalTruthHealth"]["freshnessClass"] == "stale"
     assert result.details["capitalTruthHealth"]["nextAction"] == "refresh_capital_truth_snapshot"
     assert result.details["familyAdmission"]["reason"] == "pending_family_admission"
+
+
+def test_execution_service_prepare_auto_execution_blocks_research_token_before_rpc():
+    svc = ExecutionService()
+    opp = _Opp()
+    opp.route.legs[0].token_in = "0xResearchToken"
+    runtime = _runtime(capital_admission_service=CapitalAdmissionService())
+    decision = SimpleNamespace(
+        size_mult=1.0,
+        borrow_mult=1.0,
+        gas_mode="standard",
+        metadata={"execution_route_plan": {"executable": True, "selected_venues": ["uni"]}},
+    )
+
+    result = svc.prepare_auto_execution(runtime, opp, bn=21, decision=decision)
+
+    assert result.proceed is False
+    assert result.blocked_result is not None
+    assert result.blocked_result.reason == "input_token_not_execution_authorized"
+    assert result.metadata["execution_authority"] is False

@@ -44,16 +44,43 @@ class RuntimeCanExecuteFacade:
             or "VICTOR_PRIVATE_KEY"
         )
         signing_ready = bool(os.environ.get(key_env, "").strip())
+        execution_tokens = {
+            str(token).lower()
+            for token in (
+                getattr(getattr(self.cfg, "chain", None), "token_universe", []) or []
+            )
+            if token
+        }
 
         for o in opps[:topn]:
             try:
                 amount_in = int(o.route.legs[0].amount_in)
+                borrow_token = str(o.route.legs[0].token_in or "").strip()
             except _SAFE_CAN_EXECUTE_EXCEPTIONS:
                 amount_in = 0
+                borrow_token = ""
             try:
                 amount_out = int(o.min_outs[-1])
             except _SAFE_CAN_EXECUTE_EXCEPTIONS:
                 amount_out = 0
+
+            if (
+                execution_tokens
+                and (
+                    not borrow_token
+                    or borrow_token.lower() not in execution_tokens
+                )
+            ):
+                o.can_execute = False
+                o.meta["safety"] = {
+                    "ok": False,
+                    "reason": "input_token_not_execution_authorized",
+                    "exec_ready": False,
+                    "execution_authority": False,
+                    "input_token": borrow_token,
+                }
+                o.meta["research_token_execution_authorized"] = False
+                continue
 
             if amount_in <= 0 or amount_out <= 0:
                 o.can_execute = False

@@ -25,7 +25,12 @@ class _Runtime(RuntimeCanExecuteFacade):
                 private_key_env="VICTOR_PRIVATE_KEY",
                 flashloan_fee_bps=9,
             ),
-            chain=SimpleNamespace(univ3_swap_router="", balancer_vault="", weth="0xTokenIn"),
+            chain=SimpleNamespace(
+                univ3_swap_router="",
+                balancer_vault="",
+                weth="0xTokenIn",
+                token_universe=["0xTokenIn"],
+            ),
             safety=SimpleNamespace(minProfitAbs=1, minProfitBps=1),
         )
 
@@ -87,3 +92,17 @@ def test_annotate_can_execute_preserves_readiness_semantics(monkeypatch):
     assert opp.meta["safety"]["route_ready"] is False
     assert opp.meta["safety"]["exec_ready"] is False
     assert opp.meta["safety"]["missing"] == ["univ3_swap_router"]
+
+
+def test_annotate_can_execute_blocks_research_token_borrow(monkeypatch):
+    monkeypatch.setattr(mod, "suggest_gas", _fake_suggest_gas)
+    monkeypatch.setattr(mod, "check_profit_and_repay", _fake_profit_ok)
+    runtime = _Runtime()
+    opp = _opp(100, 120)
+    opp.route.legs[0].token_in = "0xResearchToken"
+
+    asyncio.run(runtime._annotate_can_execute(SimpleNamespace(block_number=_fake_block_number), [opp]))
+
+    assert opp.can_execute is False
+    assert opp.meta["safety"]["reason"] == "input_token_not_execution_authorized"
+    assert opp.meta["safety"]["execution_authority"] is False
