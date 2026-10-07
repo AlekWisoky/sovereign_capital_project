@@ -188,13 +188,34 @@ class PoolStateEventCache:
     ) -> Tuple[List[Any], Dict[str, Any]]:
         scored: List[Tuple[int, int, int, Any]] = []
         dirty_count = 0
+        affected_tokens: set[str] = set()
+        dirty_addresses: set[str] = set()
+        for address, state in self._states.items():
+            age = max(0, int(current_block) - int(state.last_block or 0))
+            if address in self._dirty and int(state.last_block) and age <= 2:
+                dirty_addresses.add(address)
+                if state.token0:
+                    affected_tokens.add(str(state.token0).lower())
+                if state.token1:
+                    affected_tokens.add(str(state.token1).lower())
+
+        affected_subgraph_edges = 0
         for order, edge in enumerate(list(edges or [])):
             address = self._edge_pool_address(edge)
             priority = self.edge_priority(edge, current_block=int(current_block))
             state = self._states.get(address) if address else None
             last_block = int(state.last_block) if state is not None else 0
-            if priority >= 4:
+            edge_tokens = {
+                str(getattr(edge, "token_in", "") or "").lower(),
+                str(getattr(edge, "token_out", "") or "").lower(),
+            }
+            edge_tokens.discard("")
+            if address in dirty_addresses:
+                priority = max(priority, 5)
                 dirty_count += 1
+            elif affected_tokens and edge_tokens & affected_tokens:
+                priority = max(priority, 4)
+                affected_subgraph_edges += 1
             scored.append((priority, last_block, -order, edge))
         scored.sort(
             key=lambda item: (int(item[0]), int(item[1]), int(item[2])),
@@ -206,6 +227,8 @@ class PoolStateEventCache:
             "tracked_pools": int(len(self._tracked)),
             "tracked_states": int(sum(1 for state in self._states.values() if state.last_block)),
             "dirty_edges": int(dirty_count),
+            "affected_token_count": int(len(affected_tokens)),
+            "affected_subgraph_edges": int(affected_subgraph_edges),
             "last_event_block": int(self._last_seen_block),
             "event_count": int(self._event_count),
             "connected": bool(self._connected),
@@ -244,6 +267,7 @@ class PoolStateEventCache:
             "event_count": int(self._event_count),
             "reconcile_count": int(self._reconcile_count),
             "reconcile_missed": int(self._reconcile_missed),
+            "dirty_pool_count": int(len(self._dirty)),
             "last_message_ts": float(self._last_message_ts),
             "last_error": str(self._last_error or ""),
         }
