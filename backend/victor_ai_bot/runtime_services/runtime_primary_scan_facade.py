@@ -1018,7 +1018,7 @@ class RuntimePrimaryScanFacade:
         current_block: int,
         amount_in: int,
         cache: PerBlockCache | None = None,
-        discovery_context: Dict[str, List[Any]] | None = None,
+        discovery_context: Dict[str, Any] | None = None,
         telemetry_sink: Dict[str, Any] | None = None,
         shared_token_scan_amounts: Dict[str, int] | None = None,
         force_adaptive_size_scan: bool = False,
