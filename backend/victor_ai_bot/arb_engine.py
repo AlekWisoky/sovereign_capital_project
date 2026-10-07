@@ -1577,6 +1577,14 @@ async def find_two_leg_opportunities(
                 "filtered": int(metrics.get("reverse_candidates_filtered", 0)),
             },
             "pool_event_state": dict(pool_event_metrics or {}),
+            "scan_edges_before_cap": int(metrics.get("scan_edges_before_cap", len(edges))),
+            "scan_edge_cap": (
+                int(metrics["scan_edge_cap"])
+                if metrics.get("scan_edge_cap") not in (None, "")
+                else None
+            ),
+            "scan_edges_selected": int(metrics.get("scan_edges_selected", len(edges))),
+            "scan_edges_capped": int(metrics.get("scan_edges_capped", 0)),
         })
     # Rank the complete bounded scan result, then enforce the caller's output
     # cap. Discovery order must not hard-stop candidate generation.
@@ -2132,6 +2140,14 @@ async def find_three_leg_opportunities(
             "opportunity_count": len(opps),
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
             "pool_event_state": dict(pool_event_metrics or {}),
+            "scan_edges_before_cap": int(metrics.get("scan_edges_before_cap", len(edges))),
+            "scan_edge_cap": (
+                int(metrics["scan_edge_cap"])
+                if metrics.get("scan_edge_cap") not in (None, "")
+                else None
+            ),
+            "scan_edges_selected": int(metrics.get("scan_edges_selected", len(edges))),
+            "scan_edges_capped": int(metrics.get("scan_edges_capped", 0)),
         })
     # Rank the complete bounded scan result, then enforce the caller's output
     # cap. Discovery order must not hard-stop candidate generation.
