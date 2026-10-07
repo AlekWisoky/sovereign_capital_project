@@ -267,23 +267,18 @@ async def test_requote_dynamic_slippage_programmer_bug_propagates(monkeypatch):
 async def test_requote_uses_stored_route_edge_params_for_non_univ3_venues(monkeypatch):
     seen = {}
 
-    async def fake_quote_edge(rpc, cfg, cache, edge, amount):
-        seen[edge.dex] = dict(edge.params)
+    async def fake_quote_edge(rpc, cfg, cache, e, amount):
+        seen[e.dex] = dict(e.params)
         return 120, {"fee": 500}
 
     monkeypatch.setattr(arb_engine_module, "quote_edge", fake_quote_edge)
     cfg = _cfg()
     cfg.chain.aerodrome_router = "0xaero"
 
-    opp = Opportunity(
-        id="aero-opp",
-        chain="base",
-        strategy="two-leg:aerodrome->aerodrome",
-        expected_profit_raw="10",
-        expected_profit_usd="0",
-        route=Route(
+    opp = SimpleNamespace(
+        route=SimpleNamespace(
             legs=[
-                RouteLeg(
+                SimpleNamespace(
                     dex="aerodrome",
                     venue="0xpool1",
                     token_in="0x111",
@@ -292,7 +287,7 @@ async def test_requote_uses_stored_route_edge_params_for_non_univ3_venues(monkey
                     min_out="110",
                     data="0x",
                 ),
-                RouteLeg(
+                SimpleNamespace(
                     dex="aerodrome",
                     venue="0xpool2",
                     token_in="0x222",
@@ -303,8 +298,6 @@ async def test_requote_uses_stored_route_edge_params_for_non_univ3_venues(monkey
                 ),
             ]
         ),
-        min_outs=["110", "115"],
-        route_id="aero-route",
         meta={
             "route_edge_params": [
                 {"stable": True, "factory": "0xfactory1"},
@@ -324,6 +317,8 @@ async def test_requote_uses_stored_route_edge_params_for_non_univ3_venues(monkey
 
     assert requoted is not None
     assert seen["aerodrome"] == {"stable": False, "factory": "0xfactory2"}
+
+
 
 
 def test_arb_engine_has_no_broad_exception_handlers():
