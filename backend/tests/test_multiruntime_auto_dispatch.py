@@ -17,6 +17,14 @@ def _candidate(oid: str, profit_usd: int) -> SimpleNamespace:
         route_id=f"route-{oid}",
         strategy="flash_arb",
         can_execute=True,
+        route=SimpleNamespace(
+            legs=[
+                SimpleNamespace(
+                    token_in="0xTokenIn",
+                    amount_in=1_000_000,
+                )
+            ]
+        ),
         meta={
             "profitability": {
                 "revalidated": True,
@@ -79,7 +87,10 @@ class _Runtime:
         self._action = action
         self._auto_trading = auto
         self._cb = SimpleNamespace(allow_auto_trading=lambda: True)
-        self.cfg = SimpleNamespace(execution=SimpleNamespace(auto_trading=auto))
+        self.cfg = SimpleNamespace(
+            execution=SimpleNamespace(auto_trading=auto),
+            chain=SimpleNamespace(token_universe=["0xTokenIn"]),
+        )
 
     async def summary(self):
         return {

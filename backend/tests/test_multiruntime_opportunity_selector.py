@@ -30,6 +30,14 @@ def _candidate(
         route_id=f"route-{oid}",
         strategy="flash_arb",
         can_execute=bool(options["route_ready"]),
+        route=SimpleNamespace(
+            legs=[
+                SimpleNamespace(
+                    token_in=str(options.get("input_token") or "0xTokenIn"),
+                    amount_in=1_000_000,
+                )
+            ]
+        ),
         meta={
             "profitability": {
                 "stage": "execution_preflight",
@@ -89,9 +97,14 @@ def _candidate(
 
 
 class _Runtime:
-    def __init__(self, *candidates, gate_allowed=True):
+    def __init__(self, *candidates, gate_allowed=True, token_universe=None):
         self._opps = list(candidates)
         self._gate_allowed = gate_allowed
+        self.cfg = SimpleNamespace(
+            chain=SimpleNamespace(
+                token_universe=list(token_universe or ["0xTokenIn"])
+            )
+        )
 
     async def summary(self):
         return {
@@ -228,3 +241,22 @@ async def test_selector_is_read_only_for_active_chain_and_auto_trade_state():
     assert out["auto_trade_enabled"] is False
     assert out["broadcast_attempted"] is False
     assert active == "base"
+
+
+@pytest.mark.asyncio
+async def test_research_token_candidate_is_economic_evidence_but_not_execution_eligible():
+    selector = MultiRuntimeOpportunitySelector()
+    research_token = "0xResearchToken"
+    out = await selector.select(
+        {
+            "ethereum": _Runtime(
+                _candidate("research", 100, input_token=research_token),
+                token_universe=["0xTokenIn"],
+            )
+        }
+    )
+    candidate = out["candidates"][0]
+    assert candidate["after_fee"]["positive"] is True
+    assert candidate["eligible"] is False
+    assert candidate["blocking_reason"] == "input_token_not_execution_authorized"
+    assert out["selected"] is None

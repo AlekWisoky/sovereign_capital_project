@@ -817,10 +817,57 @@ class RuntimePrimaryScanFacade:
         base_amount_in: int,
         cache: PerBlockCache,
     ) -> tuple[Dict[str, int], Dict[str, Any]]:
-        """Translate the reference borrow notional into raw units per input token."""
+        """Translate the reference borrow notional into bounded raw units per input token.
+
+        The configured token universe remains the only execution-authority boundary.
+        A small deterministic research frontier may participate in read-only market
+        pricing so discovered pools can reach the quote/economic funnel without
+        mutating execution configuration.
+        """
         chain = getattr(self.cfg, "chain", None)
-        tokens = [str(token) for token in (getattr(chain, "token_universe", []) or []) if token]
-        weth = str(getattr(chain, "weth", "") or "")
+        configured_tokens: List[str] = []
+        configured_seen: set[str] = set()
+        for raw_token in list(getattr(chain, "token_universe", []) or []):
+            token = str(raw_token or "").strip()
+            key = token.lower()
+            if token and key not in configured_seen:
+                configured_seen.add(key)
+                configured_tokens.append(token)
+
+        weth = str(getattr(chain, "weth", "") or "").strip()
+        research_tokens: List[str] = []
+        research_cap = 8
+        try:
+            research_cap = max(
+                0,
+                min(
+                    16,
+                    int(os.environ.get("VICTOR_RESEARCH_TOKEN_SCAN_CAP", "8") or 8),
+                ),
+            )
+        except (TypeError, ValueError):
+            research_cap = 8
+
+        discovery = getattr(self, "_discovery", None)
+        frontier_getter = getattr(discovery, "research_frontier_tokens", None)
+        if callable(frontier_getter) and research_cap:
+            try:
+                raw_frontier = frontier_getter(self.cfg, cap=research_cap)
+            except (AttributeError, TypeError, ValueError):
+                raw_frontier = []
+            for raw_token in list(raw_frontier or []):
+                token = str(raw_token or "").strip()
+                key = token.lower()
+                if (
+                    token
+                    and key not in configured_seen
+                    and key not in {item.lower() for item in research_tokens}
+                ):
+                    research_tokens.append(token)
+                if len(research_tokens) >= research_cap:
+                    break
+
+        tokens = [*configured_tokens, *research_tokens]
         telemetry: Dict[str, Any] = {
             "enabled": False,
             "source": "",
@@ -828,28 +875,48 @@ class RuntimePrimaryScanFacade:
             "base_amount_in": str(int(base_amount_in)),
             "amounts_by_token": {},
             "unpriced_tokens": [],
+            "configured_tokens": int(len(configured_tokens)),
+            "research_tokens_considered": int(len(research_tokens)),
+            "research_tokens_priced": 0,
+            "research_tokens_unpriced": [],
+            "research_token_scan_notional_source": (
+                "bounded_research_frontier_quote_derived_usd"
+                if research_tokens
+                else "configured_execution_universe_quote_derived_usd"
+            ),
+            "research_token_scan_cap": int(research_cap),
+            "research_token_execution_universe_mutated": False,
         }
         if not tokens or not weth:
             return {}, telemetry
+
         try:
             evidence = await produce_market_price_evidence(
                 rpc,
                 cfg=self.cfg,
                 tokens=[(token, "scan_input") for token in tokens],
                 block_number=int(current_block),
+                strict=False,
             )
         except (FinalQuoteError, OSError, RuntimeError, TypeError, ValueError):
             telemetry["source"] = "reference_token_fallback"
-            telemetry["amounts_by_token"] = {weth.lower(): str(max(1, int(base_amount_in)))}
+            fallback = max(1, int(base_amount_in))
+            telemetry["amounts_by_token"] = {weth.lower(): str(fallback)}
             telemetry["unpriced_tokens"] = [
                 token for token in tokens if token.lower() != weth.lower()
             ]
-            return {weth.lower(): max(1, int(base_amount_in))}, telemetry
+            research_unpriced = list(research_tokens)
+            telemetry["research_tokens_unpriced"] = research_unpriced
+            telemetry["research_tokens_priced"] = 0
+            return {weth.lower(): fallback}, telemetry
+
         ref = evidence.get(weth.lower())
         if not isinstance(ref, dict):
             telemetry["source"] = "reference_token_unpriced"
             telemetry["unpriced_tokens"] = list(tokens)
+            telemetry["research_tokens_unpriced"] = list(research_tokens)
             return {}, telemetry
+
         try:
             ref_decimals = int(ref["decimals"])
             ref_price = float(ref["price_usd"])
@@ -861,25 +928,58 @@ class RuntimePrimaryScanFacade:
         except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
             telemetry["source"] = "reference_token_invalid"
             telemetry["unpriced_tokens"] = list(tokens)
+            telemetry["research_tokens_unpriced"] = list(research_tokens)
             return {}, telemetry
+
         amounts: Dict[str, int] = {}
+        unpriced: List[str] = []
         for token in tokens:
             row = evidence.get(token.lower())
             if not isinstance(row, dict):
-                telemetry["unpriced_tokens"].append(token)
+                unpriced.append(token)
                 continue
             try:
                 decimals = int(row["decimals"])
                 price_usd = float(row["price_usd"])
-                raw = int(max(1.0, round(reference_usd / price_usd * float(10 ** decimals))))
+                if price_usd <= 0:
+                    raise ValueError("token_price_non_positive")
+                raw = int(
+                    max(
+                        1.0,
+                        round(
+                            reference_usd
+                            / price_usd
+                            * float(10 ** decimals)
+                        ),
+                    )
+                )
             except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
-                telemetry["unpriced_tokens"].append(token)
+                unpriced.append(token)
                 continue
             amounts[token.lower()] = raw
+
+        research_unpriced = [
+            token for token in research_tokens if token.lower() in {item.lower() for item in unpriced}
+        ]
         telemetry["enabled"] = bool(amounts)
-        telemetry["source"] = "quote_derived_usd_notional"
+        telemetry["source"] = (
+            "bounded_research_frontier_quote_derived_usd_notional"
+            if research_tokens
+            else "quote_derived_usd_notional"
+        )
         telemetry["reference_notional_usd"] = float(reference_usd)
-        telemetry["amounts_by_token"] = {token: str(amount) for token, amount in amounts.items()}
+        telemetry["amounts_by_token"] = {
+            token: str(amount) for token, amount in amounts.items()
+        }
+        telemetry["unpriced_tokens"] = list(unpriced)
+        telemetry["research_tokens_unpriced"] = list(research_unpriced)
+        telemetry["research_tokens_priced"] = int(
+            len(research_tokens) - len(research_unpriced)
+        )
+        telemetry["configured_tokens_priced"] = int(
+            len(configured_tokens)
+            - sum(1 for token in configured_tokens if token.lower() in {item.lower() for item in unpriced})
+        )
         return amounts, telemetry
 
     async def _scan_primary_opportunities(

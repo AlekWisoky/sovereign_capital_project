@@ -71,6 +71,8 @@ def _profitability_blocking_reason(
 
 
 def _execution_blocking_reason(state: Mapping[str, Any]) -> str:
+    if not state.get("execution_token_authorized", False):
+        return "input_token_not_execution_authorized"
     liquidity_capacity = state.get("liquidity_capacity")
     required_notional = state.get("required_notional")
     if not state.get("route_ready"):
@@ -201,6 +203,8 @@ class MultiRuntimeOpportunitySelector:
         candidate_count: int,
         candidate: Any,
         summary: Mapping[str, Any],
+        *,
+        execution_token_authorized: bool,
     ) -> RuntimeOpportunityEvidence:
         meta = _mapping(getattr(candidate, "meta", None))
         profitability = profitability_state_view(candidate)
@@ -429,6 +433,7 @@ class MultiRuntimeOpportunitySelector:
         )
 
         blocking_state = {
+            "execution_token_authorized": bool(execution_token_authorized),
             "route_ready": route_ready,
             "route_degraded": route_degraded,
             "route_reason": route_reason,
@@ -514,15 +519,32 @@ class MultiRuntimeOpportunitySelector:
             error = None
 
         opportunities = list(getattr(runtime, "_opps", []) or [])
-        evidence = [
-            self._candidate_evidence(
-                runtime_name,
-                len(opportunities),
-                candidate,
-                _mapping(summary),
+        chain = getattr(getattr(runtime, "cfg", None), "chain", None)
+        execution_tokens = {
+            str(token).lower()
+            for token in (getattr(chain, "token_universe", []) or [])
+            if token
+        }
+        evidence = []
+        for candidate in opportunities:
+            legs = list(getattr(getattr(candidate, "route", None), "legs", []) or [])
+            input_token = (
+                str(getattr(legs[0], "token_in", "") or "").lower()
+                if legs
+                else ""
             )
-            for candidate in opportunities
-        ]
+            execution_token_authorized = bool(
+                execution_tokens and input_token in execution_tokens
+            )
+            evidence.append(
+                self._candidate_evidence(
+                    runtime_name,
+                    len(opportunities),
+                    candidate,
+                    _mapping(summary),
+                    execution_token_authorized=execution_token_authorized,
+                )
+            )
         return evidence, error
 
     async def select(

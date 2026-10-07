@@ -516,28 +516,31 @@ class DiscoveryManager:
         allowed = {str(t).lower() for t in (getattr(cfg.chain, "token_universe", []) or []) if t}
         return [(i, t) for i, t in enumerate(tokens) if t and t.lower() in allowed]
 
-    def _research_frontier_tokens(self, cfg: Any) -> set[str]:
-        """Bounded research tokens observed from verified pools; never execution authority.
+    def research_frontier_tokens(
+        self,
+        cfg: Any,
+        *,
+        cap: int | None = None,
+    ) -> List[str]:
+        """Return a deterministic bounded research-token list for read-only scans.
 
-        Frontier selection favors tokens observed across multiple verified venue/source
-        classes, then uses a deterministic tie-breaker. This improves cross-venue
-        discovery coverage without granting execution authority to any observed token.
+        These tokens are observed from verified discovery sources and remain outside
+        cfg.chain.token_universe. Callers may use them for market-data and route
+        discovery inputs, but this method never mutates execution authority.
         """
         anchors = {
             str(token).lower()
             for token in (getattr(cfg.chain, "token_universe", []) or [])
             if token
         }
-        try:
-            cap = max(
-                1,
-                min(
-                    16,
-                    int(os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "16") or 16),
-                ),
-            )
-        except (TypeError, ValueError):
-            cap = 16
+        if cap is None:
+            try:
+                cap = int(
+                    os.environ.get("VICTOR_DISCOVERY_FRONTIER_TOKEN_CAP", "16") or 16
+                )
+            except (TypeError, ValueError):
+                cap = 16
+        cap = max(0, min(16, int(cap)))
         observed = [
             token for token in self._candidate_tokens_observed
             if token not in anchors
@@ -548,7 +551,16 @@ class DiscoveryManager:
                 stable_hash_int(f"research-frontier:{self.chain_name}:{token}"),
             )
         )
-        return anchors | set(observed[:cap])
+        return list(observed[:cap])
+
+    def _research_frontier_tokens(self, cfg: Any) -> set[str]:
+        """Bounded research tokens plus configured anchors for discovery expansion."""
+        anchors = {
+            str(token).lower()
+            for token in (getattr(cfg.chain, "token_universe", []) or [])
+            if token
+        }
+        return anchors | set(self.research_frontier_tokens(cfg))
     def _supported_discovery_pairs(
         self,
         cfg: Any,
