@@ -373,7 +373,7 @@
       "backend/tests/test_withdraw_route_failure_semantics_maintenance.py",
       "test_profit_token_gas_accounting.py"
     ],
-    "runtime_legacy_lines": 201
+    "runtime_legacy_lines": 202
   },
   "contracts": {
     "ci_command": "cd contracts && forge test -q",
