@@ -1534,6 +1534,71 @@ class RuntimePrimaryScanFacade:
                 self._market_pipeline_telemetry = telemetry
             raise
 
+    def _selected_provider_frontier_seed_amounts(self, amount_in: int) -> List[int]:
+        """Return a tiny alternate-notional frontier for size-emergent discovery.
+
+        Provider comparison stays symmetric at the base notional. When that
+        base scan has too few candidates, nearby sizes must still be allowed
+        to introduce routes that do not exist at 1x. This helper derives its
+        candidates from the existing cap-aware adaptive ladder and remains
+        explicitly bounded.
+        """
+        base = max(1, int(amount_in))
+        ladder = [
+            int(value)
+            for value in self._adaptive_scan_amounts(
+                base,
+                force_adaptive_size_scan=True,
+            )
+            if int(value) > 0 and int(value) != base
+        ]
+        if not ladder:
+            return []
+
+        try:
+            max_probes = max(
+                1,
+                min(
+                    3,
+                    int(
+                        os.environ.get(
+                            "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES",
+                            "3",
+                        )
+                        or 3
+                    ),
+                ),
+            )
+        except (TypeError, ValueError):
+            max_probes = 3
+
+        preferred: List[int] = []
+        raw = os.environ.get(
+            "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS",
+            "1.5,2.0,0.5",
+        )
+        ladder_set = set(ladder)
+        for item in str(raw).split(","):
+            try:
+                multiplier = float(item.strip())
+                if multiplier <= 0.0:
+                    continue
+                candidate = max(1, int(round(float(base) * multiplier)))
+            except (TypeError, ValueError):
+                continue
+            if candidate in ladder_set and candidate not in preferred:
+                preferred.append(candidate)
+            if len(preferred) >= max_probes:
+                break
+
+        if len(preferred) < max_probes:
+            for candidate in ladder:
+                if candidate not in preferred:
+                    preferred.append(candidate)
+                if len(preferred) >= max_probes:
+                    break
+        return preferred[:max_probes]
+
     async def _run_bounded_selected_provider_size_probe(
         self,
         rpc: Any,
@@ -1992,10 +2057,13 @@ class RuntimePrimaryScanFacade:
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
 
-        # Provider comparison already completed the broad graph scan. Size
-        # optimization now re-quotes only the strongest base routes on the
-        # selected provider instead of replaying the entire graph per size.
+        # Provider comparison is intentionally symmetric at the base notional.
+        # If the selected provider has too few base candidates, rescue only a
+        # tiny nearby size frontier on that provider before route-only requotes.
+        # This closes the "profitable only at another size" discovery hole
+        # without replaying the institutional ladder across every provider.
         adaptive_telemetry: Dict[str, Any] = {}
+        frontier_seed_telemetry: Dict[str, Any] = {}
         self._market_pipeline_telemetry = {
             **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
             "rpc_selection_phase": "selected_provider_adaptive",
@@ -2003,6 +2071,201 @@ class RuntimePrimaryScanFacade:
         adaptive_opps: List[Opportunity] = []
         selected_provider_url = str(selected_url)
         adaptive_cache = PerBlockCache()
+
+        try:
+            min_opportunities = max(
+                1,
+                int(
+                    os.environ.get(
+                        "VICTOR_ADAPTIVE_SIZE_MIN_OPPORTUNITIES",
+                        "2",
+                    )
+                    or 2
+                ),
+            )
+        except (TypeError, ValueError):
+            min_opportunities = 2
+
+        if len(selected_opps or []) < min_opportunities:
+            seed_amounts = self._selected_provider_frontier_seed_amounts(int(amount_in))
+            try:
+                seed_timeout_s = max(
+                    1.0,
+                    min(
+                        selection_timeout_s,
+                        float(
+                            os.environ.get(
+                                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S",
+                                "3.0",
+                            )
+                            or 3.0
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                seed_timeout_s = min(selection_timeout_s, 3.0)
+            try:
+                seed_budget_s = max(
+                    1.0,
+                    min(
+                        selection_timeout_s,
+                        float(
+                            os.environ.get(
+                                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S",
+                                "8.0",
+                            )
+                            or 8.0
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                seed_budget_s = min(selection_timeout_s, 8.0)
+
+            frontier_seed_telemetry = {
+                "enabled": bool(seed_amounts),
+                "amounts_scanned": [str(int(value)) for value in seed_amounts],
+                "timeout_s": float(seed_timeout_s),
+                "budget_s": float(seed_budget_s),
+                "candidate_counts": [],
+                "scan_errors": [],
+                "scan_latency_ms": [],
+                "candidates_added": 0,
+            }
+
+            merged_seed_candidates: List[Opportunity] = list(selected_opps or [])
+            seen_seed_keys: set[tuple[str, str]] = set()
+            for candidate in merged_seed_candidates:
+                route_id = str(
+                    getattr(candidate, "route_id", "")
+                    or getattr(candidate, "id", "")
+                    or ""
+                )
+                try:
+                    candidate_amount = str(
+                        int(
+                            getattr(
+                                getattr(candidate, "route", None).legs[0],
+                                "amount_in",
+                                0,
+                            )
+                            or 0
+                        )
+                    )
+                except (AttributeError, IndexError, TypeError, ValueError):
+                    candidate_amount = ""
+                seen_seed_keys.add((route_id, candidate_amount))
+
+            seed_started = time.perf_counter()
+            for seed_amount in seed_amounts:
+                remaining = float(seed_budget_s) - (
+                    time.perf_counter() - seed_started
+                )
+                if remaining <= 0:
+                    break
+                timeout = min(float(seed_timeout_s), remaining)
+                seed_cache = PerBlockCache()
+                seed_sink: Dict[str, Any] = {}
+                scan_started = time.perf_counter()
+                try:
+                    if selected_provider_url == bootstrap_url:
+                        seed_rpc = bootstrap_rpc
+                        frontier = await asyncio.wait_for(
+                            self._scan_primary_opportunities(
+                                seed_rpc,
+                                current_block=int(current_block),
+                                amount_in=int(seed_amount),
+                                cache=seed_cache,
+                                discovery_context=discovery_context,
+                                telemetry_sink=seed_sink,
+                                shared_token_scan_amounts=shared_token_scan_amounts,
+                                force_adaptive_size_scan=False,
+                            ),
+                            timeout=timeout,
+                        )
+                    else:
+                        async with JsonRpcClient(
+                            selected_provider_url,
+                            timeout_s=10.0,
+                            max_concurrency=30,
+                            max_batch=80,
+                        ) as seed_rpc:
+                            frontier = await asyncio.wait_for(
+                                self._scan_primary_opportunities(
+                                    seed_rpc,
+                                    current_block=int(current_block),
+                                    amount_in=int(seed_amount),
+                                    cache=seed_cache,
+                                    discovery_context=discovery_context,
+                                    telemetry_sink=seed_sink,
+                                    shared_token_scan_amounts=shared_token_scan_amounts,
+                                    force_adaptive_size_scan=False,
+                                ),
+                                timeout=timeout,
+                            )
+
+                    additions = 0
+                    for candidate in list(frontier or []):
+                        route_id = str(
+                            getattr(candidate, "route_id", "")
+                            or getattr(candidate, "id", "")
+                            or ""
+                        )
+                        try:
+                            candidate_amount = str(
+                                int(
+                                    getattr(
+                                        getattr(candidate, "route", None).legs[0],
+                                        "amount_in",
+                                        0,
+                                    )
+                                    or 0
+                                )
+                            )
+                        except (AttributeError, IndexError, TypeError, ValueError):
+                            candidate_amount = ""
+                        key = (route_id, candidate_amount)
+                        if key in seen_seed_keys:
+                            continue
+                        seen_seed_keys.add(key)
+                        merged_seed_candidates.append(candidate)
+                        additions += 1
+
+                    frontier_seed_telemetry["candidate_counts"].append(
+                        {
+                            "amount_in": str(int(seed_amount)),
+                            "returned": int(len(frontier or [])),
+                            "added": int(additions),
+                        }
+                    )
+                    frontier_seed_telemetry["scan_latency_ms"].append(
+                        float(
+                            seed_sink.get("scan_latency_ms")
+                            or ((time.perf_counter() - scan_started) * 1000.0)
+                        )
+                    )
+                except asyncio.TimeoutError:
+                    frontier_seed_telemetry["scan_errors"].append(
+                        {
+                            "amount_in": str(int(seed_amount)),
+                            "reason": "frontier_seed_timeout",
+                            "timeout_s": float(timeout),
+                        }
+                    )
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    frontier_seed_telemetry["scan_errors"].append(
+                        {
+                            "amount_in": str(int(seed_amount)),
+                            "reason": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+
+            selected_opps = merged_seed_candidates
+            frontier_seed_telemetry["candidates_added"] = max(
+                0,
+                int(len(selected_opps)) - int(len(selected_result[1] or [])),
+            )
+
+        adaptive_telemetry["frontier_seed"] = frontier_seed_telemetry
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
