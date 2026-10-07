@@ -118,3 +118,29 @@ def test_multiruntime_lifecycle_facade_degrades_fan_in_local_runtime_error() -> 
 
     asyncio.run(bundle._fan_one('base', rt))
     assert rt.unsubscribed == 1
+
+
+class _FailingStartRuntime(_Runtime):
+    def start(self):
+        raise RuntimeError("synthetic chain startup failure")
+
+
+def test_multiruntime_start_isolates_chain_start_failures() -> None:
+    failing = _FailingStartRuntime(auto_trading=True)
+    healthy = _Runtime(auto_trading=True)
+    bundle = MultiRuntimeBundle.__new__(MultiRuntimeBundle)
+    bundle._active_chain = "failing"
+    bundle._runtimes = {"failing": failing, "healthy": healthy}
+    bundle.ALLOW_AUTO_ALL = False
+    bundle._fan_tasks = []
+    bundle._fan_stop = asyncio.Event()
+    bundle._ws_clients = []
+    bundle._start_fan_in = lambda: setattr(bundle, "_fan_started", True)
+
+    bundle.start()
+
+    assert healthy.started == 1
+    assert bundle._runtime_lifecycle["failing"]["start_status"] == "failed"
+    assert bundle._runtime_lifecycle["failing"]["error_type"] == "RuntimeError"
+    assert bundle._runtime_lifecycle["healthy"]["start_status"] == "ok"
+    assert getattr(bundle, "_fan_started", False) is True

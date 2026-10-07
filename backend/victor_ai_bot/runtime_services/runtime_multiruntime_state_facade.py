@@ -111,6 +111,9 @@ class RuntimeMultiruntimeStateFacade:
             except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
                 admission_error = str(exc)
 
+            telemetry["runtime_lifecycle"] = dict(
+                getattr(self, "_runtime_lifecycle", {}).get(name) or {}
+            )
             telemetry["admission"] = {
                 "capital": None,
                 "family": str(gate.get("stage") or ""),
