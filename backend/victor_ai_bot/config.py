@@ -792,6 +792,21 @@ def load_config(path: str) -> AppConfig:
         ),
     )
 
+    chain_env_prefix = "".join(
+        char if char.isalnum() else "_"
+        for char in str(name).upper()
+    ).strip("_")
+    executor_env = (
+        os.environ.get(f"VICTOR_{chain_env_prefix}_EXECUTOR_ADDRESS")
+        if chain_env_prefix
+        else None
+    )
+    profit_to_env = (
+        os.environ.get(f"VICTOR_{chain_env_prefix}_PROFIT_TO")
+        if chain_env_prefix
+        else None
+    )
+
     execution = ExecutionConfig(
         auto_reinvest_enabled=bool(eraw.get("auto_reinvest_enabled", False)),
         reinvest_rate=int(eraw.get("reinvest_rate", 0)),
@@ -813,8 +828,18 @@ def load_config(path: str) -> AppConfig:
         redact_routes_when_private=bool(eraw.get("redact_routes_when_private", True)),
         private_key_env=str(eraw.get("private_key_env", "VICTOR_PRIVATE_KEY")),
         from_address=str(eraw.get("from_address", "")),
-        executor_address=str(eraw.get("executor_address", "")),
-        profit_to=str(eraw.get("profit_to", "")),
+        # Chain-scoped environment overrides keep deployed execution envelopes
+        # outside committed YAML while remaining fail-closed when absent.
+        executor_address=str(
+            executor_env
+            if executor_env is not None
+            else eraw.get("executor_address", "")
+        ),
+        profit_to=str(
+            profit_to_env
+            if profit_to_env is not None
+            else eraw.get("profit_to", "")
+        ),
         withdraw_mode=str(eraw.get("withdraw_mode") or wraw.get("mode", "txdata")),
         withdraw_allowlist=_as_list(
             eraw.get("withdraw_allowlist")
