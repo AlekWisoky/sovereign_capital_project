@@ -1145,6 +1145,13 @@ async def find_two_leg_opportunities(
     for edge in edges:
         effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
         edge_groups.setdefault(effective_amount, []).append(edge)
+    max_reverse_candidates = max(
+        3,
+        min(
+            12,
+            int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8),
+        ),
+    )
     qmap1: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
     for effective_amount, grouped_edges in edge_groups.items():
         qmap1.update(
