@@ -81,7 +81,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.head.sha }}"
-          git checkout FETCH_HEAD -- docs/generated/system_truth.json docs/generated/verification_report.json
+          git show "${{ github.event.pull_request.head.sha }}:docs/generated/system_truth.json" > docs/generated/system_truth.json
+          git show "${{ github.event.pull_request.head.sha }}:docs/generated/verification_report.json" > docs/generated/verification_report.json
+          grep '"runtime_legacy_lines"' docs/generated/system_truth.json docs/generated/verification_report.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
