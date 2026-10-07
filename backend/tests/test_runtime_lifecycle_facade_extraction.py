@@ -181,7 +181,7 @@ def test_runtime_loop_retries_after_unlisted_normal_exception() -> None:
             self.calls += 1
             if self.calls == 1:
                 raise IndexError("synthetic unlisted provider failure")
-            self._stop = True
+            self._stop.set()
 
         async def _sleep(self, seconds: float) -> None:
             return None
@@ -191,13 +191,13 @@ def test_runtime_loop_retries_after_unlisted_normal_exception() -> None:
                 self.runtime = runtime
 
             def is_set(self):
-                return self.runtime._stop
+                return self.runtime._stop_state
 
-        @property
-        def _stop_proxy(self):
-            return self._StopProxy(self)
+            def set(self):
+                self.runtime._stop_state = True
 
     runtime = _Runtime()
+    runtime._stop_state = False
     # Match RuntimeBundle._loop's expected Event-like stop surface.
     runtime._stop = runtime._StopProxy(runtime)
     asyncio.run(RuntimeBundle._loop(runtime))
