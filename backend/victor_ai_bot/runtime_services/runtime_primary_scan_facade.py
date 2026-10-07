@@ -2639,6 +2639,9 @@ class RuntimePrimaryScanFacade:
                     )
                     chunk_opps = list(chunk_opps or [])
                     full_scan_opps.extend(chunk_opps)
+                    full_scan_telemetry.setdefault("size_economic_matrices", []).extend(
+                        list(sink.get("size_economic_matrix") or [])
+                    )
                     full_scan_records.append({
                         "amount_in": int(amount_in),
                         "two": [
@@ -2649,7 +2652,11 @@ class RuntimePrimaryScanFacade:
                             item for item in chunk_opps
                             if str(getattr(item, "strategy", "") or "").startswith("tri:")
                         ],
-                        "two_metrics": {},
+                        "two_metrics": {
+                            "size_economic_diagnostics": list(
+                                sink.get("size_economic_diagnostics") or []
+                            ),
+                        },
                         "three_metrics": {},
                     })
                     selected_edges = int(
@@ -2780,9 +2787,16 @@ class RuntimePrimaryScanFacade:
                             item for item in chunk_opps
                             if str(getattr(item, "strategy", "") or "").startswith("tri:")
                         ],
-                        "two_metrics": {},
+                        "two_metrics": {
+                            "size_economic_diagnostics": list(
+                                sink.get("size_economic_diagnostics") or []
+                            ),
+                        },
                         "three_metrics": {},
                     })
+                    full_scan_telemetry.setdefault("size_economic_matrices", []).extend(
+                        list(sink.get("size_economic_matrix") or [])
+                    )
                     full_scan_telemetry["chunks_completed"] = 1
                     full_scan_telemetry["edges_covered"] = int(
                         sink.get("scan_edges_selected") or graph_edge_count
@@ -2798,16 +2812,18 @@ class RuntimePrimaryScanFacade:
                     })
 
             if full_scan_opps:
-                selected_opps = full_scan_opps
+                selected_opps = [*list(selected_result[1] or []), *full_scan_opps]
 
             full_scan_telemetry["returned"] = int(len(full_scan_opps))
             full_scan_telemetry["elapsed_ms"] = float(
                 (time.perf_counter() - full_scan_started) * 1000.0
             )
             if full_scan_records:
-                full_scan_telemetry["size_economic_matrix"] = _build_size_economic_matrix(
-                    full_scan_records
+                full_scan_telemetry["size_economic_matrix"] = (
+                    list(full_scan_telemetry.get("size_economic_matrices") or [])
+                    or _build_size_economic_matrix(full_scan_records)
                 )
+                full_scan_telemetry.pop("size_economic_matrices", None)
                 full_scan_telemetry["size_economic_evidence"] = [
                     row
                     for record in full_scan_records
