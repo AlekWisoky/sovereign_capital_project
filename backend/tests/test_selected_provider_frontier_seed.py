@@ -92,6 +92,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         }
 
     scan_amounts = []
+    provider_comparison_flags = []
 
     async def fake_scan(
         rpc,
@@ -105,6 +106,9 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         force_adaptive_size_scan,
     ):
         scan_amounts.append(int(amount_in))
+        provider_comparison_flags.append(
+            bool(getattr(runtime, "_rpc_provider_comparison", False))
+        )
         telemetry_sink.update(
             {
                 "quotes": {"requests": 10, "successes": 10, "failure_reasons": {}},
@@ -154,6 +158,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
     )
 
     assert scan_amounts == [1000, 1500, 2000, 500]
+    assert provider_comparison_flags == [True, True, True, True]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
