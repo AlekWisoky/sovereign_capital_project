@@ -7,6 +7,7 @@ from ..gas import suggest_gas
 from ..models import Opportunity
 from ..rpc import JsonRpcClient
 from ..safety import check_profit_and_repay
+from ..flashloan_providers import observe_flashloan_fee_bps
 from ..usd_pricing import gas_wei_to_token_wei
 
 _SAFE_CAN_EXECUTE_EXCEPTIONS = (
@@ -33,6 +34,22 @@ class RuntimeCanExecuteFacade:
         )
         gas_limit = int(self.cfg.execution.gas_limit)
         gas_cost = int(max_fee) * int(gas_limit)
+
+        flash_provider = str(
+            getattr(self.cfg.execution, "flash_provider", "aave") or "aave"
+        )
+        fee_observation = await observe_flashloan_fee_bps(
+            rpc,
+            self.cfg,
+            flash_provider,
+            block="latest",
+        )
+        native_flashloan_fee_bps = (
+            int(fee_observation["fee_bps"])
+            if bool(fee_observation.get("ok"))
+            and fee_observation.get("fee_bps") is not None
+            else None
+        )
 
         executor_addr = str(getattr(self.cfg.execution, "executor_address", "") or "")
         has_executor = bool(executor_addr)
@@ -114,12 +131,17 @@ class RuntimeCanExecuteFacade:
                 }
                 continue
 
+            effective_flashloan_fee_bps = (
+                int(native_flashloan_fee_bps)
+                if native_flashloan_fee_bps is not None
+                else max(0, int(self.cfg.execution.flashloan_fee_bps))
+            )
             sr = check_profit_and_repay(
                 amount_in_wei=amount_in,
                 amount_out_wei=amount_out,
                 min_profit_abs_wei=int(self.cfg.safety.minProfitAbs),
                 min_profit_bps=int(self.cfg.safety.minProfitBps),
-                flashloan_fee_bps=int(self.cfg.execution.flashloan_fee_bps),
+                flashloan_fee_bps=effective_flashloan_fee_bps,
                 gas_cost_wei=gas_cost,
                 gas_cost_profit_token_wei=int(gas_cost_profit_token_wei),
             )
@@ -150,6 +172,13 @@ class RuntimeCanExecuteFacade:
                 "missing": missing,
                 "amount_out_final_wei": str(amount_out),
                 "flashloan_fee_wei": str(sr.flashloan_fee_wei),
+                "flashloan_fee_bps": int(effective_flashloan_fee_bps),
+                "flashloan_fee_source": (
+                    "provider_native_observation"
+                    if native_flashloan_fee_bps is not None
+                    else "configured_fallback"
+                ),
+                "flashloan_fee_observation": dict(fee_observation),
                 "gas_limit": int(gas_limit),
                 "max_fee_wei": str(int(max_fee)),
                 "priority_fee_wei": str(int(prio)),
