@@ -257,6 +257,9 @@ class PoolStateEventCache:
             "fresh_dirty_pool_count": int(
                 self._last_candidate_metrics.get("fresh_dirty_pool_count", 0) or 0
             ),
+            "candidate_affected_token_count": int(
+                self._last_candidate_metrics.get("affected_token_count", 0) or 0
+            ),
         }
 
     def candidate_edges(
