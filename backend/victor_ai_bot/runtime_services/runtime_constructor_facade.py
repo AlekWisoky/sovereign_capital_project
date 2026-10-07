@@ -36,6 +36,7 @@ class RuntimeConstructorFacade:
         self.metrics = Metrics(gas_mode=cfg.execution.gas_mode, send_mode=cfg.execution.send_mode)
         self._lat = LatencyProfiler(window=int(os.environ.get("VICTOR_LAT_WINDOW", "400")))
         self._task: asyncio.Task | None = None
+        self._runtime_loop_telemetry: dict[str, Any] = {"task_status": "created", "task_done": False}
         self._stop = asyncio.Event()
         self._state_lock = asyncio.Lock()
         self._opps = []
