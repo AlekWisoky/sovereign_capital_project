@@ -1994,7 +1994,17 @@ class RuntimePrimaryScanFacade:
         candidates = list(manager.read_candidates() or [])
         bootstrap_url = str(getattr(bootstrap_rpc, "url", "") or "")
         if bootstrap_url and bootstrap_url not in candidates:
-            candidates.insert(0, bootstrap_url)
+            snapshot_fn = getattr(manager, "snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else {}
+            bootstrap_quarantined = False
+            if isinstance(snapshot, dict):
+                for row in list(snapshot.get("read") or []):
+                    if not isinstance(row, dict) or str(row.get("url") or "") != bootstrap_url:
+                        continue
+                    bootstrap_quarantined = float(row.get("quote_unhealthy_until") or 0.0) > time.time()
+                    break
+            if not bootstrap_quarantined:
+                candidates.insert(0, bootstrap_url)
         candidates = list(dict.fromkeys(candidates))
         max_providers = max(
             1,
