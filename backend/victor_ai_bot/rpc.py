@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import os
+from contextlib import asynccontextmanager
 import time
 from dataclasses import dataclass
 from typing import Any, List, Optional, Dict
@@ -145,8 +146,6 @@ class JsonRpcClient:
                 )
             except (TypeError, ValueError):
                 rate_limit_backoff_ms = 150.0
-
-            from contextlib import asynccontextmanager
 
             @asynccontextmanager
             async def _batch_slot():
