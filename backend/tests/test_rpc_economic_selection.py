@@ -660,3 +660,25 @@ async def test_rpc_manager_probe_interval_timeout_keeps_loop_alive():
     await asyncio.wait_for(task, timeout=0.2)
 
     assert calls >= 2
+
+
+
+def test_effective_flashloan_fee_prefers_provider_observation():
+    from victor_ai_bot.execution import _effective_flashloan_fee_bps
+
+    assert _effective_flashloan_fee_bps(12, 9) == 12
+    assert _effective_flashloan_fee_bps(None, 9) == 9
+
+
+def test_best_read_excludes_quote_quarantined_provider():
+    manager = RpcManager(
+        rpc_read=["https://rpc-a.example", "https://rpc-b.example"],
+        rpc_send=["https://rpc-a.example", "https://rpc-b.example"],
+    )
+    manager._read["https://rpc-a.example"].last_seen_block = 100
+    manager._read["https://rpc-b.example"].last_seen_block = 100
+    manager._read["https://rpc-a.example"].quote_unhealthy_until = 9_999_999_999.0
+
+    assert manager.best_read() == "https://rpc-b.example"
+    manager._read["https://rpc-b.example"].quote_unhealthy_until = 9_999_999_999.0
+    assert manager.best_read() == ""
