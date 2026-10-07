@@ -1216,7 +1216,7 @@ class RuntimePrimaryScanFacade:
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
-                        pool_event_cache=getattr(self, "_pool_event_cache", None),
+                        pool_event_cache=scan_pool_event_cache,
                         max_scan_edges=max_scan_edges,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
