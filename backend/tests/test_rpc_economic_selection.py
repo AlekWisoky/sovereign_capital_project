@@ -543,10 +543,12 @@ async def test_runtime_rpc_race_bounds_slow_provider_without_blocking_fast_provi
     )
 
     assert result["selected_endpoint"] == "https://rpc-fast.example"
-    providers = result["telemetry"]["rpc"]["economic_selection"]["candidates"]
-    slow = next(item for item in providers if item["endpoint"].endswith("slow.example"))
-    assert slow["healthy"] is False
-    assert slow["scan_latency_ms"] >= 250.0
+    slow = next(
+        item for item in result["evidence"]
+        if str(item.endpoint).endswith("slow.example")
+    )
+    assert slow.healthy is False
+    assert slow.scan_latency_ms >= 250.0
     assert result["telemetry"]["rpc_selection_phase"] == "complete"
 
 
