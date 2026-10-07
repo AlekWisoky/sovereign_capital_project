@@ -1224,10 +1224,22 @@ async def find_two_leg_opportunities(
         except (AttributeError, TypeError, ValueError):
             pool_event_metrics = {}
     edges = _apply_scan_edge_cap(edges, max_scan_edges, metrics)
-    # map reverse candidates by (token_in, token_out)
+    # Route evaluation must retain the immutable route universe even when the
+    # selected-provider full scan feeds this function only one bounded edge slice.
+    # Otherwise a reverse leg in another slice disappears and a valid cross-pool
+    # two-leg route is structurally invisible.
+    route_edges = list(edges)
+    route_universe_edges_fn = getattr(pool_event_cache, "route_universe_edges", None)
+    if callable(route_universe_edges_fn):
+        try:
+            candidate_route_edges = list(route_universe_edges_fn() or [])
+            if candidate_route_edges:
+                route_edges = candidate_route_edges
+        except (AttributeError, TypeError, ValueError):
+            route_edges = list(edges)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
-    route_universe = _route_universe_snapshot(cfg, edges)
-    for e in edges:
+    route_universe = _route_universe_snapshot(cfg, route_edges)
+    for e in route_edges:
         by_pair.setdefault((e.token_in, e.token_out), []).append(e)
 
     opps: List[Opportunity] = []
@@ -1578,6 +1590,7 @@ async def find_two_leg_opportunities(
             },
             "pool_event_state": dict(pool_event_metrics or {}),
             "scan_edges_before_cap": int(metrics.get("scan_edges_before_cap", len(edges))),
+            "route_universe_edge_count": int(len(route_edges)),
             "scan_edge_cap": (
                 int(metrics["scan_edge_cap"])
                 if metrics.get("scan_edge_cap") not in (None, "")
