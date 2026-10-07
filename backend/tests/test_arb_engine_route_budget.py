@@ -68,6 +68,72 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_provider_comparison_edge_cap_bounds_quote_workload(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    edges = [
+        arb.Edge("univ3", "0x" + "aa" * 20, token_a, token_b, {"fee": 3000}),
+        arb.Edge("univ3", "0x" + "bb" * 20, token_b, token_a, {"fee": 3000}),
+        arb.Edge("univ3", "0x" + "cc" * 20, token_a, token_c, {"fee": 3000}),
+        arb.Edge("univ3", "0x" + "dd" * 20, token_c, token_a, {"fee": 3000}),
+        arb.Edge("univ3", "0x" + "ee" * 20, token_b, token_c, {"fee": 3000}),
+        arb.Edge("univ3", "0x" + "ff" * 20, token_c, token_b, {"fee": 3000}),
+    ]
+    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: list(edges))
+
+    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+        if metrics is not None:
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
+            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
+        return {
+            arb.edge_key(edge): (
+                110 if edge.token_out == token_b else 100,
+                {"gas_estimate": 1, "fee": 3000},
+            )
+            for edge in requested_edges
+        }
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
+    monkeypatch.setattr(
+        arb,
+        "scan_efficiency_snapshot",
+        lambda **kwargs: {
+            "elapsed_ms": 0.0,
+            "candidate_count": int(kwargs["candidate_count"]),
+            "quote_requests": int(kwargs["quote_requests"]),
+            "quote_successes": int(kwargs["quote_successes"]),
+            "quote_success_rate": 1.0,
+            "cache_hits": 0,
+            "network_batches": 1,
+        },
+    )
+
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="arbitrum"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    telemetry = {}
+    await arb.find_two_leg_opportunities(
+        object(),
+        cfg,
+        object(),
+        123,
+        amount_in=100,
+        slippage_bps=50,
+        telemetry=telemetry,
+        max_scan_edges=2,
+    )
+
+    assert telemetry["scan_edges_before_cap"] == 6
+    assert telemetry["scan_edge_cap"] == 2
+    assert telemetry["scan_edges_selected"] == 2
+    assert telemetry["scan_edges_capped"] == 4
+    # Two capped first-leg edges plus their reverse-leg quote batch.
+    assert telemetry["quote_requests"] == 4
+
+
+@pytest.mark.asyncio
 async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatch):
     edges = [
         arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333", {"fee": 3000}),
