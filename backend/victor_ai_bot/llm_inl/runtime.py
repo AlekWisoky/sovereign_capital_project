@@ -770,6 +770,7 @@ class LLMINLRuntime:
         from ..gas import suggest_gas
         from ..safety import check_profit_and_repay
         from ..usd_pricing import gas_wei_to_token_wei
+        from ..flashloan_providers import observe_flashloan_fee_bps
 
         mults = [0.5, 1.0, 1.5, 2.0]
         _, rs = self._risk_profile(rt)
@@ -785,6 +786,26 @@ class LLMINLRuntime:
             max_fee, prio = await suggest_gas(rpc, mode=str(getattr(cfg_exec, "gas_mode", "standard")), presets=cfg_exec.gas_presets)
             gas_limit = _safe_int(getattr(cfg_exec, "gas_limit", 550000), 550000)
             gas_cost = int(max_fee) * int(gas_limit)
+            flash_provider = str(
+                getattr(cfg_exec, "flash_provider", "aave") or "aave"
+            )
+            fee_observation = await observe_flashloan_fee_bps(
+                rpc,
+                rt.cfg,
+                flash_provider,
+                block="latest",
+            )
+            native_flashloan_fee_bps = (
+                int(fee_observation["fee_bps"])
+                if bool(fee_observation.get("ok"))
+                and fee_observation.get("fee_bps") is not None
+                else None
+            )
+            effective_flashloan_fee_bps = (
+                int(native_flashloan_fee_bps)
+                if native_flashloan_fee_bps is not None
+                else _safe_int(getattr(cfg_exec, "flashloan_fee_bps", 9), 9)
+            )
             profit_token = str(getattr(first_leg, "token_in", "") or "")
             try:
                 current_block = await rpc.block_number()
@@ -833,7 +854,7 @@ class LLMINLRuntime:
                     amount_out_wei=int(amount_out),
                     min_profit_abs_wei=_safe_int(getattr(cfg_safety, "minProfitAbs", "0"), 0),
                     min_profit_bps=_safe_int(getattr(cfg_safety, "minProfitBps", 0), 0),
-                    flashloan_fee_bps=_safe_int(getattr(cfg_exec, "flashloan_fee_bps", 9), 9),
+                    flashloan_fee_bps=effective_flashloan_fee_bps,
                     gas_cost_wei=int(gas_cost),
                     gas_cost_profit_token_wei=int(gas_cost_profit_token_wei),
                 )
@@ -847,6 +868,7 @@ class LLMINLRuntime:
                     "profit_after_costs_wei": str(prof),
                     "roi_bps": int(roi_bps),
                     "safe": bool(getattr(sr, "ok", False)),
+                    "flashloan_fee_bps": int(effective_flashloan_fee_bps),
                     "reason": ("ok" if getattr(sr, "ok", False) else str(getattr(sr, "reason", ""))),
                 }
                 results.append(row)
