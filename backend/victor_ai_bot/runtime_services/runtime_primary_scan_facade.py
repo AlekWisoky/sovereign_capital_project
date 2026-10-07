@@ -1467,6 +1467,14 @@ class RuntimePrimaryScanFacade:
                 two_leg_telemetry,
                 three_leg_telemetry,
             )
+            telemetry["reverse_leg_prefilter"] = dict(
+                two_leg_telemetry.get("reverse_leg_prefilter") or {}
+            )
+            telemetry["pool_event_state"] = dict(
+                two_leg_telemetry.get("pool_event_state")
+                or three_leg_telemetry.get("pool_event_state")
+                or {}
+            )
             telemetry["gross_candidates"] = len(opps)
             telemetry["route_rejections"] = route_rejections
             telemetry["failed_quote_edge_samples"] = list(
