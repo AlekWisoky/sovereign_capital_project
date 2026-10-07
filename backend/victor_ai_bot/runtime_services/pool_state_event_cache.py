@@ -110,6 +110,7 @@ class PoolStateEventCache:
         self._last_message_ts = 0.0
         self._subscribed_address_count = 0
         self._truncated = False
+        self._last_candidate_metrics: Dict[str, Any] = {}
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -235,6 +236,30 @@ class PoolStateEventCache:
             "subscribed_address_count": int(self._subscribed_address_count),
             "subscription_truncated": bool(self._truncated),
             "last_error": str(self._last_error or ""),
+            "candidate_generation_mode": str(
+                self._last_candidate_metrics.get("candidate_generation_mode") or ""
+            ),
+            "candidate_edge_count": int(
+                self._last_candidate_metrics.get("candidate_edge_count", 0) or 0
+            ),
+            "candidate_edges_full": int(
+                self._last_candidate_metrics.get("candidate_edges_full", 0) or 0
+            ),
+            "candidate_edges_pruned": int(
+                self._last_candidate_metrics.get("candidate_edges_pruned", 0) or 0
+            ),
+            "exploration_edge_count": int(
+                self._last_candidate_metrics.get("exploration_edge_count", 0) or 0
+            ),
+            "hot_subgraph_edge_count": int(
+                self._last_candidate_metrics.get("hot_subgraph_edge_count", 0) or 0
+            ),
+            "fresh_dirty_pool_count": int(
+                self._last_candidate_metrics.get("fresh_dirty_pool_count", 0) or 0
+            ),
+            "affected_token_count": int(
+                self._last_candidate_metrics.get("affected_token_count", 0) or 0
+            ),
         }
 
     def candidate_edges(
@@ -280,6 +305,7 @@ class PoolStateEventCache:
             priority["candidate_edge_count"] = int(len(ordered))
             priority["candidate_edges_pruned"] = 0
             priority["exploration_edge_count"] = 0
+            self._last_candidate_metrics = dict(priority)
             return ordered, priority
 
         hot: List[Any] = []
@@ -346,6 +372,7 @@ class PoolStateEventCache:
                 "exploration_ratio": float(ratio),
             }
         )
+        self._last_candidate_metrics = dict(priority)
         return combined, priority
 
     @staticmethod
