@@ -48,6 +48,24 @@ class _FrozenProviderScanPoolEventCache:
         del current_block
         return int(self._priorities.get(id(edge), 1))
 
+    def edge_count(self) -> int:
+        return int(len(self._edges))
+
+    def slice(self, start: int, limit: int) -> "_FrozenProviderScanPoolEventCache":
+        offset = max(0, int(start))
+        count = max(0, int(limit))
+        selected = list(self._edges[offset: offset + count])
+        telemetry = dict(self._telemetry)
+        telemetry["candidate_edge_count"] = int(len(selected))
+        telemetry["candidate_edges_full"] = int(self._telemetry.get("candidate_edges_full") or len(self._edges))
+        telemetry["candidate_edges_pruned"] = int(
+            max(0, int(telemetry["candidate_edges_full"]) - len(selected))
+        )
+        telemetry["provider_comparison_slice_offset"] = int(offset)
+        telemetry["provider_comparison_slice_limit"] = int(count)
+        priorities = {id(edge): int(self._priorities.get(id(edge), 1)) for edge in selected}
+        return _FrozenProviderScanPoolEventCache(selected, telemetry, priorities)
+
 
 
 def _resolve_scan_quoted_amount(meta: Dict[str, Any]) -> int | None:
@@ -1040,10 +1058,8 @@ class RuntimePrimaryScanFacade:
             if provider_comparison_active
             else None
         )
-        provider_scan_pool_event_cache = (
-            discovery_context.get("_provider_scan_pool_event_cache")
-            if provider_comparison_active
-            else None
+        provider_scan_pool_event_cache = discovery_context.get(
+            "_provider_scan_pool_event_cache"
         )
         scan_pool_event_cache = (
             provider_scan_pool_event_cache
@@ -2559,6 +2575,463 @@ class RuntimePrimaryScanFacade:
                 int(len(selected_opps)) - int(len(selected_result[1] or [])),
             )
 
+        if len(selected_opps or []) < min_opportunities:
+            # Provider comparison is intentionally capped. The selected provider
+            # now receives the same immutable graph, but in bounded chunks so the
+            # full graph is covered without one monolithic wall-clock timeout.
+            full_scan_telemetry: Dict[str, Any] = {
+                "attempted": True,
+                "chunk_size": int(self._selected_provider_full_scan_chunk_size()),
+                "chunk_timeout_s": float(self._selected_provider_full_scan_chunk_timeout_s()),
+                "budget_s": float(self._selected_provider_full_scan_budget_s()),
+                "chunks_total": 0,
+                "chunks_completed": 0,
+                "edges_total": 0,
+                "edges_covered": 0,
+                "returned": 0,
+                "scan_errors": [],
+                "chunks": [],
+            }
+            full_scan_started = time.perf_counter()
+            full_scan_opps: List[Opportunity] = []
+            full_scan_records: List[Dict[str, Any]] = []
+            provider_graph = discovery_context.get("_provider_scan_pool_event_cache")
+
+            edge_count_fn = getattr(provider_graph, "edge_count", None)
+            slice_fn = getattr(provider_graph, "slice", None)
+            graph_edge_count = (
+                int(edge_count_fn())
+                if callable(edge_count_fn)
+                else 0
+            )
+            if graph_edge_count <= 0:
+                graph_edge_count = 1
+            chunk_size = int(full_scan_telemetry["chunk_size"])
+            chunk_total = max(1, (graph_edge_count + chunk_size - 1) // chunk_size)
+            full_scan_telemetry["chunks_total"] = int(chunk_total)
+            full_scan_telemetry["edges_total"] = int(graph_edge_count)
+
+            async def _run_selected_full_scan_chunk(
+                scan_rpc: Any,
+                *,
+                chunk_index: int,
+                chunk_cache: Any,
+                timeout_s: float,
+            ) -> None:
+                context = dict(discovery_context)
+                context["_provider_scan_pool_event_cache"] = chunk_cache
+                context["_selected_provider_full_graph_base_only"] = True
+                sink: Dict[str, Any] = {}
+                started = time.perf_counter()
+                try:
+                    chunk_opps = await asyncio.wait_for(
+                        self._scan_primary_opportunities(
+                            scan_rpc,
+                            current_block=int(current_block),
+                            amount_in=int(amount_in),
+                            cache=selected_cache,
+                            discovery_context=context,
+                            telemetry_sink=sink,
+                            shared_token_scan_amounts=shared_token_scan_amounts,
+                            force_adaptive_size_scan=False,
+                        ),
+                        timeout=float(timeout_s),
+                    )
+                    chunk_opps = list(chunk_opps or [])
+                    full_scan_opps.extend(chunk_opps)
+                    full_scan_records.append({
+                        "amount_in": int(amount_in),
+                        "two": [
+                            item for item in chunk_opps
+                            if str(getattr(item, "strategy", "") or "").startswith("two-leg:")
+                        ],
+                        "three": [
+                            item for item in chunk_opps
+                            if str(getattr(item, "strategy", "") or "").startswith("tri:")
+                        ],
+                        "two_metrics": {},
+                        "three_metrics": {},
+                    })
+                    selected_edges = int(
+                        (sink.get("scan_edges_selected") or 0)
+                        or min(chunk_size, max(0, graph_edge_count - chunk_index * chunk_size))
+                    )
+                    full_scan_telemetry["edges_covered"] = int(
+                        full_scan_telemetry["edges_covered"] + selected_edges
+                    )
+                    full_scan_telemetry["chunks_completed"] = int(
+                        full_scan_telemetry["chunks_completed"] + 1
+                    )
+                    full_scan_telemetry["chunks"].append({
+                        "index": int(chunk_index),
+                        "offset": int(chunk_index * chunk_size),
+                        "edges_selected": int(selected_edges),
+                        "returned": int(len(chunk_opps)),
+                        "latency_ms": float(
+                            sink.get("scan_latency_ms")
+                            or (time.perf_counter() - started) * 1000.0
+                        ),
+                    })
+                except asyncio.TimeoutError:
+                    full_scan_telemetry["scan_errors"].append({
+                        "chunk": int(chunk_index),
+                        "offset": int(chunk_index * chunk_size),
+                        "reason": "selected_provider_full_scan_chunk_timeout",
+                        "timeout_s": float(timeout_s),
+                    })
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    full_scan_telemetry["scan_errors"].append({
+                        "chunk": int(chunk_index),
+                        "offset": int(chunk_index * chunk_size),
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    })
+
+            total_budget_s = float(full_scan_telemetry["budget_s"])
+            chunk_timeout_s = float(full_scan_telemetry["chunk_timeout_s"])
+            if callable(slice_fn):
+                if selected_provider_url == bootstrap_url:
+                    for chunk_index in range(chunk_total):
+                        remaining = total_budget_s - (time.perf_counter() - full_scan_started)
+                        if remaining <= 0:
+                            break
+                        timeout_s = min(chunk_timeout_s, remaining)
+                        chunk_cache = slice_fn(
+                            int(chunk_index * chunk_size),
+                            int(chunk_size),
+                        )
+                        await _run_selected_full_scan_chunk(
+                            bootstrap_rpc,
+                            chunk_index=int(chunk_index),
+                            chunk_cache=chunk_cache,
+                            timeout_s=float(timeout_s),
+                        )
+                else:
+                    async with JsonRpcClient(
+                        selected_provider_url,
+                        timeout_s=10.0,
+                        max_concurrency=30,
+                        max_batch=80,
+                    ) as selected_provider_rpc:
+                        for chunk_index in range(chunk_total):
+                            remaining = total_budget_s - (time.perf_counter() - full_scan_started)
+                            if remaining <= 0:
+                                break
+                            timeout_s = min(chunk_timeout_s, remaining)
+                            chunk_cache = slice_fn(
+                                int(chunk_index * chunk_size),
+                                int(chunk_size),
+                            )
+                            await _run_selected_full_scan_chunk(
+                                selected_provider_rpc,
+                                chunk_index=int(chunk_index),
+                                chunk_cache=chunk_cache,
+                                timeout_s=float(timeout_s),
+                            )
+            else:
+                # Test/legacy fallback: preserve the previous single-pass behavior
+                # when an injected cache does not expose the frozen-graph slicing API.
+                context = dict(discovery_context)
+                context["_selected_provider_full_graph_base_only"] = True
+                sink: Dict[str, Any] = {}
+                try:
+                    if selected_provider_url == bootstrap_url:
+                        chunk_opps = await asyncio.wait_for(
+                            self._scan_primary_opportunities(
+                                bootstrap_rpc,
+                                current_block=int(current_block),
+                                amount_in=int(amount_in),
+                                cache=selected_cache,
+                                discovery_context=context,
+                                telemetry_sink=sink,
+                                shared_token_scan_amounts=shared_token_scan_amounts,
+                                force_adaptive_size_scan=False,
+                            ),
+                            timeout=selection_timeout_s,
+                        )
+                    else:
+                        async with JsonRpcClient(
+                            selected_provider_url,
+                            timeout_s=10.0,
+                            max_concurrency=30,
+                            max_batch=80,
+                        ) as selected_provider_rpc:
+                            chunk_opps = await asyncio.wait_for(
+                                self._scan_primary_opportunities(
+                                    selected_provider_rpc,
+                                    current_block=int(current_block),
+                                    amount_in=int(amount_in),
+                                    cache=selected_cache,
+                                    discovery_context=context,
+                                    telemetry_sink=sink,
+                                    shared_token_scan_amounts=shared_token_scan_amounts,
+                                    force_adaptive_size_scan=False,
+                                ),
+                                timeout=selection_timeout_s,
+                            )
+                    chunk_opps = list(chunk_opps or [])
+                    full_scan_opps.extend(chunk_opps)
+                    full_scan_records.append({
+                        "amount_in": int(amount_in),
+                        "two": [
+                            item for item in chunk_opps
+                            if str(getattr(item, "strategy", "") or "").startswith("two-leg:")
+                        ],
+                        "three": [
+                            item for item in chunk_opps
+                            if str(getattr(item, "strategy", "") or "").startswith("tri:")
+                        ],
+                        "two_metrics": {},
+                        "three_metrics": {},
+                    })
+                    full_scan_telemetry["chunks_completed"] = 1
+                    full_scan_telemetry["edges_covered"] = int(
+                        sink.get("scan_edges_selected") or graph_edge_count
+                    )
+                except asyncio.TimeoutError:
+                    full_scan_telemetry["scan_errors"].append({
+                        "reason": "selected_provider_full_scan_timeout",
+                        "timeout_s": float(selection_timeout_s),
+                    })
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    full_scan_telemetry["scan_errors"].append({
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    })
+
+            if full_scan_opps:
+                selected_opps = full_scan_opps
+
+            full_scan_telemetry["returned"] = int(len(full_scan_opps))
+            full_scan_telemetry["elapsed_ms"] = float(
+                (time.perf_counter() - full_scan_started) * 1000.0
+            )
+            if full_scan_records:
+                full_scan_telemetry["size_economic_matrix"] = _build_size_economic_matrix(
+                    full_scan_records
+                )
+                full_scan_telemetry["size_economic_evidence"] = [
+                    row
+                    for record in full_scan_records
+                    for row in [
+                        *[
+                            _size_economic_candidate_row(item)
+                            for item in list(record.get("two") or []) + list(record.get("three") or [])
+                        ]
+                    ]
+                ]
+            selected_telemetry["selected_provider_full_scan"] = dict(full_scan_telemetry)
+
+            adaptive_cache = selected_cache
+            seed_amounts = self._selected_provider_frontier_seed_amounts(int(amount_in))
+            try:
+                seed_timeout_s = max(
+                    1.0,
+                    min(
+                        selection_timeout_s,
+                        float(
+                            os.environ.get(
+                                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S",
+                                "3.0",
+                            )
+                            or 3.0
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                seed_timeout_s = min(selection_timeout_s, 3.0)
+            try:
+                seed_budget_s = max(
+                    1.0,
+                    min(
+                        selection_timeout_s,
+                        float(
+                            os.environ.get(
+                                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S",
+                                "8.0",
+                            )
+                            or 8.0
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                seed_budget_s = min(selection_timeout_s, 8.0)
+
+            frontier_seed_telemetry = {
+                "enabled": bool(seed_amounts),
+                "amounts_scanned": [str(int(value)) for value in seed_amounts],
+                "timeout_s": float(seed_timeout_s),
+                "budget_s": float(seed_budget_s),
+                "candidate_counts": [],
+                "scan_errors": [],
+                "scan_latency_ms": [],
+                "candidates_added": 0,
+                "single_notional_provider_guard": True,
+                "provider_comparison_cap_applied": False,
+                "full_graph_pass": {
+                    "attempted": True,
+                    "returned": int(len(selected_opps or [])),
+                    "chunks_completed": int(full_scan_telemetry.get("chunks_completed", 0)),
+                    "chunks_total": int(full_scan_telemetry.get("chunks_total", 0)),
+                    "edges_covered": int(full_scan_telemetry.get("edges_covered", 0)),
+                    "edges_total": int(full_scan_telemetry.get("edges_total", 0)),
+                    "timeout_s": float(full_scan_telemetry.get("budget_s") or selection_timeout_s),
+                },
+            }
+
+            merged_seed_candidates: List[Opportunity] = list(selected_opps or [])
+            seen_seed_keys: set[tuple[str, str]] = set()
+            for candidate in merged_seed_candidates:
+                route_id = str(
+                    getattr(candidate, "route_id", "")
+                    or getattr(candidate, "id", "")
+                    or ""
+                )
+                try:
+                    candidate_amount = str(
+                        int(
+                            getattr(
+                                getattr(candidate, "route", None).legs[0],
+                                "amount_in",
+                                0,
+                            )
+                            or 0
+                        )
+                    )
+                except (AttributeError, IndexError, TypeError, ValueError):
+                    candidate_amount = ""
+                seen_seed_keys.add((route_id, candidate_amount))
+
+            seed_started = time.perf_counter()
+            previous_provider_comparison = bool(
+                getattr(self, "_rpc_provider_comparison", False)
+            )
+            try:
+                for seed_index, seed_amount in enumerate(seed_amounts):
+                    remaining = float(seed_budget_s) - (
+                        time.perf_counter() - seed_started
+                    )
+                    if remaining <= 0:
+                        break
+                    timeout = min(float(seed_timeout_s), remaining)
+                    seed_cache = PerBlockCache()
+                    seed_sink: Dict[str, Any] = {}
+                    seed_context = dict(discovery_context)
+                    if callable(slice_fn):
+                        seed_context["_provider_scan_pool_event_cache"] = slice_fn(
+                            int(seed_index * self._selected_provider_frontier_edge_cap()),
+                            int(self._selected_provider_frontier_edge_cap()),
+                        )
+                    # Critical guard: a frontier seed represents exactly one
+                    # alternate notional. It must never recurse into the adaptive
+                    # ladder inside _scan_primary_opportunities.
+                    seed_context["_selected_provider_full_graph_base_only"] = True
+                    scan_started = time.perf_counter()
+                    try:
+                        if selected_provider_url == bootstrap_url:
+                            frontier = await asyncio.wait_for(
+                                self._scan_primary_opportunities(
+                                    bootstrap_rpc,
+                                    current_block=int(current_block),
+                                    amount_in=int(seed_amount),
+                                    cache=seed_cache,
+                                    discovery_context=seed_context,
+                                    telemetry_sink=seed_sink,
+                                    shared_token_scan_amounts=shared_token_scan_amounts,
+                                    force_adaptive_size_scan=False,
+                                ),
+                                timeout=timeout,
+                            )
+                        else:
+                            async with JsonRpcClient(
+                                selected_provider_url,
+                                timeout_s=10.0,
+                                max_concurrency=30,
+                                max_batch=80,
+                            ) as seed_rpc:
+                                frontier = await asyncio.wait_for(
+                                    self._scan_primary_opportunities(
+                                        seed_rpc,
+                                        current_block=int(current_block),
+                                        amount_in=int(seed_amount),
+                                        cache=seed_cache,
+                                        discovery_context=seed_context,
+                                        telemetry_sink=seed_sink,
+                                        shared_token_scan_amounts=shared_token_scan_amounts,
+                                        force_adaptive_size_scan=False,
+                                    ),
+                                    timeout=timeout,
+                                )
+
+                        additions = 0
+                        for candidate in list(frontier or []):
+                            route_id = str(
+                                getattr(candidate, "route_id", "")
+                                or getattr(candidate, "id", "")
+                                or ""
+                            )
+                            try:
+                                candidate_amount = str(
+                                    int(
+                                        getattr(
+                                            getattr(candidate, "route", None).legs[0],
+                                            "amount_in",
+                                            0,
+                                        )
+                                        or 0
+                                    )
+                                )
+                            except (AttributeError, IndexError, TypeError, ValueError):
+                                candidate_amount = ""
+                            key = (route_id, candidate_amount)
+                            if key in seen_seed_keys:
+                                continue
+                            seen_seed_keys.add(key)
+                            meta = getattr(candidate, "meta", None)
+                            if isinstance(meta, dict):
+                                meta["adaptive_seed_amount_in"] = str(int(seed_amount))
+                            else:
+                                candidate.meta = {
+                                    "adaptive_seed_amount_in": str(int(seed_amount))
+                                }
+                            merged_seed_candidates.append(candidate)
+                            additions += 1
+
+                        frontier_seed_telemetry["candidate_counts"].append(
+                            {
+                                "amount_in": str(int(seed_amount)),
+                                "returned": int(len(frontier or [])),
+                                "added": int(additions),
+                            }
+                        )
+                        frontier_seed_telemetry["scan_latency_ms"].append(
+                            float(
+                                seed_sink.get("scan_latency_ms")
+                                or ((time.perf_counter() - scan_started) * 1000.0)
+                            )
+                        )
+                    except asyncio.TimeoutError:
+                        frontier_seed_telemetry["scan_errors"].append(
+                            {
+                                "amount_in": str(int(seed_amount)),
+                                "reason": "frontier_seed_timeout",
+                                "timeout_s": float(timeout),
+                            }
+                        )
+                    except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                        frontier_seed_telemetry["scan_errors"].append(
+                            {
+                                "amount_in": str(int(seed_amount)),
+                                "reason": f"{type(exc).__name__}: {exc}",
+                            }
+                        )
+            finally:
+                self._rpc_provider_comparison = previous_provider_comparison
+
+            selected_opps = merged_seed_candidates
+            frontier_seed_telemetry["candidates_added"] = max(
+                0,
+                int(len(selected_opps)) - int(len(selected_result[1] or [])),
+            )
+
         adaptive_telemetry["frontier_seed"] = frontier_seed_telemetry
         try:
             if selected_provider_url == bootstrap_url:
@@ -2844,6 +3317,12 @@ class RuntimePrimaryScanFacade:
             "active_chain_changed": False,
             "broadcast_attempted": False,
             "auto_trade_enabled": False,
+            "selected_provider_full_scan": dict(
+                selected_telemetry.get("selected_provider_full_scan") or {}
+            ),
+            "selected_provider_adaptive": dict(
+                selected_telemetry.get("selected_provider_adaptive") or {}
+            ),
             "provider_scan_symmetry": {
                 "route_universe_identical": route_universe_equal,
                 "size_ladder_identical": size_ladder_equal,
@@ -2902,6 +3381,62 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             configured = 96
         return max(32, min(configured, 256))
+
+    @staticmethod
+    def _selected_provider_full_scan_chunk_size() -> int:
+        try:
+            configured = int(
+                os.environ.get(
+                    "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE",
+                    "96",
+                )
+                or 96
+            )
+        except (TypeError, ValueError):
+            configured = 96
+        return max(32, min(configured, 256))
+
+    @staticmethod
+    def _selected_provider_full_scan_chunk_timeout_s() -> float:
+        try:
+            configured = float(
+                os.environ.get(
+                    "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_TIMEOUT_S",
+                    "8.0",
+                )
+                or 8.0
+            )
+        except (TypeError, ValueError):
+            configured = 8.0
+        return max(3.0, min(configured, 15.0))
+
+    @staticmethod
+    def _selected_provider_full_scan_budget_s() -> float:
+        try:
+            configured = float(
+                os.environ.get(
+                    "VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S",
+                    "28.0",
+                )
+                or 28.0
+            )
+        except (TypeError, ValueError):
+            configured = 28.0
+        return max(5.0, min(configured, 35.0))
+
+    @staticmethod
+    def _selected_provider_frontier_edge_cap() -> int:
+        try:
+            configured = int(
+                os.environ.get(
+                    "VICTOR_SELECTED_PROVIDER_FRONTIER_EDGE_CAP",
+                    "96",
+                )
+                or 96
+            )
+        except (TypeError, ValueError):
+            configured = 96
+        return max(32, min(configured, 192))
 
     @staticmethod
     def _discovery_timeout_s() -> float:
