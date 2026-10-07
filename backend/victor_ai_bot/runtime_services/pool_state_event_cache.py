@@ -428,3 +428,233 @@ class PoolStateEventCache:
     async def _run(self) -> None:
         backoff = 1.0
         while not self._stop.is_set():
+            addresses = self._subscription_addresses()
+            if not self.ws_urls:
+                self._connected = False
+                self._last_error = "no_ws_url"
+                await self._wait_for_refresh(backoff)
+                backoff = min(30.0, backoff * 1.5)
+                continue
+            if not addresses:
+                self._connected = False
+                self._last_error = "no_tracked_pools"
+                await self._wait_for_refresh(self.refresh_interval_s)
+                continue
+
+            ws_url = self.ws_urls[self._ws_cursor % len(self.ws_urls)]
+            self._ws_cursor += 1
+            version = int(self._address_version)
+            try:
+                await self._reconcile(ws_url, addresses)
+                await self._connect_once(ws_url, addresses, version)
+                backoff = 1.0
+            except asyncio.CancelledError:
+                return
+            except _SAFE_POOL_EVENT_EXCEPTIONS as exc:
+                self._connected = False
+                self._last_error = f"event_stream_error:{type(exc).__name__}:{exc}"
+                await self._wait_for_refresh(backoff)
+                backoff = min(30.0, backoff * 1.5)
+
+    async def _wait_for_refresh(self, seconds: float) -> None:
+        try:
+            await asyncio.wait_for(self._wake.wait(), timeout=float(seconds))
+        except asyncio.TimeoutError:
+            pass
+        self._wake.clear()
+
+    def _subscription_addresses(self) -> List[str]:
+        addresses = list(self._tracked.keys())
+        addresses.sort(
+            key=lambda address: (
+                -int(self._states.get(address).last_block if self._states.get(address) else 0),
+                address,
+            )
+        )
+        self._truncated = len(addresses) > self.max_addresses
+        return addresses[: self.max_addresses]
+
+    async def _connect_once(
+        self,
+        ws_url: str,
+        addresses: List[str],
+        version: int,
+    ) -> None:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.ws_connect(ws_url, heartbeat=20) as ws:
+                self._connected = True
+                self._last_error = ""
+                self._subscribed_address_count = len(addresses)
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "eth_subscribe",
+                        "params": [
+                            "logs",
+                            {
+                                "address": addresses,
+                                "topics": [list(_EVENT_TOPICS)],
+                            },
+                        ],
+                    }
+                )
+                ack = await ws.receive(timeout=10)
+                if ack.type != aiohttp.WSMsgType.TEXT:
+                    raise RuntimeError("pool_event_subscribe_failed")
+                while not self._stop.is_set():
+                    if int(version) != int(self._address_version):
+                        return
+                    msg = await ws.receive(timeout=self.refresh_interval_s)
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        self._last_message_ts = time.time()
+                        try:
+                            payload = msg.json()
+                            params = payload.get("params") or {}
+                            result = params.get("result")
+                            if isinstance(result, dict):
+                                self._apply_log(result)
+                        except _SAFE_POOL_EVENT_EXCEPTIONS:
+                            continue
+                    elif msg.type in (
+                        aiohttp.WSMsgType.CLOSED,
+                        aiohttp.WSMsgType.CLOSE,
+                        aiohttp.WSMsgType.ERROR,
+                    ):
+                        raise RuntimeError("pool_event_ws_closed")
+
+    async def _reconcile(self, ws_url: str, addresses: List[str]) -> None:
+        if not self.rpc_urls or not addresses:
+            return
+        rpc_url = self.rpc_urls[0]
+        async with JsonRpcClient(
+            rpc_url,
+            timeout_s=8.0,
+            max_concurrency=8,
+            max_batch=64,
+        ) as rpc:
+            latest = await rpc.call("eth_blockNumber")
+            if not latest.ok or not isinstance(latest.result, str):
+                return
+            current_block = int(latest.result, 16)
+            previous = int(self._last_seen_block)
+            if previous <= 0:
+                self._last_seen_block = max(0, current_block - 1)
+                return
+            start = previous + 1
+            if current_block < start:
+                return
+            if current_block - start + 1 > self.reconcile_max_blocks:
+                self._reconcile_missed += int(current_block - start + 1 - self.reconcile_max_blocks)
+                start = current_block - self.reconcile_max_blocks + 1
+            params = {
+                "address": addresses,
+                "fromBlock": hex(max(0, int(start))),
+                "toBlock": hex(int(current_block)),
+                "topics": [list(_EVENT_TOPICS)],
+            }
+            result = await rpc.call("eth_getLogs", [params])
+            if result.ok and isinstance(result.result, list):
+                self._reconcile_count += 1
+                for item in result.result[:2000]:
+                    if isinstance(item, dict):
+                        self._apply_log(item)
+            self._last_seen_block = max(int(self._last_seen_block), int(current_block))
+
+    def _apply_log(self, log: Dict[str, Any]) -> None:
+        address = str(log.get("address") or "").strip().lower()
+        if not address or address not in self._tracked:
+            return
+        try:
+            block_number = int(str(log.get("blockNumber") or "0"), 16)
+        except (TypeError, ValueError):
+            block_number = int(self._last_seen_block or 0)
+        topics = list(log.get("topics") or [])
+        topic0 = str(topics[0]).lower() if topics else ""
+        data = str(log.get("data") or "0x")
+        state = self._states.setdefault(address, PoolEventState(address=address))
+        entry = self._tracked.get(address) or {}
+        tokens = list(entry.get("tokens") or [])
+        if tokens:
+            state.token0 = str(tokens[0])
+            if len(tokens) > 1:
+                state.token1 = str(tokens[1])
+
+        event_type = "unknown"
+        if topic0 == _SYNC_TOPIC.lower():
+            event_type = "sync"
+            words = self._words(data)
+            if len(words) >= 2:
+                state.reserve0 = int(words[0])
+                state.reserve1 = int(words[1])
+        elif topic0 == _V2_SWAP_TOPIC.lower():
+            event_type = "v2_swap"
+            words = self._words(data)
+            if len(words) >= 4:
+                state.amount0 = self._signed_word(words[0])
+                state.amount1 = self._signed_word(words[1])
+        elif topic0 == _V3_SWAP_TOPIC.lower():
+            event_type = "v3_swap"
+            words = self._words(data)
+            if len(words) >= 5:
+                state.amount0 = self._signed_word(words[0])
+                state.amount1 = self._signed_word(words[1])
+                state.sqrt_price_x96 = int(words[2])
+                state.liquidity = int(words[3])
+                state.tick = self._signed_int24(words[4])
+        elif topic0 == _BALANCER_SWAP_TOPIC.lower():
+            event_type = "balancer_swap"
+            words = self._words(data)
+            if len(words) >= 2:
+                state.amount0 = int(words[0])
+                state.amount1 = int(words[1])
+
+        state.last_block = max(int(state.last_block), int(block_number))
+        state.last_event_type = event_type
+        state.last_tx_hash = str(log.get("transactionHash") or "")
+        state.updated_at_ms = int(time.time() * 1000)
+        self._dirty.add(address)
+        self._last_seen_block = max(int(self._last_seen_block), int(block_number))
+        self._event_count += 1
+
+    @staticmethod
+    def _words(data: str) -> List[int]:
+        raw = str(data or "0x")
+        if raw.startswith("0x"):
+            raw = raw[2:]
+        if len(raw) < 64:
+            return []
+        out: List[int] = []
+        for offset in range(0, len(raw) - 63, 64):
+            word = raw[offset : offset + 64]
+            try:
+                out.append(int(word, 16))
+            except ValueError:
+                return out
+        return out
+
+    @staticmethod
+    def _signed_word(value: int) -> int:
+        value = int(value)
+        return value - (1 << 256) if value >= (1 << 255) else value
+
+    @staticmethod
+    def _signed_int24(value: int) -> int:
+        value = int(value) & ((1 << 24) - 1)
+        return value - (1 << 24) if value >= (1 << 23) else value
+
+    @staticmethod
+    def _edge_pool_address(edge: Any) -> str:
+        dex = str(getattr(edge, "dex", "") or "").lower()
+        params = getattr(edge, "params", {}) or {}
+        if dex == "curve":
+            address = str(getattr(edge, "venue", "") or params.get("pool") or "")
+        elif dex == "balancer":
+            address = str(params.get("pool_address") or "")
+        else:
+            address = str(params.get("pool") or "")
+        address = address.strip().lower()
+        if address.startswith("0x") and len(address) == 42:
+            return address
+        return ""
