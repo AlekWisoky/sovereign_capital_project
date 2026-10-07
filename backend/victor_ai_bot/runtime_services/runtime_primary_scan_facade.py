@@ -671,7 +671,7 @@ class RuntimePrimaryScanFacade:
                 "block_number": int(current_block),
             }
 
-    def _adaptive_scan_amounts(self, amount_in: int) -> List[int]:
+    def _adaptive_scan_amounts(self, amount_in: int, *, force_adaptive_size_scan: bool = False) -> List[int]:
         """Return a bounded size ladder for discovery without changing execution sizing.
 
         The base amount is always scanned first. Alternative sizes are only probed
@@ -684,7 +684,9 @@ class RuntimePrimaryScanFacade:
         # Running the full institutional size ladder on every RPC multiplies
         # quote traffic and scan latency across providers. The selected provider
         # receives the full sizing pass after economic provider selection.
-        if bool(getattr(self, "_rpc_provider_comparison", False)):
+        if bool(getattr(self, "_rpc_provider_comparison", False)) and not bool(
+            force_adaptive_size_scan
+        ):
             self._adaptive_size_min_opportunities = max(
                 1,
                 int(os.environ.get("VICTOR_ADAPTIVE_SIZE_MIN_OPPORTUNITIES", "2") or 2),
@@ -974,7 +976,10 @@ class RuntimePrimaryScanFacade:
         telemetry["gas_price_integrity"] = dict(gas_price_consensus)
         try:
             size_amounts = [int(amount_in)]
-            adaptive_amounts = self._adaptive_scan_amounts(int(amount_in))
+            adaptive_amounts = self._adaptive_scan_amounts(
+                int(amount_in),
+                force_adaptive_size_scan=bool(force_adaptive_size_scan),
+            )
             size_scan_records: List[Dict[str, Any]] = []
             try:
                 min_opportunities = int(
@@ -1005,6 +1010,7 @@ class RuntimePrimaryScanFacade:
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
+                        pool_event_cache=getattr(self, "_pool_event_cache", None),
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
@@ -1034,6 +1040,7 @@ class RuntimePrimaryScanFacade:
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
+                        pool_event_cache=getattr(self, "_pool_event_cache", None),
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
