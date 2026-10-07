@@ -31,12 +31,38 @@ class RuntimeMultiruntimeLifecycleFacade:
         return False
 
     def start(self) -> None:
+        if not hasattr(self, "_runtime_lifecycle"):
+            self._runtime_lifecycle = {}
         if not self.ALLOW_AUTO_ALL:
             for name, rt in self._runtimes.items():
                 desired = bool(getattr(rt.cfg.execution, "auto_trading", False))
-                rt.set_settings(auto_trading=(desired if name == self._active_chain else False))
-        for rt in self._runtimes.values():
-            rt.start()
+                try:
+                    rt.set_settings(auto_trading=(desired if name == self._active_chain else False))
+                except Exception as exc:
+                    self._runtime_lifecycle[name] = {
+                        "start_status": "settings_failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+        for name, rt in self._runtimes.items():
+            current = dict(self._runtime_lifecycle.get(name) or {})
+            if current.get("start_status") == "settings_failed":
+                continue
+            try:
+                rt.start()
+            except Exception as exc:
+                self._runtime_lifecycle[name] = {
+                    **current,
+                    "start_status": "failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            else:
+                self._runtime_lifecycle[name] = {
+                    "start_status": "ok",
+                    "error_type": "",
+                    "error": "",
+                }
         self._start_fan_in()
 
     async def stop(self) -> None:
