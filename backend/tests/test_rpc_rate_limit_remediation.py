@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
-
+import aiohttp
 import pytest
 
 from victor_ai_bot.rpc import JsonRpcClient
@@ -121,10 +119,9 @@ def test_rpc_manager_recovers_quarantined_provider_after_expiry():
 
 
 def test_effective_fee_authority_is_native_observation():
-    # This documents the execution rule at the test-contract level: when the
-    # provider observation exists, the execution gate must use it instead of
-    # the static configuration value.
+    from victor_ai_bot.execution import _effective_flashloan_fee_bps
+
     observed = 12
     configured = 9
-    effective = observed if observed is not None else configured
-    assert effective == 12
+    assert _effective_flashloan_fee_bps(observed, configured) == 12
+    assert _effective_flashloan_fee_bps(None, configured) == 9
