@@ -167,3 +167,44 @@ def test_runtime_loop_retries_after_safe_iteration_error() -> None:
     assert runtime.metrics.last_error == "loop iteration failed: RuntimeError: synthetic provider failure"
     assert runtime._market_pipeline_telemetry["scan_status"] == "loop_iteration_failed"
     assert runtime._market_pipeline_telemetry["loop_retry_scheduled"] is True
+
+
+def test_runtime_loop_retries_after_unlisted_normal_exception() -> None:
+    class _Runtime:
+        def __init__(self):
+            self._stop = False
+            self.metrics = type("_Metrics", (), {"last_error": ""})()
+            self._market_pipeline_telemetry = {}
+            self.calls = 0
+
+        async def _run_loop_entry_iteration(self, *, loop_started_at: float) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise IndexError("synthetic unlisted provider failure")
+            self._stop = True
+
+        async def _sleep(self, seconds: float) -> None:
+            return None
+
+        class _StopProxy:
+            def __init__(self, runtime):
+                self.runtime = runtime
+
+            def is_set(self):
+                return self.runtime._stop
+
+        @property
+        def _stop_proxy(self):
+            return self._StopProxy(self)
+
+    runtime = _Runtime()
+    # Match RuntimeBundle._loop's expected Event-like stop surface.
+    runtime._stop = runtime._StopProxy(runtime)
+    asyncio.run(RuntimeBundle._loop(runtime))
+
+    assert runtime.calls == 2
+    assert runtime.metrics.last_error == (
+        "loop iteration failed: IndexError: synthetic unlisted provider failure"
+    )
+    assert runtime._market_pipeline_telemetry["scan_status"] == "loop_iteration_failed"
+    assert runtime._market_pipeline_telemetry["loop_retry_scheduled"] is True
