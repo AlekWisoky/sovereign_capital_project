@@ -905,9 +905,6 @@ class RuntimePrimaryScanFacade:
             telemetry["unpriced_tokens"] = [
                 token for token in tokens if token.lower() != weth.lower()
             ]
-            configured_unpriced = [
-                token for token in configured_tokens if token.lower() != weth.lower()
-            ]
             research_unpriced = list(research_tokens)
             telemetry["research_tokens_unpriced"] = research_unpriced
             telemetry["research_tokens_priced"] = 0
