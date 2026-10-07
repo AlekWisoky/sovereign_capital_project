@@ -547,3 +547,25 @@ async def test_runtime_rpc_race_bounds_slow_provider_without_blocking_fast_provi
     assert slow["healthy"] is False
     assert slow["scan_latency_ms"] >= 250.0
     assert result["telemetry"]["rpc_selection_phase"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_rpc_manager_probe_interval_timeout_keeps_loop_alive():
+    manager = RpcManager(
+        rpc_read=["https://rpc.example"],
+        rpc_send=["https://rpc.example"],
+        probe_interval_s=0.01,
+    )
+    calls = 0
+
+    async def fake_probe(url, stats):
+        nonlocal calls
+        calls += 1
+
+    manager._probe_one = fake_probe
+    task = asyncio.create_task(manager._loop())
+    await asyncio.sleep(0.04)
+    manager._stop.set()
+    await asyncio.wait_for(task, timeout=0.2)
+
+    assert calls >= 2
