@@ -993,6 +993,7 @@ class RuntimePrimaryScanFacade:
         telemetry_sink: Dict[str, Any] | None = None,
         shared_token_scan_amounts: Dict[str, int] | None = None,
         force_adaptive_size_scan: bool = False,
+        max_scan_edges: int | None = None,
     ) -> List[Opportunity]:
         if int(amount_in) <= 0:
             return []
@@ -1132,6 +1133,7 @@ class RuntimePrimaryScanFacade:
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
                         pool_event_cache=getattr(self, "_pool_event_cache", None),
+                        max_scan_edges=max_scan_edges,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
@@ -1162,6 +1164,7 @@ class RuntimePrimaryScanFacade:
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
                         pool_event_cache=getattr(self, "_pool_event_cache", None),
+                        max_scan_edges=max_scan_edges,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
@@ -2033,6 +2036,7 @@ class RuntimePrimaryScanFacade:
         async def scan_one(url: str) -> tuple[str, List[Opportunity], PerBlockCache, Dict[str, Any], RpcEconomicEvidence]:
             scan_cache = PerBlockCache()
             telemetry: Dict[str, Any] = {}
+            telemetry["provider_comparison_edge_cap"] = self._provider_comparison_edge_cap()
             started = time.perf_counter()
             try:
                 if url == bootstrap_url:
@@ -2046,6 +2050,7 @@ class RuntimePrimaryScanFacade:
                             telemetry_sink=telemetry,
                             shared_token_scan_amounts=shared_token_scan_amounts,
                             force_adaptive_size_scan=False,
+                            max_scan_edges=self._provider_comparison_edge_cap(),
                         ),
                         timeout=self._provider_scan_timeout_s(),
                     )
@@ -2758,6 +2763,17 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             configured = 35.0
         return max(5.0, min(configured, 120.0))
+
+    @staticmethod
+    def _provider_comparison_edge_cap() -> int:
+        """Bound provider benchmarking without limiting the selected provider scan."""
+        try:
+            configured = int(
+                os.environ.get("VICTOR_RPC_PROVIDER_COMPARISON_EDGE_CAP", "96") or 96
+            )
+        except (TypeError, ValueError):
+            configured = 96
+        return max(32, min(configured, 256))
 
     @staticmethod
     def _discovery_timeout_s() -> float:
