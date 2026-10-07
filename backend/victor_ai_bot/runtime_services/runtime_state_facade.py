@@ -82,6 +82,14 @@ class RuntimeStateFacade:
             if bool(runtime.get("degraded")):
                 route_degraded += 1
         quotes = dict(telemetry.get("quotes") or {})
+        selected_adaptive = dict(
+            telemetry.get("selected_provider_adaptive") or {}
+        )
+        scan_sizing = dict(
+            telemetry.get("scan_sizing")
+            or selected_adaptive.get("scan_sizing")
+            or {}
+        )
         requests = int(quotes.get("requests") or 0)
         successes = int(quotes.get("successes") or 0)
         discovery = dict(telemetry.get("discovery") or {})
@@ -121,6 +129,7 @@ class RuntimeStateFacade:
                 "success_rate": (float(successes) / float(requests)) if requests else 0.0,
                 "failure_reasons": dict(quotes.get("failure_reasons") or {}),
             },
+            "scan_sizing": scan_sizing,
             "rpc": dict(telemetry.get("rpc") or {}),
             "adaptive_size_discovery": dict(telemetry.get("adaptive_size_discovery") or {}),
             "size_economic_matrix": [
