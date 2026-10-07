@@ -67,7 +67,6 @@ def test_pool_event_cache_bounds_websocket_subscription_addresses():
 
 
 def test_pool_event_cache_generates_bounded_affected_subgraph():
-    hot_pool = "0x" + "77" * 20
     affected_token = "0x" + "88" * 20
     other_token = "0x" + "99" * 20
     cache = PoolStateEventCache(
@@ -98,6 +97,7 @@ def test_pool_event_cache_generates_bounded_affected_subgraph():
         for i in range(70)
     ]
     cache.refresh_edges(edges)
+    hot_pool = str(edges[0].params["pool"]).lower()
     cache._apply_log({
         "address": hot_pool,
         "blockNumber": hex(100),
@@ -105,11 +105,6 @@ def test_pool_event_cache_generates_bounded_affected_subgraph():
         "topics": [_SYNC_TOPIC],
         "data": _sync_data(1000, 2000),
     })
-
-    # Re-point the hot state onto one tracked pool so the event is relevant.
-    cache._states[hot_pool] = cache._states.pop(next(iter(cache._states)))
-    cache._states[hot_pool].address = hot_pool
-    cache._dirty = {hot_pool}
 
     selected, telemetry = cache.prioritize_edges(edges, current_block=101)
 
