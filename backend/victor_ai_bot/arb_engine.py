@@ -1115,13 +1115,22 @@ async def find_two_leg_opportunities(
     pool_event_metrics: Dict[str, Any] = {}
     if pool_event_cache is not None:
         try:
+            full_edge_count = len(edges)
             pool_event_cache.refresh_edges(
                 edges,
                 balancer_vault=str(getattr(cfg.chain, "balancer_vault", "") or ""),
             )
-            edges, pool_event_metrics = pool_event_cache.prioritize_edges(
-                edges, current_block=int(block_number)
+            edges, pool_event_metrics = pool_event_cache.candidate_edges(
+                edges,
+                current_block=int(block_number),
+                max_candidates=int(
+                    os.environ.get("VICTOR_EVENT_CANDIDATE_MAX", "768") or 768
+                ),
+                exploration_ratio=float(
+                    os.environ.get("VICTOR_EVENT_EXPLORATION_RATIO", "0.10") or 0.10
+                ),
             )
+            pool_event_metrics["full_edge_count"] = int(full_edge_count)
         except (AttributeError, TypeError, ValueError):
             pool_event_metrics = {}
     # map reverse candidates by (token_in, token_out)
@@ -1565,13 +1574,22 @@ async def find_three_leg_opportunities(
     pool_event_metrics: Dict[str, Any] = {}
     if pool_event_cache is not None:
         try:
+            full_edge_count = len(edges)
             pool_event_cache.refresh_edges(
                 edges,
                 balancer_vault=str(getattr(cfg.chain, "balancer_vault", "") or ""),
             )
-            edges, pool_event_metrics = pool_event_cache.prioritize_edges(
-                edges, current_block=int(block_number)
+            edges, pool_event_metrics = pool_event_cache.candidate_edges(
+                edges,
+                current_block=int(block_number),
+                max_candidates=int(
+                    os.environ.get("VICTOR_EVENT_CANDIDATE_MAX", "768") or 768
+                ),
+                exploration_ratio=float(
+                    os.environ.get("VICTOR_EVENT_EXPLORATION_RATIO", "0.10") or 0.10
+                ),
             )
+            pool_event_metrics["full_edge_count"] = int(full_edge_count)
         except (AttributeError, TypeError, ValueError):
             pool_event_metrics = {}
     # Keep a bounded graph, but spend the bound on edges that can actually
