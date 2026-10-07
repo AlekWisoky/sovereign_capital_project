@@ -501,3 +501,72 @@ async def test_two_leg_selected_chunk_uses_full_route_universe_for_cross_chunk_r
     assert telemetry["scan_edges_selected"] == 1
     assert telemetry["route_universe_edge_count"] == 2
     assert telemetry["route_rejections"].get("no_reverse_route", 0) == 0
+
+
+
+@pytest.mark.asyncio
+async def test_selected_rescue_reverse_candidate_cap_bounds_two_leg_fanout(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    e1 = arb.Edge("univ3", "0x" + "aa" * 20, token_a, token_b, {"fee": 3000})
+    reverses = [
+        arb.Edge(
+            "univ3",
+            "0x" + f"{i + 10:040x}",
+            token_b,
+            token_a,
+            {"fee": 3000, "pool": f"pool-{i}"},
+        )
+        for i in range(8)
+    ]
+    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: [e1, *reverses])
+
+    batch_sizes = []
+    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+        batch_sizes.append(len(requested_edges))
+        if metrics is not None:
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
+            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
+        return {
+            arb.edge_key(edge): (
+                110 if edge == e1 else 120,
+                {"gas_estimate": 1, "fee": 3000},
+            )
+            for edge in requested_edges
+        }
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
+    monkeypatch.setattr(
+        arb,
+        "scan_efficiency_snapshot",
+        lambda **kwargs: {
+            "elapsed_ms": 1.0,
+            "candidate_count": int(kwargs["candidate_count"]),
+            "quote_requests": int(kwargs["quote_requests"]),
+            "quote_successes": int(kwargs["quote_successes"]),
+            "quote_success_rate": 1.0,
+            "cache_hits": 0,
+            "network_batches": 2,
+        },
+    )
+
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="arbitrum"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    telemetry = {}
+    await arb.find_two_leg_opportunities(
+        object(),
+        cfg,
+        object(),
+        123,
+        amount_in=100,
+        slippage_bps=50,
+        telemetry=telemetry,
+        max_reverse_candidates=3,
+    )
+
+    # The first batch quotes every first-leg edge; every subsequent reverse-leg
+    # batch is bounded to at most the configured rescue cap.
+    assert batch_sizes[0] == 9
+    assert max(batch_sizes[1:]) <= 3
