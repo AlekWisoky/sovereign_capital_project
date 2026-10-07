@@ -129,7 +129,8 @@ async def test_provider_comparison_edge_cap_bounds_quote_workload(monkeypatch):
     assert telemetry["scan_edge_cap"] == 2
     assert telemetry["scan_edges_selected"] == 2
     assert telemetry["scan_edges_capped"] == 4
-    assert telemetry["quote_requests"] == 2
+    # Two capped first-leg edges plus their reverse-leg quote batch.
+    assert telemetry["quote_requests"] == 4
 
 
 @pytest.mark.asyncio
