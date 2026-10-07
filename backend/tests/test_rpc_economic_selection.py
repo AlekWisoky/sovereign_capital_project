@@ -317,26 +317,34 @@ async def test_bounded_selected_provider_sizing_probes_promising_routes_only(mon
         return None
     monkeypatch.setattr(runtime, "_annotate_canonical_after_fee_usd", noop_annotate)
 
-    base = SimpleNamespace(
-        id="base",
-        route_id="route-base",
-        strategy="two-leg:univ3->univ3",
-        expected_profit_raw="100",
-        route=SimpleNamespace(
-            legs=[SimpleNamespace(amount_in="1000")]
-        ),
-        meta={
-            "route_edge_params": [
-                {"fee": 500},
-                {"fee": 3000},
-            ],
-            "profitability": {
-                "revalidated": True,
-                "authoritative": False,
-                "profit_after_costs_wei": "-1",
-            },
-        },
-    )
+    class _Candidate:
+        def __init__(self, amount_in="1000", profit="100"):
+            self.id = "base"
+            self.route_id = "route-base"
+            self.strategy = "two-leg:univ3->univ3"
+            self.expected_profit_raw = str(profit)
+            self.route = SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount_in))]
+            )
+            self.meta = {
+                "route_edge_params": [
+                    {"fee": 500},
+                    {"fee": 3000},
+                ],
+                "profitability": {
+                    "revalidated": True,
+                    "authoritative": False,
+                    "profit_after_costs_wei": "-1",
+                },
+            }
+
+        def model_copy(self, *, deep=True):
+            return _Candidate(
+                amount_in=self.route.legs[0].amount_in,
+                profit=self.expected_profit_raw,
+            )
+
+    base = _Candidate()
 
     async def fake_requote(rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps):
         candidate.route.legs[0].amount_in = str(new_amount_in)
