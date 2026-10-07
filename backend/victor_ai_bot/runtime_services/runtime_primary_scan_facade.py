@@ -1262,6 +1262,9 @@ class RuntimePrimaryScanFacade:
                         observed_gas_price_wei=observed_gas_price_wei,
                         pool_event_cache=scan_pool_event_cache,
                         max_scan_edges=max_scan_edges,
+                        max_reverse_candidates=(
+                            3 if selected_full_graph_base_only else None
+                        ),
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
                         extra_balancer_pools=extra_balancer_pools,
