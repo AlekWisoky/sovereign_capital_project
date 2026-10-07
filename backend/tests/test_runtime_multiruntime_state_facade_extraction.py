@@ -60,7 +60,7 @@ class _TelemetryRuntime(_Runtime):
 
     async def summary(self):
         if self.slow_summary:
-            await asyncio.sleep(0.05)
+            raise asyncio.TimeoutError("synthetic summary timeout")
         return {
             "ok": True,
             "auto_trade_gate": {"allowed": False, "stage": "shadow"},
