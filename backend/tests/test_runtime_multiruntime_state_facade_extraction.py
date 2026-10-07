@@ -46,6 +46,49 @@ class _Pnl:
         return {"ok": True, "window": window}
 
 
+class _TelemetryRuntime(_Runtime):
+    def __init__(self, *, slow_summary: bool):
+        super().__init__()
+        self.slow_summary = slow_summary
+
+    def market_pipeline_telemetry_state(self):
+        return {
+            "ok": True,
+            "chain": "arbitrum",
+            "scanner": {"alive": True},
+        }
+
+    async def summary(self):
+        if self.slow_summary:
+            await asyncio.sleep(0.05)
+        return {
+            "ok": True,
+            "auto_trade_gate": {"allowed": False, "stage": "shadow"},
+            "auto_trade_recovery": {"active": False},
+        }
+
+
+async def _exercise_market_pipeline_telemetry_timeout() -> None:
+    bundle = MultiRuntimeBundle.__new__(MultiRuntimeBundle)
+    bundle._active_chain = "base"
+    bundle._runtimes = {
+        "base": _TelemetryRuntime(slow_summary=False),
+        "arbitrum": _TelemetryRuntime(slow_summary=True),
+    }
+    bundle.SNAPSHOT_TIMEOUT_S = 0.01
+
+    payload = await bundle.market_pipeline_telemetry_readonly()
+
+    assert payload["chains"]["base"]["scanner"]["alive"] is True
+    assert payload["chains"]["arbitrum"]["scanner"]["alive"] is True
+    assert payload["chains"]["arbitrum"]["admission"]["status"] == "unavailable"
+    assert payload["chains"]["arbitrum"]["admission"]["reason_code"] == "market_pipeline_admission_summary_unavailable"
+
+
+def test_multiruntime_market_pipeline_preserves_telemetry_on_summary_timeout() -> None:
+    asyncio.run(_exercise_market_pipeline_telemetry_timeout())
+
+
 def test_multiruntime_state_facade_preserves_active_chain_contract() -> None:
     active = _Runtime()
     other = _Runtime()
