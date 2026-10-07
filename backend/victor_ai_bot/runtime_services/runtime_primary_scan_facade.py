@@ -1151,9 +1151,16 @@ class RuntimePrimaryScanFacade:
         telemetry["gas_price_integrity"] = dict(gas_price_consensus)
         try:
             size_amounts = [int(amount_in)]
-            adaptive_amounts = self._adaptive_scan_amounts(
-                int(amount_in),
-                force_adaptive_size_scan=bool(force_adaptive_size_scan),
+            selected_full_graph_base_only = bool(
+                discovery_context.get("_selected_provider_full_graph_base_only")
+            )
+            adaptive_amounts = (
+                []
+                if selected_full_graph_base_only
+                else self._adaptive_scan_amounts(
+                    int(amount_in),
+                    force_adaptive_size_scan=bool(force_adaptive_size_scan),
+                )
             )
             size_scan_records: List[Dict[str, Any]] = []
             try:
@@ -2302,6 +2309,8 @@ class RuntimePrimaryScanFacade:
             # must now receive one uncapped graph pass before alternate-size seeds.
             full_scan_telemetry: Dict[str, Any] = {}
             full_scan_started = time.perf_counter()
+            full_scan_context = dict(discovery_context)
+            full_scan_context["_selected_provider_full_graph_base_only"] = True
             try:
                 if selected_provider_url == bootstrap_url:
                     full_scan = await asyncio.wait_for(
@@ -2310,7 +2319,7 @@ class RuntimePrimaryScanFacade:
                             current_block=int(current_block),
                             amount_in=int(amount_in),
                             cache=selected_cache,
-                            discovery_context=discovery_context,
+                            discovery_context=full_scan_context,
                             telemetry_sink=full_scan_telemetry,
                             shared_token_scan_amounts=shared_token_scan_amounts,
                             force_adaptive_size_scan=False,
@@ -2330,7 +2339,7 @@ class RuntimePrimaryScanFacade:
                                 current_block=int(current_block),
                                 amount_in=int(amount_in),
                                 cache=selected_cache,
-                                discovery_context=discovery_context,
+                                discovery_context=full_scan_context,
                                 telemetry_sink=full_scan_telemetry,
                                 shared_token_scan_amounts=shared_token_scan_amounts,
                                 force_adaptive_size_scan=False,
