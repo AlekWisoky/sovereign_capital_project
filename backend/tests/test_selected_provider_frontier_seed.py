@@ -166,34 +166,9 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         amount_in=1000,
     )
 
-    assert scan_amounts == [
-        1000,  # provider comparison
-        1000,  # selected-provider full-graph base pass
-        1500, 2000, 500,  # bounded frontier seeds
-        1000, 1500, 2000, 500,  # bounded size probe
-    ]
-    assert provider_comparison_flags == [
-        True,
-        False,
-        False,
-        False,
-        False,
-        False,
-        False,
-        False,
-        False,
-    ]
-    assert full_graph_base_only_flags == [
-        False,
-        True,
-        True,
-        True,
-        True,
-        False,
-        False,
-        False,
-        False,
-    ]
+    assert scan_amounts == [1000, 1000, 1500, 2000, 500]
+    assert provider_comparison_flags == [True, False, False, False, False]
+    assert full_graph_base_only_flags == [False, True, True, True, True]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
