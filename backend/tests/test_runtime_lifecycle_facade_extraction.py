@@ -125,3 +125,45 @@ def test_runtime_lifecycle_facade_contains_expected_optional_runtime_failures():
     assert stop_runtime.rpc_manager.started == 1
     assert stop_runtime.rpc_manager.stopped == 1
     assert stop_runtime._super.stopped == 1
+
+
+def test_runtime_loop_retries_after_safe_iteration_error() -> None:
+    import asyncio
+    from victor_ai_bot.runtime_legacy import RuntimeBundle
+
+    class _Stop:
+        def __init__(self):
+            self._set = False
+
+        def is_set(self):
+            return self._set
+
+        def set(self):
+            self._set = True
+
+    class _Metrics:
+        last_error = ""
+
+    class _Runtime:
+        def __init__(self):
+            self._stop = _Stop()
+            self.metrics = _Metrics()
+            self._market_pipeline_telemetry = {}
+            self.calls = 0
+
+        async def _run_loop_entry_iteration(self, *, loop_started_at: float) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("synthetic provider failure")
+            self._stop.set()
+
+        async def _sleep(self, seconds: float) -> None:
+            return None
+
+    runtime = _Runtime()
+    asyncio.run(RuntimeBundle._loop(runtime))
+
+    assert runtime.calls == 2
+    assert runtime.metrics.last_error == "loop iteration failed: RuntimeError: synthetic provider failure"
+    assert runtime._market_pipeline_telemetry["scan_status"] == "loop_iteration_failed"
+    assert runtime._market_pipeline_telemetry["loop_retry_scheduled"] is True

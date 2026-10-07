@@ -373,7 +373,7 @@
       "backend/tests/test_withdraw_route_failure_semantics_maintenance.py",
       "test_profit_token_gas_accounting.py"
     ],
-    "runtime_legacy_lines": 189
+    "runtime_legacy_lines": 203
   },
   "contracts": {
     "ci_command": "cd contracts && forge test -q",
@@ -621,7 +621,7 @@
     "api_legacy_lines": 83,
     "backend_broad_except_count": 1,
     "route_count": 167,
-    "runtime_legacy_lines": 189,
+    "runtime_legacy_lines": 203,
     "websocket_route_count": 4
   },
   "source_of_truth": [

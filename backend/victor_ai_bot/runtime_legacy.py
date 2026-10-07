@@ -43,6 +43,8 @@ from .runtime_services.runtime_multiruntime_meta_facade import RuntimeMultirunti
 from .runtime_services.runtime_multiruntime_state_facade import RuntimeMultiruntimeStateFacade
 from .runtime_services.runtime_optional_family_init import initialize_optional_family_runtimes
 from .runtime_services.runtime_optional_overlay_init import initialize_optional_overlay_runtimes
+
+_SAFE_RUNTIME_LOOP_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError)
 from .runtime_services.runtime_overlay_facade import RuntimeOverlayFacade
 from .runtime_services.runtime_operator_facade import RuntimeOperatorFacade
 from .runtime_services.runtime_post_tick_facade import RuntimePostTickFacade
@@ -171,7 +173,19 @@ class RuntimeBundle(
     async def _loop(self) -> None:
         while not self._stop.is_set():
             t0 = time.perf_counter()
-            await self._run_loop_entry_iteration(loop_started_at=t0)
+            try:
+                await self._run_loop_entry_iteration(loop_started_at=t0)
+            except _SAFE_RUNTIME_LOOP_EXCEPTIONS as exc:
+                telemetry = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
+                telemetry["scan_status"] = "loop_iteration_failed"
+                telemetry["scan_error"] = type(exc).__name__ + ": " + str(exc)
+                telemetry["loop_retry_scheduled"] = True
+                self._market_pipeline_telemetry = telemetry
+                try:
+                    self.metrics.last_error = f"loop iteration failed: {type(exc).__name__}: {exc}"
+                except _SAFE_RUNTIME_LOOP_EXCEPTIONS:
+                    pass
+                await asyncio.sleep(1.0)
 
     async def _execute_auto(self, opp, bn: int, decision: Any = None) -> None:
         """Delegate auto-execution to the canonical dispatch/wrapper facades."""
