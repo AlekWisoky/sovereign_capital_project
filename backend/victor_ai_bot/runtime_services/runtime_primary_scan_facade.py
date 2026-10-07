@@ -2031,10 +2031,13 @@ class RuntimePrimaryScanFacade:
                 },
             },
         }
+        completed_ms = int(time.time() * 1000)
+        selected_telemetry["rpc_selection_phase"] = "complete"
+        selected_telemetry["rpc_selection_completed_ms"] = completed_ms
         self._market_pipeline_telemetry = {
             **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
             "rpc_selection_phase": "complete",
-            "rpc_selection_completed_ms": int(time.time() * 1000),
+            "rpc_selection_completed_ms": completed_ms,
         }
         return {
             "selected_endpoint": selected_url,
