@@ -71,6 +71,12 @@ class RuntimeLoopEntryFacade:
             return
 
         for bootstrap_url in candidates:
+            self._runtime_loop_telemetry = {
+                **dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
+                "phase": "bootstrap_rpc",
+                "phase_started_ms": int(time.time() * 1000),
+                "bootstrap_endpoint": str(bootstrap_url),
+            }
             preselected_scan = None
             selected_url = bootstrap_url
             current_block = None
@@ -87,6 +93,11 @@ class RuntimeLoopEntryFacade:
                 current_block = int(bn)
 
                 if hasattr(self, "_resolve_amount_in"):
+                    self._runtime_loop_telemetry = {
+                        **dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
+                        "phase": "provider_comparison",
+                        "phase_started_ms": int(time.time() * 1000),
+                    }
                     try:
                         amount_in = int(self._resolve_amount_in())
                         selection = await self._select_rpc_and_scan(
@@ -96,6 +107,11 @@ class RuntimeLoopEntryFacade:
                         )
                         selected_url = str(selection.get("selected_endpoint") or bootstrap_url)
                         preselected_scan = selection
+                        self._runtime_loop_telemetry = {
+                            **dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
+                            "phase": "selected_provider_scan",
+                            "phase_started_ms": int(time.time() * 1000),
+                        }
                     except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
                         selected_url = bootstrap_url
                         preselected_scan = None
@@ -118,6 +134,11 @@ class RuntimeLoopEntryFacade:
                             )
                         except (AttributeError, TypeError, ValueError):
                             pass
+                    self._runtime_loop_telemetry = {
+                        **dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
+                        "phase": "idle",
+                        "last_completed_tick_ms": int(time.time() * 1000),
+                    }
                     return
 
             async with JsonRpcClient(
@@ -141,6 +162,11 @@ class RuntimeLoopEntryFacade:
                         )
                     except (AttributeError, TypeError, ValueError):
                         pass
+                self._runtime_loop_telemetry = {
+                    **dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
+                    "phase": "idle",
+                    "last_completed_tick_ms": int(time.time() * 1000),
+                }
                 return
 
         await self._sleep(1.0)
