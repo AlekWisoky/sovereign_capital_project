@@ -222,6 +222,67 @@ async def quote_edge(
             )
             if q:
                 out = (q.amount_out, {"pool_id": pool_id})
+        elif edge.dex == "aerodrome":
+            q = await quote_aerodrome(
+                rpc, cfg.chain.aerodrome_router,
+                edge.token_in, edge.token_out, int(amount_in),
+                stable=bool(edge.params.get("stable", False)),
+                factory=str(edge.params.get("factory") or ""),
+            )
+            if q:
+                out = (q.amount_out, {"stable": bool(q.stable), "factory": str(q.factory)})
+        elif edge.dex == "slipstream":
+            q = await quote_slipstream(
+                rpc, cfg.chain.slipstream_quoter_v2,
+                edge.token_in, edge.token_out,
+                int(edge.params.get("tick_spacing", 0)), int(amount_in),
+            )
+            if q:
+                out = (
+                    q.amount_out,
+                    {
+                        "gas_estimate": int(q.gas_estimate),
+                        "tick_spacing": int(q.tick_spacing),
+                        "factory": str(edge.params.get("factory") or ""),
+                    },
+                )
+        elif edge.dex == "camelot_algebra":
+            q = await quote_camelot_algebra(
+                rpc, cfg.chain.camelot_algebra_quoter_v2,
+                edge.token_in, edge.token_out, int(amount_in),
+            )
+            if q:
+                out = (
+                    q.amount_out,
+                    {
+                        "gas_estimate": int(q.gas_estimate),
+                        "fee": int(q.fee),
+                        "factory": str(edge.params.get("factory") or ""),
+                    },
+                )
+        elif edge.dex == "camelot_v2":
+            q = await quote_camelot_v2(
+                rpc, cfg.chain.camelot_v2_router,
+                edge.token_in, edge.token_out, int(amount_in),
+            )
+            if q:
+                out = (
+                    q.amount_out,
+                    {"fee_model": "router_observed", "pool": str(edge.params.get("pool") or "")},
+                )
+        elif edge.dex == "constant_product":
+            q = await quote_constant_product(
+                rpc, edge.venue, edge.token_in, edge.token_out, int(amount_in),
+            )
+            if q:
+                out = (
+                    q.amount_out,
+                    {
+                        "fee_model": "router_observed",
+                        "pool": str(edge.params.get("pool") or ""),
+                        "venue_name": str(edge.params.get("venue_name") or ""),
+                    },
+                )
     except _SAFE_EDGE_QUOTE_EXCEPTIONS:
         out = None
     cache.set(ck, out)
@@ -1398,6 +1459,7 @@ async def find_two_leg_opportunities(
                         "leg1": meta1,
                         "leg2": meta2,
                         "route_type": "2leg",
+                        "route_edge_params": [dict(e1.params), dict(e2.params)],
                         "route_family": _classify_route_family(cfg, [e1, e2], route_type="2leg"),
                         "venues": [e1.dex, e2.dex],
                         "pool_keys": pool_keys,
@@ -1950,6 +2012,7 @@ async def find_three_leg_opportunities(
                                 "leg2": meta2,
                                 "leg3": meta3,
                                 "route_type": "3leg",
+                                "route_edge_params": [dict(e1.params), dict(e2.params), dict(e3.params)],
                                 "route_family": _classify_route_family(cfg, [e1, e2, e3], route_type="3leg"),
                                 "venues": [e1.dex, e2.dex, e3.dex],
                                 "pool_keys": pool_keys,
@@ -2073,18 +2136,30 @@ async def requote_opportunity(
             return 0
 
     edges: List[Edge] = []
-    for lg in legs:
-        params: Dict[str, Any] = {}
-        if lg.dex == "univ3":
+    stored_params: List[Dict[str, Any]] = []
+    if isinstance(getattr(opp, "meta", None), dict):
+        raw_params = opp.meta.get("route_edge_params")
+        if isinstance(raw_params, list):
+            stored_params = [dict(item) for item in raw_params if isinstance(item, dict)]
+    for index, lg in enumerate(legs):
+        params: Dict[str, Any] = (
+            dict(stored_params[index])
+            if index < len(stored_params)
+            else {}
+        )
+        if not params and lg.dex == "univ3":
             v = _decode_u256_b32(lg.data or "0x")
             params["fee"] = int(v & 0xFFFFFF) or 3000
-        elif lg.dex == "curve":
+        elif not params and lg.dex == "curve":
             v = _decode_u256_b32(lg.data or "0x")
             params["i"] = int(v & 0xFF)
             params["j"] = int((v >> 8) & 0xFF)
             params["underlying"] = bool((v >> 16) & 1)
-        elif lg.dex == "balancer":
+        elif not params and lg.dex == "balancer":
             params["pool_id"] = str(lg.data or "0x")
+        elif not params and lg.dex == "slipstream":
+            v = _decode_u256_b32(lg.data or "0x")
+            params["tick_spacing"] = int(v & 0xFFFFFF)
         edges.append(Edge(lg.dex, lg.venue, lg.token_in, lg.token_out, params))
 
     amount = int(new_amount_in)
