@@ -11,6 +11,17 @@ _SAFE_MULTIRUNTIME_EXCEPTIONS = (
     ValueError,
 )
 
+_SAFE_MULTIRUNTIME_START_EXCEPTIONS = (
+    AttributeError,
+    AssertionError,
+    KeyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    asyncio.TimeoutError,
+)
+
 
 class RuntimeMultiruntimeLifecycleFacade:
     """Non-hot-path multichain lifecycle/websocket compatibility helpers.
@@ -38,7 +49,7 @@ class RuntimeMultiruntimeLifecycleFacade:
                 desired = bool(getattr(rt.cfg.execution, "auto_trading", False))
                 try:
                     rt.set_settings(auto_trading=(desired if name == self._active_chain else False))
-                except Exception as exc:
+                except _SAFE_MULTIRUNTIME_START_EXCEPTIONS as exc:
                     self._runtime_lifecycle[name] = {
                         "start_status": "settings_failed",
                         "error_type": type(exc).__name__,
@@ -50,7 +61,7 @@ class RuntimeMultiruntimeLifecycleFacade:
                 continue
             try:
                 rt.start()
-            except Exception as exc:
+            except _SAFE_MULTIRUNTIME_START_EXCEPTIONS as exc:
                 self._runtime_lifecycle[name] = {
                     **current,
                     "start_status": "failed",
