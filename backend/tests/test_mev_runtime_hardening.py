@@ -335,3 +335,82 @@ def test_search_engine_consumes_runtime_supplied_simulation_request(monkeypatch)
     )
     assert captured['simulation_request'] == request
     assert captured['tx']['hash'] == tx_hash
+
+
+def test_market_price_evidence_is_strict_by_default(monkeypatch):
+    async def fake_decimals(_rpc, token, *, block):
+        if str(token).lower() == "0x0000000000000000000000000000000000000012":
+            from victor_ai_bot.execution_capture.final_quote import FinalQuoteError
+            raise FinalQuoteError("bad_token")
+        return 6 if str(token).lower() == "0x0000000000000000000000000000000000000013" else 18
+
+    async def fake_best(*_args, **_kwargs):
+        return 2000.0, 3000, 2_000_000_000
+
+    from victor_ai_bot.execution_capture import final_quote
+
+    monkeypatch.setattr(final_quote, "resolve_erc20_decimals", fake_decimals)
+    monkeypatch.setattr(final_quote, "_best_v3_quote", fake_best)
+
+    with pytest.raises(final_quote.FinalQuoteError, match="bad_token"):
+        __import__("asyncio").run(
+            final_quote.produce_market_price_evidence(
+                object(),
+                cfg=SimpleNamespace(
+                    chain=SimpleNamespace(
+                        name="test",
+                        univ3_factory="0x0000000000000000000000000000000000000021",
+                        univ3_quoter_v2="0x0000000000000000000000000000000000000022",
+                        usdc="0x0000000000000000000000000000000000000013",
+                        usdt="",
+                    ),
+                    execution=SimpleNamespace(usd_stable_preference="usdc"),
+                ),
+                tokens=[
+                    ("0x0000000000000000000000000000000000000011", "scan_input"),
+                    ("0x0000000000000000000000000000000000000012", "scan_input"),
+                ],
+                block_number=123,
+            )
+        )
+
+
+def test_market_price_evidence_partial_mode_retains_independent_prices(monkeypatch):
+    async def fake_decimals(_rpc, token, *, block):
+        if str(token).lower() == "0x0000000000000000000000000000000000000012":
+            from victor_ai_bot.execution_capture.final_quote import FinalQuoteError
+            raise FinalQuoteError("bad_token")
+        return 6 if str(token).lower() == "0x0000000000000000000000000000000000000013" else 18
+
+    async def fake_best(*_args, **_kwargs):
+        return 2000.0, 3000, 2_000_000_000
+
+    from victor_ai_bot.execution_capture import final_quote
+
+    monkeypatch.setattr(final_quote, "resolve_erc20_decimals", fake_decimals)
+    monkeypatch.setattr(final_quote, "_best_v3_quote", fake_best)
+
+    out = __import__("asyncio").run(
+        final_quote.produce_market_price_evidence(
+            object(),
+            cfg=SimpleNamespace(
+                chain=SimpleNamespace(
+                    name="test",
+                    univ3_factory="0x0000000000000000000000000000000000000021",
+                    univ3_quoter_v2="0x0000000000000000000000000000000000000022",
+                    usdc="0x0000000000000000000000000000000000000013",
+                    usdt="",
+                ),
+                execution=SimpleNamespace(usd_stable_preference="usdc"),
+            ),
+            tokens=[
+                ("0x0000000000000000000000000000000000000011", "scan_input"),
+                ("0x0000000000000000000000000000000000000012", "scan_input"),
+            ],
+            block_number=123,
+            strict=False,
+        )
+    )
+
+    assert "0x0000000000000000000000000000000000000011" in out
+    assert "0x0000000000000000000000000000000000000012" not in out
