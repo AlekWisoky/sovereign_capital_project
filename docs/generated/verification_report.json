@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 375,
+    "test_file_count": 376,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -273,6 +273,7 @@
       "backend/tests/test_safety.py",
       "backend/tests/test_scan_profitability_output_semantics.py",
       "backend/tests/test_sentry_config.py",
+      "backend/tests/test_selected_provider_frontier_seed.py",
       "backend/tests/test_server_boot_maintenance.py",
       "backend/tests/test_shadow_venue_discovery.py",
       "backend/tests/test_size_economic_matrix_diagnostics.py",
@@ -688,5 +689,5 @@
     "mobile_inventory": true,
     "runtime_surface_summary": true
   },
-  "backend_test_file_count": 365
+  "backend_test_file_count": 376
 }
