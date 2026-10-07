@@ -146,6 +146,18 @@ class JsonRpcClient:
             except (TypeError, ValueError):
                 rate_limit_backoff_ms = 150.0
 
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def _batch_slot():
+                # Recursive rate-limit splits are sequential recovery work for one
+                # already-admitted batch; they must not acquire another batch slot.
+                if rate_limit_depth == 0:
+                    async with self._batch_sem:
+                        yield
+                else:
+                    yield
+
             async def _rate_limit_retry(
                 retry_chunk: List[tuple[str, list]],
             ) -> List[RpcResult] | None:
@@ -170,7 +182,7 @@ class JsonRpcClient:
                     *await _send_chunk(right, rate_limit_depth=rate_limit_depth + 1),
                 ]
 
-            async with self._batch_sem:
+            async with _batch_slot():
                 t0 = time.perf_counter()
                 reqs = []
                 ids: List[int] = []
