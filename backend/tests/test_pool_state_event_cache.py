@@ -56,7 +56,7 @@ def test_pool_event_cache_bounds_websocket_subscription_addresses():
     )
     edges = [
         Edge("univ3", "0x" + "33" * 20, "0x" + f"{i + 1:040x}", "0x" + f"{i + 100:040x}", {"pool": "0x" + f"{i + 200:040x}"})
-        for i in range(4)
+        for i in range(20)
     ]
     cache.refresh_edges(edges)
 
