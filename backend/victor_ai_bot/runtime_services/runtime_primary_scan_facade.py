@@ -2054,7 +2054,6 @@ class RuntimePrimaryScanFacade:
                             telemetry_sink=telemetry,
                             shared_token_scan_amounts=shared_token_scan_amounts,
                             force_adaptive_size_scan=False,
-                            max_scan_edges=self._provider_comparison_edge_cap(),
                         ),
                         timeout=self._provider_scan_timeout_s(),
                     )
