@@ -64,3 +64,56 @@ def test_pool_event_cache_bounds_websocket_subscription_addresses():
 
     assert len(addresses) == 16
     assert cache.snapshot()["subscription_truncated"] is True
+
+
+def test_pool_event_cache_generates_bounded_affected_subgraph():
+    hot_pool = "0x" + "77" * 20
+    affected_token = "0x" + "88" * 20
+    other_token = "0x" + "99" * 20
+    cache = PoolStateEventCache(
+        chain_name="base",
+        chain_id=8453,
+        ws_urls=["wss://example"],
+        rpc_urls=["https://example"],
+        candidate_max_edges=64,
+    )
+    edges = [
+        Edge(
+            "univ3",
+            "0x" + "33" * 20,
+            affected_token,
+            "0x" + f"{i + 100:040x}",
+            {"pool": "0x" + f"{i + 200:040x}"},
+        )
+        for i in range(10)
+    ]
+    edges += [
+        Edge(
+            "aerodrome",
+            "0x" + "44" * 20,
+            other_token,
+            "0x" + f"{i + 500:040x}",
+            {"pool": "0x" + f"{i + 600:040x}"},
+        )
+        for i in range(70)
+    ]
+    cache.refresh_edges(edges)
+    cache._apply_log({
+        "address": hot_pool,
+        "blockNumber": hex(100),
+        "transactionHash": "0xhot",
+        "topics": [_SYNC_TOPIC],
+        "data": _sync_data(1000, 2000),
+    })
+
+    # Re-point the hot state onto one tracked pool so the event is relevant.
+    cache._states[hot_pool] = cache._states.pop(next(iter(cache._states)))
+    cache._states[hot_pool].address = hot_pool
+    cache._dirty = {hot_pool}
+
+    selected, telemetry = cache.prioritize_edges(edges, current_block=101)
+
+    assert telemetry["candidate_generation_mode"] == "affected_subgraph"
+    assert telemetry["candidate_edges_pruned"] > 0
+    assert telemetry["candidate_edge_count"] < len(edges)
+    assert selected
