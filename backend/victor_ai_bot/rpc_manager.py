@@ -297,4 +297,8 @@ class RpcManager:
             for u, s in list(self._private.items()):
                 tasks.append(self._probe_one(u, s))
             await asyncio.gather(*tasks, return_exceptions=True)
-            await asyncio.wait_for(self._stop.wait(), timeout=self.probe_interval_s)
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=self.probe_interval_s)
+            except asyncio.TimeoutError:
+                # Normal probe interval expiry; keep the manager loop alive.
+                continue
