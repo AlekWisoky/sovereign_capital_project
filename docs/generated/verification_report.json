@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 374,
+    "test_file_count": 370,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -177,6 +177,7 @@
       "backend/tests/test_persistence_and_security.py",
       "backend/tests/test_pnl_store_maintenance.py",
       "backend/tests/test_policy_routes_maintenance.py",
+      "backend/tests/test_pool_state_event_cache.py",
       "backend/tests/test_portfolio_optimizer.py",
       "backend/tests/test_post_mutation_profitability_continuity.py",
       "backend/tests/test_post_mutation_revalidation_contract.py",
