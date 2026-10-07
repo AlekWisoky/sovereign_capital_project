@@ -1176,6 +1176,7 @@ async def find_two_leg_opportunities(
     time_budget_ms: int = 2000,
     max_opps: int = 50,
     telemetry: Optional[Dict[str, Any]] = None,
+    max_reverse_candidates: Optional[int] = None,
     extra_v3_pairs: Optional[List[dict]] = None,
     extra_curve_pools: Optional[List[dict]] = None,
     extra_balancer_pools: Optional[List[dict]] = None,
@@ -1257,12 +1258,14 @@ async def find_two_leg_opportunities(
     for edge in edges:
         effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
         edge_groups.setdefault(effective_amount, []).append(edge)
+    configured_reverse_candidates = (
+        max_reverse_candidates
+        if max_reverse_candidates not in (None, "")
+        else int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8)
+    )
     max_reverse_candidates = max(
         3,
-        min(
-            12,
-            int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8),
-        ),
+        min(12, int(configured_reverse_candidates)),
     )
     qmap1: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
     for effective_amount, grouped_edges in edge_groups.items():
