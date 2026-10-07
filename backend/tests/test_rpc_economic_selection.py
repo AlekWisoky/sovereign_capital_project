@@ -136,6 +136,7 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace()
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
 
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
@@ -227,6 +228,7 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace()
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
 
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": [], "runtime": {}}
@@ -408,6 +410,7 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace()
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
 
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
@@ -581,6 +584,7 @@ async def test_runtime_rpc_race_bounds_slow_provider_without_blocking_fast_provi
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace()
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
     monkeypatch.setattr(runtime, "_provider_scan_timeout_s", lambda: 0.25)
 
     async def fake_discovery(rpc, *, current_block):

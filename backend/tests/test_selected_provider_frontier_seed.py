@@ -147,6 +147,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         }
 
     runtime._build_discovery_context = fake_discovery
+    runtime._build_provider_comparison_pool_event_cache = lambda *args, **kwargs: object()
     runtime._build_token_scan_amounts = fake_token_amounts
     runtime._scan_primary_opportunities = fake_scan
     runtime._run_bounded_selected_provider_size_probe = fake_probe
@@ -157,8 +158,8 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         amount_in=1000,
     )
 
-    assert scan_amounts == [1000, 1500, 2000, 500]
-    assert provider_comparison_flags == [True, True, True, True]
+    assert scan_amounts == [1000, 1000, 1500, 2000, 500]
+    assert provider_comparison_flags == [True, False, False, False, False]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]

@@ -37,8 +37,9 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_provider_comparison_does_not_force_adaptive_scan():
+async def test_provider_comparison_does_not_force_adaptive_scan(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
     calls = []
     probe_calls = []
 
@@ -95,7 +96,7 @@ async def test_provider_comparison_does_not_force_adaptive_scan():
         amount_in=1_000,
     )
 
-    assert calls == [False, False, False, False]
+    assert calls == [False, False, False, False, False]
     assert probe_calls == [True]
 
 

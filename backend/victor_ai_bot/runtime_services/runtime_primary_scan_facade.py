@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, List
 from urllib.parse import urlsplit
 
-from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities, requote_opportunity
+from ..arb_engine import build_edges, find_three_leg_opportunities, find_two_leg_opportunities, requote_opportunity
 from ..execution_capture.final_quote import FinalQuoteError, produce_market_price_evidence
 from ..cache import PerBlockCache
 from ..gas_model import BASE_CHAIN_ID, estimate_base_l1_fee_wei, estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
@@ -20,6 +20,35 @@ from ..usd_pricing import gas_wei_to_token_wei, token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
+class _FrozenProviderScanPoolEventCache:
+    """Immutable provider-comparison graph and edge-priority view for one tick."""
+
+    def __init__(self, edges: List[Any], telemetry: Dict[str, Any], priorities: Dict[int, int]) -> None:
+        self._edges = list(edges or [])
+        self._telemetry = dict(telemetry or {})
+        self._priorities = dict(priorities or {})
+
+    def refresh_edges(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def candidate_edges(
+        self,
+        edges: List[Any],
+        *,
+        current_block: int,
+        max_candidates: int = 768,
+        exploration_ratio: float = 0.10,
+    ) -> tuple[List[Any], Dict[str, Any]]:
+        del edges, current_block, max_candidates, exploration_ratio
+        return list(self._edges), dict(self._telemetry)
+
+    def edge_priority(self, edge: Any, *, current_block: int) -> int:
+        del current_block
+        return int(self._priorities.get(id(edge), 1))
+
+
 
 def _resolve_scan_quoted_amount(meta: Dict[str, Any]) -> int | None:
     """Return the first positive quoted terminal output, preferring the final leg."""
@@ -989,7 +1018,7 @@ class RuntimePrimaryScanFacade:
         current_block: int,
         amount_in: int,
         cache: PerBlockCache | None = None,
-        discovery_context: Dict[str, List[Any]] | None = None,
+        discovery_context: Dict[str, Any] | None = None,
         telemetry_sink: Dict[str, Any] | None = None,
         shared_token_scan_amounts: Dict[str, int] | None = None,
         force_adaptive_size_scan: bool = False,
@@ -1005,10 +1034,21 @@ class RuntimePrimaryScanFacade:
                 current_block=int(current_block),
             )
         extra_v3_pairs = list(discovery_context.get("v3_pairs") or [])
+        provider_comparison_active = bool(getattr(self, "_rpc_provider_comparison", False))
         max_scan_edges = (
             self._provider_comparison_edge_cap()
-            if bool(getattr(self, "_rpc_provider_comparison", False))
+            if provider_comparison_active
             else None
+        )
+        provider_scan_pool_event_cache = (
+            discovery_context.get("_provider_scan_pool_event_cache")
+            if provider_comparison_active
+            else None
+        )
+        scan_pool_event_cache = (
+            provider_scan_pool_event_cache
+            if provider_scan_pool_event_cache is not None
+            else getattr(self, "_pool_event_cache", None)
         )
         extra_curve_pools = list(discovery_context.get("curve_pools") or [])
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
@@ -1076,13 +1116,22 @@ class RuntimePrimaryScanFacade:
                 for token, raw in dict(shared_token_scan_amounts).items()
                 if str(token) and int(raw) > 0
             }
+            shared_telemetry = dict(discovery_context.get("_shared_token_scan_telemetry") or {})
             token_scan_telemetry = {
+                **shared_telemetry,
                 "enabled": bool(token_scan_amounts),
                 "source": "shared_provider_comparison",
-                "reference_token": str(getattr(getattr(self.cfg, "chain", None), "weth", "") or ""),
+                "reference_token": str(
+                    shared_telemetry.get("reference_token")
+                    or getattr(getattr(self.cfg, "chain", None), "weth", "")
+                    or ""
+                ),
                 "base_amount_in": str(int(amount_in)),
-                "amounts_by_token": {token: str(raw) for token, raw in token_scan_amounts.items()},
-                "unpriced_tokens": [],
+                "amounts_by_token": {
+                    token: str(raw) for token, raw in token_scan_amounts.items()
+                },
+                "unpriced_tokens": list(shared_telemetry.get("unpriced_tokens") or []),
+                "research_tokens_unpriced": list(shared_telemetry.get("research_tokens_unpriced") or []),
             }
         telemetry["scan_sizing"] = dict(token_scan_telemetry)
         try:
@@ -1102,9 +1151,16 @@ class RuntimePrimaryScanFacade:
         telemetry["gas_price_integrity"] = dict(gas_price_consensus)
         try:
             size_amounts = [int(amount_in)]
-            adaptive_amounts = self._adaptive_scan_amounts(
-                int(amount_in),
-                force_adaptive_size_scan=bool(force_adaptive_size_scan),
+            selected_full_graph_base_only = bool(
+                discovery_context.get("_selected_provider_full_graph_base_only")
+            )
+            adaptive_amounts = (
+                []
+                if selected_full_graph_base_only
+                else self._adaptive_scan_amounts(
+                    int(amount_in),
+                    force_adaptive_size_scan=bool(force_adaptive_size_scan),
+                )
             )
             size_scan_records: List[Dict[str, Any]] = []
             try:
@@ -1136,7 +1192,7 @@ class RuntimePrimaryScanFacade:
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
-                        pool_event_cache=getattr(self, "_pool_event_cache", None),
+                        pool_event_cache=scan_pool_event_cache,
                         max_scan_edges=max_scan_edges,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
@@ -1167,7 +1223,7 @@ class RuntimePrimaryScanFacade:
                             for token, raw in token_scan_amounts.items()
                         },
                         observed_gas_price_wei=observed_gas_price_wei,
-                        pool_event_cache=getattr(self, "_pool_event_cache", None),
+                        pool_event_cache=scan_pool_event_cache,
                         max_scan_edges=max_scan_edges,
                         extra_v3_pairs=extra_v3_pairs,
                         extra_curve_pools=extra_curve_pools,
@@ -2031,12 +2087,20 @@ class RuntimePrimaryScanFacade:
             bootstrap_rpc,
             current_block=int(current_block),
         )
+        provider_scan_pool_event_cache = self._build_provider_comparison_pool_event_cache(
+            discovery_context,
+            current_block=int(current_block),
+        )
+        discovery_context = dict(discovery_context)
+        discovery_context["_provider_scan_pool_event_cache"] = provider_scan_pool_event_cache
         shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
             bootstrap_rpc,
             current_block=int(current_block),
             base_amount_in=int(amount_in),
             cache=PerBlockCache(),
         )
+        discovery_context["_shared_token_scan_telemetry"] = dict(shared_token_scan_telemetry)
+
         async def scan_one(url: str) -> tuple[str, List[Opportunity], PerBlockCache, Dict[str, Any], RpcEconomicEvidence]:
             scan_cache = PerBlockCache()
             telemetry: Dict[str, Any] = {}
@@ -2241,6 +2305,62 @@ class RuntimePrimaryScanFacade:
             min_opportunities = 2
 
         if len(selected_opps or []) < min_opportunities:
+            # Provider comparison is intentionally capped; the selected provider
+            # must now receive one uncapped graph pass before alternate-size seeds.
+            full_scan_telemetry: Dict[str, Any] = {}
+            full_scan_started = time.perf_counter()
+            full_scan_context = dict(discovery_context)
+            full_scan_context["_selected_provider_full_graph_base_only"] = True
+            try:
+                if selected_provider_url == bootstrap_url:
+                    full_scan = await asyncio.wait_for(
+                        self._scan_primary_opportunities(
+                            bootstrap_rpc,
+                            current_block=int(current_block),
+                            amount_in=int(amount_in),
+                            cache=selected_cache,
+                            discovery_context=full_scan_context,
+                            telemetry_sink=full_scan_telemetry,
+                            shared_token_scan_amounts=shared_token_scan_amounts,
+                            force_adaptive_size_scan=False,
+                        ),
+                        timeout=selection_timeout_s,
+                    )
+                else:
+                    async with JsonRpcClient(
+                        selected_provider_url,
+                        timeout_s=10.0,
+                        max_concurrency=30,
+                        max_batch=80,
+                    ) as selected_provider_rpc:
+                        full_scan = await asyncio.wait_for(
+                            self._scan_primary_opportunities(
+                                selected_provider_rpc,
+                                current_block=int(current_block),
+                                amount_in=int(amount_in),
+                                cache=selected_cache,
+                                discovery_context=full_scan_context,
+                                telemetry_sink=full_scan_telemetry,
+                                shared_token_scan_amounts=shared_token_scan_amounts,
+                                force_adaptive_size_scan=False,
+                            ),
+                            timeout=selection_timeout_s,
+                        )
+                if full_scan:
+                    selected_opps = list(full_scan)
+            except asyncio.TimeoutError:
+                full_scan_telemetry.setdefault(
+                    "scan_error", "selected_provider_full_scan_timeout"
+                )
+            except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                full_scan_telemetry.setdefault(
+                    "scan_error", f"{type(exc).__name__}: {exc}"
+                )
+            full_scan_telemetry.setdefault(
+                "scan_latency_ms", (time.perf_counter() - full_scan_started) * 1000.0
+            )
+            selected_telemetry["selected_provider_full_scan"] = dict(full_scan_telemetry)
+            adaptive_cache = selected_cache
             seed_amounts = self._selected_provider_frontier_seed_amounts(int(amount_in))
             try:
                 seed_timeout_s = max(
@@ -2285,6 +2405,12 @@ class RuntimePrimaryScanFacade:
                 "scan_latency_ms": [],
                 "candidates_added": 0,
                 "single_notional_provider_guard": True,
+                "provider_comparison_cap_applied": False,
+                "full_graph_pass": {
+                    "attempted": True,
+                    "returned": int(len(selected_opps or [])),
+                    "timeout_s": float(selection_timeout_s),
+                },
             }
 
             merged_seed_candidates: List[Opportunity] = list(selected_opps or [])
@@ -2314,7 +2440,6 @@ class RuntimePrimaryScanFacade:
             previous_provider_comparison = bool(
                 getattr(self, "_rpc_provider_comparison", False)
             )
-            self._rpc_provider_comparison = True
             try:
                 for seed_amount in seed_amounts:
                     remaining = float(seed_budget_s) - (
@@ -2788,6 +2913,74 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             configured = 2.0
         return max(0.25, min(configured, 10.0))
+
+    def _build_provider_comparison_pool_event_cache(
+        self,
+        discovery_context: Dict[str, Any],
+        *,
+        current_block: int,
+    ) -> _FrozenProviderScanPoolEventCache:
+        """Freeze one event-prioritized graph so every provider sees identical routes."""
+        extra_kwargs = {
+            "extra_v3_pairs": list(discovery_context.get("v3_pairs") or []),
+            "extra_curve_pools": list(discovery_context.get("curve_pools") or []),
+            "extra_balancer_pools": list(discovery_context.get("balancer_pools") or []),
+            "extra_aerodrome_pools": list(discovery_context.get("aerodrome_pools") or []),
+            "extra_slipstream_pools": list(discovery_context.get("slipstream_pools") or []),
+            "extra_camelot_algebra_pools": list(discovery_context.get("camelot_algebra_pools") or []),
+            "extra_camelot_v2_pools": list(discovery_context.get("camelot_v2_pools") or []),
+            "extra_constant_product_pools": list(discovery_context.get("constant_product_pools") or []),
+        }
+        edges = build_edges(self.cfg, **extra_kwargs)
+        source = getattr(self, "_pool_event_cache", None)
+        telemetry: Dict[str, Any] = {
+            "enabled": False,
+            "candidate_generation_mode": "full_graph",
+            "candidate_edge_count": int(len(edges)),
+            "candidate_edges_full": int(len(edges)),
+            "candidate_edges_pruned": 0,
+            "provider_comparison_frozen": True,
+        }
+        selected_edges = list(edges)
+        if source is not None:
+            try:
+                source.refresh_edges(
+                    edges,
+                    balancer_vault=str(getattr(self.cfg.chain, "balancer_vault", "") or ""),
+                )
+                selected_edges, source_metrics = source.candidate_edges(
+                    edges,
+                    current_block=int(current_block),
+                    max_candidates=int(
+                        os.environ.get("VICTOR_EVENT_CANDIDATE_MAX", "768") or 768
+                    ),
+                    exploration_ratio=float(
+                        os.environ.get("VICTOR_EVENT_EXPLORATION_RATIO", "0.10") or 0.10
+                    ),
+                )
+                telemetry.update(dict(source_metrics or {}))
+            except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+                selected_edges = list(edges)
+        priorities: Dict[int, int] = {}
+        if source is not None:
+            for edge in selected_edges:
+                try:
+                    priorities[id(edge)] = int(
+                        source.edge_priority(edge, current_block=int(current_block))
+                    )
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
+                    priorities[id(edge)] = 1
+        telemetry["provider_comparison_frozen"] = True
+        telemetry["candidate_edge_count"] = int(len(selected_edges))
+        telemetry["candidate_edges_full"] = int(telemetry.get("candidate_edges_full") or len(edges))
+        telemetry["candidate_edges_pruned"] = int(
+            max(0, int(telemetry["candidate_edges_full"]) - len(selected_edges))
+        )
+        return _FrozenProviderScanPoolEventCache(
+            selected_edges,
+            telemetry,
+            priorities,
+        )
 
     async def _build_discovery_context(
         self,
