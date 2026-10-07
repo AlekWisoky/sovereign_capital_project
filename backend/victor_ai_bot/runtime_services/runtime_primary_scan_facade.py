@@ -2351,11 +2351,7 @@ class RuntimePrimaryScanFacade:
                 "scan_latency_ms", (time.perf_counter() - full_scan_started) * 1000.0
             )
             selected_telemetry["selected_provider_full_scan"] = dict(full_scan_telemetry)
-            frontier_seed_telemetry["full_graph_pass"] = {
-                "attempted": True,
-                "returned": int(len(selected_opps or [])),
-                "timeout_s": float(selection_timeout_s),
-            }
+            adaptive_cache = selected_cache
             seed_amounts = self._selected_provider_frontier_seed_amounts(int(amount_in))
             try:
                 seed_timeout_s = max(
@@ -2401,6 +2397,11 @@ class RuntimePrimaryScanFacade:
                 "candidates_added": 0,
                 "single_notional_provider_guard": True,
                 "provider_comparison_cap_applied": False,
+                "full_graph_pass": {
+                    "attempted": True,
+                    "returned": int(len(selected_opps or [])),
+                    "timeout_s": float(selection_timeout_s),
+                },
             }
 
             merged_seed_candidates: List[Opportunity] = list(selected_opps or [])
