@@ -993,7 +993,6 @@ class RuntimePrimaryScanFacade:
         telemetry_sink: Dict[str, Any] | None = None,
         shared_token_scan_amounts: Dict[str, int] | None = None,
         force_adaptive_size_scan: bool = False,
-        max_scan_edges: int | None = None,
     ) -> List[Opportunity]:
         if int(amount_in) <= 0:
             return []
@@ -1006,6 +1005,11 @@ class RuntimePrimaryScanFacade:
                 current_block=int(current_block),
             )
         extra_v3_pairs = list(discovery_context.get("v3_pairs") or [])
+        max_scan_edges = (
+            self._provider_comparison_edge_cap()
+            if bool(getattr(self, "_rpc_provider_comparison", False))
+            else None
+        )
         extra_curve_pools = list(discovery_context.get("curve_pools") or [])
         extra_balancer_pools = list(discovery_context.get("balancer_pools") or [])
         extra_aerodrome_pools = list(discovery_context.get("aerodrome_pools") or [])
