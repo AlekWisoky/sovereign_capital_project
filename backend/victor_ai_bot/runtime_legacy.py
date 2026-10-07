@@ -43,6 +43,8 @@ from .runtime_services.runtime_multiruntime_meta_facade import RuntimeMultirunti
 from .runtime_services.runtime_multiruntime_state_facade import RuntimeMultiruntimeStateFacade
 from .runtime_services.runtime_optional_family_init import initialize_optional_family_runtimes
 from .runtime_services.runtime_optional_overlay_init import initialize_optional_overlay_runtimes
+
+_SAFE_RUNTIME_LOOP_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError)
 from .runtime_services.runtime_overlay_facade import RuntimeOverlayFacade
 from .runtime_services.runtime_operator_facade import RuntimeOperatorFacade
 from .runtime_services.runtime_post_tick_facade import RuntimePostTickFacade
