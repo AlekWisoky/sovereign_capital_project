@@ -10,6 +10,24 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 )
 
 
+def test_selected_provider_full_scan_parallelism_is_bounded(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+
+    assert runtime._selected_provider_full_scan_parallelism() == 3
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "2")
+    assert runtime._selected_provider_full_scan_parallelism() == 2
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "99")
+    assert runtime._selected_provider_full_scan_parallelism() == 3
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "0")
+    assert runtime._selected_provider_full_scan_parallelism() == 1
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "invalid")
+    assert runtime._selected_provider_full_scan_parallelism() == 3
+
+
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     monkeypatch.setenv(
