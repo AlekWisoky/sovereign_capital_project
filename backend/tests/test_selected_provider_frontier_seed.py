@@ -93,6 +93,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
 
     scan_amounts = []
     provider_comparison_flags = []
+    full_graph_base_only_flags = []
 
     async def fake_scan(
         rpc,
@@ -108,6 +109,13 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         scan_amounts.append(int(amount_in))
         provider_comparison_flags.append(
             bool(getattr(runtime, "_rpc_provider_comparison", False))
+        )
+        full_graph_base_only_flags.append(
+            bool(
+                (discovery_context or {}).get(
+                    "_selected_provider_full_graph_base_only"
+                )
+            )
         )
         telemetry_sink.update(
             {
@@ -160,6 +168,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
 
     assert scan_amounts == [1000, 1000, 1500, 2000, 500]
     assert provider_comparison_flags == [True, False, False, False, False]
+    assert full_graph_base_only_flags == [False, True, True, True, True]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
@@ -247,6 +256,33 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
     )
 
     assert seen == [500, 1500, 2000]
+
+
+def test_frozen_provider_graph_slice_preserves_stable_edge_order():
+    from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+        _FrozenProviderScanPoolEventCache,
+    )
+
+    edges = ["e0", "e1", "e2", "e3"]
+    cache = _FrozenProviderScanPoolEventCache(
+        edges,
+        {
+            "candidate_edges_full": 4,
+            "candidate_edge_count": 4,
+        },
+        {id(edge): index + 1 for index, edge in enumerate(edges)},
+    )
+
+    sliced = cache.slice(1, 2)
+
+    assert cache.edge_count() == 4
+    assert sliced.edge_count() == 2
+    assert sliced.candidate_edges(
+        [],
+        current_block=123,
+    )[0] == ["e1", "e2"]
+    assert sliced.edge_priority("e1", current_block=123) == 2
+    assert sliced.edge_priority("e2", current_block=123) == 3
 
 
 def test_chain_scoped_execution_envelope_overrides_yaml(tmp_path, monkeypatch):
