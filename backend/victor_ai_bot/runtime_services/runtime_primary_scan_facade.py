@@ -461,7 +461,7 @@ class RuntimePrimaryScanFacade:
                 gas_cost_wei = int(meta.get("gas_cost_estimate_wei") or 0)
 
             l1_fee_wei = 0
-            l1_fee_status = "execution_envelope_unconfigured"
+            l1_fee_status = "not_applicable"
             if int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID:
                 l1_fee_status = "execution_envelope_unconfigured"
                 try:
@@ -2151,6 +2151,7 @@ class RuntimePrimaryScanFacade:
                 "scan_errors": [],
                 "scan_latency_ms": [],
                 "candidates_added": 0,
+                "single_notional_provider_guard": True,
             }
 
             merged_seed_candidates: List[Opportunity] = list(selected_opps or [])
@@ -2177,39 +2178,24 @@ class RuntimePrimaryScanFacade:
                 seen_seed_keys.add((route_id, candidate_amount))
 
             seed_started = time.perf_counter()
-            for seed_amount in seed_amounts:
-                remaining = float(seed_budget_s) - (
-                    time.perf_counter() - seed_started
-                )
-                if remaining <= 0:
-                    break
-                timeout = min(float(seed_timeout_s), remaining)
-                seed_cache = PerBlockCache()
-                seed_sink: Dict[str, Any] = {}
-                scan_started = time.perf_counter()
-                try:
-                    if selected_provider_url == bootstrap_url:
-                        seed_rpc = bootstrap_rpc
-                        frontier = await asyncio.wait_for(
-                            self._scan_primary_opportunities(
-                                seed_rpc,
-                                current_block=int(current_block),
-                                amount_in=int(seed_amount),
-                                cache=seed_cache,
-                                discovery_context=discovery_context,
-                                telemetry_sink=seed_sink,
-                                shared_token_scan_amounts=shared_token_scan_amounts,
-                                force_adaptive_size_scan=False,
-                            ),
-                            timeout=timeout,
-                        )
-                    else:
-                        async with JsonRpcClient(
-                            selected_provider_url,
-                            timeout_s=10.0,
-                            max_concurrency=30,
-                            max_batch=80,
-                        ) as seed_rpc:
+            previous_provider_comparison = bool(
+                getattr(self, "_rpc_provider_comparison", False)
+            )
+            self._rpc_provider_comparison = True
+            try:
+                for seed_amount in seed_amounts:
+                    remaining = float(seed_budget_s) - (
+                        time.perf_counter() - seed_started
+                    )
+                    if remaining <= 0:
+                        break
+                    timeout = min(float(seed_timeout_s), remaining)
+                    seed_cache = PerBlockCache()
+                    seed_sink: Dict[str, Any] = {}
+                    scan_started = time.perf_counter()
+                    try:
+                        if selected_provider_url == bootstrap_url:
+                            seed_rpc = bootstrap_rpc
                             frontier = await asyncio.wait_for(
                                 self._scan_primary_opportunities(
                                     seed_rpc,
@@ -2223,62 +2209,84 @@ class RuntimePrimaryScanFacade:
                                 ),
                                 timeout=timeout,
                             )
-
-                    additions = 0
-                    for candidate in list(frontier or []):
-                        route_id = str(
-                            getattr(candidate, "route_id", "")
-                            or getattr(candidate, "id", "")
-                            or ""
-                        )
-                        try:
-                            candidate_amount = str(
-                                int(
-                                    getattr(
-                                        getattr(candidate, "route", None).legs[0],
-                                        "amount_in",
-                                        0,
-                                    )
-                                    or 0
+                        else:
+                            async with JsonRpcClient(
+                                selected_provider_url,
+                                timeout_s=10.0,
+                                max_concurrency=30,
+                                max_batch=80,
+                            ) as seed_rpc:
+                                frontier = await asyncio.wait_for(
+                                    self._scan_primary_opportunities(
+                                        seed_rpc,
+                                        current_block=int(current_block),
+                                        amount_in=int(seed_amount),
+                                        cache=seed_cache,
+                                        discovery_context=discovery_context,
+                                        telemetry_sink=seed_sink,
+                                        shared_token_scan_amounts=shared_token_scan_amounts,
+                                        force_adaptive_size_scan=False,
+                                    ),
+                                    timeout=timeout,
                                 )
-                            )
-                        except (AttributeError, IndexError, TypeError, ValueError):
-                            candidate_amount = ""
-                        key = (route_id, candidate_amount)
-                        if key in seen_seed_keys:
-                            continue
-                        seen_seed_keys.add(key)
-                        merged_seed_candidates.append(candidate)
-                        additions += 1
 
-                    frontier_seed_telemetry["candidate_counts"].append(
-                        {
-                            "amount_in": str(int(seed_amount)),
-                            "returned": int(len(frontier or [])),
-                            "added": int(additions),
-                        }
-                    )
-                    frontier_seed_telemetry["scan_latency_ms"].append(
-                        float(
-                            seed_sink.get("scan_latency_ms")
-                            or ((time.perf_counter() - scan_started) * 1000.0)
+                        additions = 0
+                        for candidate in list(frontier or []):
+                            route_id = str(
+                                getattr(candidate, "route_id", "")
+                                or getattr(candidate, "id", "")
+                                or ""
+                            )
+                            try:
+                                candidate_amount = str(
+                                    int(
+                                        getattr(
+                                            getattr(candidate, "route", None).legs[0],
+                                            "amount_in",
+                                            0,
+                                        )
+                                        or 0
+                                    )
+                                )
+                            except (AttributeError, IndexError, TypeError, ValueError):
+                                candidate_amount = ""
+                            key = (route_id, candidate_amount)
+                            if key in seen_seed_keys:
+                                continue
+                            seen_seed_keys.add(key)
+                            merged_seed_candidates.append(candidate)
+                            additions += 1
+
+                        frontier_seed_telemetry["candidate_counts"].append(
+                            {
+                                "amount_in": str(int(seed_amount)),
+                                "returned": int(len(frontier or [])),
+                                "added": int(additions),
+                            }
                         )
-                    )
-                except asyncio.TimeoutError:
-                    frontier_seed_telemetry["scan_errors"].append(
-                        {
-                            "amount_in": str(int(seed_amount)),
-                            "reason": "frontier_seed_timeout",
-                            "timeout_s": float(timeout),
-                        }
-                    )
-                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
-                    frontier_seed_telemetry["scan_errors"].append(
-                        {
-                            "amount_in": str(int(seed_amount)),
-                            "reason": f"{type(exc).__name__}: {exc}",
-                        }
-                    )
+                        frontier_seed_telemetry["scan_latency_ms"].append(
+                            float(
+                                seed_sink.get("scan_latency_ms")
+                                or ((time.perf_counter() - scan_started) * 1000.0)
+                            )
+                        )
+                    except asyncio.TimeoutError:
+                        frontier_seed_telemetry["scan_errors"].append(
+                            {
+                                "amount_in": str(int(seed_amount)),
+                                "reason": "frontier_seed_timeout",
+                                "timeout_s": float(timeout),
+                            }
+                        )
+                    except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                        frontier_seed_telemetry["scan_errors"].append(
+                            {
+                                "amount_in": str(int(seed_amount)),
+                                "reason": f"{type(exc).__name__}: {exc}",
+                            }
+                        )
+            finally:
+                self._rpc_provider_comparison = previous_provider_comparison
 
             selected_opps = merged_seed_candidates
             frontier_seed_telemetry["candidates_added"] = max(
