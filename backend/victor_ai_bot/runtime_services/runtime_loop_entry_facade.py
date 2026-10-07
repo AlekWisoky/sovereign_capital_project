@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import time
 
 from victor_ai_bot.rpc import JsonRpcClient
 
@@ -14,6 +15,10 @@ class RuntimeLoopEntryFacade:
     """
 
     async def _run_loop_entry_iteration(self, *, loop_started_at: float) -> None:
+        loop_telemetry = dict(getattr(self, "_runtime_loop_telemetry", {}) or {})
+        loop_telemetry["last_loop_entered_ms"] = int(time.time() * 1000)
+        loop_telemetry["task_status"] = "running"
+        self._runtime_loop_telemetry = loop_telemetry
         # Prefer currently healthy/readable endpoints, but always retain the
         # configured best endpoint as a bootstrap fallback. A single provider
         # outage must not suppress an entire chain's discovery cycle.
