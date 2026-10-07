@@ -301,11 +301,15 @@ async def produce_market_price_evidence(
     cfg: Any,
     tokens: list[tuple[str, str]],
     block_number: int,
+    strict: bool = True,
 ) -> dict[str, dict[str, Any]]:
-    """Reuse the canonical USD quote path for pre-decision simulation inputs.
+    """Reuse the canonical USD quote path for pre-decision market-data inputs.
 
-    This is market-data evidence only. It does not create decision lineage,
-    settlement economics, or execution authority.
+    With strict=True (the default), any token-data failure aborts the request.
+    Scan-only callers may set strict=False to retain independently valid token
+    prices while recording unpriceable tokens at their caller's telemetry layer.
+    This function never creates decision lineage, settlement economics, or
+    execution authority.
     """
     block_number = int(block_number)
     if block_number <= 0:
@@ -317,28 +321,35 @@ async def produce_market_price_evidence(
     for token, role in tokens:
         normalized = str(token or "").strip()
         if not normalized:
-            raise FinalQuoteError("market_data_token_missing")
-        key = normalized.lower()
-        if key == stable.lower():
-            decimals = stable_decimals
-            price_usd = 1.0
-            fee = 0
-            stable_amount = 10**stable_decimals
-        else:
-            decimals = await resolve_erc20_decimals(rpc, normalized, block=block)
-            request = FinalQuoteRequest(rpc=rpc, cfg=cfg, opp=None, decision=None, block_number=block_number)
-            price_usd, fee, stable_amount = await _best_v3_quote(
-                request,
-                factory=factory,
-                quoter=quoter,
-                token=normalized,
-                stable=stable,
-                stable_decimals=stable_decimals,
-                raw_amount=10**decimals,
-                block=block,
-            )
-        if price_usd <= 0:
-            raise FinalQuoteError("market_data_usd_price_invalid")
+            if strict:
+                raise FinalQuoteError("market_data_token_missing")
+            continue
+        try:
+            key = normalized.lower()
+            if key == stable.lower():
+                decimals = stable_decimals
+                price_usd = 1.0
+                fee = 0
+                stable_amount = 10**stable_decimals
+            else:
+                decimals = await resolve_erc20_decimals(rpc, normalized, block=block)
+                request = FinalQuoteRequest(rpc=rpc, cfg=cfg, opp=None, decision=None, block_number=block_number)
+                price_usd, fee, stable_amount = await _best_v3_quote(
+                    request,
+                    factory=factory,
+                    quoter=quoter,
+                    token=normalized,
+                    stable=stable,
+                    stable_decimals=stable_decimals,
+                    raw_amount=10**decimals,
+                    block=block,
+                )
+            if price_usd <= 0:
+                raise FinalQuoteError("market_data_usd_price_invalid")
+        except (FinalQuoteError, OSError, RuntimeError, TypeError, ValueError, OverflowError):
+            if strict:
+                raise
+            continue
         out[key] = {
             "address": normalized,
             "decimals": int(decimals),
