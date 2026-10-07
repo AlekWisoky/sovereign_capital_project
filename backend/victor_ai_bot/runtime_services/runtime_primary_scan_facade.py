@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, List
 from urllib.parse import urlsplit
 
-from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities
+from ..arb_engine import find_three_leg_opportunities, find_two_leg_opportunities, requote_opportunity
 from ..execution_capture.final_quote import FinalQuoteError, produce_market_price_evidence
 from ..cache import PerBlockCache
 from ..gas_model import BASE_CHAIN_ID, estimate_base_l1_fee_wei, estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
@@ -1467,6 +1467,14 @@ class RuntimePrimaryScanFacade:
                 two_leg_telemetry,
                 three_leg_telemetry,
             )
+            telemetry["reverse_leg_prefilter"] = dict(
+                two_leg_telemetry.get("reverse_leg_prefilter") or {}
+            )
+            telemetry["pool_event_state"] = dict(
+                two_leg_telemetry.get("pool_event_state")
+                or three_leg_telemetry.get("pool_event_state")
+                or {}
+            )
             telemetry["gross_candidates"] = len(opps)
             telemetry["route_rejections"] = route_rejections
             telemetry["failed_quote_edge_samples"] = list(
@@ -1525,6 +1533,253 @@ class RuntimePrimaryScanFacade:
             else:
                 self._market_pipeline_telemetry = telemetry
             raise
+
+    async def _run_bounded_selected_provider_size_probe(
+        self,
+        rpc: Any,
+        *,
+        current_block: int,
+        base_amount_in: int,
+        base_opps: List[Opportunity],
+        cache: PerBlockCache,
+    ) -> tuple[List[Opportunity], Dict[str, Any]]:
+        """Probe promising base routes at alternate notionals without rescanning the graph."""
+        telemetry: Dict[str, Any] = {}
+        adaptive_amounts = self._adaptive_scan_amounts(
+            int(base_amount_in),
+            force_adaptive_size_scan=True,
+        )
+        try:
+            min_opportunities = max(
+                1,
+                int(os.environ.get("VICTOR_ADAPTIVE_SIZE_MIN_OPPORTUNITIES", "2") or 2),
+            )
+        except (TypeError, ValueError):
+            min_opportunities = 2
+
+        def _after_cost(candidate: Any) -> int:
+            meta = getattr(candidate, "meta", {}) or {}
+            profitability = meta.get("profitability") if isinstance(meta, dict) else {}
+            if not isinstance(profitability, dict):
+                return -1
+            try:
+                return int(profitability.get("profit_after_costs_wei") or -1)
+            except (TypeError, ValueError):
+                return -1
+
+        def _route_key(candidate: Any) -> str:
+            return str(
+                getattr(candidate, "route_id", "")
+                or getattr(candidate, "id", "")
+                or ""
+            )
+
+        direct = [
+            candidate
+            for candidate in list(base_opps or [])
+            if str(getattr(candidate, "strategy", "") or "").startswith("two-leg:")
+        ]
+        triangles = [
+            candidate
+            for candidate in list(base_opps or [])
+            if str(getattr(candidate, "strategy", "") or "").startswith("tri:")
+        ]
+        direct.sort(key=opportunity_profit_sort_key, reverse=True)
+        triangles.sort(key=opportunity_profit_sort_key, reverse=True)
+
+        try:
+            route_cap = max(
+                4,
+                min(24, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_ROUTE_CAP", "12") or 12)),
+            )
+        except (TypeError, ValueError):
+            route_cap = 12
+        try:
+            triangle_cap = max(
+                0,
+                min(route_cap, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_TRIANGLE_CAP", "4") or 4)),
+            )
+        except (TypeError, ValueError):
+            triangle_cap = 4
+
+        selected: List[Opportunity] = []
+        seen_routes: set[str] = set()
+        for candidate in [*direct[:route_cap], *triangles[:triangle_cap]]:
+            key = _route_key(candidate)
+            if key and key in seen_routes:
+                continue
+            if key:
+                seen_routes.add(key)
+            selected.append(candidate)
+            if len(selected) >= route_cap:
+                break
+
+        positive_base = sum(1 for candidate in base_opps if _after_cost(candidate) > 0)
+        should_probe = bool(
+            len(adaptive_amounts) > 1
+            and (
+                positive_base < min_opportunities
+                or len(selected) < min_opportunities
+            )
+        )
+        telemetry["adaptive_size_discovery"] = {
+            "enabled": bool(len(adaptive_amounts) > 1),
+            "base_amount_in": str(int(base_amount_in)),
+            "amounts_scanned": [str(int(base_amount_in))],
+            "probe_triggered": False,
+            "minimum_opportunities": int(min_opportunities),
+            "candidates_before_probe": int(len(base_opps)),
+            "authoritative_positive_candidates_before_probe": int(positive_base),
+            "probe_basis": "bounded_selected_route_requote",
+            "selected_route_count": int(len(selected)),
+            "route_cap": int(route_cap),
+            "triangle_cap": int(triangle_cap),
+            "probe_candidate_delta": 0,
+            "probe_quote_failures": 0,
+        }
+        if not should_probe:
+            return list(base_opps), telemetry
+
+        probe_amounts: List[int] = []
+        for amount in list(adaptive_amounts[1:5]):
+            if int(amount) not in probe_amounts:
+                probe_amounts.append(int(amount))
+        if len(adaptive_amounts) > 1:
+            terminal = int(adaptive_amounts[-1])
+            if terminal not in probe_amounts:
+                probe_amounts.append(terminal)
+
+        size_scan_records: List[Dict[str, Any]] = [{
+            "amount_in": int(base_amount_in),
+            "two": list(direct),
+            "three": list(triangles),
+            "two_metrics": {},
+            "three_metrics": {},
+        }]
+        sized: List[Opportunity] = []
+
+        for probe_amount in probe_amounts:
+            tasks = []
+            for candidate in selected:
+                try:
+                    base_raw = int(
+                        getattr(getattr(candidate, "route", None).legs[0], "amount_in", 0)
+                    )
+                except (AttributeError, IndexError, TypeError, ValueError):
+                    base_raw = 0
+                if base_raw <= 0 or int(base_amount_in) <= 0:
+                    continue
+                raw_probe = max(
+                    1,
+                    int(round(float(base_raw) * float(probe_amount) / float(max(1, int(base_amount_in))))),
+                )
+                try:
+                    clone = candidate.model_copy(deep=True)
+                except AttributeError:
+                    continue
+                tasks.append(
+                    requote_opportunity(
+                        rpc,
+                        self.cfg,
+                        cache,
+                        clone,
+                        new_amount_in=raw_probe,
+                        slippage_bps=int(self.cfg.safety.slippage_bps),
+                    )
+                )
+            if not tasks:
+                continue
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            probe_rows: List[Opportunity] = []
+            for result in results:
+                if isinstance(result, Exception) or result is None:
+                    telemetry["adaptive_size_discovery"]["probe_quote_failures"] = int(
+                        telemetry["adaptive_size_discovery"].get("probe_quote_failures", 0)
+                    ) + 1
+                    continue
+                probe_rows.append(result)
+                sized.append(result)
+            size_scan_records.append({
+                "amount_in": int(probe_amount),
+                "two": [
+                    row for row in probe_rows
+                    if str(getattr(row, "strategy", "") or "").startswith("two-leg:")
+                ],
+                "three": [
+                    row for row in probe_rows
+                    if str(getattr(row, "strategy", "") or "").startswith("tri:")
+                ],
+                "two_metrics": {},
+                "three_metrics": {},
+            })
+
+        try:
+            gas_price_consensus = await self.rpc_manager.gas_price_consensus()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            gas_price_consensus = {
+                "gas_price_wei": None,
+                "status": "insufficient_agreement",
+                "observations": [],
+                "anomalies": [],
+            }
+        observed_gas_price_wei = (
+            int(gas_price_consensus.get("gas_price_wei"))
+            if gas_price_consensus.get("gas_price_wei") not in (None, "")
+            else None
+        )
+        if sized:
+            await self._annotate_canonical_after_fee_usd(
+                opps=list(sized),
+                rpc=rpc,
+                current_block=int(current_block),
+                cache=cache,
+                observed_gas_price_wei=observed_gas_price_wei,
+                gas_price_integrity=gas_price_consensus,
+            )
+
+        matrix = _build_size_economic_matrix(size_scan_records)
+        _attach_quote_economic_size_curves([*selected, *sized], matrix)
+        telemetry["size_economic_matrix"] = matrix
+        telemetry["size_economic_evidence"] = [
+            _size_economic_candidate_row(candidate)
+            for candidate in sized
+        ]
+        telemetry["adaptive_size_discovery"].update({
+            "amounts_scanned": [
+                str(int(base_amount_in)),
+                *[str(int(amount)) for amount in probe_amounts],
+            ],
+            "probe_triggered": bool(sized),
+            "probe_candidate_delta": int(len(sized)),
+            "economic_matrix_complete": bool(
+                {str(row.get("amount_in")) for row in matrix}.issuperset(
+                    {
+                        str(int(base_amount_in)),
+                        *[str(int(amount)) for amount in probe_amounts],
+                    }
+                )
+            ),
+            "best_sizing_variants": [
+                {
+                    "route_id": _route_key(candidate),
+                    "amount_in": str(getattr(getattr(candidate.route, "legs", [])[0], "amount_in", "")),
+                    "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+                    "after_cost_profit_wei": str(_after_cost(candidate)),
+                    "revalidated": bool(
+                        (
+                            (getattr(candidate, "meta", {}) or {}).get("profitability")
+                            or {}
+                        ).get("revalidated")
+                    ),
+                }
+                for candidate in sorted(
+                    sized,
+                    key=opportunity_profit_sort_key,
+                    reverse=True,
+                )[:32]
+            ],
+        })
+        return [*base_opps, *sized], telemetry
 
     async def _select_rpc_and_scan(
         self,
@@ -1737,11 +1992,9 @@ class RuntimePrimaryScanFacade:
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
 
-        # Now that the read provider is selected on comparable base-size
-        # economics, perform institutional adaptive sizing exactly once on that
-        # provider. This preserves economic-optimum modeling without multiplying
-        # the size ladder across every RPC candidate.
-        adaptive_cache = PerBlockCache()
+        # Provider comparison already completed the broad graph scan. Size
+        # optimization now re-quotes only the strongest base routes on the
+        # selected provider instead of replaying the entire graph per size.
         adaptive_telemetry: Dict[str, Any] = {}
         self._market_pipeline_telemetry = {
             **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
@@ -1749,46 +2002,34 @@ class RuntimePrimaryScanFacade:
         }
         adaptive_opps: List[Opportunity] = []
         selected_provider_url = str(selected_url)
+        adaptive_cache = PerBlockCache()
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
-                adaptive_opps = await asyncio.wait_for(
-                    self._scan_primary_opportunities(
-                        selected_provider_rpc,
-                        current_block=int(current_block),
-                        amount_in=int(amount_in),
-                        cache=adaptive_cache,
-                        discovery_context=discovery_context,
-                        telemetry_sink=adaptive_telemetry,
-                        shared_token_scan_amounts=shared_token_scan_amounts,
-                        force_adaptive_size_scan=True,
-                    ),
-                    timeout=selection_timeout_s,
+                adaptive_opps, adaptive_telemetry = await self._run_bounded_selected_provider_size_probe(
+                    selected_provider_rpc,
+                    current_block=int(current_block),
+                    base_amount_in=int(amount_in),
+                    base_opps=list(selected_opps or []),
+                    cache=adaptive_cache,
                 )
             else:
                 async with JsonRpcClient(
-                    selected_provider_url, timeout_s=10.0, max_concurrency=30, max_batch=80
+                    selected_provider_url,
+                    timeout_s=10.0,
+                    max_concurrency=30,
+                    max_batch=80,
                 ) as selected_provider_rpc:
-                    adaptive_opps = await asyncio.wait_for(
-                        self._scan_primary_opportunities(
-                            selected_provider_rpc,
-                            current_block=int(current_block),
-                            amount_in=int(amount_in),
-                            cache=adaptive_cache,
-                            discovery_context=discovery_context,
-                            telemetry_sink=adaptive_telemetry,
-                            shared_token_scan_amounts=shared_token_scan_amounts,
-                            force_adaptive_size_scan=True,
-                        ),
-                        timeout=selection_timeout_s,
+                    adaptive_opps, adaptive_telemetry = await self._run_bounded_selected_provider_size_probe(
+                        selected_provider_rpc,
+                        current_block=int(current_block),
+                        base_amount_in=int(amount_in),
+                        base_opps=list(selected_opps or []),
+                        cache=adaptive_cache,
                     )
-        except asyncio.TimeoutError:
-            adaptive_telemetry.setdefault("scan_error", "selected_provider_adaptive_timeout")
-            adaptive_telemetry["provider_scan_timeout_s"] = selection_timeout_s
-            adaptive_opps = []
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
             adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
-            adaptive_opps = []
+            adaptive_opps = list(selected_opps or [])
 
         # Keep provider-comparison telemetry as the symmetric baseline, but
         # always preserve the selected provider's adaptive pass separately.

@@ -263,6 +263,64 @@ async def test_requote_dynamic_slippage_programmer_bug_propagates(monkeypatch):
         )
 
 
+@pytest.mark.asyncio
+async def test_requote_uses_stored_route_edge_params_for_non_univ3_venues(monkeypatch):
+    seen = {}
+
+    async def fake_quote_edge(rpc, cfg, cache, e, amount):
+        seen[e.dex] = dict(e.params)
+        return 120, {"fee": 500}
+
+    monkeypatch.setattr(arb_engine_module, "quote_edge", fake_quote_edge)
+    cfg = _cfg()
+    cfg.chain.aerodrome_router = "0xaero"
+
+    opp = SimpleNamespace(
+        route=SimpleNamespace(
+            legs=[
+                SimpleNamespace(
+                    dex="aerodrome",
+                    venue="0xpool1",
+                    token_in="0x111",
+                    token_out="0x222",
+                    amount_in="100",
+                    min_out="110",
+                    data="0x",
+                ),
+                SimpleNamespace(
+                    dex="aerodrome",
+                    venue="0xpool2",
+                    token_in="0x222",
+                    token_out="0x111",
+                    amount_in="120",
+                    min_out="115",
+                    data="0x",
+                ),
+            ]
+        ),
+        meta={
+            "route_edge_params": [
+                {"stable": True, "factory": "0xfactory1"},
+                {"stable": False, "factory": "0xfactory2"},
+            ],
+        },
+    )
+
+    requoted = await requote_opportunity(
+        object(),
+        cfg,
+        PerBlockCache(),
+        opp,
+        new_amount_in=100,
+        slippage_bps=50,
+    )
+
+    assert requoted is not None
+    assert seen["aerodrome"] == {"stable": False, "factory": "0xfactory2"}
+
+
+
+
 def test_arb_engine_has_no_broad_exception_handlers():
     module = ast.parse((ROOT / 'arb_engine.py').read_text(encoding='utf-8'))
     broad = []

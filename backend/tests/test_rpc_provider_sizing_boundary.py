@@ -40,6 +40,7 @@ import pytest
 async def test_provider_comparison_does_not_force_adaptive_scan():
     runtime = RuntimePrimaryScanFacade()
     calls = []
+    probe_calls = []
 
     class FakeManager:
         def read_candidates(self):
@@ -60,6 +61,15 @@ async def test_provider_comparison_does_not_force_adaptive_scan():
     async def fake_token_amounts(*args, **kwargs):
         return {}, {}
 
+    async def fake_probe(*args, **kwargs):
+        probe_calls.append(True)
+        return [], {
+            "adaptive_size_discovery": {
+                "amounts_scanned": ["1000", "500", "1500"],
+                "probe_triggered": True,
+            }
+        }
+
     async def fake_scan(*args, **kwargs):
         calls.append(bool(kwargs.get("force_adaptive_size_scan")))
         telemetry = kwargs["telemetry_sink"]
@@ -76,6 +86,7 @@ async def test_provider_comparison_does_not_force_adaptive_scan():
     runtime._build_discovery_context = fake_discovery
     runtime._build_token_scan_amounts = fake_token_amounts
     runtime._scan_primary_opportunities = fake_scan
+    runtime._run_bounded_selected_provider_size_probe = fake_probe
     runtime.cache = object()
 
     await runtime._select_rpc_and_scan(
@@ -84,7 +95,8 @@ async def test_provider_comparison_does_not_force_adaptive_scan():
         amount_in=1_000,
     )
 
-    assert calls == [False, True]
+    assert calls == [False]
+    assert probe_calls == [True]
 
 
 def test_selected_provider_force_flag_bypasses_provider_comparison(monkeypatch):
