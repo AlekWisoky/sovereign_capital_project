@@ -450,3 +450,98 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
         current_block=1,
     )
     assert opportunity.meta["canonical_after_fee_usd"]["profit_after_costs_usd_micro"] == "-500"
+
+
+@pytest.mark.asyncio
+async def test_runtime_rpc_race_bounds_slow_provider_without_blocking_fast_provider(monkeypatch):
+    monkeypatch.setenv("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "0.25")
+
+    class _Manager:
+        def __init__(self):
+            self.telemetry = []
+
+        def read_candidates(self):
+            return ["https://rpc-fast.example", "https://rpc-slow.example"]
+
+        def observe_quote_telemetry(self, url, **kwargs):
+            self.telemetry.append((url, kwargs))
+
+        def snapshot(self):
+            return {
+                "read": [
+                    {"url": "https://rpc-fast.example", "ok": True, "score": 10.0},
+                    {"url": "https://rpc-slow.example", "ok": True, "score": 20.0},
+                ]
+            }
+
+    class _Rpc:
+        def __init__(self, url):
+            self.url = url
+
+    class _Client:
+        def __init__(self, url, **kwargs):
+            self.url = url
+
+        async def __aenter__(self):
+            return _Rpc(self.url)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    runtime = RuntimePrimaryScanFacade()
+    runtime.rpc_manager = _Manager()
+    runtime.cfg = SimpleNamespace()
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_scan(
+        rpc,
+        *,
+        current_block,
+        amount_in,
+        cache,
+        discovery_context,
+        telemetry_sink,
+        shared_token_scan_amounts=None,
+        force_adaptive_size_scan=False,
+    ):
+        if rpc.url.endswith("slow.example"):
+            await asyncio.sleep(1.0)
+        telemetry_sink.update({
+            "quotes": {"requests": 4, "successes": 4, "failure_reasons": {}},
+            "scan_latency_ms": 1.0,
+            "route_universe": {"edges_by_dex": {"univ3": 1}},
+            "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
+            "adaptive_size_discovery": {"amounts_scanned": ["1000"]},
+        })
+        return [
+            SimpleNamespace(
+                meta={
+                    "canonical_after_fee_usd": {
+                        "verified": True,
+                        "profit_after_costs_usd_micro": 500,
+                    }
+                }
+            )
+        ]
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.JsonRpcClient",
+        _Client,
+    )
+    monkeypatch.setattr(runtime, "_build_discovery_context", fake_discovery)
+    monkeypatch.setattr(runtime, "_scan_primary_opportunities", fake_scan)
+
+    result = await runtime._select_rpc_and_scan(
+        bootstrap_rpc=_Rpc("https://rpc-fast.example"),
+        current_block=123,
+        amount_in=1_000,
+    )
+
+    assert result["selected_endpoint"] == "https://rpc-fast.example"
+    providers = result["telemetry"]["rpc"]["economic_selection"]["candidates"]
+    slow = next(item for item in providers if item["endpoint"].endswith("slow.example"))
+    assert slow["healthy"] is False
+    assert slow["scan_latency_ms"] >= 250.0
+    assert result["telemetry"]["rpc_selection_phase"] == "complete"
