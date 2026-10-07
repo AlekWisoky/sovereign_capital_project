@@ -5,17 +5,17 @@
 - generated_at_iso: 2026-10-04T05:51:11.946Z
 - thin_shell_runtime_py_lines: 47
 - thin_shell_api_py_lines: 21
-- backend_test_file_count: 368
+- backend_test_file_count: 376
 - mobile_test_file_count: 15
-- route_count: 165
+- route_count: 167
 - route_count_basis: app_routes
-- http_route_count: 161
+- http_route_count: 163
 - http_route_count_basis: http_methods_excluding_head_options
-- application_route_count: 157
+- application_route_count: 159
 - framework_route_count: 4
-- app_route_count: 165
+- app_route_count: 167
 - websocket_route_count: 4
-- runtime_legacy_lines: 183
+- runtime_legacy_lines: 203
 - api_legacy_lines: 83
 - runtime_bundle_definition_count: 1
 - runtime_legacy_broad_except_count: 0
@@ -28,7 +28,7 @@
 - contract_validation_command: ./scripts/verify_contracts.sh
 
 ## Broad exception sites
-- backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py:45 except Exception as e:
+- backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py:47 except Exception as e:
 
 ## Runtime services
 - admission_service
@@ -66,11 +66,14 @@
 - family_hardening_service
 - fund_service
 - institutional_sizing_runtime
+- jupiter_shadow
 - launch_service
 - lifecycle_service
+- multiruntime_opportunity_selector
 - omar_receipt_facade
 - operator_summary_service
 - opportunity_service
+- pool_state_event_cache
 - profitability_truth
 - receipt_service
 - replay_service
@@ -124,6 +127,8 @@
 - runtime_treasury_guidance_facade
 - runtime_treasury_overlay_facade
 - runtime_unit_econ_facade
+- solana_jupiter
+- solana_raydium
 - state_service
 - state_summary_service
 - summary_read_contract

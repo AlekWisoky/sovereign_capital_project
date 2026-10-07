@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 375,
+  "backend_test_file_count": 376,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -329,6 +329,7 @@
     "test_runtime_unit_econ_facade_extraction.py",
     "test_safety.py",
     "test_scan_profitability_output_semantics.py",
+    "test_selected_provider_frontier_seed.py",
     "test_sentry_config.py",
     "test_server_boot_maintenance.py",
     "test_shadow_venue_discovery.py",
@@ -2162,7 +2163,7 @@
     ]
   },
   "tests": {
-    "backend_test_files": 373,
+    "backend_test_files": 376,
     "backend_test_names": [
       "test_95plus_realism.py",
       "test_adaptation_maintenance.py",
@@ -2193,6 +2194,10 @@
       "test_bankroll_native_timestamp_persistence.py",
       "test_behaveagent_runtime_maintenance.py",
       "test_cache.py",
+      "test_camelot_algebra_discovery.py",
+      "test_camelot_algebra_quote.py",
+      "test_camelot_algebra_route_execution.py",
+      "test_camelot_algebra_scan_wiring.py",
       "test_camelot_v2_venue.py",
       "test_candidate_token_discovery_telemetry.py",
       "test_canonical_omar_closed_loop.py",
@@ -2229,6 +2234,7 @@
       "test_command_center_overlay_maintenance.py",
       "test_config_validation_maintenance.py",
       "test_consensus_engine_persistence.py",
+      "test_constant_product_venue.py",
       "test_contract_state.py",
       "test_contract_validation_stage7.py",
       "test_dashboard_capital_contract_adoption.py",
@@ -2334,6 +2340,7 @@
       "test_persistence_and_security.py",
       "test_pnl_store_maintenance.py",
       "test_policy_routes_maintenance.py",
+      "test_pool_state_event_cache.py",
       "test_portfolio_optimizer.py",
       "test_post_mutation_profitability_continuity.py",
       "test_post_mutation_revalidation_contract.py",
@@ -2430,6 +2437,7 @@
       "test_runtime_unit_econ_facade_extraction.py",
       "test_safety.py",
       "test_scan_profitability_output_semantics.py",
+      "test_selected_provider_frontier_seed.py",
       "test_sentry_config.py",
       "test_server_boot_maintenance.py",
       "test_shadow_venue_discovery.py",

@@ -95,7 +95,7 @@ async def test_provider_comparison_does_not_force_adaptive_scan():
         amount_in=1_000,
     )
 
-    assert calls == [False]
+    assert calls == [False, False, False, False]
     assert probe_calls == [True]
 
 
