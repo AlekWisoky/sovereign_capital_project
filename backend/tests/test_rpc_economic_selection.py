@@ -494,6 +494,7 @@ async def test_runtime_rpc_race_bounds_slow_provider_without_blocking_fast_provi
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace()
+    monkeypatch.setattr(runtime, "_provider_scan_timeout_s", lambda: 0.25)
 
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
