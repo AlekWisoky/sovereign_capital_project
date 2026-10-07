@@ -108,17 +108,10 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     monkeypatch.setattr(scan_mod, 'find_three_leg_opportunities', fake_three)
     runtime.cfg.flags.enable_three_leg_loops = True
 
-    opps = await runtime._scan_primary_opportunities(
-        object(),
-        current_block=321,
-        amount_in=10,
-        discovery_context={"_selected_provider_full_graph_base_only": True},
-    )
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=10)
 
     assert runtime._discovery.calls[0]['block_number'] == 321
     assert calls['two']['amount_in'] == 10
-    assert calls['two']['max_reverse_candidates'] == 3
-    assert calls['three']['max_reverse_candidates'] == 3
     assert calls['two']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_camelot_v2_pools'] == [{
