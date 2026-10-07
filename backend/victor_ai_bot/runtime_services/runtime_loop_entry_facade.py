@@ -20,10 +20,48 @@ class RuntimeLoopEntryFacade:
         read_candidates = getattr(self.rpc_manager, "read_candidates", None)
         candidates = list(read_candidates() or []) if callable(read_candidates) else []
         bootstrap_url = self.rpc_manager.best_read()
+
+        # The configured read universe is the authoritative bootstrap fallback.
+        # RpcManager may temporarily lose its live endpoint map after an
+        # operator/provider-state mutation; in that case an empty candidate set
+        # must not strand the scanner indefinitely.
+        if not bootstrap_url:
+            configured = list(
+                getattr(getattr(self, "cfg", None), "chain", None)
+                and getattr(self.cfg.chain, "rpc_read", None)
+                or []
+            )
+            configured = [str(url) for url in configured if str(url).strip()]
+            if configured:
+                sync_preferences = getattr(self.rpc_manager, "sync_read_preferences", None)
+                if callable(sync_preferences):
+                    try:
+                        sync_preferences(configured)
+                    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+                        pass
+                candidates = list(dict.fromkeys([*configured, *candidates]))
+                bootstrap_url = candidates[0] if candidates else configured[0]
+
         if bootstrap_url:
             candidates.insert(0, bootstrap_url)
         candidates = list(dict.fromkeys(str(url) for url in candidates if str(url).strip()))
         if not candidates:
+            telemetry = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
+            telemetry["scan_status"] = "blocked_before_scan"
+            telemetry["scan_error"] = "no_read_rpc_candidates"
+            telemetry["rpc"] = {
+                "endpoint": "",
+                "provider": "",
+                "ok": False,
+                "configured_read_count": len(
+                    list(
+                        getattr(getattr(self, "cfg", None), "chain", None)
+                        and getattr(self.cfg.chain, "rpc_read", None)
+                        or []
+                    )
+                ),
+            }
+            self._market_pipeline_telemetry = telemetry
             await self._sleep(1.0)
             return
 

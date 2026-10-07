@@ -50,6 +50,14 @@ class _RuntimeNoRead(_Runtime):
     def __init__(self):
         super().__init__()
         self.read_url = ''
+        self.rpc_manager = type('Mgr', (), {
+            'best_read': lambda s: '',
+            'read_candidates': lambda s: [],
+            'sync_read_preferences': lambda s, urls: self.calls.append(('sync_preferences', list(urls))),
+        })()
+        self.cfg = type('Cfg', (), {
+            'chain': type('Chain', (), {'rpc_read': ['https://configured.example']})(),
+        })()
 
 
 class _RuntimeNoBlock(_Runtime):
@@ -88,12 +96,16 @@ async def test_loop_entry_iteration_preserves_prepare_then_contained_order(monke
 
 
 @pytest.mark.asyncio
-async def test_loop_entry_iteration_sleeps_when_no_read_url():
+async def test_loop_entry_iteration_restores_configured_rpc_when_live_map_is_empty(monkeypatch):
     runtime = _RuntimeNoRead()
-
+    monkeypatch.setattr(
+        'victor_ai_bot.runtime_services.runtime_loop_entry_facade.JsonRpcClient',
+        lambda *a, **k: _RpcContext(runtime.calls),
+    )
     await runtime._run_loop_entry_iteration(loop_started_at=0.0)
-
-    assert runtime.calls == [('sleep', 1.0)]
+    assert [name for name, _ in runtime.calls] == [
+        'sync_preferences', 'enter_rpc', 'prepare', 'contained', 'exit_rpc',
+    ]
 
 
 @pytest.mark.asyncio
