@@ -2006,12 +2006,24 @@ class RuntimePrimaryScanFacade:
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
-                adaptive_opps, adaptive_telemetry = await self._run_bounded_selected_provider_size_probe(
-                    selected_provider_rpc,
-                    current_block=int(current_block),
-                    base_amount_in=int(amount_in),
-                    base_opps=list(selected_opps or []),
-                    cache=adaptive_cache,
+                adaptive_opps, adaptive_telemetry = await asyncio.wait_for(
+
+                    self._run_bounded_selected_provider_size_probe(
+
+                        selected_provider_rpc,
+
+                        current_block=int(current_block),
+
+                        base_amount_in=int(amount_in),
+
+                        base_opps=list(selected_opps or []),
+
+                        cache=adaptive_cache,
+
+                    ),
+
+                    timeout=selection_timeout_s,
+
                 )
             else:
                 async with JsonRpcClient(
@@ -2020,13 +2032,29 @@ class RuntimePrimaryScanFacade:
                     max_concurrency=30,
                     max_batch=80,
                 ) as selected_provider_rpc:
-                    adaptive_opps, adaptive_telemetry = await self._run_bounded_selected_provider_size_probe(
-                        selected_provider_rpc,
-                        current_block=int(current_block),
-                        base_amount_in=int(amount_in),
-                        base_opps=list(selected_opps or []),
-                        cache=adaptive_cache,
+                    adaptive_opps, adaptive_telemetry = await asyncio.wait_for(
+
+                        self._run_bounded_selected_provider_size_probe(
+
+                            selected_provider_rpc,
+
+                            current_block=int(current_block),
+
+                            base_amount_in=int(amount_in),
+
+                            base_opps=list(selected_opps or []),
+
+                            cache=adaptive_cache,
+
+                        ),
+
+                        timeout=selection_timeout_s,
+
                     )
+        except asyncio.TimeoutError:
+            adaptive_telemetry.setdefault("scan_error", "selected_provider_adaptive_timeout")
+            adaptive_telemetry["provider_scan_timeout_s"] = selection_timeout_s
+            adaptive_opps = list(selected_opps or [])
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
             adaptive_telemetry.setdefault("scan_error", f"{type(exc).__name__}: {exc}")
             adaptive_opps = list(selected_opps or [])
