@@ -519,57 +519,32 @@ class MultiRuntimeOpportunitySelector:
             error = None
 
         opportunities = list(getattr(runtime, "_opps", []) or [])
-        evidence = [
-            self._candidate_evidence(
-                runtime_name,
-                len(opportunities),
-                candidate,
-                _mapping(summary),
-                execution_token_authorized=bool(
-                    (
-                        {
-                            str(token).lower()
-                            for token in (
-                                getattr(
-                                    getattr(runtime, "cfg", None),
-                                    "chain",
-                                    None,
-                                )
-                                and getattr(runtime.cfg.chain, "token_universe", [])
-                                or []
-                            )
-                            if token
-                        }
-                    )
-                    and str(
-                        getattr(
-                            getattr(
-                                getattr(candidate, "route", None),
-                                "legs",
-                                [None],
-                            )[0],
-                            "token_in",
-                            "",
-                        )
-                        or ""
-                    ).lower()
-                    in {
-                        str(token).lower()
-                        for token in (
-                            getattr(
-                                getattr(runtime, "cfg", None),
-                                "chain",
-                                None,
-                            )
-                            and getattr(runtime.cfg.chain, "token_universe", [])
-                            or []
-                        )
-                        if token
-                    }
-                ),
+        chain = getattr(getattr(runtime, "cfg", None), "chain", None)
+        execution_tokens = {
+            str(token).lower()
+            for token in (getattr(chain, "token_universe", []) or [])
+            if token
+        }
+        evidence = []
+        for candidate in opportunities:
+            legs = list(getattr(getattr(candidate, "route", None), "legs", []) or [])
+            input_token = (
+                str(getattr(legs[0], "token_in", "") or "").lower()
+                if legs
+                else ""
             )
-            for candidate in opportunities
-        ]
+            execution_token_authorized = bool(
+                execution_tokens and input_token in execution_tokens
+            )
+            evidence.append(
+                self._candidate_evidence(
+                    runtime_name,
+                    len(opportunities),
+                    candidate,
+                    _mapping(summary),
+                    execution_token_authorized=execution_token_authorized,
+                )
+            )
         return evidence, error
 
     async def select(
