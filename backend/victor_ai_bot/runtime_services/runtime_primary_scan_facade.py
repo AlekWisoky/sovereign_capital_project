@@ -44,6 +44,51 @@ async def _gather_selected_provider_scan_batch(
             raise result
 
 
+def _selected_provider_chunk_accounting(
+    *,
+    graph_edge_count: int,
+    chunk_size: int,
+    chunk_statuses: Dict[int, str],
+    chunk_status_reasons: Dict[int, str],
+) -> Dict[str, Any]:
+    """Account for every scheduled, failed, timed-out, or budget-skipped graph slice."""
+    edge_count = max(0, int(graph_edge_count))
+    size = max(1, int(chunk_size))
+    total = max(1, (edge_count + size - 1) // size)
+    statuses = {int(index): str(status) for index, status in chunk_statuses.items()}
+    reasons = {int(index): str(reason) for index, reason in chunk_status_reasons.items()}
+    for index in range(total):
+        status = statuses.get(index, "pending")
+        if status == "pending":
+            statuses[index] = "skipped_budget"
+            reasons[index] = "budget_exhausted_before_schedule"
+        elif status == "running":
+            # A task that escaped its local exception boundary is not left unaccounted.
+            statuses[index] = "failed"
+            reasons[index] = "task_failed_outside_chunk_boundary"
+    rows = [
+        {
+            "index": index,
+            "offset": index * size,
+            "edges": min(size, max(0, edge_count - index * size)),
+            "status": statuses[index],
+            **({"reason": reasons[index]} if index in reasons else {}),
+        }
+        for index in range(total)
+    ]
+    final_statuses = [row["status"] for row in rows]
+    return {
+        "chunk_accounting": rows,
+        "chunks_timed_out": sum(status == "timed_out" for status in final_statuses),
+        "chunks_failed": sum(status == "failed" for status in final_statuses),
+        "chunks_skipped": sum(status == "skipped_budget" for status in final_statuses),
+        "chunks_accounted": sum(
+            status in {"completed", "timed_out", "failed", "skipped_budget"}
+            for status in final_statuses
+        ),
+    }
+
+
 class _FrozenProviderScanPoolEventCache:
     """Immutable provider-comparison graph and edge-priority view for one tick."""
 
@@ -2664,37 +2709,13 @@ class RuntimePrimaryScanFacade:
             if full_scan_opps:
                 selected_opps = [*list(selected_result[1] or []), *full_scan_opps]
 
-            for chunk_index, status in list(chunk_statuses.items()):
-                if status == "pending":
-                    chunk_statuses[chunk_index] = "skipped_budget"
-                    chunk_status_reasons[chunk_index] = "budget_exhausted_before_schedule"
-                elif status == "running":
-                    # A task that escaped the local exception boundary is a
-                    # failed chunk, not an unaccounted edge range.
-                    chunk_statuses[chunk_index] = "failed"
-                    chunk_status_reasons[chunk_index] = "task_failed_outside_chunk_boundary"
-            full_scan_telemetry["chunk_accounting"] = [
-                {
-                    "index": int(index),
-                    "offset": int(index * chunk_size),
-                    "edges": int(min(chunk_size, max(0, graph_edge_count - index * chunk_size))),
-                    "status": str(chunk_statuses[index]),
-                    **({"reason": chunk_status_reasons[index]} if index in chunk_status_reasons else {}),
-                }
-                for index in range(chunk_total)
-            ]
-            full_scan_telemetry["chunks_timed_out"] = sum(
-                status == "timed_out" for status in chunk_statuses.values()
-            )
-            full_scan_telemetry["chunks_failed"] = sum(
-                status == "failed" for status in chunk_statuses.values()
-            )
-            full_scan_telemetry["chunks_skipped"] = sum(
-                status == "skipped_budget" for status in chunk_statuses.values()
-            )
-            full_scan_telemetry["chunks_accounted"] = sum(
-                status in {"completed", "timed_out", "failed", "skipped_budget"}
-                for status in chunk_statuses.values()
+            full_scan_telemetry.update(
+                _selected_provider_chunk_accounting(
+                    graph_edge_count=graph_edge_count,
+                    chunk_size=chunk_size,
+                    chunk_statuses=chunk_statuses,
+                    chunk_status_reasons=chunk_status_reasons,
+                )
             )
             full_scan_telemetry["returned"] = int(len(full_scan_opps))
             full_scan_telemetry["elapsed_ms"] = float(
