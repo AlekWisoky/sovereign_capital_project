@@ -269,6 +269,65 @@ def _edge_diversity_novelty(
     )
 
 
+def _select_three_leg_frontier_edges(
+    candidates: List[Tuple[int, Edge]],
+    *,
+    active_protocols_by_token: Dict[str, set[str]],
+    active_pools_by_token: Dict[str, set[str]],
+    active_routers_by_token: Dict[str, set[str]],
+    per_token_cap: int,
+    global_cap: int,
+) -> Tuple[List[Edge], Dict[str, List[Edge]]]:
+    """Greedily select bounded edges, recomputing diversity after each pick."""
+    pending = list(candidates)
+    selected: List[Edge] = []
+    by_token: Dict[str, List[Edge]] = []
+    selected_by_token: Dict[str, List[Edge]] = {}
+
+    while pending and len(selected) < max(0, int(global_cap)):
+        best_index = None
+        best_score = None
+        for candidate_index, (order, edge) in enumerate(pending):
+            token = str(edge.token_in)
+            bucket = selected_by_token.get(token, [])
+            if len(bucket) >= max(0, int(per_token_cap)):
+                continue
+            protocols = set(active_protocols_by_token.get(token, set()))
+            pools = set(active_pools_by_token.get(token, set()))
+            routers = set(active_routers_by_token.get(token, set()))
+            for chosen in bucket:
+                protocol = _edge_protocol_identity(chosen)
+                pool = _edge_pool_identity(chosen)
+                router = _edge_router_identity(chosen)
+                if protocol:
+                    protocols.add(protocol)
+                if pool:
+                    pools.add(pool)
+                if router:
+                    routers.add(router)
+            protocol_new, pool_new, router_new = _edge_diversity_novelty(
+                edge,
+                active_protocols=protocols,
+                active_pools=pools,
+                active_routers=routers,
+            )
+            score = (protocol_new, pool_new, router_new, -int(order))
+            if best_score is None or score > best_score:
+                best_index = candidate_index
+                best_score = score
+
+        if best_index is None:
+            break
+        _order, edge = pending.pop(best_index)
+        token = str(edge.token_in)
+        selected_by_token.setdefault(token, []).append(edge)
+        selected.append(edge)
+
+    # Preserve insertion order for downstream adjacency construction.
+    by_token = {token: list(items) for token, items in selected_by_token.items()}
+    return selected, by_token
+
+
 async def quote_edge(
     rpc, cfg, cache: PerBlockCache, edge: Edge, amount_in: int
 ) -> Optional[Tuple[int, Dict[str, Any]]]:
@@ -1903,45 +1962,17 @@ async def find_three_leg_opportunities(
         if closes:
             frontier_candidates.append((order, edge))
 
-    # Greedy bounded selection recomputes novelty against both the existing
-    # adjacency and already selected frontier edges. This avoids counting two
-    # same-protocol/same-pool candidates as two independent diversity gains.
-    while frontier_candidates and len(frontier_selected) < frontier_global:
-        best_index = None
-        best_score = None
-        for candidate_index, (order, edge) in enumerate(frontier_candidates):
-            token = edge.token_in
-            bucket = frontier_by_token.get(token, [])
-            if len(bucket) >= frontier_per_token:
-                continue
-            active_protocols = set(active_protocols_by_token.get(token, set()))
-            active_pools = set(active_pools_by_token.get(token, set()))
-            active_routers = set(active_routers_by_token.get(token, set()))
-            for chosen in bucket:
-                protocol = _edge_protocol_identity(chosen)
-                pool = _edge_pool_identity(chosen)
-                router = _edge_router_identity(chosen)
-                if protocol:
-                    active_protocols.add(protocol)
-                if pool:
-                    active_pools.add(pool)
-                if router:
-                    active_routers.add(router)
-            protocol_new, pool_new, router_new = _edge_diversity_novelty(
-                edge,
-                active_protocols=active_protocols,
-                active_pools=active_pools,
-                active_routers=active_routers,
-            )
-            score = (protocol_new, pool_new, router_new, -order)
-            if best_score is None or score > best_score:
-                best_index = candidate_index
-                best_score = score
-        if best_index is None:
-            break
-        _order, selected_edge = frontier_candidates.pop(best_index)
-        frontier_by_token.setdefault(selected_edge.token_in, []).append(selected_edge)
-        frontier_selected.append(selected_edge)
+    # Quote viability and cycle closure are hard gates. The selector recomputes
+    # protocol, pool, and router novelty after each pick so duplicate diversity
+    # gains cannot consume the bounded frontier quota.
+    frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
+        frontier_candidates,
+        active_protocols_by_token=active_protocols_by_token,
+        active_pools_by_token=active_pools_by_token,
+        active_routers_by_token=active_routers_by_token,
+        per_token_cap=frontier_per_token,
+        global_cap=frontier_global,
+    )
 
     frontier_adj: Dict[str, List[Edge]] = {
         token: list(items) for token, items in adj.items()
