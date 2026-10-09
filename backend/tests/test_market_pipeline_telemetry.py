@@ -122,7 +122,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "failure_reasons": {},
     }
     assert out["rpc"] == {
-        "endpoint": "https://rpc.example",
+        "endpoint": "rpc.example",
         "provider": "rpc.example",
         "score": 123.4,
         "ok": True,
@@ -209,3 +209,76 @@ def test_market_pipeline_telemetry_exposes_candidate_tokens_separately_from_exec
     assert candidate["observed_not_admitted"] == ["0x" + "22" * 20]
     assert candidate["observed_not_admitted_count"] == 1
     assert candidate["admission_mutated"] is False
+
+
+def test_market_pipeline_exposes_gas_consensus_without_rpc_credentials():
+    runtime = _Runtime()
+    runtime._market_pipeline_telemetry["gas_price_integrity"] = {
+        "status": "insufficient_agreement",
+        "gas_price_wei": None,
+        "provider_count": 2,
+        "observed_at": 123.0,
+        "observations": [
+            {
+                "url": "https://user:password@rpc-a.example/v1?apikey=secret-a",
+                "provider": "rpc-a.example",
+                "block_number": 100,
+                "gas_price_wei": 1_000_000_000,
+            },
+            {
+                "url": "https://rpc-b.example/key-secret",
+                "provider": "rpc-b.example",
+                "block_number": 200,
+                "gas_price_wei": 2_000_000_000,
+                "error": "provider failure containing secret-b",
+            },
+        ],
+        "anomalies": [
+            {"reason": "stale_block", "url": "https://rpc-a.example?apikey=secret-a"},
+            {"reason": "stale_block"},
+            {"reason": "gas_price_outlier"},
+        ],
+    }
+
+    summary = runtime.market_pipeline_telemetry_state()["gas_price_integrity"]
+    assert summary["status"] == "insufficient_agreement"
+    assert summary["provider_count"] == 2
+    assert summary["usable_observation_count"] == 1
+    assert summary["observations"] == [
+        {
+            "provider": "rpc-a.example",
+            "block_number": 100,
+            "gas_price_wei": "1000000000",
+            "ok": True,
+            "error_present": False,
+        },
+        {
+            "provider": "rpc-b.example",
+            "block_number": 200,
+            "gas_price_wei": "2000000000",
+            "ok": False,
+            "error_present": True,
+        },
+    ]
+    assert summary["anomaly_reason_counts"] == {
+        "stale_block": 2,
+        "gas_price_outlier": 1,
+    }
+    serialized = str(summary)
+    for secret in ("password", "secret-a", "secret-b", "/v1", "/key-secret"):
+        assert secret not in serialized
+
+
+def test_market_pipeline_sanitizes_rpc_urls_and_raw_errors():
+    runtime = _Runtime()
+    runtime._market_pipeline_telemetry["rpc"].update({
+        "endpoint": "https://user:password@rpc.example/v1?apikey=rpc-secret",
+        "last_error": "connection failed at https://rpc.example/secret-path?token=error-secret",
+    })
+    out = runtime.market_pipeline_telemetry_state()
+    assert out["rpc"]["endpoint"] == "rpc.example"
+    assert out["rpc"]["last_error"] == "rpc_transport_or_provider_error"
+    serialized = str(out["rpc"])
+    for secret in ("password", "rpc-secret", "secret-path", "error-secret", "/v1"):
+        assert secret not in serialized
+

@@ -3325,19 +3325,24 @@ class RuntimePrimaryScanFacade:
             configured = 96
         return max(32, min(configured, 256))
 
-    @staticmethod
-    def _selected_provider_full_scan_chunk_size() -> int:
-        """Keep dense rescue scans granular while allowing bounded operator tuning."""
+    def _selected_provider_full_scan_chunk_size(self) -> int:
+        """Use smaller default rescue chunks on Arbitrum, where provider scans time out."""
+        chain = getattr(getattr(self, "cfg", None), "chain", None)
+        try:
+            chain_id = int(getattr(chain, "chain_id", 0) or 0)
+        except (TypeError, ValueError):
+            chain_id = 0
+        default_size = 8 if chain_id == 42161 else 16
         try:
             configured = int(
                 os.environ.get(
                     "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE",
-                    "16",
+                    str(default_size),
                 )
-                or 16
+                or default_size
             )
         except (TypeError, ValueError):
-            configured = 16
+            configured = default_size
         return max(8, min(configured, 256))
 
     @staticmethod

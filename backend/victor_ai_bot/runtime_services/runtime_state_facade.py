@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlsplit
 
 from ..jsonsafe import to_json_safe
 from .control_state import unavailable_state
@@ -9,6 +10,132 @@ from .fund_service import fund_summary_unavailable_payload
 from .family_hardening_service import family_hardening_unavailable_summary
 
 _RUNTIME_STATE_FACADE_FAILURES = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
+def _safe_provider_host(value: Any) -> str:
+    """Reduce an endpoint string to a host-only label for public diagnostics."""
+    raw = str(value or "").strip()
+    try:
+        host = urlsplit(raw).hostname
+    except ValueError:
+        host = None
+    if host:
+        return str(host)[:128]
+    if "://" in raw:
+        return "unknown"
+    # Compatibility with bare host labels; never retain userinfo, path, or query.
+    label = raw.rsplit("@", 1)[-1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    return label[:128] or "unknown"
+
+
+def _safe_rpc_error_kind(value: Any) -> str:
+    """Replace raw provider errors with stable categories safe for a public API."""
+    message = str(value or "").lower()
+    if any(token in message for token in ("429", "rate limit", "rate_limited")):
+        return "rpc_rate_limited"
+    if "timeout" in message or "timed out" in message:
+        return "rpc_timeout"
+    if any(token in message for token in ("connection", "transport", "ssl", "network")):
+        return "rpc_transport_or_provider_error"
+    if "revert" in message:
+        return "quote_reverted"
+    return "provider_error"
+
+
+def _sanitize_rpc_telemetry(value: Any, key: str = "") -> Any:
+    """Sanitize nested public RPC telemetry, retaining metrics but removing secrets."""
+    lower_key = str(key).lower()
+    if isinstance(value, dict):
+        return {
+            str(child_key): _sanitize_rpc_telemetry(child_value, str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_rpc_telemetry(item, key) for item in value]
+    if isinstance(value, str):
+        if lower_key in {"error", "last_error", "quote_last_error", "error_message", "error_text"}:
+            return _safe_rpc_error_kind(value) if value else value
+        if "://" in value or any(part in lower_key for part in ("url", "endpoint", "uri")):
+            return _safe_provider_host(value)
+    return value
+
+
+def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
+    """Expose useful gas-consensus diagnostics without leaking RPC URLs or credentials."""
+    if not isinstance(value, dict):
+        return {}
+
+    def _int_or_none(raw: Any) -> int | None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    raw_observations = [
+        row for row in list(value.get("observations") or []) if isinstance(row, dict)
+    ][:8]
+    observations: list[Dict[str, Any]] = []
+    for raw in raw_observations:
+        url = str(raw.get("url") or "")
+        host = ""
+        if url:
+            try:
+                host = str(urlsplit(url).hostname or "")
+            except ValueError:
+                host = ""
+        if not host:
+            # Provider labels from RpcManager are normally hostnames. Strip
+            # userinfo, paths, and query strings defensively for compatibility.
+            host = _safe_provider_host(raw.get("provider"))
+        block_number = _int_or_none(raw.get("block_number"))
+        price = _int_or_none(raw.get("gas_price_wei"))
+        error_present = bool(raw.get("error"))
+        observations.append({
+            "provider": host[:128] or "unknown",
+            "block_number": block_number,
+            "gas_price_wei": str(price) if price is not None and price > 0 else None,
+            "ok": bool(
+                block_number is not None
+                and block_number >= 0
+                and price is not None
+                and price > 0
+                and not error_present
+            ),
+            "error_present": error_present,
+        })
+
+    anomaly_reasons: Dict[str, int] = {}
+    for row in list(value.get("anomalies") or []):
+        if not isinstance(row, dict):
+            continue
+        reason = str(row.get("reason") or "unspecified")[:80]
+        anomaly_reasons[reason] = anomaly_reasons.get(reason, 0) + 1
+
+    selected_price = _int_or_none(value.get("gas_price_wei"))
+    provider_count = _int_or_none(value.get("provider_count"))
+    observed_at = value.get("observed_at")
+    try:
+        observed_at = float(observed_at) if observed_at is not None else None
+    except (TypeError, ValueError, OverflowError):
+        observed_at = None
+
+    return {
+        "status": str(value.get("status") or "unknown")[:48],
+        "gas_price_wei": (
+            str(selected_price) if selected_price is not None and selected_price > 0 else None
+        ),
+        "provider_count": max(
+            0,
+            provider_count if provider_count is not None else len(raw_observations),
+        ),
+        "usable_observation_count": sum(1 for row in observations if row["ok"]),
+        "inlier_count": len(
+            [row for row in list(value.get("inliers") or []) if isinstance(row, dict)]
+        ),
+        "observed_at": observed_at,
+        "observations": observations,
+        "anomaly_reason_counts": anomaly_reasons,
+    }
 
 
 class RuntimeStateFacade:
@@ -130,7 +257,10 @@ class RuntimeStateFacade:
                 "failure_reasons": dict(quotes.get("failure_reasons") or {}),
             },
             "scan_sizing": scan_sizing,
-            "rpc": dict(telemetry.get("rpc") or {}),
+            "rpc": _sanitize_rpc_telemetry(telemetry.get("rpc") or {}),
+            "gas_price_integrity": _gas_price_integrity_summary(
+                telemetry.get("gas_price_integrity")
+            ),
             "adaptive_size_discovery": dict(telemetry.get("adaptive_size_discovery") or {}),
             "size_economic_matrix": [
                 dict(row) for row in (telemetry.get("size_economic_matrix") or [])
@@ -175,6 +305,35 @@ class RuntimeStateFacade:
         economics = payload.get("economics", {})
         for key in ("gross_candidates", "after_fee_candidates", "after_fee_positive_candidates"):
             economics[key] = int(economics.get(key) or 0)
+
+        # to_json_safe may normalize nested numeric values; restore the documented
+        # numeric telemetry types explicitly at this public API boundary.
+        gas_integrity = payload.get("gas_price_integrity", {})
+        if isinstance(gas_integrity, dict):
+            for key in ("provider_count", "usable_observation_count", "inlier_count"):
+                try:
+                    gas_integrity[key] = max(0, int(gas_integrity.get(key) or 0))
+                except (TypeError, ValueError, OverflowError):
+                    gas_integrity[key] = 0
+            anomaly_counts = gas_integrity.get("anomaly_reason_counts", {})
+            if isinstance(anomaly_counts, dict):
+                for key, value in list(anomaly_counts.items()):
+                    try:
+                        anomaly_counts[key] = max(0, int(value or 0))
+                    except (TypeError, ValueError, OverflowError):
+                        anomaly_counts[key] = 0
+            observations = gas_integrity.get("observations", [])
+            if isinstance(observations, list):
+                for observation in observations:
+                    if not isinstance(observation, dict):
+                        continue
+                    if observation.get("block_number") is not None:
+                        try:
+                            observation["block_number"] = int(observation["block_number"])
+                        except (TypeError, ValueError, OverflowError):
+                            observation["block_number"] = None
+                    observation["ok"] = bool(observation.get("ok"))
+                    observation["error_present"] = bool(observation.get("error_present"))
         return payload
 
     def execution_capture_analytics(self) -> Dict[str, Any]: return self._state_summary_payload("execution_capture_analytics", default={"laneSuccess": [], "venueQuality": []})
