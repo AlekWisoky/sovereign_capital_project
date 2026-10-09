@@ -22,6 +22,28 @@ from .profitability_truth import opportunity_profit_sort_key
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
+async def _gather_selected_provider_scan_batch(
+    tasks: List[asyncio.Task],
+    chunk_indices: List[int],
+    scan_errors: List[Dict[str, Any]],
+) -> None:
+    """Wait for every rescue chunk and contain unexpected per-task failures."""
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for chunk_index, result in zip(chunk_indices, results):
+        if isinstance(result, asyncio.CancelledError):
+            scan_errors.append({
+                "chunk": int(chunk_index),
+                "reason": "selected_provider_full_scan_chunk_cancelled",
+            })
+        elif isinstance(result, Exception):
+            scan_errors.append({
+                "chunk": int(chunk_index),
+                "reason": f"{type(result).__name__}: {result}",
+            })
+        elif isinstance(result, BaseException):
+            raise result
+
+
 class _FrozenProviderScanPoolEventCache:
     """Immutable provider-comparison graph and edge-priority view for one tick."""
 
@@ -2496,6 +2518,7 @@ class RuntimePrimaryScanFacade:
             async def _run_selected_full_scan_chunks(scan_rpc: Any) -> None:
                 for batch_start in range(0, chunk_total, chunk_parallelism):
                     tasks = []
+                    task_chunk_indices: List[int] = []
                     for chunk_index in range(
                         batch_start,
                         min(chunk_total, batch_start + chunk_parallelism),
@@ -2520,9 +2543,14 @@ class RuntimePrimaryScanFacade:
                                 )
                             )
                         )
+                        task_chunk_indices.append(int(chunk_index))
                     if not tasks:
                         break
-                    await asyncio.gather(*tasks)
+                    await _gather_selected_provider_scan_batch(
+                        tasks,
+                        task_chunk_indices,
+                        full_scan_telemetry["scan_errors"],
+                    )
 
             if callable(slice_fn):
                 if selected_provider_url == bootstrap_url:
