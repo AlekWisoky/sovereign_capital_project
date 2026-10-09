@@ -185,6 +185,7 @@ class Edge:
     token_out: str
     params: Dict[str, Any]
 
+
 def _edge_protocol_identity(edge: Edge) -> str | None:
     """Return the canonical protocol family represented by an execution edge."""
     protocol = str(getattr(edge, "dex", "") or "").strip().lower()
