@@ -624,3 +624,43 @@ def test_frontier_identity_separates_protocol_pool_and_router_diversity():
     assert arb._edge_pool_identity(curve) == "curve:pool:" + pool_a
     assert arb._edge_router_identity(curve) is None
 
+
+
+def test_three_leg_frontier_recomputes_diversity_after_each_selection():
+    token_in = "0x" + "11" * 20
+    univ3 = arb.Edge(
+        "univ3",
+        "0x" + "aa" * 20,
+        token_in,
+        "0x" + "22" * 20,
+        {"fee": 3000, "pool": "pool-univ3-new"},
+    )
+    slipstream_first = arb.Edge(
+        "slipstream",
+        "0x" + "bb" * 20,
+        token_in,
+        "0x" + "33" * 20,
+        {"factory": "factory-slip", "tick_spacing": 100, "pool": "pool-slip-first"},
+    )
+    slipstream_second = arb.Edge(
+        "slipstream",
+        "0x" + "bb" * 20,
+        token_in,
+        "0x" + "44" * 20,
+        {"factory": "factory-slip", "tick_spacing": 100, "pool": "pool-slip-second"},
+    )
+
+    selected, by_token = arb._select_three_leg_frontier_edges(
+        [(0, univ3), (1, slipstream_first), (2, slipstream_second)],
+        active_protocols_by_token={token_in: {"univ3"}},
+        active_pools_by_token={token_in: {"univ3:pool:pool-existing"}},
+        active_routers_by_token={token_in: {"0x" + "aa" * 20}},
+        per_token_cap=2,
+        global_cap=2,
+    )
+
+    # Slipstream wins the first slot as a new protocol. On the next selection,
+    # its sibling is no longer protocol-new; the Uniswap pool therefore wins
+    # the tie-break by discovery order instead of spending both slots on one DEX.
+    assert selected == [slipstream_first, univ3]
+    assert by_token[token_in] == [slipstream_first, univ3]
