@@ -281,7 +281,7 @@ def _select_three_leg_frontier_edges(
     """Greedily select bounded edges, recomputing diversity after each pick."""
     pending = list(candidates)
     selected: List[Edge] = []
-    by_token: Dict[str, List[Edge]] = []
+    by_token: Dict[str, List[Edge]] = {}
     selected_by_token: Dict[str, List[Edge]] = {}
 
     while pending and len(selected) < max(0, int(global_cap)):
