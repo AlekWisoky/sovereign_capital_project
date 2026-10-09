@@ -31,8 +31,6 @@ def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_front
     assert runtime._selected_provider_frontier_seed_budget_s() == 12.0
 
 
-
-
 def test_arbitrum_full_scan_defaults_to_smaller_rescue_chunks(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     runtime.cfg = SimpleNamespace(chain=SimpleNamespace(chain_id=42161))
