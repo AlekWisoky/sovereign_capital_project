@@ -416,6 +416,9 @@ def test_reverse_prefilter_keeps_protocol_and_pool_diversity():
     assert stats["total"] == 10
     assert stats["selected"] == 8
     assert stats["filtered"] == 2
+    assert stats["protocols_selected"] == 3
+    assert stats["pools_selected"] == 8
+    assert stats["routers_selected"] == 8
 
 
 
@@ -570,3 +573,53 @@ async def test_selected_rescue_reverse_candidate_cap_bounds_two_leg_fanout(monke
     # batch is bounded to at most the configured rescue cap.
     assert batch_sizes[0] == 9
     assert max(batch_sizes[1:]) <= 3
+
+
+def test_frontier_identity_separates_protocol_pool_and_router_diversity():
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    router_a = "0x" + "aa" * 20
+    router_b = "0x" + "bb" * 20
+    pool_a = "0x" + "a1" * 20
+    pool_b = "0x" + "b2" * 20
+    pool_c = "0x" + "c3" * 20
+
+    univ3_a = arb.Edge("univ3", router_a, token_a, token_b, {"fee": 3000, "pool": pool_a})
+    univ3_b = arb.Edge("univ3", router_a, token_b, token_a, {"fee": 3000, "pool": pool_b})
+    slipstream = arb.Edge(
+        "slipstream",
+        router_b,
+        token_a,
+        token_b,
+        {"factory": "0x" + "f1" * 20, "tick_spacing": 100, "pool": pool_c},
+    )
+
+    assert arb._edge_protocol_identity(univ3_a) == arb._edge_protocol_identity(univ3_b)
+    assert arb._edge_pool_identity(univ3_a) != arb._edge_pool_identity(univ3_b)
+    assert arb._edge_router_identity(univ3_a) == arb._edge_router_identity(univ3_b)
+    assert arb._edge_diversity_novelty(
+        univ3_b,
+        active_protocols={"univ3"},
+        active_pools={arb._edge_pool_identity(univ3_a)},
+        active_routers={router_a},
+    ) == (0, 1, 0)
+    assert arb._edge_diversity_novelty(
+        slipstream,
+        active_protocols={"univ3"},
+        active_pools={arb._edge_pool_identity(univ3_a)},
+        active_routers={router_a},
+    ) == (1, 1, 1)
+
+    # Uniswap V3 pairs without explicit pool addresses remain distinct by fee
+    # tier, while reverse directions of the same pair map to the same pool key.
+    fee_500 = arb.Edge("univ3", router_a, token_a, token_b, {"fee": 500})
+    reverse_fee_500 = arb.Edge("univ3", router_a, token_b, token_a, {"fee": 500})
+    fee_3000 = arb.Edge("univ3", router_a, token_a, token_b, {"fee": 3000})
+    assert arb._edge_pool_identity(fee_500) == arb._edge_pool_identity(reverse_fee_500)
+    assert arb._edge_pool_identity(fee_500) != arb._edge_pool_identity(fee_3000)
+
+    # Curve's venue is its pool contract, not a router address.
+    curve = arb.Edge("curve", pool_a, token_a, token_b, {"i": 0, "j": 1})
+    assert arb._edge_pool_identity(curve) == "curve:pool:" + pool_a
+    assert arb._edge_router_identity(curve) is None
+
