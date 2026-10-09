@@ -418,7 +418,8 @@ def test_reverse_prefilter_keeps_protocol_and_pool_diversity():
     assert stats["filtered"] == 2
     assert stats["protocols_selected"] == 3
     assert stats["pools_selected"] == 8
-    assert stats["routers_selected"] == 8
+    # Curve uses its venue as a pool address, so it is intentionally not counted as a router.
+    assert stats["routers_selected"] == 7
 
 
 
