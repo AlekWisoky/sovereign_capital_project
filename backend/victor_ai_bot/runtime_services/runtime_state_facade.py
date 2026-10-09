@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlsplit
 
 from ..jsonsafe import to_json_safe
 from .control_state import unavailable_state
@@ -9,6 +10,80 @@ from .fund_service import fund_summary_unavailable_payload
 from .family_hardening_service import family_hardening_unavailable_summary
 
 _RUNTIME_STATE_FACADE_FAILURES = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
+def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
+    """Expose useful gas-consensus diagnostics without leaking RPC URLs or credentials."""
+    if not isinstance(value, dict):
+        return {}
+
+    def _int_or_none(raw: Any) -> int | None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    raw_observations = [
+        row for row in list(value.get("observations") or []) if isinstance(row, dict)
+    ][:8]
+    observations: list[Dict[str, Any]] = []
+    for raw in raw_observations:
+        url = str(raw.get("url") or "")
+        host = ""
+        if url:
+            try:
+                host = str(urlsplit(url).hostname or "")
+            except ValueError:
+                host = ""
+        if not host:
+            # Provider labels from RpcManager are normally hostnames. Strip
+            # userinfo, paths, and query strings defensively for compatibility.
+            host = str(raw.get("provider") or "unknown")
+            host = host.rsplit("@", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+        block_number = _int_or_none(raw.get("block_number"))
+        price = _int_or_none(raw.get("gas_price_wei"))
+        error_present = bool(raw.get("error"))
+        observations.append({
+            "provider": host[:128] or "unknown",
+            "block_number": block_number,
+            "gas_price_wei": str(price) if price is not None and price > 0 else None,
+            "ok": bool(
+                block_number is not None
+                and block_number >= 0
+                and price is not None
+                and price > 0
+                and not error_present
+            ),
+            "error_present": error_present,
+        })
+
+    anomaly_reasons: Dict[str, int] = {}
+    for row in list(value.get("anomalies") or []):
+        if not isinstance(row, dict):
+            continue
+        reason = str(row.get("reason") or "unspecified")[:80]
+        anomaly_reasons[reason] = anomaly_reasons.get(reason, 0) + 1
+
+    selected_price = _int_or_none(value.get("gas_price_wei"))
+    provider_count = _int_or_none(value.get("provider_count"))
+    observed_at = value.get("observed_at")
+    try:
+        observed_at = float(observed_at) if observed_at is not None else None
+    except (TypeError, ValueError, OverflowError):
+        observed_at = None
+
+    return {
+        "status": str(value.get("status") or "unknown")[:48],
+        "gas_price_wei": (
+            str(selected_price) if selected_price is not None and selected_price > 0 else None
+        ),
+        "provider_count": max(0, provider_count if provider_count is not None else len(raw_observations)),
+        "usable_observation_count": sum(1 for row in observations if row["ok"]),
+        "inlier_count": len(list(value.get("inliers") or [])),
+        "observed_at": observed_at,
+        "observations": observations,
+        "anomaly_reason_counts": anomaly_reasons,
+    }
 
 
 class RuntimeStateFacade:
@@ -131,6 +206,9 @@ class RuntimeStateFacade:
             },
             "scan_sizing": scan_sizing,
             "rpc": dict(telemetry.get("rpc") or {}),
+            "gas_price_integrity": _gas_price_integrity_summary(
+                telemetry.get("gas_price_integrity")
+            ),
             "adaptive_size_discovery": dict(telemetry.get("adaptive_size_discovery") or {}),
             "size_economic_matrix": [
                 dict(row) for row in (telemetry.get("size_economic_matrix") or [])
