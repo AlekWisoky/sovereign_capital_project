@@ -11,6 +11,56 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 )
 
 
+def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_frontier(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S", raising=False)
+    monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", raising=False)
+    monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", raising=False)
+
+    baseline = runtime._selected_provider_full_scan_budget_s(235)
+    dense_graph = runtime._selected_provider_full_scan_budget_s(370)
+
+    assert baseline == 35.0
+    assert dense_graph == 56.0
+    assert dense_graph > baseline
+    assert runtime._selected_provider_frontier_seed_budget_s() == 10.0
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S", "44")
+    assert runtime._selected_provider_full_scan_budget_s(10_000) == 60.0
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S", "99")
+    assert runtime._selected_provider_frontier_seed_budget_s() == 12.0
+
+
+def test_selected_provider_chunk_accounting_covers_completed_timeout_failed_and_skipped():
+    from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+        _selected_provider_chunk_accounting,
+    )
+
+    accounting = _selected_provider_chunk_accounting(
+        graph_edge_count=58,
+        chunk_size=16,
+        chunk_statuses={
+            0: "completed",
+            1: "timed_out",
+            2: "failed",
+            3: "pending",
+        },
+        chunk_status_reasons={1: "chunk_timeout", 2: "rpc_error"},
+    )
+
+    assert accounting["chunks_accounted"] == 4
+    assert accounting["chunks_timed_out"] == 1
+    assert accounting["chunks_failed"] == 1
+    assert accounting["chunks_skipped"] == 1
+    rows = accounting["chunk_accounting"]
+    assert [row["edges"] for row in rows] == [16, 16, 16, 10]
+    assert [row["status"] for row in rows] == [
+        "completed", "timed_out", "failed", "skipped_budget"
+    ]
+    assert rows[1]["reason"] == "chunk_timeout"
+    assert rows[3]["reason"] == "budget_exhausted_before_schedule"
+
+
 def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     env_name = "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE"
