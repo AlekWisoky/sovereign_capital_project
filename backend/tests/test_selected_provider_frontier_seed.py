@@ -11,6 +11,31 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 )
 
 
+def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    env_name = "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE"
+
+    assert runtime._selected_provider_full_scan_chunk_size() == 16
+
+    monkeypatch.setenv(env_name, "8")
+    assert runtime._selected_provider_full_scan_chunk_size() == 8
+
+    monkeypatch.setenv(env_name, "4")
+    assert runtime._selected_provider_full_scan_chunk_size() == 8
+
+    monkeypatch.setenv(env_name, "99")
+    assert runtime._selected_provider_full_scan_chunk_size() == 99
+
+    monkeypatch.setenv(env_name, "999")
+    assert runtime._selected_provider_full_scan_chunk_size() == 256
+
+    monkeypatch.setenv(env_name, "invalid")
+    assert runtime._selected_provider_full_scan_chunk_size() == 16
+
+    monkeypatch.setenv(env_name, "")
+    assert runtime._selected_provider_full_scan_chunk_size() == 16
+
+
 @pytest.mark.asyncio
 async def test_selected_provider_batch_waits_for_siblings_when_chunk_raises():
     from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
