@@ -210,6 +210,7 @@ def test_market_pipeline_telemetry_exposes_candidate_tokens_separately_from_exec
     assert candidate["observed_not_admitted_count"] == 1
     assert candidate["admission_mutated"] is False
 
+
 def test_market_pipeline_exposes_gas_consensus_without_rpc_credentials():
     runtime = _Runtime()
     runtime._market_pipeline_telemetry["gas_price_integrity"] = {
