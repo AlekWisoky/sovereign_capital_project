@@ -2404,6 +2404,7 @@ class RuntimePrimaryScanFacade:
                 "chunk_size": int(self._selected_provider_full_scan_chunk_size()),
                 "chunk_timeout_s": float(self._selected_provider_full_scan_chunk_timeout_s()),
                 "budget_s": float(self._selected_provider_full_scan_budget_s()),
+                "frontier_reserved_budget_s": float(self._selected_provider_frontier_seed_budget_s()),
                 "parallelism": int(self._selected_provider_full_scan_parallelism()),
                 "chunks_total": 0,
                 "chunks_completed": 0,
@@ -2431,6 +2432,24 @@ class RuntimePrimaryScanFacade:
             chunk_total = max(1, (graph_edge_count + chunk_size - 1) // chunk_size)
             full_scan_telemetry["chunks_total"] = int(chunk_total)
             full_scan_telemetry["edges_total"] = int(graph_edge_count)
+            total_budget_s = float(self._selected_provider_full_scan_budget_s(graph_edge_count))
+            full_scan_telemetry["budget_s"] = total_budget_s
+            full_scan_telemetry["budget_basis"] = {
+                "graph_edge_count": int(graph_edge_count),
+                "chunks_required": int(chunk_total),
+                "parallel_waves_required": int(
+                    (chunk_total + int(full_scan_telemetry["parallelism"]) - 1)
+                    // int(full_scan_telemetry["parallelism"])
+                ),
+                "adaptive": bool(total_budget_s > 28.0),
+                "frontier_reserved_budget_s": float(
+                    full_scan_telemetry["frontier_reserved_budget_s"]
+                ),
+            }
+            chunk_statuses: Dict[int, str] = {
+                index: "pending" for index in range(chunk_total)
+            }
+            chunk_status_reasons: Dict[int, str] = {}
 
             async def _run_selected_full_scan_chunk(
                 scan_rpc: Any,
@@ -2487,6 +2506,7 @@ class RuntimePrimaryScanFacade:
                     full_scan_telemetry["chunks_completed"] = int(
                         full_scan_telemetry["chunks_completed"] + 1
                     )
+                    chunk_statuses[int(chunk_index)] = "completed"
                     full_scan_telemetry["chunks"].append({
                         "index": int(chunk_index),
                         "offset": int(chunk_index * chunk_size),
@@ -2498,6 +2518,8 @@ class RuntimePrimaryScanFacade:
                         ),
                     })
                 except asyncio.TimeoutError:
+                    chunk_statuses[int(chunk_index)] = "timed_out"
+                    chunk_status_reasons[int(chunk_index)] = "chunk_timeout"
                     full_scan_telemetry["scan_errors"].append({
                         "chunk": int(chunk_index),
                         "offset": int(chunk_index * chunk_size),
@@ -2505,13 +2527,14 @@ class RuntimePrimaryScanFacade:
                         "timeout_s": float(timeout_s),
                     })
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    chunk_statuses[int(chunk_index)] = "failed"
+                    chunk_status_reasons[int(chunk_index)] = f"{type(exc).__name__}: {exc}"
                     full_scan_telemetry["scan_errors"].append({
                         "chunk": int(chunk_index),
                         "offset": int(chunk_index * chunk_size),
                         "reason": f"{type(exc).__name__}: {exc}",
                     })
 
-            total_budget_s = float(full_scan_telemetry["budget_s"])
             chunk_timeout_s = float(full_scan_telemetry["chunk_timeout_s"])
             chunk_parallelism = int(full_scan_telemetry["parallelism"])
 
@@ -2529,6 +2552,7 @@ class RuntimePrimaryScanFacade:
                         if remaining <= 0:
                             break
                         timeout_s = min(chunk_timeout_s, remaining)
+                        chunk_statuses[int(chunk_index)] = "running"
                         chunk_cache = slice_fn(
                             int(chunk_index * chunk_size),
                             int(chunk_size),
@@ -2640,6 +2664,38 @@ class RuntimePrimaryScanFacade:
             if full_scan_opps:
                 selected_opps = [*list(selected_result[1] or []), *full_scan_opps]
 
+            for chunk_index, status in list(chunk_statuses.items()):
+                if status == "pending":
+                    chunk_statuses[chunk_index] = "skipped_budget"
+                    chunk_status_reasons[chunk_index] = "budget_exhausted_before_schedule"
+                elif status == "running":
+                    # A task that escaped the local exception boundary is a
+                    # failed chunk, not an unaccounted edge range.
+                    chunk_statuses[chunk_index] = "failed"
+                    chunk_status_reasons[chunk_index] = "task_failed_outside_chunk_boundary"
+            full_scan_telemetry["chunk_accounting"] = [
+                {
+                    "index": int(index),
+                    "offset": int(index * chunk_size),
+                    "edges": int(min(chunk_size, max(0, graph_edge_count - index * chunk_size))),
+                    "status": str(chunk_statuses[index]),
+                    **({"reason": chunk_status_reasons[index]} if index in chunk_status_reasons else {}),
+                }
+                for index in range(chunk_total)
+            ]
+            full_scan_telemetry["chunks_timed_out"] = sum(
+                status == "timed_out" for status in chunk_statuses.values()
+            )
+            full_scan_telemetry["chunks_failed"] = sum(
+                status == "failed" for status in chunk_statuses.values()
+            )
+            full_scan_telemetry["chunks_skipped"] = sum(
+                status == "skipped_budget" for status in chunk_statuses.values()
+            )
+            full_scan_telemetry["chunks_accounted"] = sum(
+                status in {"completed", "timed_out", "failed", "skipped_budget"}
+                for status in chunk_statuses.values()
+            )
             full_scan_telemetry["returned"] = int(len(full_scan_opps))
             full_scan_telemetry["elapsed_ms"] = float(
                 (time.perf_counter() - full_scan_started) * 1000.0
@@ -2708,22 +2764,10 @@ class RuntimePrimaryScanFacade:
                 )
             except (TypeError, ValueError):
                 seed_timeout_s = min(selection_timeout_s, 3.0)
-            try:
-                seed_budget_s = max(
-                    1.0,
-                    min(
-                        selection_timeout_s,
-                        float(
-                            os.environ.get(
-                                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S",
-                                "8.0",
-                            )
-                            or 8.0
-                        ),
-                    ),
-                )
-            except (TypeError, ValueError):
-                seed_budget_s = min(selection_timeout_s, 8.0)
+            seed_budget_s = min(
+                selection_timeout_s,
+                float(self._selected_provider_frontier_seed_budget_s()),
+            )
 
             frontier_seed_telemetry = {
                 "enabled": bool(seed_amounts),
@@ -3232,13 +3276,13 @@ class RuntimePrimaryScanFacade:
 
     @staticmethod
     def _provider_scan_timeout_s() -> float:
-        """Bound one provider's read-only economic scan so one endpoint cannot starve a chain."""
+        """Bound the provider comparison plus selected-provider rescue envelope."""
         try:
             configured = float(
-                os.environ.get("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "35.0") or 35.0
+                os.environ.get("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "60.0") or 60.0
             )
         except (TypeError, ValueError):
-            configured = 35.0
+            configured = 60.0
         return max(5.0, min(configured, 120.0))
 
     @staticmethod
@@ -3295,8 +3339,8 @@ class RuntimePrimaryScanFacade:
             configured = 8.0
         return max(3.0, min(configured, 15.0))
 
-    @staticmethod
-    def _selected_provider_full_scan_budget_s() -> float:
+    def _selected_provider_full_scan_budget_s(self, graph_edge_count: int = 0) -> float:
+        """Scale the bounded graph pass with graph size, leaving frontier time separate."""
         try:
             configured = float(
                 os.environ.get(
@@ -3307,7 +3351,28 @@ class RuntimePrimaryScanFacade:
             )
         except (TypeError, ValueError):
             configured = 28.0
-        return max(5.0, min(configured, 35.0))
+        configured = max(5.0, min(configured, 45.0))
+        chunk_size = self._selected_provider_full_scan_chunk_size()
+        parallelism = self._selected_provider_full_scan_parallelism()
+        chunks = max(1, (max(1, int(graph_edge_count)) + chunk_size - 1) // chunk_size)
+        waves = max(1, (chunks + parallelism - 1) // parallelism)
+        # The 28-second default was tuned for ~15 chunks. Add 2.5 seconds
+        # per additional parallel wave, bounded so a pathological graph cannot
+        # turn a read-only discovery pass into an unbounded request.
+        adaptive = configured + max(0, waves - 5) * 2.5
+        return max(configured, min(adaptive, 45.0))
+
+    @staticmethod
+    def _selected_provider_frontier_seed_budget_s() -> float:
+        """Reserve a bounded wall-clock window for alternate-size discovery."""
+        try:
+            configured = float(
+                os.environ.get("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S", "8.0")
+                or 8.0
+            )
+        except (TypeError, ValueError):
+            configured = 8.0
+        return max(3.0, min(configured, 12.0))
 
     @staticmethod
     def _selected_provider_frontier_edge_cap() -> int:
