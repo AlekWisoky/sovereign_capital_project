@@ -305,6 +305,35 @@ class RuntimeStateFacade:
         economics = payload.get("economics", {})
         for key in ("gross_candidates", "after_fee_candidates", "after_fee_positive_candidates"):
             economics[key] = int(economics.get(key) or 0)
+
+        # to_json_safe may normalize nested numeric values; restore the documented
+        # numeric telemetry types explicitly at this public API boundary.
+        gas_integrity = payload.get("gas_price_integrity", {})
+        if isinstance(gas_integrity, dict):
+            for key in ("provider_count", "usable_observation_count", "inlier_count"):
+                try:
+                    gas_integrity[key] = max(0, int(gas_integrity.get(key) or 0))
+                except (TypeError, ValueError, OverflowError):
+                    gas_integrity[key] = 0
+            anomaly_counts = gas_integrity.get("anomaly_reason_counts", {})
+            if isinstance(anomaly_counts, dict):
+                for key, value in list(anomaly_counts.items()):
+                    try:
+                        anomaly_counts[key] = max(0, int(value or 0))
+                    except (TypeError, ValueError, OverflowError):
+                        anomaly_counts[key] = 0
+            observations = gas_integrity.get("observations", [])
+            if isinstance(observations, list):
+                for observation in observations:
+                    if not isinstance(observation, dict):
+                        continue
+                    if observation.get("block_number") is not None:
+                        try:
+                            observation["block_number"] = int(observation["block_number"])
+                        except (TypeError, ValueError, OverflowError):
+                            observation["block_number"] = None
+                    observation["ok"] = bool(observation.get("ok"))
+                    observation["error_present"] = bool(observation.get("error_present"))
         return payload
 
     def execution_capture_analytics(self) -> Dict[str, Any]: return self._state_summary_payload("execution_capture_analytics", default={"laneSuccess": [], "venueQuality": []})
