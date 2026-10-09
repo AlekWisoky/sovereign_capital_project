@@ -3392,7 +3392,7 @@ class RuntimePrimaryScanFacade:
                 or 10.0
             )
         except (TypeError, ValueError):
-            configured = 8.0
+            configured = 10.0
         return max(3.0, min(configured, 12.0))
 
     @staticmethod
