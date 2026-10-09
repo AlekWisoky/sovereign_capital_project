@@ -22,6 +22,28 @@ from .profitability_truth import opportunity_profit_sort_key
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
+async def _gather_selected_provider_scan_batch(
+    tasks: List[asyncio.Task],
+    chunk_indices: List[int],
+    scan_errors: List[Dict[str, Any]],
+) -> None:
+    """Wait for every rescue chunk and contain unexpected per-task failures."""
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for chunk_index, result in zip(chunk_indices, results):
+        if isinstance(result, asyncio.CancelledError):
+            scan_errors.append({
+                "chunk": int(chunk_index),
+                "reason": "selected_provider_full_scan_chunk_cancelled",
+            })
+        elif isinstance(result, Exception):
+            scan_errors.append({
+                "chunk": int(chunk_index),
+                "reason": f"{type(result).__name__}: {result}",
+            })
+        elif isinstance(result, BaseException):
+            raise result
+
+
 class _FrozenProviderScanPoolEventCache:
     """Immutable provider-comparison graph and edge-priority view for one tick."""
 
@@ -2382,6 +2404,7 @@ class RuntimePrimaryScanFacade:
                 "chunk_size": int(self._selected_provider_full_scan_chunk_size()),
                 "chunk_timeout_s": float(self._selected_provider_full_scan_chunk_timeout_s()),
                 "budget_s": float(self._selected_provider_full_scan_budget_s()),
+                "parallelism": int(self._selected_provider_full_scan_parallelism()),
                 "chunks_total": 0,
                 "chunks_completed": 0,
                 "edges_total": 0,
@@ -2490,10 +2513,19 @@ class RuntimePrimaryScanFacade:
 
             total_budget_s = float(full_scan_telemetry["budget_s"])
             chunk_timeout_s = float(full_scan_telemetry["chunk_timeout_s"])
-            if callable(slice_fn):
-                if selected_provider_url == bootstrap_url:
-                    for chunk_index in range(chunk_total):
-                        remaining = total_budget_s - (time.perf_counter() - full_scan_started)
+            chunk_parallelism = int(full_scan_telemetry["parallelism"])
+
+            async def _run_selected_full_scan_chunks(scan_rpc: Any) -> None:
+                for batch_start in range(0, chunk_total, chunk_parallelism):
+                    tasks = []
+                    task_chunk_indices: List[int] = []
+                    for chunk_index in range(
+                        batch_start,
+                        min(chunk_total, batch_start + chunk_parallelism),
+                    ):
+                        remaining = total_budget_s - (
+                            time.perf_counter() - full_scan_started
+                        )
                         if remaining <= 0:
                             break
                         timeout_s = min(chunk_timeout_s, remaining)
@@ -2501,12 +2533,28 @@ class RuntimePrimaryScanFacade:
                             int(chunk_index * chunk_size),
                             int(chunk_size),
                         )
-                        await _run_selected_full_scan_chunk(
-                            bootstrap_rpc,
-                            chunk_index=int(chunk_index),
-                            chunk_cache=chunk_cache,
-                            timeout_s=float(timeout_s),
+                        tasks.append(
+                            asyncio.create_task(
+                                _run_selected_full_scan_chunk(
+                                    scan_rpc,
+                                    chunk_index=int(chunk_index),
+                                    chunk_cache=chunk_cache,
+                                    timeout_s=float(timeout_s),
+                                )
+                            )
                         )
+                        task_chunk_indices.append(int(chunk_index))
+                    if not tasks:
+                        break
+                    await _gather_selected_provider_scan_batch(
+                        tasks,
+                        task_chunk_indices,
+                        full_scan_telemetry["scan_errors"],
+                    )
+
+            if callable(slice_fn):
+                if selected_provider_url == bootstrap_url:
+                    await _run_selected_full_scan_chunks(bootstrap_rpc)
                 else:
                     async with JsonRpcClient(
                         selected_provider_url,
@@ -2514,21 +2562,7 @@ class RuntimePrimaryScanFacade:
                         max_concurrency=30,
                         max_batch=80,
                     ) as selected_provider_rpc:
-                        for chunk_index in range(chunk_total):
-                            remaining = total_budget_s - (time.perf_counter() - full_scan_started)
-                            if remaining <= 0:
-                                break
-                            timeout_s = min(chunk_timeout_s, remaining)
-                            chunk_cache = slice_fn(
-                                int(chunk_index * chunk_size),
-                                int(chunk_size),
-                            )
-                            await _run_selected_full_scan_chunk(
-                                selected_provider_rpc,
-                                chunk_index=int(chunk_index),
-                                chunk_cache=chunk_cache,
-                                timeout_s=float(timeout_s),
-                            )
+                        await _run_selected_full_scan_chunks(selected_provider_rpc)
             else:
                 # Test/legacy fallback: preserve the previous single-pass behavior
                 # when an injected cache does not expose the frozen-graph slicing API.
@@ -3231,6 +3265,20 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             configured = 96
         return max(32, min(configured, 256))
+
+    @staticmethod
+    def _selected_provider_full_scan_parallelism() -> int:
+        try:
+            configured = int(
+                os.environ.get(
+                    "VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM",
+                    "3",
+                )
+                or 3
+            )
+        except (TypeError, ValueError):
+            configured = 3
+        return max(1, min(configured, 3))
 
     @staticmethod
     def _selected_provider_full_scan_chunk_timeout_s() -> float:

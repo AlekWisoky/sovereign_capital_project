@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,53 @@ from victor_ai_bot.config import load_config
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     RuntimePrimaryScanFacade,
 )
+
+
+@pytest.mark.asyncio
+async def test_selected_provider_batch_waits_for_siblings_when_chunk_raises():
+    from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+        _gather_selected_provider_scan_batch,
+    )
+
+    completed = []
+
+    async def fail_unexpectedly():
+        raise AssertionError("synthetic chunk failure")
+
+    async def finish_after_yield():
+        await asyncio.sleep(0)
+        completed.append("sibling-finished")
+
+    tasks = [
+        asyncio.create_task(fail_unexpectedly()),
+        asyncio.create_task(finish_after_yield()),
+    ]
+    errors = []
+    await _gather_selected_provider_scan_batch(tasks, [4, 5], errors)
+
+    assert completed == ["sibling-finished"]
+    assert errors == [{
+        "chunk": 4,
+        "reason": "AssertionError: synthetic chunk failure",
+    }]
+
+
+def test_selected_provider_full_scan_parallelism_is_bounded(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+
+    assert runtime._selected_provider_full_scan_parallelism() == 3
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "2")
+    assert runtime._selected_provider_full_scan_parallelism() == 2
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "99")
+    assert runtime._selected_provider_full_scan_parallelism() == 3
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "0")
+    assert runtime._selected_provider_full_scan_parallelism() == 1
+
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "invalid")
+    assert runtime._selected_provider_full_scan_parallelism() == 3
 
 
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
