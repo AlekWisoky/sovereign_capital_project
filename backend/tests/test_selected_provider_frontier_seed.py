@@ -31,6 +31,21 @@ def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_front
     assert runtime._selected_provider_frontier_seed_budget_s() == 12.0
 
 
+
+
+def test_arbitrum_full_scan_defaults_to_smaller_rescue_chunks(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(chain=SimpleNamespace(chain_id=42161))
+    monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", raising=False)
+
+    assert runtime._selected_provider_full_scan_chunk_size() == 8
+    assert runtime._selected_provider_full_scan_budget_s(370) == 60.0
+
+    # An explicit operator override remains supported and bounded.
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", "16")
+    assert runtime._selected_provider_full_scan_chunk_size() == 16
+
+
 def test_selected_provider_chunk_accounting_covers_completed_timeout_failed_and_skipped():
     from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
         _selected_provider_chunk_accounting,
