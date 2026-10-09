@@ -2594,10 +2594,10 @@ class RuntimePrimaryScanFacade:
                         remaining = total_budget_s - (
                             time.perf_counter() - full_scan_started
                         )
-                        # Do not launch a chunk with less than its minimum viable
-                        # timeout; it is predictably doomed and cancellation cleanup
-                        # can consume time reserved for alternate-size probes.
-                        if remaining < min(3.0, chunk_timeout_s):
+                        # Observed rescue chunks take several seconds. Avoid launching
+                        # a slice with too little time to finish: wait_for cancellation
+                        # cleanup can otherwise consume the frontier's separate budget.
+                        if remaining < min(4.0, chunk_timeout_s):
                             break
                         timeout_s = min(chunk_timeout_s, remaining)
                         chunk_statuses[int(chunk_index)] = "running"
@@ -3300,7 +3300,7 @@ class RuntimePrimaryScanFacade:
 
     @staticmethod
     def _provider_scan_timeout_s() -> float:
-        """Bound the provider comparison plus selected-provider rescue envelope."""
+        """Bound each provider's initial read-only comparison scan."""
         try:
             configured = float(
                 os.environ.get("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "35.0") or 35.0
