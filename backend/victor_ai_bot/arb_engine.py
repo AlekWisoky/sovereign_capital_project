@@ -222,7 +222,7 @@ def _edge_pool_identity(edge: Edge) -> str | None:
     pair = "|".join(sorted((token_in, token_out)))
     required_fields = {
         "univ3": ("fee",),
-        "aerodrome": ("factory",),
+        "aerodrome": ("factory", "stable"),
         "slipstream": ("factory", "tick_spacing"),
         "camelot_algebra": ("factory", "tick_spacing"),
         "camelot_v2": ("factory",),
@@ -1891,7 +1891,7 @@ async def find_three_leg_opportunities(
         }
         for token, items in adj.items()
     }
-    frontier_scored: List[Tuple[int, int, int, int, int, Edge]] = []
+    frontier_candidates: List[Tuple[int, Edge]] = []
     for order, edge in enumerate(pruned_edges):
         if not qmap1_3.get(edge_key(edge)):
             continue
@@ -1900,32 +1900,48 @@ async def find_three_leg_opportunities(
             for middle in edges
             if middle.token_in == edge.token_out and middle.token_out != edge.token_in
         )
-        if not closes:
-            continue
-        protocol_new, pool_new, router_new = _edge_diversity_novelty(
-            edge,
-            active_protocols=active_protocols_by_token.get(edge.token_in, set()),
-            active_pools=active_pools_by_token.get(edge.token_in, set()),
-            active_routers=active_routers_by_token.get(edge.token_in, set()),
-        )
-        # Quote viability and cycle closure are hard gates. Novel protocol,
-        # pool, and router identities are separate tie-break dimensions, in
-        # that order; none of these scores grants economic or execution authority.
-        frontier_scored.append(
-            (int(closes), protocol_new, pool_new, router_new, -order, edge)
-        )
-    frontier_scored.sort(
-        key=lambda item: (item[0], item[1], item[2], item[3], item[4]),
-        reverse=True,
-    )
-    for _closure, _protocol_new, _pool_new, _router_new, _order, edge in frontier_scored:
-        if len(frontier_selected) >= frontier_global:
+        if closes:
+            frontier_candidates.append((order, edge))
+
+    # Greedy bounded selection recomputes novelty against both the existing
+    # adjacency and already selected frontier edges. This avoids counting two
+    # same-protocol/same-pool candidates as two independent diversity gains.
+    while frontier_candidates and len(frontier_selected) < frontier_global:
+        best_index = None
+        best_score = None
+        for candidate_index, (order, edge) in enumerate(frontier_candidates):
+            token = edge.token_in
+            bucket = frontier_by_token.get(token, [])
+            if len(bucket) >= frontier_per_token:
+                continue
+            active_protocols = set(active_protocols_by_token.get(token, set()))
+            active_pools = set(active_pools_by_token.get(token, set()))
+            active_routers = set(active_routers_by_token.get(token, set()))
+            for chosen in bucket:
+                protocol = _edge_protocol_identity(chosen)
+                pool = _edge_pool_identity(chosen)
+                router = _edge_router_identity(chosen)
+                if protocol:
+                    active_protocols.add(protocol)
+                if pool:
+                    active_pools.add(pool)
+                if router:
+                    active_routers.add(router)
+            protocol_new, pool_new, router_new = _edge_diversity_novelty(
+                edge,
+                active_protocols=active_protocols,
+                active_pools=active_pools,
+                active_routers=active_routers,
+            )
+            score = (protocol_new, pool_new, router_new, -order)
+            if best_score is None or score > best_score:
+                best_index = candidate_index
+                best_score = score
+        if best_index is None:
             break
-        bucket = frontier_by_token.setdefault(edge.token_in, [])
-        if len(bucket) >= frontier_per_token:
-            continue
-        bucket.append(edge)
-        frontier_selected.append(edge)
+        _order, selected_edge = frontier_candidates.pop(best_index)
+        frontier_by_token.setdefault(selected_edge.token_in, []).append(selected_edge)
+        frontier_selected.append(selected_edge)
 
     frontier_adj: Dict[str, List[Edge]] = {
         token: list(items) for token, items in adj.items()
@@ -1934,15 +1950,24 @@ async def find_three_leg_opportunities(
         frontier_adj.setdefault(token, []).extend(items)
 
     if telemetry is not None:
-        frontier_diversity = [
-            _edge_diversity_novelty(
-                edge,
-                active_protocols=active_protocols_by_token.get(edge.token_in, set()),
-                active_pools=active_pools_by_token.get(edge.token_in, set()),
-                active_routers=active_routers_by_token.get(edge.token_in, set()),
-            )
+        new_protocols = {
+            (edge.token_in, protocol)
             for edge in frontier_selected
-        ]
+            if (protocol := _edge_protocol_identity(edge)) is not None
+            and protocol not in active_protocols_by_token.get(edge.token_in, set())
+        }
+        new_pools = {
+            (edge.token_in, pool)
+            for edge in frontier_selected
+            if (pool := _edge_pool_identity(edge)) is not None
+            and pool not in active_pools_by_token.get(edge.token_in, set())
+        }
+        new_routers = {
+            (edge.token_in, router)
+            for edge in frontier_selected
+            if (router := _edge_router_identity(edge)) is not None
+            and router not in active_routers_by_token.get(edge.token_in, set())
+        }
         telemetry["three_leg_frontier"] = {
             "enabled": bool(frontier_selected),
             "initial_pruned_edges": int(len(pruned_edges)),
@@ -1963,9 +1988,9 @@ async def find_three_leg_opportunities(
                     not in active_venues_by_token.get(edge.token_in, set())
                 )
             ),
-            "protocol_diverse_edges": int(sum(row[0] for row in frontier_diversity)),
-            "pool_diverse_edges": int(sum(row[1] for row in frontier_diversity)),
-            "router_diverse_edges": int(sum(row[2] for row in frontier_diversity)),
+            "protocol_diverse_edges": int(len(new_protocols)),
+            "pool_diverse_edges": int(len(new_pools)),
+            "router_diverse_edges": int(len(new_routers)),
         }
 
     # iterate first edge; use time budget
