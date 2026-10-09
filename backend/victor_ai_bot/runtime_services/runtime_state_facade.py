@@ -77,9 +77,14 @@ def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
         "gas_price_wei": (
             str(selected_price) if selected_price is not None and selected_price > 0 else None
         ),
-        "provider_count": max(0, provider_count if provider_count is not None else len(raw_observations)),
+        "provider_count": max(
+            0,
+            provider_count if provider_count is not None else len(raw_observations),
+        ),
         "usable_observation_count": sum(1 for row in observations if row["ok"]),
-        "inlier_count": len(list(value.get("inliers") or [])),
+        "inlier_count": len(
+            [row for row in list(value.get("inliers") or []) if isinstance(row, dict)]
+        ),
         "observed_at": observed_at,
         "observations": observations,
         "anomaly_reason_counts": anomaly_reasons,
