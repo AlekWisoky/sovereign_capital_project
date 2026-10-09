@@ -3388,8 +3388,8 @@ class RuntimePrimaryScanFacade:
         """Reserve a bounded wall-clock window for alternate-size discovery."""
         try:
             configured = float(
-                os.environ.get("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S", "8.0")
-                or 8.0
+                os.environ.get("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S", "10.0")
+                or 10.0
             )
         except (TypeError, ValueError):
             configured = 8.0
