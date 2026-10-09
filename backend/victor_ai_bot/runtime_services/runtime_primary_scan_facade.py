@@ -3300,10 +3300,10 @@ class RuntimePrimaryScanFacade:
         """Bound the provider comparison plus selected-provider rescue envelope."""
         try:
             configured = float(
-                os.environ.get("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "60.0") or 60.0
+                os.environ.get("VICTOR_RPC_PROVIDER_SCAN_TIMEOUT_S", "35.0") or 35.0
             )
         except (TypeError, ValueError):
-            configured = 60.0
+            configured = 35.0
         return max(5.0, min(configured, 120.0))
 
     @staticmethod
