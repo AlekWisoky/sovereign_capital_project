@@ -122,7 +122,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "failure_reasons": {},
     }
     assert out["rpc"] == {
-        "endpoint": "https://rpc.example",
+        "endpoint": "rpc.example",
         "provider": "rpc.example",
         "score": 123.4,
         "ok": True,
@@ -266,5 +266,19 @@ def test_market_pipeline_exposes_gas_consensus_without_rpc_credentials():
     }
     serialized = str(summary)
     for secret in ("password", "secret-a", "secret-b", "/v1", "/key-secret"):
+        assert secret not in serialized
+
+
+def test_market_pipeline_sanitizes_rpc_urls_and_raw_errors():
+    runtime = _Runtime()
+    runtime._market_pipeline_telemetry["rpc"].update({
+        "endpoint": "https://user:password@rpc.example/v1?apikey=rpc-secret",
+        "last_error": "connection failed at https://rpc.example/secret-path?token=error-secret",
+    })
+    out = runtime.market_pipeline_telemetry_state()
+    assert out["rpc"]["endpoint"] == "rpc.example"
+    assert out["rpc"]["last_error"] == "rpc_transport_or_provider_error"
+    serialized = str(out["rpc"])
+    for secret in ("password", "rpc-secret", "secret-path", "error-secret", "/v1"):
         assert secret not in serialized
 
