@@ -53,10 +53,10 @@ def _sanitize_rpc_telemetry(value: Any, key: str = "") -> Any:
     if isinstance(value, list):
         return [_sanitize_rpc_telemetry(item, key) for item in value]
     if isinstance(value, str):
-        if "://" in value or any(part in lower_key for part in ("url", "endpoint", "uri")):
-            return _safe_provider_host(value)
         if lower_key in {"error", "last_error", "quote_last_error", "error_message", "error_text"}:
             return _safe_rpc_error_kind(value) if value else value
+        if "://" in value or any(part in lower_key for part in ("url", "endpoint", "uri")):
+            return _safe_provider_host(value)
     return value
 
 
