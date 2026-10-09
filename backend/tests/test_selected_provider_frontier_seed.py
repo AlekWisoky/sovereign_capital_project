@@ -11,8 +11,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 )
 
 
-@pytest.mark.asyncio
-async def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
+def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     env_name = "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE"
 
@@ -37,7 +36,8 @@ async def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
     assert runtime._selected_provider_full_scan_chunk_size() == 16
 
 
-def test_selected_provider_batch_waits_for_siblings_when_chunk_raises():
+@pytest.mark.asyncio
+async def test_selected_provider_batch_waits_for_siblings_when_chunk_raises():
     from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
         _gather_selected_provider_scan_batch,
     )
