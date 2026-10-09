@@ -2699,12 +2699,17 @@ class RuntimePrimaryScanFacade:
                     full_scan_telemetry["edges_covered"] = int(
                         sink.get("scan_edges_selected") or graph_edge_count
                     )
+                    chunk_statuses[0] = "completed"
                 except asyncio.TimeoutError:
+                    chunk_statuses[0] = "timed_out"
+                    chunk_status_reasons[0] = "fallback_scan_timeout"
                     full_scan_telemetry["scan_errors"].append({
                         "reason": "selected_provider_full_scan_timeout",
                         "timeout_s": float(selection_timeout_s),
                     })
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    chunk_statuses[0] = "failed"
+                    chunk_status_reasons[0] = f"{type(exc).__name__}: {exc}"
                     full_scan_telemetry["scan_errors"].append({
                         "reason": f"{type(exc).__name__}: {exc}",
                     })
