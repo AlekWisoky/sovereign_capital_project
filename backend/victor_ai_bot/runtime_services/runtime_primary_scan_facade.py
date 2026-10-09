@@ -2594,7 +2594,10 @@ class RuntimePrimaryScanFacade:
                         remaining = total_budget_s - (
                             time.perf_counter() - full_scan_started
                         )
-                        if remaining <= 0:
+                        # Do not launch a chunk with less than its minimum viable
+                        # timeout; it is predictably doomed and cancellation cleanup
+                        # can consume time reserved for alternate-size probes.
+                        if remaining < min(3.0, chunk_timeout_s):
                             break
                         timeout_s = min(chunk_timeout_s, remaining)
                         chunk_statuses[int(chunk_index)] = "running"
