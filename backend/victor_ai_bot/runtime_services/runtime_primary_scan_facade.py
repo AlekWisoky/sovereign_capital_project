@@ -3254,17 +3254,18 @@ class RuntimePrimaryScanFacade:
 
     @staticmethod
     def _selected_provider_full_scan_chunk_size() -> int:
+        """Keep dense rescue scans granular while allowing bounded operator tuning."""
         try:
             configured = int(
                 os.environ.get(
                     "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE",
-                    "32",
+                    "16",
                 )
-                or 96
+                or 16
             )
         except (TypeError, ValueError):
-            configured = 96
-        return max(32, min(configured, 256))
+            configured = 16
+        return max(8, min(configured, 256))
 
     @staticmethod
     def _selected_provider_full_scan_parallelism() -> int:
