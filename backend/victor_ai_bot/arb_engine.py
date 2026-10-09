@@ -185,6 +185,88 @@ class Edge:
     token_out: str
     params: Dict[str, Any]
 
+def _edge_protocol_identity(edge: Edge) -> str | None:
+    """Return the canonical protocol family represented by an execution edge."""
+    protocol = str(getattr(edge, "dex", "") or "").strip().lower()
+    return protocol or None
+
+
+def _edge_pool_identity(edge: Edge) -> str | None:
+    """Resolve pool identity without confusing a shared router with a pool.
+
+    Explicit pool addresses and Balancer pool IDs are authoritative. For
+    configured families whose pool is deterministically identified by its
+    factory/pair/fee-or-mode tuple, derive a normalized fallback key. Unknown
+    identities return None and are not counted as verified pool diversity.
+    """
+    protocol = _edge_protocol_identity(edge)
+    if not protocol:
+        return None
+    raw_params = getattr(edge, "params", {}) or {}
+    params = raw_params if isinstance(raw_params, dict) else {}
+    pool_id = str(params.get("pool_id") or "").strip().lower()
+    if pool_id:
+        return f"{protocol}:pool_id:{pool_id}"
+    pool = str(params.get("pool") or "").strip().lower()
+    if not pool and protocol == "curve":
+        # Curve edges address the pool directly; venue is not a router here.
+        pool = str(getattr(edge, "venue", "") or "").strip().lower()
+    if pool:
+        return f"{protocol}:pool:{pool}"
+
+    token_in = str(getattr(edge, "token_in", "") or "").strip().lower()
+    token_out = str(getattr(edge, "token_out", "") or "").strip().lower()
+    if not token_in or not token_out:
+        return None
+    pair = "|".join(sorted((token_in, token_out)))
+    required_fields = {
+        "univ3": ("fee",),
+        "aerodrome": ("factory",),
+        "slipstream": ("factory", "tick_spacing"),
+        "camelot_algebra": ("factory", "tick_spacing"),
+        "camelot_v2": ("factory",),
+        "constant_product": ("factory", "venue_name"),
+    }.get(protocol)
+    if required_fields is None:
+        return None
+
+    normalized = {
+        key: str(params[key]).strip().lower()
+        for key in ("factory", "fee", "tick_spacing", "stable", "venue_name")
+        if key in params and params[key] not in (None, "")
+    }
+    if not all(normalized.get(key) for key in required_fields):
+        return None
+    dimensions = "|".join(f"{key}={normalized[key]}" for key in sorted(normalized))
+    return f"{protocol}:pair:{pair}:{dimensions}"
+
+
+def _edge_router_identity(edge: Edge) -> str | None:
+    """Return router identity, excluding protocols whose venue is the pool."""
+    protocol = _edge_protocol_identity(edge)
+    if not protocol or protocol == "curve":
+        return None
+    router = str(getattr(edge, "venue", "") or "").strip().lower()
+    return router or None
+
+
+def _edge_diversity_novelty(
+    edge: Edge,
+    *,
+    active_protocols: set[str],
+    active_pools: set[str],
+    active_routers: set[str],
+) -> Tuple[int, int, int]:
+    """Return independent protocol-, pool-, and router-novelty dimensions."""
+    protocol = _edge_protocol_identity(edge)
+    pool = _edge_pool_identity(edge)
+    router = _edge_router_identity(edge)
+    return (
+        int(bool(protocol) and protocol not in active_protocols),
+        int(pool is not None and pool not in active_pools),
+        int(router is not None and router not in active_routers),
+    )
+
 
 async def quote_edge(
     rpc, cfg, cache: PerBlockCache, edge: Edge, amount_in: int
@@ -1069,16 +1151,16 @@ def _prefilter_reverse_candidates(
     pool_event_cache: Any = None,
     current_block: int = 0,
 ) -> Tuple[List[Edge], Dict[str, int]]:
-    """Rank reverse legs locally before variable-notional quote fanout.
+    """Bound reverse-leg quoting while preserving independent diversity axes.
 
-    All reverse legs share the same token_in/token_out pair, so the already
-    acquired base-size qmap1 output is a valid first-order price signal. We
-    retain one candidate per protocol first, then expand across distinct pools,
-    then fill by score. Missing base quotes are retained only as diversity
-    fallbacks and never receive positive score.
+    All reverse legs share the same token pair, so the base-size quote is a
+    useful first-order price signal. Select one candidate per protocol, then
+    distinct known pools, then distinct routers, before filling the remaining
+    cap by quote score. Unknown pool identity is never misreported as pool
+    diversity; every candidate still remains eligible for the final fill.
     """
     cap = max(3, min(12, int(max_candidates)))
-    scored: List[Tuple[int, int, str, str, int, Edge]] = []
+    scored: List[Tuple[int, int, str, str, str, int, Edge]] = []
     for order, edge in enumerate(list(revs or [])):
         base_quote = qmap1.get(edge_key(edge))
         local_output = int(base_quote[0]) if base_quote else -1
@@ -1092,22 +1174,19 @@ def _prefilter_reverse_candidates(
                 )
             except (AttributeError, TypeError, ValueError):
                 priority = 1
-        protocol = str(edge.dex).lower()
-        pool = str(
-            edge.params.get("pool")
-            or edge.params.get("pool_id")
-            or edge.venue
-            or ""
-        ).lower()
-        scored.append((local_output, priority, protocol, pool, -order, edge))
+        protocol = _edge_protocol_identity(edge) or ""
+        pool = _edge_pool_identity(edge) or ""
+        router = _edge_router_identity(edge) or ""
+        scored.append((local_output, priority, protocol, pool, router, -order, edge))
 
-    scored.sort(key=lambda item: (item[0], item[1], item[3], item[4]), reverse=True)
+    scored.sort(
+        key=lambda item: (item[0], item[1], item[3], item[4], item[5]),
+        reverse=True,
+    )
     selected: List[Edge] = []
     selected_ids: set[str] = set()
 
-    def add_phase(
-        predicate,
-    ) -> None:
+    def add_phase(predicate) -> None:
         for item in scored:
             edge = item[-1]
             ek = edge_key(edge)
@@ -1120,9 +1199,9 @@ def _prefilter_reverse_candidates(
 
     protocols: set[str] = set()
 
-    def _new_protocol(item: Tuple[int, int, str, str, int, Edge]) -> bool:
-        protocol = str(item[2])
-        if protocol in protocols:
+    def _new_protocol(item: Tuple[int, int, str, str, str, int, Edge]) -> bool:
+        protocol = item[2]
+        if not protocol or protocol in protocols:
             return False
         protocols.add(protocol)
         return True
@@ -1131,36 +1210,43 @@ def _prefilter_reverse_candidates(
 
     pools: set[str] = set()
 
-    def _new_pool(item: Tuple[int, int, str, str, int, Edge]) -> bool:
-        pool = str(item[3])
-        if pool in pools:
+    def _new_pool(item: Tuple[int, int, str, str, str, int, Edge]) -> bool:
+        pool = item[3]
+        if not pool or pool in pools:
             return False
         pools.add(pool)
         return True
 
     add_phase(_new_pool)
+
+    routers: set[str] = set()
+
+    def _new_router(item: Tuple[int, int, str, str, str, int, Edge]) -> bool:
+        router = item[4]
+        if not router or router in routers:
+            return False
+        routers.add(router)
+        return True
+
+    add_phase(_new_router)
     add_phase(lambda _item: True)
 
-    return selected[:cap], {
+    picked = selected[:cap]
+    return picked, {
         "total": int(len(revs)),
-        "selected": int(len(selected[:cap])),
-        "filtered": int(max(0, len(revs) - len(selected[:cap]))),
+        "selected": int(len(picked)),
+        "filtered": int(max(0, len(revs) - len(picked))),
         "base_quote_available": int(
             sum(1 for edge in revs if qmap1.get(edge_key(edge)))
         ),
-        "protocols_selected": int(len({str(edge.dex).lower() for edge in selected[:cap]})),
+        "protocols_selected": int(
+            len({_edge_protocol_identity(edge) for edge in picked if _edge_protocol_identity(edge)})
+        ),
         "pools_selected": int(
-            len(
-                {
-                    str(
-                        edge.params.get("pool")
-                        or edge.params.get("pool_id")
-                        or edge.venue
-                        or ""
-                    ).lower()
-                    for edge in selected[:cap]
-                }
-            )
+            len({_edge_pool_identity(edge) for edge in picked if _edge_pool_identity(edge)})
+        ),
+        "routers_selected": int(
+            len({_edge_router_identity(edge) for edge in picked if _edge_router_identity(edge)})
         ),
     }
 
@@ -1777,10 +1863,34 @@ async def find_three_leg_opportunities(
     frontier_by_token: Dict[str, List[Edge]] = {}
     frontier_selected: List[Edge] = []
     active_venues_by_token = {
-        token: {str(edge.venue).lower() for edge in items}
+        token: {str(edge.venue).strip().lower() for edge in items if str(edge.venue or "").strip()}
         for token, items in adj.items()
     }
-    frontier_scored: List[Tuple[int, int, int, Edge]] = []
+    active_protocols_by_token = {
+        token: {
+            protocol
+            for edge in items
+            if (protocol := _edge_protocol_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    active_pools_by_token = {
+        token: {
+            pool
+            for edge in items
+            if (pool := _edge_pool_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    active_routers_by_token = {
+        token: {
+            router
+            for edge in items
+            if (router := _edge_router_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    frontier_scored: List[Tuple[int, int, int, int, int, Edge]] = []
     for order, edge in enumerate(pruned_edges):
         if not qmap1_3.get(edge_key(edge)):
             continue
@@ -1791,16 +1901,23 @@ async def find_three_leg_opportunities(
         )
         if not closes:
             continue
-        venue_new = int(
-            str(edge.venue).lower()
-            not in active_venues_by_token.get(edge.token_in, set())
+        protocol_new, pool_new, router_new = _edge_diversity_novelty(
+            edge,
+            active_protocols=active_protocols_by_token.get(edge.token_in, set()),
+            active_pools=active_pools_by_token.get(edge.token_in, set()),
+            active_routers=active_routers_by_token.get(edge.token_in, set()),
         )
-        # Successful first-leg quote is the viability gate; closure and venue
-        # diversity break ties without pretending raw token amounts are
-        # economically comparable across different output tokens.
-        frontier_scored.append((int(closes), venue_new, -order, edge))
-    frontier_scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
-    for _closure, _venue_new, _order, edge in frontier_scored:
+        # Quote viability and cycle closure are hard gates. Novel protocol,
+        # pool, and router identities are separate tie-break dimensions, in
+        # that order; none of these scores grants economic or execution authority.
+        frontier_scored.append(
+            (int(closes), protocol_new, pool_new, router_new, -order, edge)
+        )
+    frontier_scored.sort(
+        key=lambda item: (item[0], item[1], item[2], item[3], item[4]),
+        reverse=True,
+    )
+    for _closure, _protocol_new, _pool_new, _router_new, _order, edge in frontier_scored:
         if len(frontier_selected) >= frontier_global:
             break
         bucket = frontier_by_token.setdefault(edge.token_in, [])
@@ -1816,6 +1933,15 @@ async def find_three_leg_opportunities(
         frontier_adj.setdefault(token, []).extend(items)
 
     if telemetry is not None:
+        frontier_diversity = [
+            _edge_diversity_novelty(
+                edge,
+                active_protocols=active_protocols_by_token.get(edge.token_in, set()),
+                active_pools=active_pools_by_token.get(edge.token_in, set()),
+                active_routers=active_routers_by_token.get(edge.token_in, set()),
+            )
+            for edge in frontier_selected
+        ]
         telemetry["three_leg_frontier"] = {
             "enabled": bool(frontier_selected),
             "initial_pruned_edges": int(len(pruned_edges)),
@@ -1825,14 +1951,20 @@ async def find_three_leg_opportunities(
             "quote_viable_edges": int(
                 sum(1 for edge in pruned_edges if qmap1_3.get(edge_key(edge)))
             ),
+            # Compatibility field retains the old raw venue-address meaning.
+            # Prefer the three separate identity dimensions for new consumers.
+            "venue_diversity_semantics": "legacy_edge_venue_address",
             "venue_diverse_edges": int(
                 sum(
                     1
                     for edge in frontier_selected
-                    if str(edge.venue).lower()
+                    if str(edge.venue).strip().lower()
                     not in active_venues_by_token.get(edge.token_in, set())
                 )
             ),
+            "protocol_diverse_edges": int(sum(row[0] for row in frontier_diversity)),
+            "pool_diverse_edges": int(sum(row[1] for row in frontier_diversity)),
+            "router_diverse_edges": int(sum(row[2] for row in frontier_diversity)),
         }
 
     # iterate first edge; use time budget
