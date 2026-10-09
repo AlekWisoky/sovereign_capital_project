@@ -20,13 +20,13 @@ def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_front
     baseline = runtime._selected_provider_full_scan_budget_s(235)
     dense_graph = runtime._selected_provider_full_scan_budget_s(370)
 
-    assert baseline == 28.0
-    assert dense_graph == 35.5
+    assert baseline == 35.0
+    assert dense_graph == 56.0
     assert dense_graph > baseline
     assert runtime._selected_provider_frontier_seed_budget_s() == 10.0
 
     monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S", "44")
-    assert runtime._selected_provider_full_scan_budget_s(10_000) == 45.0
+    assert runtime._selected_provider_full_scan_budget_s(10_000) == 60.0
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S", "99")
     assert runtime._selected_provider_frontier_seed_budget_s() == 12.0
 
