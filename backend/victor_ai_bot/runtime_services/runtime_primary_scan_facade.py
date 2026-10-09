@@ -3372,16 +3372,17 @@ class RuntimePrimaryScanFacade:
             )
         except (TypeError, ValueError):
             configured = 28.0
-        configured = max(5.0, min(configured, 45.0))
+        configured = max(5.0, min(configured, 60.0))
         chunk_size = self._selected_provider_full_scan_chunk_size()
         parallelism = self._selected_provider_full_scan_parallelism()
         chunks = max(1, (max(1, int(graph_edge_count)) + chunk_size - 1) // chunk_size)
         waves = max(1, (chunks + parallelism - 1) // parallelism)
-        # The 28-second default was tuned for ~15 chunks. Add 2.5 seconds
-        # per additional parallel wave, bounded so a pathological graph cannot
-        # turn a read-only discovery pass into an unbounded request.
-        adaptive = configured + max(0, waves - 5) * 2.5
-        return max(configured, min(adaptive, 45.0))
+        # The historical 28-second window completed about four parallel waves.
+        # Scale in proportion to required waves so larger graphs do not inherit
+        # a timeout calibrated for a smaller graph. A hard 60-second cap keeps
+        # per-tick read-only work bounded; frontier seeds have their own reserve.
+        adaptive = configured * float(waves) / 4.0
+        return max(configured, min(adaptive, 60.0))
 
     @staticmethod
     def _selected_provider_frontier_seed_budget_s() -> float:
