@@ -12,6 +12,54 @@ from .family_hardening_service import family_hardening_unavailable_summary
 _RUNTIME_STATE_FACADE_FAILURES = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
+def _safe_provider_host(value: Any) -> str:
+    """Reduce an endpoint string to a host-only label for public diagnostics."""
+    raw = str(value or "").strip()
+    try:
+        host = urlsplit(raw).hostname
+    except ValueError:
+        host = None
+    if host:
+        return str(host)[:128]
+    if "://" in raw:
+        return "unknown"
+    # Compatibility with bare host labels; never retain userinfo, path, or query.
+    label = raw.rsplit("@", 1)[-1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    return label[:128] or "unknown"
+
+
+def _safe_rpc_error_kind(value: Any) -> str:
+    """Replace raw provider errors with stable categories safe for a public API."""
+    message = str(value or "").lower()
+    if any(token in message for token in ("429", "rate limit", "rate_limited")):
+        return "rpc_rate_limited"
+    if "timeout" in message or "timed out" in message:
+        return "rpc_timeout"
+    if any(token in message for token in ("connection", "transport", "ssl", "network")):
+        return "rpc_transport_or_provider_error"
+    if "revert" in message:
+        return "quote_reverted"
+    return "provider_error"
+
+
+def _sanitize_rpc_telemetry(value: Any, key: str = "") -> Any:
+    """Sanitize nested public RPC telemetry, retaining metrics but removing secrets."""
+    lower_key = str(key).lower()
+    if isinstance(value, dict):
+        return {
+            str(child_key): _sanitize_rpc_telemetry(child_value, str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_rpc_telemetry(item, key) for item in value]
+    if isinstance(value, str):
+        if "://" in value or any(part in lower_key for part in ("url", "endpoint", "uri")):
+            return _safe_provider_host(value)
+        if lower_key in {"error", "last_error", "quote_last_error", "error_message", "error_text"}:
+            return _safe_rpc_error_kind(value) if value else value
+    return value
+
+
 def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
     """Expose useful gas-consensus diagnostics without leaking RPC URLs or credentials."""
     if not isinstance(value, dict):
@@ -38,8 +86,7 @@ def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
         if not host:
             # Provider labels from RpcManager are normally hostnames. Strip
             # userinfo, paths, and query strings defensively for compatibility.
-            host = str(raw.get("provider") or "unknown")
-            host = host.rsplit("@", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+            host = _safe_provider_host(raw.get("provider"))
         block_number = _int_or_none(raw.get("block_number"))
         price = _int_or_none(raw.get("gas_price_wei"))
         error_present = bool(raw.get("error"))
@@ -210,7 +257,7 @@ class RuntimeStateFacade:
                 "failure_reasons": dict(quotes.get("failure_reasons") or {}),
             },
             "scan_sizing": scan_sizing,
-            "rpc": dict(telemetry.get("rpc") or {}),
+            "rpc": _sanitize_rpc_telemetry(telemetry.get("rpc") or {}),
             "gas_price_integrity": _gas_price_integrity_summary(
                 telemetry.get("gas_price_integrity")
             ),
