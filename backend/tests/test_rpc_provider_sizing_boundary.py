@@ -90,14 +90,19 @@ async def test_provider_comparison_does_not_force_adaptive_scan(monkeypatch):
     runtime._run_bounded_selected_provider_size_probe = fake_probe
     runtime.cache = object()
 
-    await runtime._select_rpc_and_scan(
+    result = await runtime._select_rpc_and_scan(
         bootstrap_rpc=FakeRpc(),
         current_block=123,
         amount_in=1_000,
     )
 
-    assert calls == [False, False, False, False, False]
+    # Provider comparison and the base-only full-graph pass stay non-adaptive;
+    # the bounded frontier schedules only one alternate notional per block.
+    assert calls == [False, False, False]
     assert probe_calls == [True]
+    frontier = result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]
+    assert frontier["schedule_policy"] == "one_notional_per_tick_rotating"
+    assert len(frontier["amounts_scanned"]) == 1
 
 
 def test_selected_provider_force_flag_bypasses_provider_comparison(monkeypatch):
