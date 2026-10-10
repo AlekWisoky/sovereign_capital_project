@@ -1863,6 +1863,13 @@ class RuntimePrimaryScanFacade:
                         (two_leg_telemetry, probe_two_metrics),
                         (three_leg_telemetry, probe_three_metrics),
                     ):
+                        for key in ("budget_exhausted_after_quote", "route_budget_exhausted"):
+                            if key in source:
+                                target[key] = bool(
+                                    target.get(key, False) or source.get(key, False)
+                                )
+                        if source.get("route_budget_exhausted") or source.get("budget_exhausted_after_quote"):
+                            target["route_budget_stop_reason"] = "time_budget"
                         for key in (
                             "quote_requests",
                             "quote_successes",
