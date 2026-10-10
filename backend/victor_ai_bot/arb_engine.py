@@ -1,7 +1,8 @@
 from __future__ import annotations
 import time, hashlib, os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from bisect import bisect_left
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from .cache import PerBlockCache
 from .models import Opportunity, Route, RouteLeg
 from .quote_univ3 import quote_exact_input_single, quote_exact_input_single_batch
@@ -242,6 +243,14 @@ def _edge_pool_identity(edge: Edge) -> str | None:
     return f"{protocol}:pair:{pair}:{dimensions}"
 
 
+def _edge_directed_pair_identity(edge: Edge) -> tuple[str, str] | None:
+    token_in = str(getattr(edge, "token_in", "") or "").strip().lower()
+    token_out = str(getattr(edge, "token_out", "") or "").strip().lower()
+    if not token_in or not token_out or token_in == token_out:
+        return None
+    return token_in, token_out
+
+
 def _edge_router_identity(edge: Edge) -> str | None:
     """Return router identity, excluding protocols whose venue is the pool."""
     protocol = _edge_protocol_identity(edge)
@@ -269,6 +278,129 @@ def _edge_diversity_novelty(
     )
 
 
+def _quote_outputs_by_pair(
+    candidates: Sequence[Tuple[int, Edge]],
+    quoted: Mapping[str, int],
+) -> Dict[Tuple[str, str], List[int]]:
+    outputs: Dict[Tuple[str, str], List[int]] = {}
+    for _order, edge in candidates:
+        pair = _edge_directed_pair_identity(edge)
+        output = quoted.get(edge_key(edge))
+        if pair is not None and output is not None:
+            outputs.setdefault(pair, []).append(int(output))
+    return outputs
+
+
+def _quote_quality_rank(output: int, unique_outputs: Sequence[int]) -> int:
+    if len(unique_outputs) <= 1:
+        return 5_000
+    rank = bisect_left(unique_outputs, int(output))
+    return int(rank * 10_000 / (len(unique_outputs) - 1))
+
+
+def _pair_quote_percentiles(
+    pair: Tuple[str, str],
+    candidates: Sequence[Tuple[int, Edge]],
+    outputs: Sequence[int],
+    quoted: Mapping[str, int],
+) -> Dict[Tuple[str, str, str], int]:
+    unique_outputs = sorted(set(outputs))
+    matching = [
+        (edge, int(quoted[edge_key(edge)]))
+        for _order, edge in candidates
+        if _edge_directed_pair_identity(edge) == pair
+        and edge_key(edge) in quoted
+    ]
+    return {
+        (pair[0], pair[1], edge_key(edge)): _quote_quality_rank(output, unique_outputs)
+        for edge, output in matching
+    }
+
+
+def _frontier_quote_quality_percentiles(
+    candidates: Sequence[Tuple[int, Edge]],
+    quoted: Mapping[str, int],
+) -> Dict[Tuple[str, str, str], int]:
+    outputs_by_pair = _quote_outputs_by_pair(candidates, quoted)
+    percentiles: Dict[Tuple[str, str, str], int] = {}
+    for pair, outputs in outputs_by_pair.items():
+        percentiles.update(_pair_quote_percentiles(pair, candidates, outputs, quoted))
+    return percentiles
+
+
+@dataclass(frozen=True)
+class _FrontierSelectionContext:
+    active_protocols_by_token: Dict[str, set[str]]
+    active_pools_by_token: Dict[str, set[str]]
+    active_routers_by_token: Dict[str, set[str]]
+    per_token_cap: int
+    quote_quality_by_edge: Dict[Tuple[str, str, str], int]
+
+
+def _frontier_identity_sets(
+    edge: Edge,
+    already_selected: Sequence[Edge],
+    context: _FrontierSelectionContext,
+) -> Tuple[set[str], set[str], set[str]]:
+    token = str(edge.token_in)
+    protocols = set(context.active_protocols_by_token.get(token, set()))
+    pools = set(context.active_pools_by_token.get(token, set()))
+    routers = set(context.active_routers_by_token.get(token, set()))
+    for chosen in already_selected:
+        protocol = _edge_protocol_identity(chosen)
+        pool = _edge_pool_identity(chosen)
+        router = _edge_router_identity(chosen)
+        if protocol:
+            protocols.add(protocol)
+        if pool:
+            pools.add(pool)
+        if router:
+            routers.add(router)
+    return protocols, pools, routers
+
+
+def _frontier_candidate_score(
+    order: int,
+    edge: Edge,
+    selected_by_token: Dict[str, List[Edge]],
+    context: _FrontierSelectionContext,
+) -> Tuple[int, int, int, int, int] | None:
+    token = str(edge.token_in)
+    bucket = selected_by_token.get(token, [])
+    if len(bucket) >= max(0, int(context.per_token_cap)):
+        return None
+    protocols, pools, routers = _frontier_identity_sets(edge, bucket, context)
+    protocol_new, pool_new, router_new = _edge_diversity_novelty(
+        edge,
+        active_protocols=protocols,
+        active_pools=pools,
+        active_routers=routers,
+    )
+    pair = _edge_directed_pair_identity(edge)
+    quote_quality = (
+        context.quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
+        if pair is not None else 0
+    )
+    return quote_quality, protocol_new, pool_new, router_new, -int(order)
+
+
+def _best_frontier_candidate_index(
+    pending: Sequence[Tuple[int, Edge]],
+    selected_by_token: Dict[str, List[Edge]],
+    context: _FrontierSelectionContext,
+) -> int | None:
+    best_index = None
+    best_score = None
+    for candidate_index, (order, edge) in enumerate(pending):
+        score = _frontier_candidate_score(order, edge, selected_by_token, context)
+        if score is None:
+            continue
+        if best_score is None or score > best_score:
+            best_index = candidate_index
+            best_score = score
+    return best_index
+
+
 def _select_three_leg_frontier_edges(
     candidates: List[Tuple[int, Edge]],
     *,
@@ -277,55 +409,38 @@ def _select_three_leg_frontier_edges(
     active_routers_by_token: Dict[str, set[str]],
     per_token_cap: int,
     global_cap: int,
+    quoted_output_by_edge: Optional[Dict[str, int]] = None,
+    quote_quality_by_edge: Optional[Dict[Tuple[str, str, str], int]] = None,
 ) -> Tuple[List[Edge], Dict[str, List[Edge]]]:
-    """Greedily select bounded edges, recomputing diversity after each pick."""
+    """Select a bounded, quote-aware edge frontier with independent identity axes."""
     pending = list(candidates)
     selected: List[Edge] = []
-    by_token: Dict[str, List[Edge]] = {}
     selected_by_token: Dict[str, List[Edge]] = {}
-
+    quoted = {
+        str(key): int(value)
+        for key, value in dict(quoted_output_by_edge or {}).items()
+        if int(value) > 0
+    }
+    quality = dict(
+        quote_quality_by_edge
+        if quote_quality_by_edge is not None
+        else _frontier_quote_quality_percentiles(pending, quoted)
+    )
+    context = _FrontierSelectionContext(
+        active_protocols_by_token=active_protocols_by_token,
+        active_pools_by_token=active_pools_by_token,
+        active_routers_by_token=active_routers_by_token,
+        per_token_cap=max(0, int(per_token_cap)),
+        quote_quality_by_edge=quality,
+    )
     while pending and len(selected) < max(0, int(global_cap)):
-        best_index = None
-        best_score = None
-        for candidate_index, (order, edge) in enumerate(pending):
-            token = str(edge.token_in)
-            bucket = selected_by_token.get(token, [])
-            if len(bucket) >= max(0, int(per_token_cap)):
-                continue
-            protocols = set(active_protocols_by_token.get(token, set()))
-            pools = set(active_pools_by_token.get(token, set()))
-            routers = set(active_routers_by_token.get(token, set()))
-            for chosen in bucket:
-                protocol = _edge_protocol_identity(chosen)
-                pool = _edge_pool_identity(chosen)
-                router = _edge_router_identity(chosen)
-                if protocol:
-                    protocols.add(protocol)
-                if pool:
-                    pools.add(pool)
-                if router:
-                    routers.add(router)
-            protocol_new, pool_new, router_new = _edge_diversity_novelty(
-                edge,
-                active_protocols=protocols,
-                active_pools=pools,
-                active_routers=routers,
-            )
-            score = (protocol_new, pool_new, router_new, -int(order))
-            if best_score is None or score > best_score:
-                best_index = candidate_index
-                best_score = score
-
+        best_index = _best_frontier_candidate_index(pending, selected_by_token, context)
         if best_index is None:
             break
         _order, edge = pending.pop(best_index)
-        token = str(edge.token_in)
-        selected_by_token.setdefault(token, []).append(edge)
+        selected_by_token.setdefault(str(edge.token_in), []).append(edge)
         selected.append(edge)
-
-    # Preserve insertion order for downstream adjacency construction.
-    by_token = {token: list(items) for token, items in selected_by_token.items()}
-    return selected, by_token
+    return selected, {token: list(items) for token, items in selected_by_token.items()}
 
 
 async def quote_edge(
@@ -1750,10 +1865,117 @@ async def find_two_leg_opportunities(
             "scan_edges_selected": int(metrics.get("scan_edges_selected", len(edges))),
             "scan_edges_capped": int(metrics.get("scan_edges_capped", 0)),
         })
-    # Rank the complete bounded scan result, then enforce the caller's output
-    # cap. Discovery order must not hard-stop candidate generation.
-    opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
+    # Rank completed routes by signed after-cost economics before gross
+    # fallback. Validation authority remains a downstream execution gate.
+    opps.sort(key=_opportunity_economic_sort_key, reverse=True)
     return opps[: max(1, int(max_opps))]
+
+
+def _profitability_state(meta: Mapping[str, Any]) -> Dict[str, Any]:
+    state = meta.get("profitability")
+    if not isinstance(state, dict):
+        state = meta.get("profitability_diagnostic")
+    return state if isinstance(state, dict) else {}
+
+
+def _canonical_after_cost_usd_micro(meta: Mapping[str, Any]) -> int | None:
+    canonical = meta.get("canonical_after_fee_usd")
+    if not isinstance(canonical, dict):
+        return None
+    try:
+        raw = canonical.get("profit_after_costs_usd_micro")
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _raw_signed_economic_profit(
+    opportunity: Opportunity,
+    meta: Mapping[str, Any],
+    state: Mapping[str, Any],
+) -> int | None:
+    economic = None
+    for key in (
+        "economic_profit_after_costs_wei",
+        "economic_after_cost_profit_wei",
+        "profit_after_costs_wei",
+        "after_cost_profit_wei",
+    ):
+        raw = state.get(key, meta.get(key))
+        if raw not in (None, ""):
+            try:
+                economic = int(raw)
+                break
+            except (TypeError, ValueError, OverflowError):
+                continue
+    if economic != -1 or str(state.get("reason") or "") != "does_not_repay_flashloan":
+        return economic
+    gas_token = state.get("gas_cost_profit_token_wei")
+    if gas_token in (None, ""):
+        return None
+    try:
+        gross_raw = state.get("gross_profit_wei")
+        gross = (
+            int(gross_raw)
+            if gross_raw not in (None, "")
+            else int(getattr(opportunity, "expected_profit_raw", 0) or 0)
+        )
+        return gross - int(state.get("flashloan_fee_wei") or 0) - int(gas_token)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _route_borrow_token(opportunity: Opportunity, meta: Mapping[str, Any]) -> str:
+    route = getattr(opportunity, "route", None)
+    legs = list(getattr(route, "legs", []) or [])
+    first_token = getattr(legs[0], "token_in", "") if legs else ""
+    return str(first_token or meta.get("borrow_token") or "").strip().lower()
+
+
+def _route_gross_profit(opportunity: Opportunity) -> int:
+    try:
+        return int(getattr(opportunity, "expected_profit_raw", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _authoritative_positive(state: Mapping[str, Any], profit: int | None) -> bool:
+    return bool(
+        state.get("revalidated") is True
+        and state.get("authoritative") is True
+        and state.get("valid") is True
+        and state.get("repayment_valid") is True
+        and profit is not None
+        and profit > 0
+    )
+
+
+def _opportunity_economic_sort_key(
+    opportunity: Opportunity,
+) -> tuple[int, int, str, int, int, int, str]:
+    """Rank by comparable USD net value, otherwise by token-local signed net."""
+    meta_value = getattr(opportunity, "meta", {}) or {}
+    meta = meta_value if isinstance(meta_value, dict) else {}
+    state = _profitability_state(meta)
+    usd_micro = _canonical_after_cost_usd_micro(meta)
+    economic = _raw_signed_economic_profit(opportunity, meta, state)
+    borrow_token = _route_borrow_token(opportunity, meta)
+    gross = _route_gross_profit(opportunity)
+    verified_usd = usd_micro is not None and _authoritative_positive(state, usd_micro)
+    route_id = str(
+        getattr(opportunity, "route_id", "") or getattr(opportunity, "id", "") or ""
+    )
+    if usd_micro is not None:
+        return (1, usd_micro, "", 0, int(verified_usd), 0, route_id)
+    return (
+        0,
+        0,
+        borrow_token,
+        int(economic or 0),
+        int(_authoritative_positive(state, economic)),
+        gross,
+        route_id,
+    )
 
 
 def _prioritize_three_leg_adjacency(
@@ -1968,6 +2190,14 @@ async def find_three_leg_opportunities(
     # Quote viability and cycle closure are hard gates. The selector recomputes
     # protocol, pool, and router novelty after each pick so duplicate diversity
     # gains cannot consume the bounded frontier quota.
+    quoted_output_by_edge = {
+        key: int(value[0])
+        for key, value in qmap1_3.items()
+        if value and int(value[0]) > 0
+    }
+    quote_quality_by_edge = _frontier_quote_quality_percentiles(
+        frontier_candidates, quoted_output_by_edge
+    )
     frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
         frontier_candidates,
         active_protocols_by_token=active_protocols_by_token,
@@ -1975,6 +2205,8 @@ async def find_three_leg_opportunities(
         active_routers_by_token=active_routers_by_token,
         per_token_cap=frontier_per_token,
         global_cap=frontier_global,
+        quoted_output_by_edge=quoted_output_by_edge,
+        quote_quality_by_edge=quote_quality_by_edge,
     )
 
     frontier_adj: Dict[str, List[Edge]] = {
@@ -1984,6 +2216,20 @@ async def find_three_leg_opportunities(
         frontier_adj.setdefault(token, []).extend(items)
 
     if telemetry is not None:
+        active_directed_pairs = {
+            (str(edge.token_in).lower(), str(edge.token_out).lower())
+            for items in adj.values() for edge in items
+        }
+        frontier_directed_pairs = {
+            pair for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        }
+        new_directed_pairs = frontier_directed_pairs - active_directed_pairs
+        selected_quote_percentiles = [
+            quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
+            for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        ]
         new_protocols = {
             (edge.token_in, protocol)
             for edge in frontier_selected
@@ -2025,6 +2271,18 @@ async def find_three_leg_opportunities(
             "protocol_diverse_edges": int(len(new_protocols)),
             "pool_diverse_edges": int(len(new_pools)),
             "router_diverse_edges": int(len(new_routers)),
+            "directed_pair_diverse_edges": int(len(new_directed_pairs)),
+            "directed_pair_identity": "token_in->token_out",
+            "quote_quality_priority_used": bool(quoted_output_by_edge),
+            "quote_quality_directed_pair_groups": int(len({
+                (str(edge.token_in).lower(), str(edge.token_out).lower())
+                for edge in frontier_candidates
+                if edge_key(edge) in quoted_output_by_edge
+            })),
+            "selected_mean_quote_quality_percentile_bps": (
+                int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
+                if selected_quote_percentiles else None
+            ),
         }
 
     # Iterate first edges under a bounded budget. Once a route group is in
@@ -2373,9 +2631,9 @@ async def find_three_leg_opportunities(
             "scan_edges_selected": int(metrics.get("scan_edges_selected", len(edges))),
             "scan_edges_capped": int(metrics.get("scan_edges_capped", 0)),
         })
-    # Rank the complete bounded scan result, then enforce the caller's output
-    # cap. Discovery order must not hard-stop candidate generation.
-    opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
+    # Rank completed two-leg routes by comparable after-cost USD economics,
+    # then use token-local net P&L only when conversion evidence is absent.
+    opps.sort(key=_opportunity_economic_sort_key, reverse=True)
     return opps[: max(1, int(max_opps))]
 
 

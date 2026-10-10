@@ -18,6 +18,7 @@ from ..profitability_state import revalidate_profitability_state
 from ..flashloan_providers import observe_flashloan_fee_bps
 from ..usd_pricing import gas_wei_to_token_wei, token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
+from ..gas_adjusted_split_router import build_gas_adjusted_split_frontier
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
@@ -426,6 +427,23 @@ def _candidate_economic_fields(
     }
 
 
+def _size_row_native_gas_cost_wei(
+    meta: Mapping[str, Any],
+    fallback: str,
+) -> str:
+    """Use total native gas cost when the split frontier has explicit L2/L1 parts."""
+    raw_l2 = meta.get("economic_gas_l2_wei")
+    raw_l1 = meta.get("economic_base_l1_fee_wei", meta.get("base_l1_fee_wei"))
+    if raw_l2 in (None, "") or raw_l1 in (None, ""):
+        return str(fallback)
+    try:
+        l2 = int(raw_l2)
+        l1 = int(raw_l1)
+    except (TypeError, ValueError, OverflowError):
+        return str(fallback)
+    return str(l2 + l1) if l2 > 0 and l1 >= 0 else str(fallback)
+
+
 def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     meta = getattr(candidate, "meta", {}) or {}
     profitability = meta.get("profitability") if isinstance(meta, dict) else {}
@@ -439,10 +457,22 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "amount_in": amount_in_value,
         "gross_profit_wei": str(fields["gross_profit_wei"]),
         "amount_out_wei": str(fields["amount_out_wei"]),
-        "gas_cost_profit_token_wei": str(fields["gas_cost_profit_token_wei"]),
+        "gas_cost_profit_token_wei": (
+            str(fields["gas_cost_profit_token_wei"])
+            if profitability.get("gas_cost_profit_token_wei") not in (None, "")
+            else ""
+        ),
+        "gas_cost_conversion_available": bool(
+            profitability.get("gas_cost_profit_token_wei") not in (None, "")
+            and int(fields["gas_cost_profit_token_wei"]) > 0
+        ),
+        "gas_units_estimate": str(meta.get("economic_gas_units") or ""),
+        "gas_cost_l2_wei": str(meta.get("economic_gas_l2_wei") or ""),
+        "base_l1_fee_wei": str(meta.get("economic_base_l1_fee_wei", meta.get("base_l1_fee_wei", "0")) or "0"),
+        "base_l1_fee_status": str(meta.get("base_l1_fee_status") or ""),
         "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
         "flashloan_fee_wei": str(fields["flashloan_fee_wei"]),
-        "gas_cost_wei": fields["gas_cost_wei"],
+        "gas_cost_wei": _size_row_native_gas_cost_wei(meta, fields["gas_cost_wei"]),
         "gross_minus_flashloan_fee_wei": str(fields["gross_minus_flashloan_fee_wei"]),
         "gross_minus_flashloan_fee_minus_gas_wei": str(fields["gross_minus_flashloan_fee_minus_gas_wei"]),
         "repayment_valid": fields["repayment_valid"],
@@ -918,6 +948,7 @@ class RuntimePrimaryScanFacade:
                 meta.get("venues")
                 or any(isinstance(meta.get(key), dict) for key in ("leg1", "leg2", "leg3"))
             )
+            gas_units = 0
             if has_route_gas_inputs:
                 gas_units = estimate_route_gas_units(meta)
                 gas_cost_wei = int(
@@ -1010,10 +1041,14 @@ class RuntimePrimaryScanFacade:
                     # component when the exact executor envelope cannot be priced.
                     l1_fee_wei = 0
 
+            l2_gas_cost_wei = int(gas_cost_wei)
             gas_cost_wei += int(l1_fee_wei)
             if isinstance(meta, dict):
                 meta["base_l1_fee_wei"] = str(int(l1_fee_wei))
                 meta["base_l1_fee_status"] = l1_fee_status
+                meta["economic_gas_units"] = str(int(gas_units)) if has_route_gas_inputs else ""
+                meta["economic_gas_l2_wei"] = str(l2_gas_cost_wei) if has_route_gas_inputs else ""
+                meta["economic_base_l1_fee_wei"] = str(int(l1_fee_wei))
 
             gas_cost_in_profit_token_wei: int | None = None
             profit_token = ""
@@ -1899,6 +1934,21 @@ class RuntimePrimaryScanFacade:
             # "no route quoted" from "route quoted but economically rejected".
             size_matrix = _build_size_economic_matrix(size_scan_records)
             telemetry["size_economic_matrix"] = size_matrix
+            try:
+                telemetry["gas_adjusted_split_routing"] = build_gas_adjusted_split_frontier(
+                    size_matrix,
+                    chain_id=int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0),
+                )
+            except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                telemetry["gas_adjusted_split_routing"] = {
+                    "enabled": True,
+                    "mode": "bounded_gas_adjusted_split_diagnostic",
+                    "available": False,
+                    "execution_supported": False,
+                    "execution_authority_granted": False,
+                    "reason_code": "split_frontier_model_failed",
+                    "error_type": type(exc).__name__,
+                }
             _attach_quote_economic_size_curves([*opps2, *opps3], size_matrix)
 
             telemetry["adaptive_size_discovery"] = {
@@ -3863,6 +3913,24 @@ class RuntimePrimaryScanFacade:
                     adaptive_matrix,
                     frontier_matrix,
                 )
+                # Recompute against the union of sampled and adaptive amounts.
+                # Do not leave the strongest size/frontier quote out of the split
+                # diagnostic simply because it arrived from a later scan pass.
+                try:
+                    selected_telemetry["gas_adjusted_split_routing"] = build_gas_adjusted_split_frontier(
+                        list(selected_telemetry["size_economic_matrix"]),
+                        chain_id=int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0),
+                    )
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    selected_telemetry["gas_adjusted_split_routing"] = {
+                        "enabled": True,
+                        "mode": "bounded_gas_adjusted_split_diagnostic",
+                        "available": False,
+                        "execution_supported": False,
+                        "execution_authority_granted": False,
+                        "reason_code": "split_frontier_model_failed",
+                        "error_type": type(exc).__name__,
+                    }
             adaptive_evidence = list(selected_adaptive.get("size_economic_evidence") or [])
             frontier_evidence = list(frontier_seed_telemetry.get("size_economic_evidence") or [])
             if adaptive_evidence or frontier_evidence:

@@ -81,6 +81,16 @@ Route evaluation uses one shared bounded budget so the two-leg and three-leg sta
 
 Set these only in the server's untracked `env/backend.env`; never commit secrets or production environment files. Bigger evaluation budgets trade latency and per-tick graph-slice coverage for more route groups examined per slice. Review `route_evaluation` telemetry—especially the resolved budgets, stop reason, route groups, chunk completion, and edges covered—before increasing them further. Never weaken flash-loan repayment, revalidation, after-cost profitability, or execution-authority gates to improve candidate counts.
 
+## Gas-adjusted split-route economics
+
+The market pipeline exposes `gas_adjusted_split_routing` as a bounded, read-only economic frontier over route/amount evidence. It considers independent circular routes that can divide one total notional, rejects reused normalized pool identities, ranks routes by signed net value, and uses protocol/pool identity only to preserve alternatives within 50 basis points of the best single-route net estimate. It models shared L2 execution overhead plus per-route gas, subtracts sampled flash-loan premiums, converts native gas into the borrow-token unit, and includes Base L1 data-fee estimates only when exact-calldata evidence exists for every component route.
+
+**Pricing caveat:** the extra-route gas allowance is a planning heuristic, not a proven upper bound. Base L1 fees are summed from individual ABI-v2 route calldata as a conservative proxy, not an exact estimate of the future split-plan calldata. Telemetry explicitly marks these as non-authoritative; ABI-v3 calldata must be priced from its exact encoded bytes and gas must be re-estimated/simulated.
+
+**Important execution boundary:** the deployed `VictorArbExecutor` ABI v2 accepts one sequential `Leg[]`; it cannot execute multiple independent arbitrage cycles funded by portions of one flash loan. All split-frontier results therefore carry `execution_supported=false`, `execution_authority_granted=false`, and require executor ABI v3 plus target-state transaction simulation before they could become executable. A positive split estimate is research evidence only, not an opportunity to submit.
+
+The model fails closed when quote evidence, gas conversion, gas-unit estimates, or required Base L1 data-fee evidence is missing. Do not loosen repayment, after-cost profitability, authority, or simulation gates to increase candidate counts. Treat `eligible_route_amount_evidence`, `split_combinations_evaluated`, `positive_after_cost_estimates`, `search_truncated_targets`, and each plan's `improvement_over_best_single_wei` as diagnostic telemetry only.
+
 ## 7) Safe mode
 
 Keep the current Ethereum configuration non-live:

@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 376,
+    "test_file_count": 378,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -18,6 +18,7 @@
       "backend/tests/test_aqe_import_boundary.py",
       "backend/tests/test_arb_engine_hardening.py",
       "backend/tests/test_arb_engine_route_budget.py",
+      "backend/tests/test_arb_engine_route_priority.py",
       "backend/tests/test_arbitrage_adapters_hardening.py",
       "backend/tests/test_arbitrage_runtime_hardening.py",
       "backend/tests/test_arbitrage_screener_helper.py",
@@ -117,6 +118,7 @@
       "backend/tests/test_fund_route_auto_trade_sync.py",
       "backend/tests/test_fund_routes.py",
       "backend/tests/test_fund_summary_component_sync_maintenance.py",
+      "backend/tests/test_gas_adjusted_split_router.py",
       "backend/tests/test_gmao_governance_maintenance.py",
       "backend/tests/test_goal_read_surface_sync_maintenance.py",
       "backend/tests/test_governance_read_surface_auto_trade_sync.py",
@@ -559,9 +561,9 @@
       ]
     }
   },
-  "generated_at": "2026-10-04T05:53:50.848Z",
+  "generated_at": "2026-10-10T08:31:10.995000Z",
   "generated_at_iso": "2026-10-04T05:53:50.848Z",
-  "generated_at_ms": 1791093230848,
+  "generated_at_ms": 1791621070995,
   "generator": "scripts/render_verification_report.py",
   "mobile": {
     "ci_script": "npm run typecheck:ci && npm run test:unit",
