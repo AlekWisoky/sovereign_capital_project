@@ -9,9 +9,10 @@ TOKEN_Y = "0x" + "33" * 20
 TOKEN_Z = "0x" + "44" * 20
 ROUTER = "0x" + "55" * 20
 FEE_AUX = "0x" + (3000).to_bytes(32, "big").hex()
+SECOND_FEE_AUX = "0x" + (500).to_bytes(32, "big").hex()
 
 
-def _legs(middle: str, amount: int = 5_000_000, *, first_aux: str = FEE_AUX, second_aux: str = FEE_AUX):
+def _legs(middle: str, amount: int = 5_000_000, *, first_aux: str = FEE_AUX, second_aux: str = SECOND_FEE_AUX):
     return [
         {
             "dex": "univ3",
@@ -117,7 +118,7 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
             "token_out": TOKEN_A,
             "amount_in": "5000500",
             "min_out": "5000800",
-            "data": "0x" + (500).to_bytes(32, "big").hex(),
+            "data": "0x" + (10000).to_bytes(32, "big").hex(),
         },
     ]
     result = build_gas_adjusted_split_frontier(
