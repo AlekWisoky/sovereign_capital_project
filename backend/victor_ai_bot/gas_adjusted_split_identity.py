@@ -100,6 +100,7 @@ def _candidate_has_converted_gas_evidence(values: Mapping[str, int]) -> bool:
         and values["l2_gas"] > 0
         and values["gas_units"] > SHARED_EXECUTION_OVERHEAD_GAS_UNITS
         and values["l1_fee"] >= 0
+        and values["native_cost"] == values["l2_gas"] + values["l1_fee"]
     )
 
 
