@@ -11,6 +11,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _candidate_economic_after_cost_for_sizing,
     _candidate_sizing_sort_key,
     _merge_size_economic_matrices,
+    _selected_provider_frontier_seed_for_block,
     _selected_provider_frontier_slice_offset,
     _selected_provider_full_scan_chunk_order,
 )
@@ -69,6 +70,15 @@ def test_selected_provider_full_scan_rotates_and_covers_each_chunk_once():
     assert set(first) == set(range(33))
     assert len(first) == len(set(first))
     assert first[1:] + first[:1] == second
+
+
+def test_frontier_seed_rotates_one_notional_per_block():
+    ladder = [500, 2000, 8000]
+    assert _selected_provider_frontier_seed_for_block(ladder, 123) == ([500], 0)
+    assert _selected_provider_frontier_seed_for_block(ladder, 124) == ([2000], 1)
+    assert _selected_provider_frontier_seed_for_block(ladder, 125) == ([8000], 2)
+    assert _selected_provider_frontier_seed_for_block(ladder, 126) == ([500], 0)
+    assert _selected_provider_frontier_seed_for_block([], 123) == ([], 0)
 
 
 def test_selected_provider_chunk_accounting_covers_completed_timeout_failed_and_skipped():
@@ -344,17 +354,26 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
 
     result = await runtime._select_rpc_and_scan(
         bootstrap_rpc=SimpleNamespace(url="https://rpc.example"),
-        current_block=123,
+        current_block=124,
         amount_in=1000,
     )
 
-    assert scan_amounts == [1000, 1000, 500, 2000, 8000]
-    assert provider_comparison_flags == [True, False, False, False, False]
-    assert full_graph_base_only_flags == [False, True, True, True, True]
+    # One alternate notional is scanned in a tick; size selection rotates
+    # across blocks, and the scan budget is no longer split into three 3s timeouts.
+    assert scan_amounts == [1000, 1000, 2000]
+    assert provider_comparison_flags == [True, False, False]
+    assert full_graph_base_only_flags == [False, True, True]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
-    assert result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]["candidates_added"] == 1
+    frontier = result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]
+    assert frontier["candidate_amounts"] == ["500", "2000", "8000"]
+    assert frontier["amounts_scanned"] == ["2000"]
+    assert frontier["notional_rotation_index"] == 1
+    assert frontier["candidates_added"] == 1
+    progress = result["telemetry"]["rpc_selection_progress"]
+    assert progress["phase"] == "complete"
+    assert "details" not in progress or "chunks_total" not in progress["details"]
 
 
 @pytest.mark.asyncio
