@@ -150,6 +150,63 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["size_economic_evidence"][0]["route_id"] == "route-1"
 
 
+def test_market_pipeline_exposes_live_rpc_selection_progress_without_endpoint_urls():
+    runtime = _Runtime()
+    runtime._market_pipeline_telemetry.update({
+        "rpc_selection_phase": "provider_comparison",
+        "rpc_selection_started_ms": 1_800_000_000_000,
+        "rpc_provider_scan_timeout_s": 35.0,
+        "rpc_selection_progress": {
+            "phase": "provider_comparison",
+            "started_ms": 1_800_000_000_000,
+            "phase_started_ms": 1_800_000_001_000,
+            "updated_ms": 1_800_000_012_000,
+            "elapsed_ms": 12_000,
+            "phase_elapsed_ms": 11_000,
+            "provider_count": 2,
+            "providers_started": 2,
+            "providers_running": 1,
+            "providers_completed": 1,
+            "providers_failed": 0,
+            "providers": [
+                {
+                    "provider": "rpc-a.example",
+                    "status": "completed",
+                    "quote_requests": 10,
+                    "quote_successes": 10,
+                    "candidate_count": 1,
+                    "elapsed_ms": 1_200,
+                },
+                {
+                    "provider": "rpc-b.example",
+                    "status": "running",
+                    "quote_requests": 4,
+                    "quote_successes": 3,
+                    "candidate_count": 0,
+                },
+            ],
+        },
+    })
+
+    out = runtime.market_pipeline_telemetry_state()
+
+    assert out["rpc_selection_phase"] == "provider_comparison"
+    assert out["rpc_provider_scan_timeout_s"] == 35.0
+    progress = out["rpc_selection_progress"]
+    assert progress["phase"] == "provider_comparison"
+    assert progress["providers_running"] == 1
+    assert [row["status"] for row in progress["providers"]] == [
+        "completed", "running"
+    ]
+    assert [row["provider"] for row in progress["providers"]] == [
+        "rpc-a.example", "rpc-b.example"
+    ]
+    serialized = str(progress)
+    assert "https://" not in serialized
+    assert "apikey" not in serialized
+    assert "password" not in serialized
+
+
 def test_market_pipeline_telemetry_counts_canonical_profitability_when_candidates_exist():
     out = _Runtime().market_pipeline_telemetry_state()
     assert out["economics"]["gross_candidates"] == 2

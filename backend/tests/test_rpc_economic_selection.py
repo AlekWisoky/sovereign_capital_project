@@ -203,6 +203,133 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
     }
 
 @pytest.mark.asyncio
+async def test_rpc_selection_publishes_inflight_provider_progress(monkeypatch):
+    class _Manager:
+        def read_candidates(self):
+            return ["https://rpc-a.example"]
+
+        def observe_quote_telemetry(self, url, **kwargs):
+            return None
+
+        def snapshot(self):
+            return {
+                "read": [
+                    {"url": "https://rpc-a.example", "ok": True, "score": 10.0},
+                ]
+            }
+
+    runtime = RuntimePrimaryScanFacade()
+    runtime.rpc_manager = _Manager()
+    runtime.cfg = SimpleNamespace()
+    runtime.cache = PerBlockCache()
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MIN_OPPORTUNITIES", "1")
+    monkeypatch.setattr(
+        runtime,
+        "_build_provider_comparison_pool_event_cache",
+        lambda *args, **kwargs: object(),
+    )
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": [], "runtime": {}}
+
+    async def fake_token_amounts(*args, **kwargs):
+        return {"weth": 1000}, {"amounts_by_token": {"weth": "1000"}}
+
+    scan_started = asyncio.Event()
+    release_scan = asyncio.Event()
+    candidate = SimpleNamespace(
+        id="route-id",
+        route_id="route-profitable",
+        strategy="two-leg:univ3->sushiswap-v2",
+        expected_profit_raw="20",
+        route=SimpleNamespace(legs=[SimpleNamespace(amount_in="1000")]),
+        meta={
+            "profitability": {
+                "revalidated": True,
+                "authoritative": True,
+                "valid": True,
+                "repayment_valid": True,
+                "profit_after_costs_wei": "10",
+            },
+            "canonical_after_fee_usd": {
+                "verified": True,
+                "profit_after_costs_usd_micro": 10,
+            },
+        },
+    )
+
+    async def fake_scan(
+        rpc,
+        *,
+        current_block,
+        amount_in,
+        cache,
+        discovery_context,
+        telemetry_sink,
+        shared_token_scan_amounts,
+        force_adaptive_size_scan,
+    ):
+        scan_started.set()
+        await release_scan.wait()
+        telemetry_sink.update({
+            "quotes": {"requests": 4, "successes": 4, "failure_reasons": {}},
+            "scan_latency_ms": 10.0,
+            "route_universe": {"edges_by_dex": {"univ3": 2}},
+            "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
+            "adaptive_size_discovery": {"amounts_scanned": ["1000"]},
+        })
+        return [candidate]
+
+    async def fake_size_probe(
+        rpc,
+        *,
+        current_block,
+        base_amount_in,
+        base_opps,
+        cache,
+    ):
+        return list(base_opps), {
+            "adaptive_size_discovery": {
+                "amounts_scanned": ["1000"],
+                "probe_triggered": False,
+                "economic_matrix_complete": True,
+            },
+            "size_economic_matrix": [
+                {"amount_in": "1000", "candidates": []},
+            ],
+            "size_economic_evidence": [],
+        }
+
+    runtime._build_discovery_context = fake_discovery
+    runtime._build_token_scan_amounts = fake_token_amounts
+    runtime._scan_primary_opportunities = fake_scan
+    runtime._run_bounded_selected_provider_size_probe = fake_size_probe
+
+    task = asyncio.create_task(runtime._select_rpc_and_scan(
+        bootstrap_rpc=SimpleNamespace(url="https://rpc-a.example"),
+        current_block=123,
+        amount_in=1000,
+    ))
+    await asyncio.wait_for(scan_started.wait(), timeout=2.0)
+
+    in_flight = dict(runtime._market_pipeline_telemetry["rpc_selection_progress"])
+    assert in_flight["phase"] == "provider_comparison"
+    assert in_flight["providers_running"] == 1
+    assert in_flight["providers_completed"] == 0
+    assert in_flight["providers"][0]["provider"] == "rpc-a.example"
+    assert in_flight["providers"][0]["status"] == "running"
+    assert "https://" not in str(in_flight)
+
+    release_scan.set()
+    result = await asyncio.wait_for(task, timeout=5.0)
+    finished = result["telemetry"]["rpc_selection_progress"]
+    assert finished["phase"] == "complete"
+    assert finished["providers_completed"] == 1
+    assert finished["providers_failed"] == 0
+    assert finished["providers"][0]["candidate_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_candidates(monkeypatch):
     class _Manager:
         def __init__(self):
