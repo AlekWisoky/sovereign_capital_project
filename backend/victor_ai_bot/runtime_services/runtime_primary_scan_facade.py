@@ -1892,7 +1892,7 @@ class RuntimePrimaryScanFacade:
             provider_cost_inputs,
         ) = await _resolve_scan_provider_cost_inputs(
             _ProviderScanCostContext(
-                rpc_manager=self.rpc_manager,
+                rpc_manager=getattr(self, "rpc_manager", None),
                 discovery_context=discovery_context,
                 current_block=int(current_block),
                 amount_in=int(amount_in),
