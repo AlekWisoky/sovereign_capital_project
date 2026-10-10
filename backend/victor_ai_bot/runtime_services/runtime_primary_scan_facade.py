@@ -2587,10 +2587,19 @@ class RuntimePrimaryScanFacade:
 
             providers = [dict(row) for row in provider_progress_by_url.values()]
             terminal = {"completed", "failed", "timed_out"}
+            prior = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
+            previous_progress = dict(prior.get("rpc_selection_progress") or {})
+            phase_started_ms = (
+                now_ms
+                if str(previous_progress.get("phase") or "") != str(phase)
+                else int(previous_progress.get("phase_started_ms") or now_ms)
+            )
+            previous_details = dict(previous_progress.get("details") or {})
             progress = {
                 "phase": str(phase),
                 "started_ms": selection_started_ms,
-                "phase_started_ms": now_ms,
+                "phase_started_ms": phase_started_ms,
+                "phase_elapsed_ms": max(0, now_ms - phase_started_ms),
                 "updated_ms": now_ms,
                 "elapsed_ms": max(0, now_ms - selection_started_ms),
                 "provider_count": len(providers),
@@ -2600,9 +2609,6 @@ class RuntimePrimaryScanFacade:
                 "providers_failed": sum(row.get("status") in {"failed", "timed_out"} for row in providers),
                 "providers": providers,
             }
-            prior = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
-            previous_progress = dict(prior.get("rpc_selection_progress") or {})
-            previous_details = dict(previous_progress.get("details") or {})
             if details:
                 previous_details.update(dict(details))
             if previous_details:
