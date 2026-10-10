@@ -104,6 +104,11 @@ def test_gas_adjusted_split_frontier_finds_better_partition_but_never_grants_aut
     assert plan["simulation_required_before_authority"] is True
     assert plan["revalidated"] is False
     assert plan["authoritative"] is False
+    assert plan["identity_coverage"]["unique_protocols"] == 1
+    assert plan["identity_coverage"]["unique_pool_keys"] == 4
+    assert plan["identity_coverage"]["unique_router_ids"] == 1
+    assert plan["identity_coverage"]["unique_directed_pairs"] == 4
+    assert plan["identity_coverage"]["router_identity_is_not_a_profit_score"] is True
 
 
 def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
