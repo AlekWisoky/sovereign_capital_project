@@ -182,7 +182,7 @@ def _prepare_candidate_buckets(
         for candidate in candidates:
             by_amount.setdefault(candidate["amount_in"], []).append(candidate)
         kept = []
-        for amount, bucket in by_amount.items():
+        for _amount, bucket in by_amount.items():
             # Keep the top-net route, then preserve economically near-best
             # alternatives that add pool/protocol coverage. A route can only
             # trade some net value for diversity inside a bounded 50-bps band.
