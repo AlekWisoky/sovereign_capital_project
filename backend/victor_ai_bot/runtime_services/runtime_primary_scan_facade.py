@@ -4220,6 +4220,10 @@ class RuntimePrimaryScanFacade:
             provider_candidate_counts[str(url)] = len(provider_opps or [])
             if not provider_evidence.economically_eligible:
                 continue
+            if not provider_comparison_comparable and str(url) != str(selected_url):
+                # Candidate union is only meaningful over a comparable graph and
+                # cost basis. On mismatch keep the operational fallback's result.
+                continue
             for opportunity in list(provider_opps or []):
                 route_id = str(getattr(opportunity, "route_id", "") or "")
                 meta = getattr(opportunity, "meta", None)
