@@ -173,6 +173,18 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
     assert not any(row["route_count"] >= 2 for row in result["plans"])
 
 
+def test_split_optimizer_rejects_native_gas_cost_unit_mismatch():
+    candidate = _candidate(
+        "gas-mismatch",
+        (5_000_000, 1_000_000),
+        _legs(TOKEN_X),
+    )
+    candidate["gas_cost_wei"] = "39999999"
+    candidate["gas_cost_l2_wei"] = "40000000"
+    candidate["base_l1_fee_wei"] = "0"
+    assert _normalize_candidate(candidate, chain_id=1) is None
+
+
 def test_component_must_repay_principal_and_flash_fee():
     candidate = _candidate(
         "not-repayable",
