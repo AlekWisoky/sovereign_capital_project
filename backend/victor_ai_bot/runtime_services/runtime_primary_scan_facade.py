@@ -1843,14 +1843,18 @@ class RuntimePrimaryScanFacade:
                                 list(source.get("size_economic_diagnostics") or [])
                             )
                         if isinstance(source.get("route_group_schedule"), dict):
-                            # Aggregate numeric counters across the size probes while
-                            # preserving metadata as a structured per-block snapshot.
+                            # Aggregate only within the same block. A long market
+                            # pipeline can cross a block boundary between size probes.
                             incoming = source["route_group_schedule"]
-                            schedule = dict(target.get("route_group_schedule") or {})
+                            block_number = int(incoming.get("block_number") or 0)
+                            by_block = dict(target.get("route_group_schedule_by_block") or {})
+                            block_key = str(block_number)
+                            schedule = dict(by_block.get(block_key) or {})
                             for count_key in (
                                 "groups_prepared",
                                 "groups_completed",
                                 "quote_batches_completed_and_consumed",
+                                "duplicate_quote_batches_coalesced",
                                 "waves_started",
                             ):
                                 schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
@@ -1860,13 +1864,15 @@ class RuntimePrimaryScanFacade:
                                 int(schedule.get("parallelism_limit", 0) or 0),
                                 int(incoming.get("parallelism_limit", 0) or 0),
                             )
-                            schedule["block_number"] = int(incoming.get("block_number") or 0)
+                            schedule["block_number"] = block_number
                             schedule["ordering"] = str(incoming.get("ordering") or "")
                             schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
                                 schedule.get("completed_wave_results_consumed_before_budget_stop", True)
                                 and incoming.get("completed_wave_results_consumed_before_budget_stop") is True
                             )
-                            target["route_group_schedule"] = schedule
+                            by_block[block_key] = schedule
+                            target["route_group_schedule_by_block"] = by_block
+                            target["route_group_schedule"] = dict(schedule)
                         target["budget_exhausted_after_quote"] = bool(
                             target.get("budget_exhausted_after_quote", False)
                             or source.get("budget_exhausted_after_quote", False)
