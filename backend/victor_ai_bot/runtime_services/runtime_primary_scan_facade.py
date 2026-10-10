@@ -44,6 +44,20 @@ async def _gather_selected_provider_scan_batch(
             raise result
 
 
+def _selected_provider_full_scan_chunk_order(
+    *,
+    graph_edge_count: int,
+    chunk_size: int,
+    rotation_index: int,
+) -> List[int]:
+    """Rotate the first graph slice each block so a bounded scan eventually covers all edges."""
+    edge_count = max(0, int(graph_edge_count))
+    size = max(1, int(chunk_size))
+    chunk_count = max(1, (edge_count + size - 1) // size)
+    start = max(0, int(rotation_index)) % chunk_count
+    return [(start + offset) % chunk_count for offset in range(chunk_count)]
+
+
 def _selected_provider_chunk_accounting(
     *,
     graph_edge_count: int,
@@ -2938,6 +2952,15 @@ class RuntimePrimaryScanFacade:
             full_scan_telemetry["edges_total"] = int(graph_edge_count)
             total_budget_s = float(self._selected_provider_full_scan_budget_s(graph_edge_count))
             full_scan_telemetry["budget_s"] = total_budget_s
+            chunk_order = _selected_provider_full_scan_chunk_order(
+                graph_edge_count=graph_edge_count,
+                chunk_size=chunk_size,
+                rotation_index=int(current_block),
+            )
+            full_scan_telemetry["rotation_start_chunk"] = int(chunk_order[0])
+            full_scan_telemetry["chunk_order_preview"] = [
+                int(index) for index in chunk_order[: min(12, len(chunk_order))]
+            ]
             full_scan_telemetry["budget_basis"] = {
                 "graph_edge_count": int(graph_edge_count),
                 "chunks_required": int(chunk_total),
@@ -2945,7 +2968,9 @@ class RuntimePrimaryScanFacade:
                     (chunk_total + int(full_scan_telemetry["parallelism"]) - 1)
                     // int(full_scan_telemetry["parallelism"])
                 ),
-                "adaptive": bool(total_budget_s > 28.0),
+                "adaptive": bool(total_budget_s > 8.0),
+                "per_tick_hard_cap_s": 12.0,
+                "rotation_start_chunk": int(chunk_order[0]),
                 "frontier_reserved_budget_s": float(
                     full_scan_telemetry["frontier_reserved_budget_s"]
                 ),
@@ -2953,12 +2978,17 @@ class RuntimePrimaryScanFacade:
             publish_rpc_selection_progress(
                 "selected_provider_full_scan",
                 details={
-                    "scan_kind": "full_graph",
+                    "scan_kind": "rotating_full_graph_slice",
                     "chunks_total": int(chunk_total),
                     "chunks_completed": 0,
+                    "chunks_started": 0,
                     "edges_total": int(graph_edge_count),
                     "edges_covered": 0,
                     "budget_s": float(total_budget_s),
+                    "rotation_start_chunk": int(chunk_order[0]),
+                    "chunk_order_preview": [
+                        int(index) for index in chunk_order[: min(12, len(chunk_order))]
+                    ],
                 },
             )
             chunk_statuses: Dict[int, str] = {
@@ -3080,10 +3110,10 @@ class RuntimePrimaryScanFacade:
                 for batch_start in range(0, chunk_total, chunk_parallelism):
                     tasks = []
                     task_chunk_indices: List[int] = []
-                    for chunk_index in range(
-                        batch_start,
-                        min(chunk_total, batch_start + chunk_parallelism),
-                    ):
+                    batch_chunk_indices = chunk_order[
+                        batch_start : min(chunk_total, batch_start + chunk_parallelism)
+                    ]
+                    for chunk_index in batch_chunk_indices:
                         remaining = total_budget_s - (
                             time.perf_counter() - full_scan_started
                         )
@@ -3111,6 +3141,25 @@ class RuntimePrimaryScanFacade:
                         task_chunk_indices.append(int(chunk_index))
                     if not tasks:
                         break
+                    publish_rpc_selection_progress(
+                        "selected_provider_full_scan",
+                        details={
+                            "chunks_started": sum(
+                                value == "running" for value in chunk_statuses.values()
+                            ),
+                            "chunks_completed": sum(
+                                value == "completed" for value in chunk_statuses.values()
+                            ),
+                            "chunks_timed_out": sum(
+                                value == "timed_out" for value in chunk_statuses.values()
+                            ),
+                            "chunks_failed": sum(
+                                value == "failed" for value in chunk_statuses.values()
+                            ),
+                            "active_chunks": list(task_chunk_indices),
+                            "rotation_start_chunk": int(chunk_order[0]),
+                        },
+                    )
                     await _gather_selected_provider_scan_batch(
                         tasks,
                         task_chunk_indices,
@@ -4031,28 +4080,27 @@ class RuntimePrimaryScanFacade:
         return max(3.0, min(configured, 15.0))
 
     def _selected_provider_full_scan_budget_s(self, graph_edge_count: int = 0) -> float:
-        """Scale the bounded graph pass with graph size, leaving frontier time separate."""
+        """Return a short per-tick budget; rotating slices continue coverage on later blocks."""
         try:
             configured = float(
                 os.environ.get(
                     "VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S",
-                    "28.0",
+                    "8.0",
                 )
-                or 28.0
+                or 8.0
             )
         except (TypeError, ValueError):
-            configured = 28.0
-        configured = max(5.0, min(configured, 60.0))
+            configured = 8.0
+        # Never let an operator override turn the rescue scan into a 60-second
+        # per-chain monopolist. Large graphs get more priority within this hard
+        # cap, while rotating chunk order advances coverage on subsequent blocks.
+        configured = max(5.0, min(configured, 12.0))
         chunk_size = self._selected_provider_full_scan_chunk_size()
         parallelism = self._selected_provider_full_scan_parallelism()
         chunks = max(1, (max(1, int(graph_edge_count)) + chunk_size - 1) // chunk_size)
         waves = max(1, (chunks + parallelism - 1) // parallelism)
-        # The historical 28-second window completed about four parallel waves.
-        # Scale in proportion to required waves so larger graphs do not inherit
-        # a timeout calibrated for a smaller graph. A hard 60-second cap keeps
-        # per-tick read-only work bounded; frontier seeds have their own reserve.
         adaptive = configured * float(waves) / 4.0
-        return max(configured, min(adaptive, 60.0))
+        return min(12.0, max(configured, adaptive))
 
     @staticmethod
     def _selected_provider_frontier_seed_budget_s() -> float:
