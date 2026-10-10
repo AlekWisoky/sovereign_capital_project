@@ -4316,6 +4316,12 @@ class RuntimePrimaryScanFacade:
         size_ladders: List[tuple[str, ...]] = []
         token_ladders: List[tuple[tuple[str, str], ...]] = []
         for url, _opps, _cache, provider_telemetry, _provider_evidence in results:
+            eligible_for_comparison = bool(
+                getattr(_provider_evidence, "economically_eligible", False)
+                and not str(provider_telemetry.get("scan_error") or "")
+                and int(getattr(_provider_evidence, "block_number", -1) or -1)
+                == int(current_block)
+            )
             adaptive = dict(provider_telemetry.get("adaptive_size_discovery") or {})
             sizing = dict(provider_telemetry.get("scan_sizing") or {})
             universe = dict(provider_telemetry.get("route_universe") or {})
@@ -4329,10 +4335,12 @@ class RuntimePrimaryScanFacade:
                     for k, v in dict(sizing.get("amounts_by_token") or {}).items()
                 )
             )
-            route_universes.append(universe)
-            size_ladders.append(amounts_scanned)
-            token_ladders.append(amounts_by_token)
+            if eligible_for_comparison:
+                route_universes.append(universe)
+                size_ladders.append(amounts_scanned)
+                token_ladders.append(amounts_by_token)
             provider_symmetry.append({
+                "eligible_for_economic_comparison": eligible_for_comparison,
                 "endpoint": url,
                 "provider": str(urlsplit(url).hostname or ""),
                 "block_number": int(current_block),
