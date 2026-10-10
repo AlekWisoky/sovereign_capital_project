@@ -111,6 +111,27 @@ def test_gas_adjusted_split_frontier_finds_better_partition_but_never_grants_aut
     assert plan["identity_coverage"]["router_identity_is_not_a_profit_score"] is True
 
 
+def test_candidate_shortlist_keeps_near_best_pool_diversity_not_raw_router_count():
+    matrix = _matrix(
+        (5_000_000, [
+            _candidate("best-net", 5_000_000, 1_000_000, _legs(TOKEN_X)),
+            _candidate("near-net-diverse-pool", 5_000_000, 998_600, _legs(TOKEN_Y)),
+            _candidate("economically-distant", 5_000_000, 900_000, _legs(TOKEN_Z)),
+        ])
+    )
+    buckets = __import__(
+        "victor_ai_bot.gas_adjusted_split_router",
+        fromlist=["_prepare_candidate_buckets"],
+    )._prepare_candidate_buckets(
+        matrix,
+        chain_id=1,
+        max_per_amount=2,
+    )
+    selected = {row["route_id"] for row in buckets[TOKEN_A]}
+    assert selected == {"best-net", "near-net-diverse-pool"}
+    assert "economically-distant" not in selected
+
+
 def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
     shared_route_b = [
         {
