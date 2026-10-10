@@ -863,47 +863,91 @@ def _merge_size_economic_matrices(
     return sorted(merged, key=lambda row: int(row.get("amount_in") or 0))
 
 
-def _merge_route_group_schedule_telemetry(
-    target: Dict[str, Any],
-    source: Dict[str, Any],
-) -> None:
-    """Aggregate scheduler counters per block without inflating the scan method."""
-    incoming = source.get("route_group_schedule")
-    if not isinstance(incoming, dict):
-        return
-    block_number = int(incoming.get("block_number") or 0)
-    by_block = dict(target.get("route_group_schedule_by_block") or {})
-    block_key = str(block_number)
-    prior = target.get("route_group_schedule")
-    if (
-        isinstance(prior, dict)
-        and int(prior.get("block_number") or 0) == block_number
-    ):
-        by_block.setdefault(block_key, dict(prior))
-    schedule = dict(by_block.get(block_key) or {})
+def _merge_route_group_schedule_row(
+    existing: Dict[str, Any] | None,
+    incoming: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Combine two measurements for one block, retaining counters and deadline state."""
+    schedule = dict(existing or {})
     for count_key in (
         "groups_prepared",
         "groups_completed",
         "quote_batches_completed_and_consumed",
+        "first_leg_quote_batches_total",
+        "first_leg_quote_batches_completed",
+        "first_leg_quote_batches_failed",
+        "first_leg_quote_batches_skipped_budget",
+        "first_leg_quote_waves_started",
+        "route_group_quote_batches_completed_and_consumed",
+        "route_group_quote_batches_coalesced",
+        "route_group_waves_started",
         "duplicate_quote_batches_coalesced",
         "waves_started",
     ):
         schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
             incoming.get(count_key, 0) or 0
         )
-    schedule["parallelism_limit"] = max(
-        int(schedule.get("parallelism_limit", 0) or 0),
-        int(incoming.get("parallelism_limit", 0) or 0),
-    )
-    schedule["block_number"] = block_number
-    schedule["ordering"] = str(incoming.get("ordering") or "")
+    for limit_key in ("parallelism_limit", "first_leg_quote_parallelism_limit"):
+        schedule[limit_key] = max(
+            int(schedule.get(limit_key, 0) or 0),
+            int(incoming.get(limit_key, 0) or 0),
+        )
+    for flag_key in ("first_leg_deadline_exceeded",):
+        schedule[flag_key] = bool(
+            schedule.get(flag_key, False) or incoming.get(flag_key, False)
+        )
     schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
         schedule.get("completed_wave_results_consumed_before_budget_stop", True)
         and incoming.get("completed_wave_results_consumed_before_budget_stop") is True
     )
-    by_block[block_key] = schedule
+    schedule["block_number"] = int(incoming.get("block_number") or 0)
+    for text_key in ("ordering", "first_leg_quote_ordering"):
+        if incoming.get(text_key):
+            schedule[text_key] = str(incoming[text_key])
+    return schedule
+
+
+def _merge_route_group_schedule_telemetry(
+    target: Dict[str, Any],
+    source: Dict[str, Any],
+) -> None:
+    """Aggregate scheduler counters per block without inflating the scan method."""
+    incoming_rows = source.get("route_group_schedule_by_block")
+    if not isinstance(incoming_rows, dict) or not incoming_rows:
+        incoming = source.get("route_group_schedule")
+        if not isinstance(incoming, dict):
+            return
+        incoming_rows = {str(int(incoming.get("block_number") or 0)): incoming}
+
+    by_block = dict(target.get("route_group_schedule_by_block") or {})
+    prior = target.get("route_group_schedule")
+    if isinstance(prior, dict):
+        prior_block = int(prior.get("block_number") or 0)
+        by_block.setdefault(str(prior_block), dict(prior))
+    for raw_block, incoming in incoming_rows.items():
+        if not isinstance(incoming, dict):
+            continue
+        try:
+            block_number = int(incoming.get("block_number", raw_block) or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        block_key = str(block_number)
+        by_block[block_key] = _merge_route_group_schedule_row(
+            by_block.get(block_key), incoming
+        )
+    if not by_block:
+        return
     target["route_group_schedule_by_block"] = by_block
-    target["route_group_schedule"] = dict(schedule)
+    latest = source.get("route_group_schedule")
+    if isinstance(latest, dict):
+        latest_block = str(int(latest.get("block_number") or 0))
+    else:
+        latest_block = max(by_block, key=lambda key: int(key))
+    target["route_group_schedule"] = dict(
+        by_block.get(latest_block) or by_block[max(by_block, key=lambda key: int(key))]
+    )
+
+
 
 
 class RuntimePrimaryScanFacade:
@@ -2240,13 +2284,17 @@ class RuntimePrimaryScanFacade:
                     or three_leg_telemetry.get("budget_exhausted_after_quote", False)
                 ),
             }
-            route_schedule = dict(two_leg_telemetry.get("route_group_schedule") or {})
+            scheduler_summary: Dict[str, Any] = {}
+            _merge_route_group_schedule_telemetry(scheduler_summary, two_leg_telemetry)
+            _merge_route_group_schedule_telemetry(scheduler_summary, three_leg_telemetry)
+            route_schedule = dict(scheduler_summary.get("route_group_schedule") or {})
             route_schedule_by_block = dict(
-                two_leg_telemetry.get("route_group_schedule_by_block") or {}
+                scheduler_summary.get("route_group_schedule_by_block") or {}
             )
             if route_schedule:
                 route_evaluation["route_group_schedule"] = route_schedule
             if route_schedule_by_block:
+                route_evaluation["route_group_schedule_by_block"] = route_schedule_by_block
                 route_evaluation["route_group_schedule_by_block"] = route_schedule_by_block
             if (
                 "route_budget_elapsed_ms" in two_leg_telemetry
