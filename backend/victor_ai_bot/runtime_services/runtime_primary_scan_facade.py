@@ -18,6 +18,7 @@ from ..profitability_state import revalidate_profitability_state
 from ..flashloan_providers import observe_flashloan_fee_bps
 from ..usd_pricing import gas_wei_to_token_wei, token_to_usd_micro
 from .profitability_truth import opportunity_profit_sort_key
+from ..gas_adjusted_split_router import build_gas_adjusted_split_frontier
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
 
@@ -439,7 +440,19 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "amount_in": amount_in_value,
         "gross_profit_wei": str(fields["gross_profit_wei"]),
         "amount_out_wei": str(fields["amount_out_wei"]),
-        "gas_cost_profit_token_wei": str(fields["gas_cost_profit_token_wei"]),
+        "gas_cost_profit_token_wei": (
+            str(fields["gas_cost_profit_token_wei"])
+            if profitability.get("gas_cost_profit_token_wei") not in (None, "")
+            else ""
+        ),
+        "gas_cost_conversion_available": bool(
+            profitability.get("gas_cost_profit_token_wei") not in (None, "")
+            and int(fields["gas_cost_profit_token_wei"]) > 0
+        ),
+        "gas_units_estimate": str(meta.get("economic_gas_units") or ""),
+        "gas_cost_l2_wei": str(meta.get("economic_gas_l2_wei") or ""),
+        "base_l1_fee_wei": str(meta.get("economic_base_l1_fee_wei", meta.get("base_l1_fee_wei", "0")) or "0"),
+        "base_l1_fee_status": str(meta.get("base_l1_fee_status") or ""),
         "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
         "flashloan_fee_wei": str(fields["flashloan_fee_wei"]),
         "gas_cost_wei": fields["gas_cost_wei"],
@@ -918,6 +931,7 @@ class RuntimePrimaryScanFacade:
                 meta.get("venues")
                 or any(isinstance(meta.get(key), dict) for key in ("leg1", "leg2", "leg3"))
             )
+            gas_units = 0
             if has_route_gas_inputs:
                 gas_units = estimate_route_gas_units(meta)
                 gas_cost_wei = int(
@@ -1010,10 +1024,14 @@ class RuntimePrimaryScanFacade:
                     # component when the exact executor envelope cannot be priced.
                     l1_fee_wei = 0
 
+            l2_gas_cost_wei = int(gas_cost_wei)
             gas_cost_wei += int(l1_fee_wei)
             if isinstance(meta, dict):
                 meta["base_l1_fee_wei"] = str(int(l1_fee_wei))
                 meta["base_l1_fee_status"] = l1_fee_status
+                meta["economic_gas_units"] = str(int(gas_units)) if has_route_gas_inputs else ""
+                meta["economic_gas_l2_wei"] = str(l2_gas_cost_wei) if has_route_gas_inputs else ""
+                meta["economic_base_l1_fee_wei"] = str(int(l1_fee_wei))
 
             gas_cost_in_profit_token_wei: int | None = None
             profit_token = ""
@@ -1899,6 +1917,21 @@ class RuntimePrimaryScanFacade:
             # "no route quoted" from "route quoted but economically rejected".
             size_matrix = _build_size_economic_matrix(size_scan_records)
             telemetry["size_economic_matrix"] = size_matrix
+            try:
+                telemetry["gas_adjusted_split_routing"] = build_gas_adjusted_split_frontier(
+                    size_matrix,
+                    chain_id=int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0),
+                )
+            except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                telemetry["gas_adjusted_split_routing"] = {
+                    "enabled": True,
+                    "mode": "bounded_gas_adjusted_split_diagnostic",
+                    "available": False,
+                    "execution_supported": False,
+                    "execution_authority_granted": False,
+                    "reason_code": "split_frontier_model_failed",
+                    "error_type": type(exc).__name__,
+                }
             _attach_quote_economic_size_curves([*opps2, *opps3], size_matrix)
 
             telemetry["adaptive_size_discovery"] = {
