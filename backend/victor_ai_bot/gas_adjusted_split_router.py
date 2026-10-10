@@ -131,6 +131,17 @@ def _normalize_candidate(candidate: Mapping[str, Any], *, chain_id: int) -> Dict
     }
 
 
+def _candidate_evidence_rank(row: Mapping[str, Any]) -> tuple[int, int, int, int, int]:
+    """Prefer valid authoritative economics, then signed net estimate."""
+    return (
+        int(bool(row.get("revalidated") and row.get("authoritative") and row.get("valid") and row.get("repayment_valid"))),
+        int(bool(row.get("authoritative"))),
+        int(bool(row.get("revalidated"))),
+        int(row.get("single_route_net_wei") or 0),
+        int(row.get("gross_profit_wei") or 0),
+    )
+
+
 def _prepare_candidate_buckets(
     size_matrix: Sequence[Mapping[str, Any]], *, chain_id: int, max_per_amount: int
 ) -> Dict[str, List[Dict[str, Any]]]:
@@ -148,15 +159,7 @@ def _prepare_candidate_buckets(
                 continue
             key = (candidate["borrow_token"], candidate["amount_in"], candidate["route_id"])
             prior = by_key.get(key)
-            def evidence_rank(row: Mapping[str, Any]) -> tuple[int, int, int, int, int]:
-                return (
-                    int(bool(row.get("revalidated") and row.get("authoritative") and row.get("valid") and row.get("repayment_valid"))),
-                    int(bool(row.get("authoritative"))),
-                    int(bool(row.get("revalidated"))),
-                    int(row.get("single_route_net_wei") or 0),
-                    int(row.get("gross_profit_wei") or 0),
-                )
-            if prior is None or evidence_rank(candidate) > evidence_rank(prior):
+            if prior is None or _candidate_evidence_rank(candidate) > _candidate_evidence_rank(prior):
                 by_key[key] = candidate
 
     by_token: Dict[str, List[Dict[str, Any]]] = {}
