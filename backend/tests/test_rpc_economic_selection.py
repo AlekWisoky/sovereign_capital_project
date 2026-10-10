@@ -156,9 +156,6 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
         fake_fee_observation,
     )
 
-    async def fake_token_amounts(*args, **kwargs):
-        return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
-
     async def fake_scan(
         rpc,
         *,
@@ -314,6 +311,8 @@ async def test_rpc_selection_publishes_inflight_provider_progress(monkeypatch):
         base_amount_in,
         base_opps,
         cache,
+        shared_gas_price_consensus=None,
+        shared_flashloan_fee_observation=None,
     ):
         return list(base_opps), {
             "adaptive_size_discovery": {
@@ -415,6 +414,8 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
         base_amount_in,
         base_opps,
         cache,
+        shared_gas_price_consensus=None,
+        shared_flashloan_fee_observation=None,
     ):
         selected_probe_calls.append((rpc.url, list(base_opps), int(base_amount_in)))
         return [], {
@@ -583,9 +584,6 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
         "victor_ai_bot.runtime_services.runtime_primary_scan_facade.observe_flashloan_fee_bps",
         fake_fee_observation,
     )
-
-    async def fake_token_amounts(*args, **kwargs):
-        return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
 
     async def fake_scan(
         rpc,
