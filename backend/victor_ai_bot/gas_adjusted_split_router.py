@@ -460,6 +460,11 @@ def build_gas_adjusted_split_frontier(
             token_plans = plans_by_token[token]
             if rank < len(token_plans):
                 interleaved.append(token_plans[rank])
+    candidate_plan_count = len(interleaved)
+    positive_estimate_count = sum(
+        int(row.get("economic_after_cost_profit_wei") or 0) > 0
+        for row in interleaved
+    )
     plans = interleaved[:max(1, min(int(max_plans), 32))]
     return {
         "enabled": True,
@@ -467,14 +472,14 @@ def build_gas_adjusted_split_frontier(
         "chain_id": int(chain_id),
         "ranking_scope": "within_borrow_token_only_then_round_robin_across_tokens",
         "eligible_route_amount_evidence": int(eligible_routes),
+        "candidate_plans_before_output_limit": int(candidate_plan_count),
+        "returned_plan_count": int(len(plans)),
         "split_combinations_evaluated": int(evaluated),
         "search_states_limit_per_target": int(search_limit),
         "search_truncated_targets": int(truncated_searches),
         "max_routes_per_split": int(maximum_routes),
         "max_candidates_per_amount": int(max(1, min(int(max_candidates_per_amount), 12))),
-        "positive_after_cost_estimates": sum(
-            int(row.get("economic_after_cost_profit_wei") or 0) > 0 for row in plans
-        ),
+        "positive_after_cost_estimates": int(positive_estimate_count),
         "plans": plans,
         "execution_supported": False,
         "required_executor_abi_version": 3,
