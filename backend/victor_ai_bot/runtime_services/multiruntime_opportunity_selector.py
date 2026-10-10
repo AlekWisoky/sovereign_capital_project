@@ -429,13 +429,16 @@ class MultiRuntimeOpportunitySelector:
         gate_allowed = bool(gate.get("allowed", False)) and (
             not candidate_gate or bool(candidate_gate.get("allowed", False))
         )
-        gate_reason = str(
-            candidate_gate.get("reason_code")
-            or candidate_gate.get("reason")
-            or gate.get("reason_code")
-            or gate.get("reason")
-            or "auto_trade_gate_unavailable"
-        )
+        if not gate or "allowed" not in gate:
+            gate_reason = "auto_trade_gate_summary_unavailable"
+        else:
+            gate_reason = str(
+                candidate_gate.get("reason_code")
+                or candidate_gate.get("reason")
+                or gate.get("reason_code")
+                or gate.get("reason")
+                or "auto_trade_gate_unavailable"
+            )
         recovery_ready = (
             bool(recovery.get("ready", False))
             and not bool(recovery.get("blocked", False))
