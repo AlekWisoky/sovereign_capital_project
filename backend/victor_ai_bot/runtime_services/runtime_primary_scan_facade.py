@@ -427,6 +427,23 @@ def _candidate_economic_fields(
     }
 
 
+def _size_row_native_gas_cost_wei(
+    meta: Mapping[str, Any],
+    fallback: str,
+) -> str:
+    """Use total native gas cost when the split frontier has explicit L2/L1 parts."""
+    raw_l2 = meta.get("economic_gas_l2_wei")
+    raw_l1 = meta.get("economic_base_l1_fee_wei", meta.get("base_l1_fee_wei"))
+    if raw_l2 in (None, "") or raw_l1 in (None, ""):
+        return str(fallback)
+    try:
+        l2 = int(raw_l2)
+        l1 = int(raw_l1)
+    except (TypeError, ValueError, OverflowError):
+        return str(fallback)
+    return str(l2 + l1) if l2 > 0 and l1 >= 0 else str(fallback)
+
+
 def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     meta = getattr(candidate, "meta", {}) or {}
     profitability = meta.get("profitability") if isinstance(meta, dict) else {}
@@ -455,7 +472,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "base_l1_fee_status": str(meta.get("base_l1_fee_status") or ""),
         "min_outs": [str(x) for x in list(getattr(candidate, "min_outs", []) or [])],
         "flashloan_fee_wei": str(fields["flashloan_fee_wei"]),
-        "gas_cost_wei": fields["gas_cost_wei"],
+        "gas_cost_wei": _size_row_native_gas_cost_wei(meta, fields["gas_cost_wei"]),
         "gross_minus_flashloan_fee_wei": str(fields["gross_minus_flashloan_fee_wei"]),
         "gross_minus_flashloan_fee_minus_gas_wei": str(fields["gross_minus_flashloan_fee_minus_gas_wei"]),
         "repayment_valid": fields["repayment_valid"],
