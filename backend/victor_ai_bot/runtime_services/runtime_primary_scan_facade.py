@@ -3339,6 +3339,16 @@ class RuntimePrimaryScanFacade:
                     candidate_amount = ""
                 seen_seed_keys.add((route_id, candidate_amount))
 
+            publish_rpc_selection_progress(
+                "selected_provider_frontier_seed",
+                details={
+                    "scan_kind": "frontier_seed",
+                    "seed_count": len(seed_amounts),
+                    "seeds_completed": 0,
+                    "rotation_index": int(rotation_index),
+                    "edge_cap": int(frontier_edge_cap),
+                },
+            )
             seed_started = time.perf_counter()
             previous_provider_comparison = bool(
                 getattr(self, "_rpc_provider_comparison", False)
@@ -3456,6 +3466,20 @@ class RuntimePrimaryScanFacade:
                                 "added": int(additions),
                             }
                         )
+                        publish_rpc_selection_progress(
+                            "selected_provider_frontier_seed",
+                            details={
+                                "seeds_completed": len(frontier_seed_telemetry["candidate_counts"]),
+                                "seed_candidates_returned": sum(
+                                    int(row.get("returned") or 0)
+                                    for row in frontier_seed_telemetry["candidate_counts"]
+                                ),
+                                "seed_candidates_added": sum(
+                                    int(row.get("added") or 0)
+                                    for row in frontier_seed_telemetry["candidate_counts"]
+                                ),
+                            },
+                        )
                         for matrix_row in list(seed_sink.get("size_economic_matrix") or []):
                             if not isinstance(matrix_row, dict):
                                 continue
@@ -3507,6 +3531,16 @@ class RuntimePrimaryScanFacade:
                                 "timeout_s": float(timeout),
                             }
                         )
+                        publish_rpc_selection_progress(
+                            "selected_provider_frontier_seed",
+                            details={
+                                "seeds_completed": len(frontier_seed_telemetry["candidate_counts"]),
+                                "seed_timeouts": sum(
+                                    row.get("status") == "timed_out"
+                                    for row in frontier_seed_telemetry["candidate_counts"]
+                                ),
+                            },
+                        )
                     except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                         frontier_seed_telemetry["candidate_counts"].append({
                             "amount_in": str(int(seed_amount)),
@@ -3524,6 +3558,16 @@ class RuntimePrimaryScanFacade:
                                 "edge_offset": int(edge_offset),
                                 "reason": f"{type(exc).__name__}: {exc}",
                             }
+                        )
+                        publish_rpc_selection_progress(
+                            "selected_provider_frontier_seed",
+                            details={
+                                "seeds_completed": len(frontier_seed_telemetry["candidate_counts"]),
+                                "seed_failures": sum(
+                                    row.get("status") == "failed"
+                                    for row in frontier_seed_telemetry["candidate_counts"]
+                                ),
+                            },
                         )
             finally:
                 self._rpc_provider_comparison = previous_provider_comparison
