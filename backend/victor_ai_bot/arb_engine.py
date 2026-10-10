@@ -1800,10 +1800,14 @@ async def find_two_leg_opportunities(
     return opps[: max(1, int(max_opps))]
 
 
-def _opportunity_economic_sort_key(opportunity: Opportunity) -> tuple[int, int, int, int, int, str]:
-    """Rank routes by signed net value, keeping gross only as a fallback.
+def _opportunity_economic_sort_key(
+    opportunity: Opportunity,
+) -> tuple[int, int, str, int, int, int, str]:
+    """Rank routes in comparable after-cost USD units when available.
 
-    This is a discovery-priority key, not an execution-authority check.
+    Raw token wei is comparable only inside the same borrow-token group. This is
+    discovery priority, not execution authority; missing USD conversion never
+    gets silently treated as zero-cost or compared to another token's wei.
     """
     meta_value = getattr(opportunity, "meta", {}) or {}
     meta = meta_value if isinstance(meta_value, dict) else {}
@@ -1811,6 +1815,17 @@ def _opportunity_economic_sort_key(opportunity: Opportunity) -> tuple[int, int, 
     if not isinstance(state, dict):
         state = meta.get("profitability_diagnostic")
     state = state if isinstance(state, dict) else {}
+
+    usd_micro = None
+    canonical_usd = meta.get("canonical_after_fee_usd")
+    if isinstance(canonical_usd, dict):
+        raw_usd = canonical_usd.get("profit_after_costs_usd_micro")
+        if raw_usd not in (None, ""):
+            try:
+                usd_micro = int(raw_usd)
+            except (TypeError, ValueError, OverflowError):
+                usd_micro = None
+
     economic = None
     for key in (
         "economic_profit_after_costs_wei",
@@ -1849,6 +1864,14 @@ def _opportunity_economic_sort_key(opportunity: Opportunity) -> tuple[int, int, 
                 economic = None
         except (TypeError, ValueError, OverflowError):
             economic = None
+
+    route = getattr(opportunity, "route", None)
+    legs = list(getattr(route, "legs", []) or [])
+    borrow_token = str(
+        (getattr(legs[0], "token_in", "") if legs else "")
+        or meta.get("borrow_token")
+        or ""
+    ).strip().lower()
     try:
         gross = int(getattr(opportunity, "expected_profit_raw", 0) or 0)
     except (TypeError, ValueError, OverflowError):
@@ -1862,11 +1885,18 @@ def _opportunity_economic_sort_key(opportunity: Opportunity) -> tuple[int, int, 
     route_id = str(
         getattr(opportunity, "route_id", "") or getattr(opportunity, "id", "") or ""
     )
+
+    # USD-valued candidates compare across tokens. Without USD conversion, group
+    # by token before comparing signed wei, so wei from different assets cannot
+    # accidentally dominate because one token has more decimal places.
+    if usd_micro is not None:
+        return (1, usd_micro, "", 0, int(verified and usd_micro > 0), 0, route_id)
     return (
-        int(economic is not None),
+        0,
+        0,
+        borrow_token,
         int(economic or 0),
         int(verified and economic is not None and economic > 0),
-        int(state.get("revalidated") is True),
         gross,
         route_id,
     )
