@@ -183,23 +183,42 @@ def _prepare_candidate_buckets(
             by_amount.setdefault(candidate["amount_in"], []).append(candidate)
         kept = []
         for amount, bucket in by_amount.items():
-            # Keep high expected-net routes, but favor new protocols/pools when
-            # net economics are close so the split search does not collapse onto
-            # several near-identical routes.
+            # Keep the top-net route, then preserve economically near-best
+            # alternatives that add pool/protocol coverage. A route can only
+            # trade some net value for diversity inside a bounded 50-bps band.
             chosen: List[Dict[str, Any]] = []
             pending = sorted(
                 bucket,
-                key=lambda row: (row["single_route_net_wei"], row["gross_profit_wei"], row["route_id"]),
+                key=lambda row: (
+                    row["single_route_net_wei"],
+                    row["gross_profit_wei"],
+                    row["route_id"],
+                ),
                 reverse=True,
             )
+            if pending:
+                chosen.append(pending.pop(0))
+            best_net = int(chosen[0]["single_route_net_wei"]) if chosen else 0
+            tolerance = max(1, abs(best_net) * 50 // 10_000)
             while pending and len(chosen) < max(1, max_per_amount):
+                near_best = [
+                    idx for idx, row in enumerate(pending)
+                    if best_net - int(row["single_route_net_wei"]) <= tolerance
+                ]
+                if not near_best:
+                    # No economically comparable alternative remains. Continue
+                    # with highest net evidence, never diversity-only promotion.
+                    chosen.append(pending.pop(0))
+                    continue
+                selected_protocols = set().union(*(row["protocols"] for row in chosen))
+                selected_pools = set().union(*(row["pool_keys"] for row in chosen))
                 pick_idx = max(
-                    range(len(pending)),
+                    near_best,
                     key=lambda idx: (
+                        len(pending[idx]["protocols"] - selected_protocols),
+                        len(pending[idx]["pool_keys"] - selected_pools),
                         pending[idx]["single_route_net_wei"],
                         pending[idx]["gross_profit_wei"],
-                        len(pending[idx]["protocols"] - set().union(*(x["protocols"] for x in chosen))) if chosen else len(pending[idx]["protocols"]),
-                        len(pending[idx]["pool_keys"] - set().union(*(x["pool_keys"] for x in chosen))) if chosen else len(pending[idx]["pool_keys"]),
                     ),
                 )
                 chosen.append(pending.pop(pick_idx))
@@ -450,6 +469,8 @@ def build_gas_adjusted_split_frontier(
             "gas_cost_policy": "one_shared_l2_overhead_plus_per-route leg estimate; max observed gas price and conversion ratio; sum per-route L1 data fees conservatively",
             "flashloan_fee_policy": "sum exact sampled portion fees plus one-wei-per-extra-route rounding reserve",
             "pool_policy": "reject plans that reuse a normalized pool key",
+            "candidate_diversity_policy": "highest-net route first; alternatives may trade at most 50 bps of net value for new protocol/pool identity, then net ranks again",
+            "candidate_diversity_tolerance_bps": 50,
             "all_results_diagnostic_only": True,
         },
     }
