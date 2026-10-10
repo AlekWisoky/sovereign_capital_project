@@ -1650,12 +1650,26 @@ class RuntimePrimaryScanFacade:
             # Route-family deadlines are shared across every amount probe in this
             # scan tick. A new notional must not reset the per-tick RPC budget.
             route_budget_started = time.perf_counter()
+            two_leg_family_enabled = bool(getattr(self.cfg.flags, "enable_two_leg_loops", True))
+            three_leg_family_enabled = bool(
+                getattr(self.cfg.flags, "enable_three_leg_loops", False)
+                or getattr(self.cfg.flags, "enable_v3_triangular", False)
+            )
+            total_route_budget_ms = max(
+                1, int(two_leg_route_budget_ms + three_leg_route_budget_ms)
+            )
+            # When triangles are disabled, let the two-leg frontier use the full
+            # route budget over its size ladder instead of stranding the triangle slice.
+            two_leg_budget_window_ms = (
+                total_route_budget_ms
+                if two_leg_family_enabled and not three_leg_family_enabled
+                else max(1, int(two_leg_route_budget_ms))
+            )
             two_leg_route_deadline = (
-                route_budget_started + max(1, int(two_leg_route_budget_ms)) / 1000.0
+                route_budget_started + two_leg_budget_window_ms / 1000.0
             )
             three_leg_route_deadline = (
-                route_budget_started
-                + max(1, int(two_leg_route_budget_ms + three_leg_route_budget_ms)) / 1000.0
+                route_budget_started + total_route_budget_ms / 1000.0
             )
 
             async def _run_size_scan(size_amount: int) -> tuple[List[Opportunity], List[Opportunity], Dict[str, Any], Dict[str, Any]]:
@@ -2232,6 +2246,12 @@ class RuntimePrimaryScanFacade:
                     "two_leg_budget_elapsed_ms": two_elapsed,
                     "three_leg_budget_elapsed_ms": three_elapsed,
                     "total_route_budget_elapsed_ms": two_elapsed + three_elapsed,
+                    "two_leg_budget_window_ms": int(two_leg_budget_window_ms),
+                    "three_leg_budget_window_ms": int(
+                        max(1, total_route_budget_ms - two_leg_budget_window_ms)
+                        if two_leg_family_enabled and three_leg_family_enabled
+                        else (total_route_budget_ms if three_leg_family_enabled else 0)
+                    ),
                 })
             telemetry["route_evaluation"] = route_evaluation
             # Both scanners build the same route graph; expose one canonical
