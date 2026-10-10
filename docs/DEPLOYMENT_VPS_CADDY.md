@@ -70,6 +70,17 @@ test "$DEPLOYED_SHA" = "$SHA"
 
 The `/api/deploy/info` endpoint reports `git_sha` from `VICTOR_GIT_SHA` and reports `unknown` when a build was not stamped. Do not treat `unknown` or a mismatch as a verified deployment.
 
+## Route discovery budget
+
+Route evaluation uses one shared bounded budget so the two-leg and three-leg stages cannot each claim an independent unbounded deadline.
+
+- `VICTOR_ROUTE_EVALUATION_BUDGET_MS`: total route-family evaluation budget per scan; default `9000` ms, clamped to `2000–10000` ms. The default is split into `4000` ms for two-leg and `5000` ms for three-leg evaluation.
+- `VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_TIMEOUT_S`: timeout per selected-provider graph chunk; default `12` s, clamped to `3–15` s.
+- `VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S`: shared selected-provider rescue budget; graph-size scaling is retained and the per-tick cap remains `12` s.
+- `VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE` and `VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM`: tune graph coverage and concurrency. The implementation clamps parallelism to at most three concurrent chunks.
+
+Set these only in the server's untracked `env/backend.env`; never commit secrets or production environment files. Bigger evaluation budgets trade latency and per-tick graph-slice coverage for more route groups examined per slice. Review `route_evaluation` telemetry—especially the resolved budgets, stop reason, route groups, chunk completion, and edges covered—before increasing them further. Never weaken flash-loan repayment, revalidation, after-cost profitability, or execution-authority gates to improve candidate counts.
+
 ## 7) Safe mode
 
 Keep the current Ethereum configuration non-live:

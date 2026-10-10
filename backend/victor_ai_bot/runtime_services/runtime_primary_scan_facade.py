@@ -76,6 +76,20 @@ def _selected_provider_full_scan_chunk_order(
     return [(start + offset) % chunk_count for offset in range(chunk_count)]
 
 
+def _selected_provider_minimum_chunk_window_s(
+    *, total_budget_s: float, chunk_timeout_s: float
+) -> float:
+    """Do not start another chunk wave when the remaining deadline is too short.
+
+    The full-scan deadline is shared by all chunk waves. Reserve at least 75%
+    of the configured total (bounded to 4-8s) before starting a wave so a newly
+    enlarged per-route budget is not routinely cut off by a tiny tail deadline.
+    """
+    total = max(1.0, float(total_budget_s))
+    timeout = max(1.0, float(chunk_timeout_s))
+    return min(timeout, max(4.0, min(8.0, total * 0.75)))
+
+
 def _selected_provider_chunk_accounting(
     *,
     graph_edge_count: int,
@@ -1595,6 +1609,10 @@ class RuntimePrimaryScanFacade:
             except (TypeError, ValueError):
                 min_opportunities = 2
 
+            two_leg_route_budget_ms, three_leg_route_budget_ms = (
+                self._route_evaluation_budgets_ms()
+            )
+
             async def _run_size_scan(size_amount: int) -> tuple[List[Opportunity], List[Opportunity], Dict[str, Any], Dict[str, Any]]:
                 two: List[Opportunity] = []
                 three: List[Opportunity] = []
@@ -1612,7 +1630,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=2400,
+                        time_budget_ms=two_leg_route_budget_ms,
                         max_opps=60,
                         telemetry=two_metrics,
                         amount_in_by_token={
@@ -1646,7 +1664,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=2600,
+                        time_budget_ms=three_leg_route_budget_ms,
                         max_opps=40,
                         telemetry=three_metrics,
                         amount_in_by_token={
@@ -2040,6 +2058,11 @@ class RuntimePrimaryScanFacade:
                 "route_evaluation_ms": float(
                     two_leg_telemetry.get("route_evaluation_ms", 0.0)
                 ) + float(three_leg_telemetry.get("route_evaluation_ms", 0.0)),
+                "two_leg_budget_ms": int(two_leg_route_budget_ms),
+                "three_leg_budget_ms": int(three_leg_route_budget_ms),
+                "configured_total_budget_ms": int(
+                    two_leg_route_budget_ms + three_leg_route_budget_ms
+                ),
                 "route_groups_evaluated": int(
                     two_leg_telemetry.get("route_groups_evaluated", 0)
                 ) + int(three_leg_telemetry.get("route_groups_evaluated", 0)),
@@ -2988,6 +3011,13 @@ class RuntimePrimaryScanFacade:
             full_scan_telemetry["edges_total"] = int(graph_edge_count)
             total_budget_s = float(self._selected_provider_full_scan_budget_s(graph_edge_count))
             full_scan_telemetry["budget_s"] = total_budget_s
+            minimum_chunk_window_s = _selected_provider_minimum_chunk_window_s(
+                total_budget_s=total_budget_s,
+                chunk_timeout_s=float(full_scan_telemetry["chunk_timeout_s"]),
+            )
+            full_scan_telemetry["minimum_chunk_window_s"] = float(
+                minimum_chunk_window_s
+            )
             chunk_order = _selected_provider_full_scan_chunk_order(
                 graph_edge_count=graph_edge_count,
                 chunk_size=chunk_size,
@@ -3024,6 +3054,7 @@ class RuntimePrimaryScanFacade:
                     "edges_total": int(graph_edge_count),
                     "edges_covered": 0,
                     "budget_s": float(total_budget_s),
+                    "minimum_chunk_window_s": float(minimum_chunk_window_s),
                     "rotation_start_chunk": int(chunk_order[0]),
                     "chunk_order_preview": [
                         int(index) for index in chunk_order[: min(12, len(chunk_order))]
@@ -3156,10 +3187,11 @@ class RuntimePrimaryScanFacade:
                         remaining = total_budget_s - (
                             time.perf_counter() - full_scan_started
                         )
-                        # Observed rescue chunks take several seconds. Avoid launching
-                        # a slice with too little time to finish: wait_for cancellation
-                        # cleanup can otherwise consume the frontier's separate budget.
-                        if remaining < min(4.0, chunk_timeout_s):
+                        # The remaining deadline is shared by all waves. Do not
+                        # start a new chunk with a short tail window: once route budgets
+                        # are enlarged, cancelling late chunks can discard the candidates
+                        # they accumulated before cancellation.
+                        if remaining < minimum_chunk_window_s:
                             break
                         timeout_s = min(chunk_timeout_s, remaining)
                         chunk_statuses[int(chunk_index)] = "running"
@@ -4107,6 +4139,27 @@ class RuntimePrimaryScanFacade:
             configured = 96
         return max(32, min(configured, 256))
 
+    @staticmethod
+    def _route_evaluation_budgets_ms() -> tuple[int, int]:
+        """Split one bounded route-evaluation deadline across 2/3-leg search.
+
+        The shared cap keeps the two sequential route families compatible with
+        the selected-provider chunk deadline. Operators can tune small or large
+        hosts with one variable without accidentally allocating an unbounded
+        timeout to each family independently.
+        """
+        try:
+            configured = int(
+                os.environ.get("VICTOR_ROUTE_EVALUATION_BUDGET_MS", "9000")
+                or 9000
+            )
+        except (TypeError, ValueError, OverflowError):
+            configured = 9000
+        total_ms = max(2000, min(configured, 10000))
+        two_leg_ms = max(1000, (total_ms * 4) // 9)
+        three_leg_ms = max(1000, total_ms - two_leg_ms)
+        return int(two_leg_ms), int(three_leg_ms)
+
     def _selected_provider_full_scan_chunk_size(self) -> int:
         """Keep rescue slices small enough to finish within the bounded tick budget."""
         default_size = 8
@@ -4142,12 +4195,12 @@ class RuntimePrimaryScanFacade:
             configured = float(
                 os.environ.get(
                     "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_TIMEOUT_S",
-                    "8.0",
+                    "12.0",
                 )
-                or 8.0
+                or 12.0
             )
         except (TypeError, ValueError):
-            configured = 8.0
+            configured = 12.0
         return max(3.0, min(configured, 15.0))
 
     def _selected_provider_full_scan_budget_s(self, graph_edge_count: int = 0) -> float:

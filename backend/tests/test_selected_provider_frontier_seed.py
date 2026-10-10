@@ -14,7 +14,52 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _selected_provider_frontier_seed_for_block,
     _selected_provider_frontier_slice_offset,
     _selected_provider_full_scan_chunk_order,
+    _selected_provider_minimum_chunk_window_s,
 )
+
+
+def test_route_evaluation_budget_is_bounded_configurable_and_split(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    name = "VICTOR_ROUTE_EVALUATION_BUDGET_MS"
+    monkeypatch.delenv(name, raising=False)
+
+    # Institutional default allocates one shared 9s route-family budget.
+    assert runtime._route_evaluation_budgets_ms() == (4000, 5000)
+
+    # Small hosts can request a lower but still useful bounded budget.
+    monkeypatch.setenv(name, "2000")
+    assert runtime._route_evaluation_budgets_ms() == (1000, 1000)
+
+    # Invalid configuration fails safely to the documented default.
+    monkeypatch.setenv(name, "not-a-number")
+    assert runtime._route_evaluation_budgets_ms() == (4000, 5000)
+
+    # Oversized requests are clamped; neither route family gets an unbounded deadline.
+    monkeypatch.setenv(name, "999999")
+    two_leg, three_leg = runtime._route_evaluation_budgets_ms()
+    assert (two_leg, three_leg) == (4444, 5556)
+    assert two_leg + three_leg == 10000
+
+
+def test_selected_provider_chunk_timeout_defaults_to_route_budget_envelope(monkeypatch):
+    name = "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_TIMEOUT_S"
+    monkeypatch.delenv(name, raising=False)
+    assert RuntimePrimaryScanFacade._selected_provider_full_scan_chunk_timeout_s() == 12.0
+
+    monkeypatch.setenv(name, "999")
+    assert RuntimePrimaryScanFacade._selected_provider_full_scan_chunk_timeout_s() == 15.0
+
+
+def test_chunk_scheduler_reserves_enough_remaining_budget(monkeypatch):
+    assert _selected_provider_minimum_chunk_window_s(
+        total_budget_s=12.0, chunk_timeout_s=12.0
+    ) == 8.0
+    assert _selected_provider_minimum_chunk_window_s(
+        total_budget_s=8.0, chunk_timeout_s=8.0
+    ) == 6.0
+    assert _selected_provider_minimum_chunk_window_s(
+        total_budget_s=6.0, chunk_timeout_s=3.0
+    ) == 3.0
 
 
 def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_frontier(monkeypatch):

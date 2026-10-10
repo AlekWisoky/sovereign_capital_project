@@ -112,8 +112,8 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
 
     assert runtime._discovery.calls[0]['block_number'] == 321
     assert calls['two']['amount_in'] == 10
-    assert calls['two']['time_budget_ms'] == 2400
-    assert calls['three']['time_budget_ms'] == 2600
+    assert calls['two']['time_budget_ms'] == 4000
+    assert calls['three']['time_budget_ms'] == 5000
     assert calls['two']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_camelot_v2_pools'] == [{
@@ -125,7 +125,7 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12, 'failure_reasons': {}}
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
-    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True}
+    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True, 'two_leg_budget_ms': 4000, 'three_leg_budget_ms': 5000, 'configured_total_budget_ms': 9000}
     assert runtime._market_pipeline_telemetry['gross_candidates'] == 4
     adaptive = runtime._market_pipeline_telemetry['adaptive_size_discovery']
     assert adaptive['candidates_before_probe'] == 4
