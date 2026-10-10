@@ -8,7 +8,6 @@ not multiple independent cycles funded from partitions of one flash loan.
 
 from dataclasses import dataclass
 from itertools import chain
-from fractions import Fraction
 from typing import Any, Dict, Iterator, List, Mapping, Sequence
 
 from .gas_adjusted_split_identity import (
