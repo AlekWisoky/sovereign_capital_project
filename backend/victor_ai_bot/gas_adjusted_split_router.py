@@ -7,8 +7,9 @@ not multiple independent cycles funded from partitions of one flash loan.
 """
 
 from dataclasses import dataclass
+from itertools import chain
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, Iterator, List, Mapping, Sequence
 
 from .gas_adjusted_split_identity import (
     SHARED_EXECUTION_OVERHEAD_GAS_UNITS as _SHARED_EXECUTION_OVERHEAD_GAS_UNITS,
@@ -56,21 +57,27 @@ class _PartialSplit:
 
 
 def _size_row_has_quote_success(size_row: Mapping[str, Any]) -> bool:
-    return bool(
-        (_int(size_row.get("quote_requests")) or 0) > 0
-        and (_int(size_row.get("quote_successes")) or 0) > 0
-    )
+    requested = _int(size_row.get("quote_requests")) or 0
+    succeeded = _int(size_row.get("quote_successes")) or 0
+    return requested > 0 and succeeded > 0
+
+
+def _is_quote_backed_size_row(row: Any) -> bool:
+    return isinstance(row, Mapping) and _size_row_has_quote_success(row)
+
+
+def _iter_mapping_rows(rows: Any) -> Iterator[Mapping[str, Any]]:
+    return (row for row in (rows or []) if isinstance(row, Mapping))
 
 
 def _iter_quote_backed_candidates(
     size_matrix: Sequence[Mapping[str, Any]],
-):
-    for size_row in size_matrix:
-        if not isinstance(size_row, Mapping) or not _size_row_has_quote_success(size_row):
-            continue
-        for row in size_row.get("candidates", []) or []:
-            if isinstance(row, Mapping):
-                yield row
+) -> Iterator[Mapping[str, Any]]:
+    eligible_rows = filter(_is_quote_backed_size_row, size_matrix)
+    return chain.from_iterable(
+        _iter_mapping_rows(size_row.get("candidates", []))
+        for size_row in eligible_rows
+    )
 
 
 def _deduplicate_candidates(
