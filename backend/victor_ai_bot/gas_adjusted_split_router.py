@@ -40,7 +40,10 @@ def _leg_pool_key(leg: Mapping[str, Any]) -> str | None:
         return None
     pair = "|".join(sorted((token_in, token_out)))
     if dex == "curve":
-        return f"curve|{venue}|{aux}" if venue else None
+        # A Curve pool is the identity across all coin-index directions; aux
+        # selects the coin indices but must not make one physical pool look
+        # like independent liquidity for split routing.
+        return f"curve|{venue}" if venue else None
     if dex == "balancer":
         return f"balancer|{aux}" if aux not in {"", "0x"} else None
     if dex in {"univ3", "slipstream", "aerodrome", "camelot_algebra", "camelot_v2", "constant_product"}:
@@ -70,6 +73,7 @@ def _normalize_candidate(candidate: Mapping[str, Any], *, chain_id: int) -> Dict
     if (
         not route_id or amount is None or amount <= 0 or gross is None or gross <= 0
         or fee is None or fee < 0 or gas_token is None or gas_token <= 0
+        or candidate.get("repayment_valid") is not True
         or native_cost is None or native_cost <= 0 or l2_gas is None or l2_gas <= 0
         or gas_units is None or gas_units <= _SHARED_EXECUTION_OVERHEAD_GAS_UNITS
         or l1_fee is None or l1_fee < 0 or len(legs) < 2 or len(legs) > 3
