@@ -161,6 +161,30 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["route_universe"]["univ3_unique_pool_count"] == 10
     assert out["route_universe"]["univ3_configured_pair_fee_coverage_ratio"] == 10.0 / 12.0
     assert out["route_evaluation"] == {
+        "route_group_schedule": {
+            "block_number": 200,
+            "groups_prepared": 2,
+            "groups_completed": 2,
+            "quote_batches_completed_and_consumed": 2,
+            "duplicate_quote_batches_coalesced": 0,
+            "parallelism_limit": 3,
+            "waves_started": 1,
+            "ordering": "round_robin_source_token_protocol",
+            "completed_wave_results_consumed_before_budget_stop": True,
+        },
+        "route_group_schedule_by_block": {
+            "200": {
+                "block_number": 200,
+                "groups_prepared": 2,
+                "groups_completed": 2,
+                "quote_batches_completed_and_consumed": 2,
+                "duplicate_quote_batches_coalesced": 0,
+                "parallelism_limit": 3,
+                "waves_started": 1,
+                "ordering": "round_robin_source_token_protocol",
+                "completed_wave_results_consumed_before_budget_stop": True,
+            },
+        },
         "quote_phase_ms": 125.0,
         "route_evaluation_ms": 17.5,
         "route_groups_evaluated": 3,
