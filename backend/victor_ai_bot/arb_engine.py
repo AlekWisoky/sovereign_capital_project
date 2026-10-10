@@ -1661,53 +1661,53 @@ def _consume_two_leg_quote_result(
     effective_amount_in = int(group["effective_amount_in"])
     out1 = int(group["out1"])
     meta1 = group["meta1"]
-        q2 = qmap2.get(edge_key(e2))
-        if not q2:
-            metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
-            return
-        out2, meta2 = q2
-        gross_profit = out2 - effective_amount_in
-        # min_outs for legs include slippage haircut
-        min1 = _apply_slippage(out1, slippage_bps)
-        min2 = _apply_slippage(out2, slippage_bps)
+    q2 = qmap2.get(edge_key(e2))
+    if not q2:
+        metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
+        return
+    out2, meta2 = q2
+    gross_profit = out2 - effective_amount_in
+    # min_outs for legs include slippage haircut
+    min1 = _apply_slippage(out1, slippage_bps)
+    min2 = _apply_slippage(out2, slippage_bps)
         
-        aux1 = _route_aux_for_edge(e1, meta1)
-        aux2 = _route_aux_for_edge(e2, meta2)
+    aux1 = _route_aux_for_edge(e1, meta1)
+    aux2 = _route_aux_for_edge(e2, meta2)
 
-        rid = route_id_hex(
-            [
-                EncLeg(
-                    dex=e1.dex,
-                    venue=e1.venue,
-                    token_in=e1.token_in,
-                    token_out=e1.token_out,
-                    aux=aux1,
-                ),
-                EncLeg(
-                    dex=e2.dex,
-                    venue=e2.venue,
-                    token_in=e2.token_in,
-                    token_out=e2.token_out,
-                    aux=aux2,
-                ),
-            ]
-        )
+    rid = route_id_hex(
+        [
+            EncLeg(
+                dex=e1.dex,
+                venue=e1.venue,
+                token_in=e1.token_in,
+                token_out=e1.token_out,
+                aux=aux1,
+            ),
+            EncLeg(
+                dex=e2.dex,
+                venue=e2.venue,
+                token_in=e2.token_in,
+                token_out=e2.token_out,
+                aux=aux2,
+            ),
+        ]
+    )
         
-        facts = _TwoLegCandidateFacts(
-            group=group,
-            edge=e2,
-            amount_out=int(out2),
-            meta=dict(meta2),
-            gross_profit=int(gross_profit),
-            min_out_first=int(min1),
-            min_out_final=int(min2),
-            aux_first=aux1,
-            aux_second=aux2,
-            route_id=rid,
-        )
-        if _record_non_positive_two_leg(context, facts):
-            return
-        _append_two_leg_opportunity(context, facts)
+    facts = _TwoLegCandidateFacts(
+        group=group,
+        edge=e2,
+        amount_out=int(out2),
+        meta=dict(meta2),
+        gross_profit=int(gross_profit),
+        min_out_first=int(min1),
+        min_out_final=int(min2),
+        aux_first=aux1,
+        aux_second=aux2,
+        route_id=rid,
+    )
+    if _record_non_positive_two_leg(context, facts):
+        return
+    _append_two_leg_opportunity(context, facts)
 
 
 
