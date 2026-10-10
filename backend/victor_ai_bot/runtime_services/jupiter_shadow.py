@@ -104,20 +104,21 @@ class JupiterShadowService:
         return snapshot
 
     def _finish_scheduled_discovery(self, task: asyncio.Task[Any]) -> None:
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
+        if task.cancelled():
+            if self._discovery_task is task:
+                self._discovery_task = None
+            return
+
+        error = task.exception()
+        if error is not None:
             self._last = {
                 **self._last,
                 "status": "refresh_failed",
-                "last_error_kind": type(exc).__name__,
+                "last_error_kind": type(error).__name__,
                 "execution_authority": False,
             }
-        finally:
-            if self._discovery_task is task:
-                self._discovery_task = None
+        if self._discovery_task is task:
+            self._discovery_task = None
 
     async def quote_pairs(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
         if not self.enabled:
