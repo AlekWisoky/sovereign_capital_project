@@ -263,6 +263,34 @@ async def test_research_token_candidate_is_economic_evidence_but_not_execution_e
     assert out["selected"] is None
 
 @pytest.mark.asyncio
+async def test_empty_runtime_does_not_wait_for_unused_summary():
+    class _SlowEmptyRuntime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.summary_calls = 0
+
+        async def summary(self):
+            self.summary_calls += 1
+            await asyncio.sleep(5.0)
+            return await super().summary()
+
+    runtime = _SlowEmptyRuntime()
+    out = await asyncio.wait_for(
+        MultiRuntimeOpportunitySelector().select({"arbitrum": runtime}),
+        timeout=0.2,
+    )
+
+    assert runtime.summary_calls == 0
+    assert out["runtime_count"] == 1
+    assert out["candidates"] == []
+    assert out["runtime_errors"] == {}
+    assert out["selected"] is None
+    assert out["active_chain_changed"] is False
+    assert out["auto_trade_enabled"] is False
+    assert out["broadcast_attempted"] is False
+
+
+@pytest.mark.asyncio
 async def test_selector_bounds_slow_runtime_summary_and_fails_closed(monkeypatch):
     monkeypatch.setenv("VICTOR_GLOBAL_SELECTION_SUMMARY_TIMEOUT_S", "0.25")
 

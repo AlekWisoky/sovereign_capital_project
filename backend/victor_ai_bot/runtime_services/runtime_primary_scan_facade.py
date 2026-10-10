@@ -44,6 +44,24 @@ async def _gather_selected_provider_scan_batch(
             raise result
 
 
+def _selected_provider_frontier_seed_for_block(
+    seed_amounts: List[int], current_block: int
+) -> tuple[List[int], int]:
+    """Rotate one alternate notional per block to keep each bounded scan useful."""
+    ladder: List[int] = []
+    for value in list(seed_amounts or []):
+        try:
+            amount = int(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if amount > 0 and amount not in ladder:
+            ladder.append(amount)
+    if not ladder:
+        return [], 0
+    rotation_index = max(0, int(current_block)) % len(ladder)
+    return [ladder[rotation_index]], rotation_index
+
+
 def _selected_provider_full_scan_chunk_order(
     *,
     graph_edge_count: int,
@@ -2606,17 +2624,20 @@ class RuntimePrimaryScanFacade:
             same_selection = (
                 int(previous_progress.get("started_ms") or 0) == selection_started_ms
             )
-            phase_started_ms = (
-                now_ms
-                if (
-                    not same_selection
-                    or str(previous_progress.get("phase") or "") != str(phase)
-                )
-                else int(previous_progress.get("phase_started_ms") or now_ms)
+            same_phase = (
+                same_selection
+                and str(previous_progress.get("phase") or "") == str(phase)
             )
+            phase_started_ms = (
+                int(previous_progress.get("phase_started_ms") or now_ms)
+                if same_phase
+                else now_ms
+            )
+            # Details belong to one phase only. Carrying them across phases made
+            # a frontier-seed snapshot appear to report the prior full-scan chunks.
             previous_details = (
                 dict(previous_progress.get("details") or {})
-                if same_selection
+                if same_phase
                 else {}
             )
             progress = {
@@ -3340,26 +3361,39 @@ class RuntimePrimaryScanFacade:
             selected_telemetry["selected_provider_full_scan"] = dict(full_scan_telemetry)
 
             adaptive_cache = selected_cache
-            seed_amounts = self._selected_provider_frontier_seed_amounts(int(amount_in))
-            try:
-                seed_timeout_s = max(
-                    1.0,
-                    min(
-                        selection_timeout_s,
-                        float(
-                            os.environ.get(
-                                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S",
-                                "3.0",
-                            )
-                            or 3.0
-                        ),
-                    ),
+            seed_candidate_amounts = self._selected_provider_frontier_seed_amounts(
+                int(amount_in)
+            )
+            seed_amounts, seed_notional_rotation_index = (
+                _selected_provider_frontier_seed_for_block(
+                    seed_candidate_amounts,
+                    int(current_block),
                 )
-            except (TypeError, ValueError):
-                seed_timeout_s = min(selection_timeout_s, 3.0)
+            )
             seed_budget_s = min(
                 selection_timeout_s,
                 float(self._selected_provider_frontier_seed_budget_s()),
+            )
+            try:
+                configured_seed_timeout_s = float(
+                    os.environ.get(
+                        "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S",
+                        "8.0",
+                    )
+                    or 8.0
+                )
+            except (TypeError, ValueError):
+                configured_seed_timeout_s = 8.0
+            # Previously three sequential probes each had only a 3s timeout.
+            # Production showed 0/3 seed slices completing. Spend the bounded
+            # frontier budget on one rotating notional per block instead.
+            seed_timeout_s = max(
+                1.0,
+                min(
+                    selection_timeout_s,
+                    seed_budget_s,
+                    configured_seed_timeout_s,
+                ),
             )
 
             frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
@@ -3369,7 +3403,12 @@ class RuntimePrimaryScanFacade:
             rotation_index = int(current_block) % rotation_slots
             frontier_seed_telemetry = {
                 "enabled": bool(seed_amounts),
+                "candidate_amounts": [
+                    str(int(value)) for value in seed_candidate_amounts
+                ],
                 "amounts_scanned": [str(int(value)) for value in seed_amounts],
+                "notional_rotation_index": int(seed_notional_rotation_index),
+                "schedule_policy": "one_notional_per_tick_rotating",
                 "timeout_s": float(seed_timeout_s),
                 "budget_s": float(seed_budget_s),
                 "candidate_counts": [],

@@ -548,6 +548,12 @@ class MultiRuntimeOpportunitySelector:
     async def _runtime_evidence(
         self, runtime_name: str, runtime: Any
     ) -> tuple[list[RuntimeOpportunityEvidence], str | None]:
+        # An empty runtime has nothing to admit or rank. Do not make a read-only
+        # selection wait on a summary that cannot affect the result.
+        opportunities = list(getattr(runtime, "_opps", []) or [])
+        if not opportunities:
+            return [], None
+
         try:
             summary = await _bounded_runtime_summary(runtime)
         except (
@@ -562,7 +568,6 @@ class MultiRuntimeOpportunitySelector:
         else:
             error = None
 
-        opportunities = list(getattr(runtime, "_opps", []) or [])
         chain = getattr(getattr(runtime, "cfg", None), "chain", None)
         execution_tokens = {
             str(token).lower()
