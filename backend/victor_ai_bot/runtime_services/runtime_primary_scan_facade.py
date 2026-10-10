@@ -2589,12 +2589,22 @@ class RuntimePrimaryScanFacade:
             terminal = {"completed", "failed", "timed_out"}
             prior = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
             previous_progress = dict(prior.get("rpc_selection_progress") or {})
+            same_selection = (
+                int(previous_progress.get("started_ms") or 0) == selection_started_ms
+            )
             phase_started_ms = (
                 now_ms
-                if str(previous_progress.get("phase") or "") != str(phase)
+                if (
+                    not same_selection
+                    or str(previous_progress.get("phase") or "") != str(phase)
+                )
                 else int(previous_progress.get("phase_started_ms") or now_ms)
             )
-            previous_details = dict(previous_progress.get("details") or {})
+            previous_details = (
+                dict(previous_progress.get("details") or {})
+                if same_selection
+                else {}
+            )
             progress = {
                 "phase": str(phase),
                 "started_ms": selection_started_ms,
