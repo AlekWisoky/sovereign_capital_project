@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import statistics
+import time
 from typing import Any
 
 import httpx
@@ -42,6 +43,16 @@ class JupiterShadowService:
         self.discovery_concurrency = max(1, int(os.getenv("VICTOR_SOLANA_JUPITER_CONCURRENCY", "4") or 4))
         self.client = JupiterSwapV2Client()
         self.raydium = RaydiumQuoteClient()
+        try:
+            refresh_interval = float(
+                os.getenv("VICTOR_SOLANA_JUPITER_REFRESH_INTERVAL_S", "45") or 45
+            )
+        except (TypeError, ValueError):
+            refresh_interval = 45.0
+        self.discovery_refresh_interval_s = max(15.0, min(refresh_interval, 300.0))
+        self._last_refresh_started_monotonic = 0.0
+        self._last_refresh_started_ms = 0
+        self._discovery_task: asyncio.Task[Any] | None = None
         self._last = {
             "enabled": self.enabled,
             "configured": self.client.configured,
@@ -56,6 +67,58 @@ class JupiterShadowService:
 
     def snapshot(self) -> dict[str, Any]:
         return dict(self._last)
+
+    def snapshot_or_schedule_refresh(self) -> dict[str, Any]:
+        """Return the last completed evidence immediately and throttle live refreshes."""
+        now = time.monotonic()
+        task = self._discovery_task
+        started_this_read = False
+        can_refresh = bool(
+            self.enabled and self.client.configured and self.client.default_taker
+        )
+        refresh_due = (
+            now - float(self._last_refresh_started_monotonic)
+            >= float(self.discovery_refresh_interval_s)
+        )
+        if can_refresh and (task is None or task.done()) and refresh_due:
+            self._last_refresh_started_monotonic = now
+            self._last_refresh_started_ms = int(time.time() * 1000)
+            task = asyncio.create_task(
+                self.discover(),
+                name="solana-jupiter-shadow-discovery",
+            )
+            self._discovery_task = task
+            task.add_done_callback(self._finish_scheduled_discovery)
+            started_this_read = True
+
+        snapshot = self.snapshot()
+        current_task = self._discovery_task
+        snapshot["refresh"] = {
+            "source": "last_completed_snapshot",
+            "in_progress": bool(current_task is not None and not current_task.done()),
+            "started_by_this_read": started_this_read,
+            "last_started_ms": self._last_refresh_started_ms or None,
+            "minimum_interval_s": self.discovery_refresh_interval_s,
+            "execution_authority": False,
+        }
+        return snapshot
+
+    def _finish_scheduled_discovery(self, task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            if self._discovery_task is task:
+                self._discovery_task = None
+            return
+
+        error = task.exception()
+        if error is not None:
+            self._last = {
+                **self._last,
+                "status": "refresh_failed",
+                "last_error_kind": type(error).__name__,
+                "execution_authority": False,
+            }
+        if self._discovery_task is task:
+            self._discovery_task = None
 
     async def quote_pairs(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
         if not self.enabled:

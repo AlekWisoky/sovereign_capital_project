@@ -50,6 +50,7 @@ class _TelemetryRuntime(_Runtime):
     def __init__(self, *, slow_summary: bool):
         super().__init__()
         self.slow_summary = slow_summary
+        self.summary_calls = 0
 
     def market_pipeline_telemetry_state(self):
         return {
@@ -59,6 +60,7 @@ class _TelemetryRuntime(_Runtime):
         }
 
     async def summary(self):
+        self.summary_calls += 1
         if self.slow_summary:
             raise asyncio.TimeoutError("synthetic summary timeout")
         return {
@@ -71,22 +73,82 @@ class _TelemetryRuntime(_Runtime):
 async def _exercise_market_pipeline_telemetry_timeout() -> None:
     bundle = MultiRuntimeBundle.__new__(MultiRuntimeBundle)
     bundle._active_chain = "base"
-    bundle._runtimes = {
-        "base": _TelemetryRuntime(slow_summary=False),
-        "arbitrum": _TelemetryRuntime(slow_summary=True),
-    }
+    base = _TelemetryRuntime(slow_summary=False)
+    arbitrum = _TelemetryRuntime(slow_summary=True)
+    bundle._runtimes = {"base": base, "arbitrum": arbitrum}
     bundle.SNAPSHOT_TIMEOUT_S = 0.01
+
+    class _JupiterSnapshot:
+        def __init__(self):
+            self.discover_calls = 0
+
+        def snapshot(self):
+            return {"status": "cached", "execution_authority": False}
+
+        async def discover(self):
+            self.discover_calls += 1
+            raise AssertionError("telemetry reads must not perform live Jupiter discovery")
+
+    jupiter = _JupiterSnapshot()
+    bundle._solana_jupiter = jupiter
 
     payload = await bundle.market_pipeline_telemetry_readonly()
 
     assert payload["chains"]["base"]["scanner"]["alive"] is True
     assert payload["chains"]["arbitrum"]["scanner"]["alive"] is True
-    assert payload["chains"]["arbitrum"]["admission"]["status"] == "unavailable"
-    assert payload["chains"]["arbitrum"]["admission"]["reason_code"] == "market_pipeline_admission_summary_unavailable"
+    assert payload["chains"]["arbitrum"]["admission"]["status"] == "not_sampled"
+    assert payload["chains"]["arbitrum"]["admission"]["reason_code"] == "live_summary_skipped_for_read_latency"
+    assert base.summary_calls == 0
+    assert arbitrum.summary_calls == 0
+    assert jupiter.discover_calls == 0
+    assert payload["solana_jupiter_source"] == "last_completed_snapshot"
 
 
-def test_multiruntime_market_pipeline_preserves_telemetry_on_summary_timeout() -> None:
+def test_multiruntime_market_pipeline_preserves_telemetry_without_live_summary() -> None:
     asyncio.run(_exercise_market_pipeline_telemetry_timeout())
+
+async def _exercise_readonly_selection_uses_cached_jupiter_snapshot() -> None:
+    bundle = MultiRuntimeBundle.__new__(MultiRuntimeBundle)
+    bundle._active_chain = "base"
+    bundle._runtimes = {"base": _TelemetryRuntime(slow_summary=False)}
+    bundle.SNAPSHOT_TIMEOUT_S = 0.01
+
+    class _JupiterSnapshot:
+        def __init__(self):
+            self.refresh_requests = 0
+            self.discover_calls = 0
+
+        def snapshot_or_schedule_refresh(self):
+            self.refresh_requests += 1
+            return {
+                "status": "cached",
+                "candidates": [],
+                "execution_authority": False,
+                "refresh": {
+                    "source": "last_completed_snapshot",
+                    "in_progress": True,
+                    "execution_authority": False,
+                },
+            }
+
+        async def discover(self):
+            self.discover_calls += 1
+            raise AssertionError("selection reads must not await live Jupiter discovery")
+
+    jupiter = _JupiterSnapshot()
+    bundle._solana_jupiter = jupiter
+    payload = await bundle.select_best_opportunity_readonly()
+
+    assert payload["ok"] is True
+    assert payload["runtime_count"] == 1
+    assert payload["global_discovery_candidates"] == []
+    assert jupiter.refresh_requests == 1
+    assert jupiter.discover_calls == 0
+
+
+def test_multiruntime_selection_uses_cached_jupiter_snapshot() -> None:
+    asyncio.run(_exercise_readonly_selection_uses_cached_jupiter_snapshot())
+
 
 
 def test_multiruntime_state_facade_preserves_active_chain_contract() -> None:

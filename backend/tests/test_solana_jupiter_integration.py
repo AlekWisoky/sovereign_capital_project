@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from victor_ai_bot.runtime_services.solana_jupiter import (
@@ -159,3 +161,36 @@ async def test_solana_shadow_preserves_jupiter_http_status(monkeypatch):
     assert attempts == 1
     assert successes == 0
     assert reason == "http_400"
+
+@pytest.mark.asyncio
+async def test_snapshot_refresh_schedules_one_background_discovery(monkeypatch):
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_ENABLED", "1")
+    monkeypatch.setenv("VICTOR_SOLANA_JUPITER_REFRESH_INTERVAL_S", "15")
+    service = JupiterShadowService()
+    service.enabled = True
+    service.client = type("Client", (), {"configured": True, "default_taker": "test-taker"})()
+    calls = 0
+    finished = asyncio.Event()
+
+    async def fake_discover():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        service._last = {**service._last, "status": "healthy", "execution_authority": False}
+        finished.set()
+        return service.snapshot()
+
+    monkeypatch.setattr(service, "discover", fake_discover)
+
+    first = service.snapshot_or_schedule_refresh()
+    second = service.snapshot_or_schedule_refresh()
+    assert first["refresh"]["started_by_this_read"] is True
+    assert second["refresh"]["started_by_this_read"] is False
+    assert second["refresh"]["in_progress"] is True
+
+    await asyncio.wait_for(finished.wait(), timeout=1.0)
+    await asyncio.sleep(0)
+    assert calls == 1
+    assert service.snapshot()["status"] == "healthy"
+    assert service.snapshot()["execution_authority"] is False
+

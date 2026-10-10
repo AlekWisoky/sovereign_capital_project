@@ -2982,6 +2982,9 @@ class RuntimePrimaryScanFacade:
                     "chunks_total": int(chunk_total),
                     "chunks_completed": 0,
                     "chunks_started": 0,
+                    "chunk_size": int(chunk_size),
+                    "chunk_timeout_s": float(full_scan_telemetry["chunk_timeout_s"]),
+                    "parallelism": int(full_scan_telemetry["parallelism"]),
                     "edges_total": int(graph_edge_count),
                     "edges_covered": 0,
                     "budget_s": float(total_budget_s),
@@ -3147,6 +3150,9 @@ class RuntimePrimaryScanFacade:
                             "chunks_started": sum(
                                 value == "running" for value in chunk_statuses.values()
                             ),
+                            "chunk_size": int(chunk_size),
+                            "chunk_timeout_s": float(chunk_timeout_s),
+                            "parallelism": int(chunk_parallelism),
                             "chunks_completed": sum(
                                 value == "completed" for value in chunk_statuses.values()
                             ),
@@ -4048,13 +4054,8 @@ class RuntimePrimaryScanFacade:
         return max(32, min(configured, 256))
 
     def _selected_provider_full_scan_chunk_size(self) -> int:
-        """Use smaller default rescue chunks on Arbitrum, where provider scans time out."""
-        chain = getattr(getattr(self, "cfg", None), "chain", None)
-        try:
-            chain_id = int(getattr(chain, "chain_id", 0) or 0)
-        except (TypeError, ValueError):
-            chain_id = 0
-        default_size = 8 if chain_id == 42161 else 16
+        """Keep rescue slices small enough to finish within the bounded tick budget."""
+        default_size = 8
         try:
             configured = int(
                 os.environ.get(
