@@ -307,7 +307,8 @@ def build_gas_adjusted_split_frontier(
                     str(row["route_id"]),
                 )
             )
-            visited = 0
+            states_seen = 0
+            combinations_evaluated = 0
             best_for_target: Dict[str, Any] | None = None
 
             def walk(
@@ -317,14 +318,15 @@ def build_gas_adjusted_split_frontier(
                 used_routes: set[str],
                 used_pools: set[str],
             ) -> None:
-                nonlocal evaluated, visited, truncated_searches, best_for_target
-                if visited >= search_limit:
+                nonlocal evaluated, states_seen, combinations_evaluated, truncated_searches, best_for_target
+                if states_seen >= search_limit:
                     return
+                states_seen += 1
                 if remaining == 0:
                     if len(parts) < 2:
                         return
                     evaluated += 1
-                    visited += 1
+                    combinations_evaluated += 1
                     model = _evaluate_split(parts)
                     model["borrow_token"] = token
                     model["best_single_route_net_wei_at_target"] = (
@@ -367,15 +369,16 @@ def build_gas_adjusted_split_frontier(
                         used_routes | {route_id},
                         used_pools | set(row["pool_keys"]),
                     )
-                    if visited >= search_limit:
+                    if states_seen >= search_limit:
                         return
 
             walk(0, target_amount, [], set(), set())
-            if visited >= search_limit:
+            if states_seen >= search_limit:
                 truncated_searches += 1
             if best_for_target is not None:
-                best_for_target["search_states"] = visited
-                best_for_target["search_truncated"] = visited >= search_limit
+                best_for_target["search_states"] = states_seen
+                best_for_target["split_combinations_evaluated_for_target"] = combinations_evaluated
+                best_for_target["search_truncated"] = states_seen >= search_limit
                 best_for_target["selection_basis"] = "gas_adjusted_split_economic_diagnostic"
                 plans.append(best_for_target)
 
