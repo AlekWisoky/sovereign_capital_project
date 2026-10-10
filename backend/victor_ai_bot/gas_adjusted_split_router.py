@@ -79,6 +79,9 @@ def _normalize_candidate(candidate: Mapping[str, Any], *, chain_id: int) -> Dict
     }:
         return None
 
+    leg_start_amount = _int(legs[0].get("amount_in"))
+    if leg_start_amount is None or leg_start_amount != amount:
+        return None
     borrow_token = str(legs[0].get("token_in") or "").strip().lower()
     prior_out = borrow_token
     pool_keys = []
