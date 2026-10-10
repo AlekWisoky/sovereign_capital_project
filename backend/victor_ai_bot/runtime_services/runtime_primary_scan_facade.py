@@ -1821,7 +1821,6 @@ class RuntimePrimaryScanFacade:
                             "gross_candidates",
                             "candidate_count",
                             "route_groups_evaluated",
-                            "route_group_schedule",
                             "successful_quote_edge_count",
                             "successful_quote_pool_count",
                             "successful_quote_pair_count",
@@ -1843,6 +1842,10 @@ class RuntimePrimaryScanFacade:
                             target["size_economic_diagnostics"].extend(
                                 list(source.get("size_economic_diagnostics") or [])
                             )
+                        if isinstance(source.get("route_group_schedule"), dict):
+                            # This is a structured per-block scheduler snapshot, not
+                            # a numeric counter; never coerce it through the sum loop.
+                            target["route_group_schedule"] = dict(source["route_group_schedule"])
                         target["budget_exhausted_after_quote"] = bool(
                             target.get("budget_exhausted_after_quote", False)
                             or source.get("budget_exhausted_after_quote", False)
