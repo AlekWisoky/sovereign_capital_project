@@ -226,7 +226,7 @@ async def test_three_leg_route_evaluation_consumes_quotes_returned_after_budget(
 
     calls = {"count": 0}
 
-    async def fake_quotes(rpc, cfg, requested_edges, amount_in, metrics=None):
+    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
         calls["count"] += 1
         slow_call = {"first": 1, "second": 2, "third": 3}[slow_phase]
         if calls["count"] == slow_call:
