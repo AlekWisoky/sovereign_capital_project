@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 379,
+  "backend_test_file_count": 380,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -272,6 +272,7 @@
     "test_route_runtime_truth_consistency.py",
     "test_route_surface_truth_stage4.py",
     "test_rpc_economic_selection.py",
+    "test_rpc_provider_comparability.py",
     "test_rpc_provider_sizing_boundary.py",
     "test_runtime_after_tick_facade_extraction.py",
     "test_runtime_agent_consensus_facade_extraction.py",
