@@ -2519,6 +2519,110 @@ class RuntimePrimaryScanFacade:
                 "evidence": [],
             }
 
+        selection_started_ms = int(time.time() * 1000)
+        selection_timeout_s = self._provider_scan_timeout_s()
+        provider_progress_by_url: Dict[str, Dict[str, Any]] = {}
+        for url in candidates:
+            try:
+                provider_name = str(urlsplit(url).hostname or "unknown")
+            except ValueError:
+                provider_name = "unknown"
+            provider_progress_by_url[url] = {
+                "provider": provider_name[:128],
+                "status": "pending",
+                "quote_requests": 0,
+                "quote_successes": 0,
+                "candidate_count": 0,
+            }
+
+        def publish_rpc_selection_progress(
+            phase: str,
+            *,
+            provider_url: str | None = None,
+            status: str | None = None,
+            candidate_count: int | None = None,
+            provider_telemetry: Dict[str, Any] | None = None,
+            details: Dict[str, Any] | None = None,
+        ) -> None:
+            """Publish bounded, credential-free live progress for the read-only scan."""
+            now_ms = int(time.time() * 1000)
+            provider_row = provider_progress_by_url.get(provider_url or "")
+            if provider_row is not None:
+                if status:
+                    provider_row["status"] = str(status)
+                    if status == "running":
+                        provider_row["started_ms"] = now_ms
+                        provider_row.pop("completed_ms", None)
+                        provider_row.pop("elapsed_ms", None)
+                    elif status in {"completed", "failed", "timed_out"}:
+                        provider_row["completed_ms"] = now_ms
+                        provider_row["elapsed_ms"] = max(
+                            0, now_ms - int(provider_row.get("started_ms") or now_ms)
+                        )
+                if candidate_count is not None:
+                    provider_row["candidate_count"] = max(0, int(candidate_count))
+                if isinstance(provider_telemetry, dict):
+                    quotes = dict(provider_telemetry.get("quotes") or {})
+                    provider_row["quote_requests"] = max(
+                        0, int(quotes.get("requests") or 0)
+                    )
+                    provider_row["quote_successes"] = max(
+                        0, int(quotes.get("successes") or 0)
+                    )
+                    try:
+                        provider_row["scan_latency_ms"] = round(
+                            float(provider_telemetry.get("scan_latency_ms") or 0.0), 1
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        provider_row["scan_latency_ms"] = 0.0
+                    error = str(provider_telemetry.get("scan_error") or "").lower()
+                    if error:
+                        provider_row["error_kind"] = (
+                            "provider_scan_timeout"
+                            if "timeout" in error or "timed out" in error
+                            else "provider_scan_failed"
+                        )
+                    else:
+                        provider_row.pop("error_kind", None)
+
+            providers = [dict(row) for row in provider_progress_by_url.values()]
+            terminal = {"completed", "failed", "timed_out"}
+            progress = {
+                "phase": str(phase),
+                "started_ms": selection_started_ms,
+                "phase_started_ms": now_ms,
+                "updated_ms": now_ms,
+                "elapsed_ms": max(0, now_ms - selection_started_ms),
+                "provider_count": len(providers),
+                "providers_started": sum(row.get("status") != "pending" for row in providers),
+                "providers_running": sum(row.get("status") == "running" for row in providers),
+                "providers_completed": sum(row.get("status") in terminal for row in providers),
+                "providers_failed": sum(row.get("status") in {"failed", "timed_out"} for row in providers),
+                "providers": providers,
+            }
+            prior = dict(getattr(self, "_market_pipeline_telemetry", {}) or {})
+            previous_progress = dict(prior.get("rpc_selection_progress") or {})
+            previous_details = dict(previous_progress.get("details") or {})
+            if details:
+                previous_details.update(dict(details))
+            if previous_details:
+                progress["details"] = previous_details
+            prior.update({
+                "rpc_selection_phase": str(phase),
+                "rpc_selection_started_ms": selection_started_ms,
+                "rpc_provider_scan_timeout_s": float(selection_timeout_s),
+                "rpc_selection_progress": progress,
+            })
+            self._market_pipeline_telemetry = prior
+
+            loop_telemetry = dict(getattr(self, "_runtime_loop_telemetry", {}) or {})
+            if str(loop_telemetry.get("phase") or "") != str(phase):
+                loop_telemetry["phase_started_ms"] = now_ms
+            loop_telemetry["phase"] = str(phase)
+            self._runtime_loop_telemetry = loop_telemetry
+
+        publish_rpc_selection_progress("discovery_preparation")
+
         discovery_context = await self._build_discovery_context(
             bootstrap_rpc,
             current_block=int(current_block),
@@ -2541,6 +2645,11 @@ class RuntimePrimaryScanFacade:
             scan_cache = PerBlockCache()
             telemetry: Dict[str, Any] = {}
             telemetry["provider_comparison_edge_cap"] = self._provider_comparison_edge_cap()
+            publish_rpc_selection_progress(
+                "provider_comparison",
+                provider_url=url,
+                status="running",
+            )
             started = time.perf_counter()
             try:
                 if url == bootstrap_url:
@@ -2682,15 +2791,22 @@ class RuntimePrimaryScanFacade:
                     "quote_unhealthy_until": row.get("quote_unhealthy_until", 0.0),
                 }
             )
+            scan_error = str(telemetry.get("scan_error") or "").lower()
+            scan_status = (
+                "timed_out"
+                if "timeout" in scan_error or "timed out" in scan_error
+                else "failed" if scan_error else "completed"
+            )
+            publish_rpc_selection_progress(
+                "provider_comparison",
+                provider_url=url,
+                status=scan_status,
+                candidate_count=len(opps or []),
+                provider_telemetry=telemetry,
+            )
             return url, list(opps or []), scan_cache, telemetry, evidence
 
-        selection_timeout_s = self._provider_scan_timeout_s()
-        self._market_pipeline_telemetry = {
-            **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
-            "rpc_selection_phase": "provider_comparison",
-            "rpc_selection_started_ms": int(time.time() * 1000),
-            "rpc_provider_scan_timeout_s": float(selection_timeout_s),
-        }
+        publish_rpc_selection_progress("provider_comparison")
         # Provider selection is a comparison gate, not the institutional sizing
         # pass. Keep all providers on the same base notional so quote volume and
         # latency remain bounded; the selected provider gets the full adaptive
@@ -2718,10 +2834,7 @@ class RuntimePrimaryScanFacade:
         # without replaying the institutional ladder across every provider.
         adaptive_telemetry: Dict[str, Any] = {}
         frontier_seed_telemetry: Dict[str, Any] = {}
-        self._market_pipeline_telemetry = {
-            **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
-            "rpc_selection_phase": "selected_provider_adaptive",
-        }
+        publish_rpc_selection_progress("selected_provider_adaptive")
         adaptive_opps: List[Opportunity] = []
         selected_provider_url = str(selected_url)
         adaptive_cache = PerBlockCache()
@@ -2761,6 +2874,7 @@ class RuntimePrimaryScanFacade:
             or authoritative_positive_selected < min_opportunities
         )
         if full_graph_rescue_required:
+            publish_rpc_selection_progress("selected_provider_full_scan")
             # Provider comparison is intentionally capped. The selected provider
             # now receives the same immutable graph, but in bounded chunks so the
             # full graph is covered without one monolithic wall-clock timeout.
@@ -2820,6 +2934,17 @@ class RuntimePrimaryScanFacade:
                     full_scan_telemetry["frontier_reserved_budget_s"]
                 ),
             }
+            publish_rpc_selection_progress(
+                "selected_provider_full_scan",
+                details={
+                    "scan_kind": "full_graph",
+                    "chunks_total": int(chunk_total),
+                    "chunks_completed": 0,
+                    "edges_total": int(graph_edge_count),
+                    "edges_covered": 0,
+                    "budget_s": float(total_budget_s),
+                },
+            )
             chunk_statuses: Dict[int, str] = {
                 index: "pending" for index in range(chunk_total)
             }
@@ -2891,6 +3016,13 @@ class RuntimePrimaryScanFacade:
                             or (time.perf_counter() - started) * 1000.0
                         ),
                     })
+                    publish_rpc_selection_progress(
+                        "selected_provider_full_scan",
+                        details={
+                            "chunks_completed": int(full_scan_telemetry["chunks_completed"]),
+                            "edges_covered": int(full_scan_telemetry["edges_covered"]),
+                        },
+                    )
                 except asyncio.TimeoutError:
                     chunk_statuses[int(chunk_index)] = "timed_out"
                     chunk_status_reasons[int(chunk_index)] = "chunk_timeout"
@@ -2900,6 +3032,14 @@ class RuntimePrimaryScanFacade:
                         "reason": "selected_provider_full_scan_chunk_timeout",
                         "timeout_s": float(timeout_s),
                     })
+                    publish_rpc_selection_progress(
+                        "selected_provider_full_scan",
+                        details={
+                            "chunks_timed_out": sum(
+                                value == "timed_out" for value in chunk_statuses.values()
+                            ),
+                        },
+                    )
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
                     chunk_statuses[int(chunk_index)] = "failed"
                     chunk_status_reasons[int(chunk_index)] = f"{type(exc).__name__}: {exc}"
@@ -2908,6 +3048,14 @@ class RuntimePrimaryScanFacade:
                         "offset": int(chunk_index * chunk_size),
                         "reason": f"{type(exc).__name__}: {exc}",
                     })
+                    publish_rpc_selection_progress(
+                        "selected_provider_full_scan",
+                        details={
+                            "chunks_failed": sum(
+                                value == "failed" for value in chunk_statuses.values()
+                            ),
+                        },
+                    )
 
             chunk_timeout_s = float(full_scan_telemetry["chunk_timeout_s"])
             chunk_parallelism = int(full_scan_telemetry["parallelism"])
@@ -3399,6 +3547,14 @@ class RuntimePrimaryScanFacade:
             )
 
         adaptive_telemetry["frontier_seed"] = frontier_seed_telemetry
+        publish_rpc_selection_progress(
+            "selected_provider_size_curve",
+            details={
+                "scan_kind": "selected_provider_size_curve",
+                "frontier_seed_attempted": bool(frontier_seed_telemetry.get("enabled")),
+                "frontier_seed_candidates_added": int(frontier_seed_telemetry.get("candidates_added", 0) or 0),
+            },
+        )
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
@@ -3719,12 +3875,22 @@ class RuntimePrimaryScanFacade:
             },
         }
         completed_ms = int(time.time() * 1000)
+        publish_rpc_selection_progress("complete")
+        progress_snapshot = dict(
+            (getattr(self, "_market_pipeline_telemetry", {}) or {}).get(
+                "rpc_selection_progress"
+            ) or {}
+        )
         selected_telemetry["rpc_selection_phase"] = "complete"
+        selected_telemetry["rpc_selection_started_ms"] = selection_started_ms
         selected_telemetry["rpc_selection_completed_ms"] = completed_ms
+        selected_telemetry["rpc_provider_scan_timeout_s"] = float(selection_timeout_s)
+        selected_telemetry["rpc_selection_progress"] = progress_snapshot
         self._market_pipeline_telemetry = {
             **dict(getattr(self, "_market_pipeline_telemetry", {}) or {}),
             "rpc_selection_phase": "complete",
             "rpc_selection_completed_ms": completed_ms,
+            "rpc_selection_progress": progress_snapshot,
         }
         return {
             "selected_endpoint": selected_url,
