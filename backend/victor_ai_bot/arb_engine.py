@@ -1428,6 +1428,31 @@ def _prefilter_reverse_candidates(
     }
 
 
+def _count_triangle_completions(
+    edge: Edge,
+    adjacency: Mapping[str, Sequence[Edge]],
+    by_pair: Mapping[Tuple[str, str], Sequence[Edge]],
+) -> int:
+    return sum(
+        len(by_pair.get((second.token_out, edge.token_in), ()))
+        for second in adjacency.get(edge.token_out, ())
+        if second.token_out != edge.token_in
+    )
+
+
+def _triangle_edge_group_potential(
+    item: Tuple[int, List[Edge]],
+    *,
+    adjacency: Mapping[str, Sequence[Edge]],
+    by_pair: Mapping[Tuple[str, str], Sequence[Edge]],
+) -> tuple[int, int]:
+    _, grouped_edges = item
+    return (
+        sum(_count_triangle_completions(edge, adjacency, by_pair) for edge in grouped_edges),
+        len(grouped_edges),
+    )
+
+
 def _round_robin_route_group_edges(edges: Sequence[Edge]) -> List[Edge]:
     """Interleave source-token/protocol families without changing their inner priority."""
     buckets: Dict[Tuple[str, str], List[Edge]] = {}
@@ -1456,6 +1481,21 @@ def _route_group_parallelism() -> int:
     except (TypeError, ValueError, OverflowError):
         requested = 3
     return max(1, min(4, requested))
+
+
+def _consume_bounded_quote_result(
+    result: Any,
+    quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
+) -> tuple[int, int]:
+    """Accumulate a completed first-leg batch without hiding cancellation."""
+    if isinstance(result, asyncio.CancelledError):
+        raise result
+    if isinstance(result, Exception):
+        return 0, 1
+    if isinstance(result, BaseException):
+        raise result
+    quote_map.update(dict(result or {}))
+    return 1, 0
 
 
 async def _quote_edge_groups_in_bounded_waves(
@@ -1494,15 +1534,11 @@ async def _quote_edge_groups_in_bounded_waves(
         ), return_exceptions=True)
         waves += 1
         for result in results:
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, BaseException):
-                if isinstance(result, Exception):
-                    failed += 1
-                    continue
-                raise result
-            quote_map.update(dict(result or {}))
-            completed += 1
+            batch_completed, batch_failed = _consume_bounded_quote_result(
+                result, quote_map
+            )
+            completed += batch_completed
+            failed += batch_failed
         next_start = wave_start + len(wave)
         if next_start < len(ordered) and time.perf_counter() >= deadline:
             skipped = len(ordered) - next_start
@@ -2341,18 +2377,12 @@ async def find_three_leg_opportunities(
     for edge in edges:
         effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
         edge_groups.setdefault(effective_amount, []).append(edge)
-    def _triangle_group_potential(item: Tuple[int, List[Edge]]) -> tuple[int, int]:
-        _, grouped_edges = item
-        potential = 0
-        for first_edge in grouped_edges:
-            for second_edge in adj.get(first_edge.token_out, []):
-                if second_edge.token_out == first_edge.token_in:
-                    continue
-                potential += len(by_pair.get((second_edge.token_out, first_edge.token_in), []))
-        return potential, len(grouped_edges)
-
     ordered_triangle_edge_groups = sorted(
-        edge_groups.items(), key=_triangle_group_potential, reverse=True
+        edge_groups.items(),
+        key=lambda item: _triangle_edge_group_potential(
+            item, adjacency=adj, by_pair=by_pair
+        ),
+        reverse=True,
     )
     qmap1_3, first_leg_quote_schedule = await _quote_edge_groups_in_bounded_waves(
         rpc,
