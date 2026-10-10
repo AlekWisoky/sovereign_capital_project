@@ -165,6 +165,18 @@ def _base_l1_fee_is_exact(candidate: Mapping[str, Any], chain_id: int) -> bool:
     )
 
 
+def _route_token_pair_is_valid(
+    token_in: str,
+    token_out: str,
+    expected_token_in: str,
+) -> bool:
+    return bool(token_in and token_out and token_in != token_out and token_in == expected_token_in)
+
+
+def _route_protocol_has_pool(protocol: str, pool_key: str | None) -> bool:
+    return bool(protocol and pool_key)
+
+
 def _route_leg_identity(
     leg: Mapping[str, Any], expected_token_in: str
 ) -> Dict[str, str] | None:
@@ -172,10 +184,9 @@ def _route_leg_identity(
     token_out = str(leg.get("token_out") or "").strip().lower()
     protocol = str(leg.get("dex") or "").strip().lower()
     pool_key = _leg_pool_key(leg)
-    if (
-        not token_in or not token_out or token_in == token_out
-        or token_in != expected_token_in or not protocol or pool_key is None
-    ):
+    if not _route_token_pair_is_valid(token_in, token_out, expected_token_in):
+        return None
+    if not _route_protocol_has_pool(protocol, pool_key):
         return None
     venue = str(leg.get("venue") or "").strip().lower()
     return {
