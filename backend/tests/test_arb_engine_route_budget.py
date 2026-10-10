@@ -638,6 +638,50 @@ def test_frontier_identity_separates_protocol_pool_and_router_diversity():
 
 
 
+def test_three_leg_frontier_uses_best_quote_within_same_directed_pair():
+    token_in = "0x" + "11" * 20
+    token_out = "0x" + "22" * 20
+    low = arb.Edge(
+        "univ3", "0x" + "aa" * 20, token_in, token_out,
+        {"fee": 3000, "pool": "pool-low"},
+    )
+    high = arb.Edge(
+        "univ3", "0x" + "aa" * 20, token_in, token_out,
+        {"fee": 500, "pool": "pool-high"},
+    )
+    selected, _ = arb._select_three_leg_frontier_edges(
+        [(0, low), (1, high)],
+        active_protocols_by_token={token_in: {"univ3"}},
+        active_pools_by_token={token_in: {"univ3:pool:pool-existing"}},
+        active_routers_by_token={token_in: {"0x" + "aa" * 20}},
+        per_token_cap=1,
+        global_cap=1,
+        quoted_output_by_edge={
+            arb.edge_key(low): 100,
+            arb.edge_key(high): 110,
+        },
+    )
+    assert selected == [high]
+
+
+def test_three_leg_route_sort_prefers_signed_after_cost_net_over_gross():
+    gross_winner = SimpleNamespace(
+        route_id="gross-winner",
+        expected_profit_raw="1000000",
+        meta={"profitability": {"profit_after_costs_wei": "-900000", "revalidated": True}},
+    )
+    net_winner = SimpleNamespace(
+        route_id="net-winner",
+        expected_profit_raw="200000",
+        meta={"profitability": {
+            "profit_after_costs_wei": "100000",
+            "revalidated": True,
+            "authoritative": False,
+        }},
+    )
+    assert arb._opportunity_economic_sort_key(net_winner) > arb._opportunity_economic_sort_key(gross_winner)
+
+
 def test_three_leg_frontier_recomputes_diversity_after_each_selection():
     token_in = "0x" + "11" * 20
     univ3 = arb.Edge(
