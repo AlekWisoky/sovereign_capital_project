@@ -3,6 +3,23 @@
 This file documents the **strict mobile↔backend contract**.
 
 ## REST
+### GET /api/deploy/info
+
+Returns deployment mode, broadcast-safety flags, and the Git SHA stamped into the running backend container.
+
+```json
+{
+  "ok": true,
+  "mode": "private",
+  "public_mode": false,
+  "public_allow_broadcast": false,
+  "git_sha": "0123456789abcdef0123456789abcdef01234567",
+  "brand": { "name": "x∆v", "slogan": "Sovereign Capital" }
+}
+```
+
+If `VICTOR_GIT_SHA` was not supplied at deployment, `git_sha` is `"unknown"`; production SHA verification must fail closed rather than accepting that value.
+
 ### GET /api/state
 Returns the runtime state object (no wrapper):
 
