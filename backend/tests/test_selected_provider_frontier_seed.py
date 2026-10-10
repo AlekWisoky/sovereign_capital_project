@@ -14,6 +14,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _selected_provider_frontier_seed_for_block,
     _selected_provider_frontier_slice_offset,
     _selected_provider_full_scan_chunk_order,
+    _selected_provider_minimum_chunk_window_s,
 )
 
 
@@ -47,6 +48,18 @@ def test_selected_provider_chunk_timeout_defaults_to_route_budget_envelope(monke
 
     monkeypatch.setenv(name, "999")
     assert RuntimePrimaryScanFacade._selected_provider_full_scan_chunk_timeout_s() == 15.0
+
+
+def test_chunk_scheduler_reserves_enough_remaining_budget(monkeypatch):
+    assert _selected_provider_minimum_chunk_window_s(
+        total_budget_s=12.0, chunk_timeout_s=12.0
+    ) == 8.0
+    assert _selected_provider_minimum_chunk_window_s(
+        total_budget_s=8.0, chunk_timeout_s=8.0
+    ) == 6.0
+    assert _selected_provider_minimum_chunk_window_s(
+        total_budget_s=6.0, chunk_timeout_s=3.0
+    ) == 3.0
 
 
 def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_frontier(monkeypatch):
