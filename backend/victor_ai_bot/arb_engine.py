@@ -1825,6 +1825,30 @@ def _opportunity_economic_sort_key(opportunity: Opportunity) -> tuple[int, int, 
                 break
             except (TypeError, ValueError, OverflowError):
                 continue
+    if (
+        economic == -1
+        and str(state.get("reason") or "") == "does_not_repay_flashloan"
+    ):
+        # -1 is a legacy sentinel, not signed net P&L. Reconstruct only from
+        # same-unit inputs; never subtract native-wei gas from token-wei profit.
+        try:
+            gas_token_raw = state.get("gas_cost_profit_token_wei")
+            if gas_token_raw not in (None, ""):
+                gross_raw = state.get("gross_profit_wei")
+                gross_for_model = (
+                    int(gross_raw)
+                    if gross_raw not in (None, "")
+                    else int(getattr(opportunity, "expected_profit_raw", 0) or 0)
+                )
+                economic = (
+                    gross_for_model
+                    - int(state.get("flashloan_fee_wei") or 0)
+                    - int(gas_token_raw)
+                )
+            else:
+                economic = None
+        except (TypeError, ValueError, OverflowError):
+            economic = None
     try:
         gross = int(getattr(opportunity, "expected_profit_raw", 0) or 0)
     except (TypeError, ValueError, OverflowError):
