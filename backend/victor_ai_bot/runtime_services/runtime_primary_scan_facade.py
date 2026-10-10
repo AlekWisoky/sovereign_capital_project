@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import time
 from typing import Any, Dict, List
@@ -21,6 +23,48 @@ from .profitability_truth import opportunity_profit_sort_key
 from ..gas_adjusted_split_router import build_gas_adjusted_split_frontier
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
+def _canonical_provider_value(value: Any) -> str:
+    """Stable JSON identity for route graph and cost inputs."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _provider_comparison_signature(
+    telemetry: Dict[str, Any], current_block: int
+) -> tuple[Any, ...]:
+    adaptive = dict(telemetry.get("adaptive_size_discovery") or {})
+    sizing = dict(telemetry.get("scan_sizing") or {})
+    return (
+        int(current_block),
+        _canonical_provider_value(telemetry.get("route_universe") or {}),
+        tuple(str(value) for value in adaptive.get("amounts_scanned") or []),
+        tuple(sorted(
+            (str(key).lower(), str(value))
+            for key, value in dict(sizing.get("amounts_by_token") or {}).items()
+        )),
+        _canonical_provider_value(telemetry.get("provider_comparison_cost_inputs") or {}),
+    )
+
+
+def _provider_results_are_comparable(
+    results: List[tuple[Any, ...]], current_block: int
+) -> tuple[bool, str]:
+    """Fail closed if any provider used a different graph, size ladder, or cost basis."""
+    if len(results) < 2:
+        return False, "fewer_than_two_provider_results"
+    signatures = []
+    for result in results:
+        telemetry = result[3] if len(result) > 3 and isinstance(result[3], dict) else {}
+        evidence = result[4] if len(result) > 4 else None
+        if str(telemetry.get("scan_error") or ""):
+            return False, "provider_scan_failed_or_timed_out"
+        if getattr(evidence, "block_number", None) != int(current_block):
+            return False, "provider_block_mismatch"
+        signatures.append(_provider_comparison_signature(telemetry, current_block))
+    if any(signature != signatures[0] for signature in signatures[1:]):
+        return False, "provider_graph_size_or_cost_inputs_mismatch"
+    return True, "matched_graph_block_sizes_and_cost_inputs"
 
 
 async def _gather_selected_provider_scan_batch(
@@ -889,6 +933,7 @@ class RuntimePrimaryScanFacade:
         cache: PerBlockCache | None = None,
         observed_gas_price_wei: int | None = None,
         gas_price_integrity: Dict[str, Any] | None = None,
+        flashloan_fee_observation: Dict[str, Any] | None = None,
     ) -> None:
         """Attach explicit USD value for canonical scan-time after-fee truth.
 
@@ -904,12 +949,15 @@ class RuntimePrimaryScanFacade:
         preference = str(getattr(execution, "usd_stable_preference", "usdc") or "usdc")
         scan_cache = cache or self.cache
         flash_provider = str(getattr(getattr(self.cfg, "execution", None), "flash_provider", "aave") or "aave")
-        flashloan_fee_observation = await observe_flashloan_fee_bps(
-            rpc,
-            self.cfg,
-            flash_provider,
-            block=f"0x{int(current_block):x}",
-        )
+        if not isinstance(flashloan_fee_observation, dict):
+            flashloan_fee_observation = await observe_flashloan_fee_bps(
+                rpc,
+                self.cfg,
+                flash_provider,
+                block=f"0x{int(current_block):x}",
+            )
+        else:
+            flashloan_fee_observation = dict(flashloan_fee_observation)
         native_flashloan_fee_bps = (
             int(flashloan_fee_observation["fee_bps"])
             if bool(flashloan_fee_observation.get("ok"))
@@ -1608,21 +1656,39 @@ class RuntimePrimaryScanFacade:
                 "research_tokens_unpriced": list(shared_telemetry.get("research_tokens_unpriced") or []),
             }
         telemetry["scan_sizing"] = dict(token_scan_telemetry)
-        try:
-            gas_price_consensus = await self.rpc_manager.gas_price_consensus()
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            gas_price_consensus = {
-                "gas_price_wei": None,
-                "status": "insufficient_agreement",
-                "observations": [],
-                "anomalies": [],
-            }
+        shared_gas_consensus = dict(
+            (discovery_context or {}).get("_shared_provider_gas_price_consensus") or {}
+        )
+        if shared_gas_consensus:
+            gas_price_consensus = shared_gas_consensus
+        else:
+            try:
+                gas_price_consensus = await self.rpc_manager.gas_price_consensus()
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                gas_price_consensus = {
+                    "gas_price_wei": None,
+                    "status": "insufficient_agreement",
+                    "observations": [],
+                    "anomalies": [],
+                }
         observed_gas_price_wei = (
             int(gas_price_consensus.get("gas_price_wei"))
             if gas_price_consensus.get("gas_price_wei") not in (None, "")
             else None
         )
         telemetry["gas_price_integrity"] = dict(gas_price_consensus)
+        shared_fee_observation = dict(
+            (discovery_context or {}).get("_shared_provider_flashloan_fee_observation") or {}
+        )
+        if shared_fee_observation:
+            telemetry["provider_comparison_cost_inputs"] = {
+                "block_number": int(current_block),
+                "gas_price_wei": str(gas_price_consensus.get("gas_price_wei") or ""),
+                "gas_price_status": str(gas_price_consensus.get("status") or ""),
+                "flashloan_fee_bps": str(shared_fee_observation.get("fee_bps") or ""),
+                "flashloan_fee_ok": bool(shared_fee_observation.get("ok")),
+                "flashloan_fee_status": str(shared_fee_observation.get("status") or ""),
+            }
         try:
             size_amounts = [int(amount_in)]
             selected_full_graph_base_only = bool(
@@ -1824,18 +1890,25 @@ class RuntimePrimaryScanFacade:
                     cache=scan_cache,
                     observed_gas_price_wei=observed_gas_price_wei,
                     gas_price_integrity=gas_price_consensus,
+                flashloan_fee_observation=shared_fee_observation or None,
                 )
                 authoritative_positive_candidates_before_probe = (
                     _authoritative_positive_after_cost_count([*opps2, *opps3])
                 )
                 probe_basis = "authoritative_after_cost_positive_count"
 
+            provider_comparison_active = bool(
+                getattr(self, "_rpc_provider_comparison", False)
+            )
             should_probe = (
-                force_adaptive_size_scan
-                or candidates_before_probe < min_opportunities
-                or (
-                    candidates_before_probe >= min_opportunities
-                    and authoritative_positive_candidates_before_probe < min_opportunities
+                not provider_comparison_active
+                and (
+                    force_adaptive_size_scan
+                    or candidates_before_probe < min_opportunities
+                    or (
+                        candidates_before_probe >= min_opportunities
+                        and authoritative_positive_candidates_before_probe < min_opportunities
+                    )
                 )
             )
 
@@ -1978,6 +2051,7 @@ class RuntimePrimaryScanFacade:
                 cache=scan_cache,
                 observed_gas_price_wei=observed_gas_price_wei,
                 gas_price_integrity=gas_price_consensus,
+            flashloan_fee_observation=shared_fee_observation or None,
             )
 
             def _candidate_profitability(candidate: Opportunity) -> Dict[str, Any]:
@@ -2660,6 +2734,7 @@ class RuntimePrimaryScanFacade:
                 cache=cache,
                 observed_gas_price_wei=observed_gas_price_wei,
                 gas_price_integrity=gas_price_consensus,
+            flashloan_fee_observation=shared_fee_observation or None,
             )
 
         matrix = _build_size_economic_matrix(size_scan_records)
