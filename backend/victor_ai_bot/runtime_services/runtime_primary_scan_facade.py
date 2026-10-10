@@ -405,6 +405,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "economic_after_cost_profit_wei": str(fields["economic_after_cost_profit_wei"]),
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
+        "valid": bool(profitability.get("valid")),
         "reason": str(profitability.get("reason") or "unavailable"),
         "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
     }
