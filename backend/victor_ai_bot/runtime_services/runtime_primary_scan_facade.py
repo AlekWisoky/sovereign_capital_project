@@ -2596,8 +2596,10 @@ class RuntimePrimaryScanFacade:
         base_amount_in: int,
         base_opps: List[Opportunity],
         cache: PerBlockCache,
+        shared_gas_price_consensus: Dict[str, Any] | None = None,
+        shared_flashloan_fee_observation: Dict[str, Any] | None = None,
     ) -> tuple[List[Opportunity], Dict[str, Any]]:
-        """Probe promising base routes at alternate notionals without rescanning the graph."""
+        """Probe promising routes using the same block/cost snapshot as provider selection."""
         telemetry: Dict[str, Any] = {}
         adaptive_amounts = self._adaptive_scan_amounts(
             int(base_amount_in),
@@ -2822,15 +2824,17 @@ class RuntimePrimaryScanFacade:
                 "three_metrics": {},
             })
 
-        try:
-            gas_price_consensus = await self.rpc_manager.gas_price_consensus()
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            gas_price_consensus = {
-                "gas_price_wei": None,
-                "status": "insufficient_agreement",
-                "observations": [],
-                "anomalies": [],
-            }
+        gas_price_consensus = dict(shared_gas_price_consensus or {})
+        if not gas_price_consensus:
+            try:
+                gas_price_consensus = dict(await self.rpc_manager.gas_price_consensus() or {})
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                gas_price_consensus = {
+                    "gas_price_wei": None,
+                    "status": "insufficient_agreement",
+                    "observations": [],
+                    "anomalies": [],
+                }
         observed_gas_price_wei = (
             int(gas_price_consensus.get("gas_price_wei"))
             if gas_price_consensus.get("gas_price_wei") not in (None, "")
@@ -2844,6 +2848,11 @@ class RuntimePrimaryScanFacade:
                 cache=cache,
                 observed_gas_price_wei=observed_gas_price_wei,
                 gas_price_integrity=gas_price_consensus,
+                flashloan_fee_observation=(
+                    dict(shared_flashloan_fee_observation)
+                    if isinstance(shared_flashloan_fee_observation, dict)
+                    else None
+                ),
             )
 
         matrix = _build_size_economic_matrix(size_scan_records)
@@ -4205,6 +4214,10 @@ class RuntimePrimaryScanFacade:
 
                         cache=adaptive_cache,
 
+                        shared_gas_price_consensus=shared_gas_consensus,
+
+                        shared_flashloan_fee_observation=shared_flashloan_fee,
+
                     ),
 
                     timeout=selection_timeout_s,
@@ -4478,7 +4491,16 @@ class RuntimePrimaryScanFacade:
         )
 
         selected_telemetry["rpc"]["economic_selection"] = {
-            "mode": "read_only_economic",
+            "mode": (
+                "read_only_economic"
+                if provider_comparison_comparable
+                else "read_only_operational_fallback"
+            ),
+            "economic_comparison_comparable": bool(provider_comparison_comparable),
+            "comparison_reason": str(provider_comparison_reason),
+            "provider_comparison_cost_inputs": dict(
+                selected_telemetry.get("provider_comparison_cost_inputs") or {}
+            ),
             "selected_endpoint": selected_url,
             "selected_provider": str(urlsplit(selected_url).hostname or ""),
             "candidates": [
@@ -4509,6 +4531,9 @@ class RuntimePrimaryScanFacade:
                 selected_telemetry.get("selected_provider_adaptive") or {}
             ),
             "provider_scan_symmetry": {
+                "economic_comparison_comparable": bool(provider_comparison_comparable),
+                "comparison_reason": str(provider_comparison_reason),
+                "cost_inputs_identical": bool(provider_comparison_comparable),
                 "route_universe_identical": route_universe_equal,
                 "size_ladder_identical": size_ladder_equal,
                 "token_size_ladder_identical": token_ladder_equal,
@@ -4521,7 +4546,7 @@ class RuntimePrimaryScanFacade:
                 "shared_token_sizing": dict(shared_token_scan_telemetry),
                 "providers": provider_symmetry,
                 "opportunity_union": {
-                    "enabled": True,
+                    "enabled": bool(provider_comparison_comparable),
                     "healthy_provider_count": int(sum(1 for value in provider_eligible.values() if value)),
                     "provider_candidate_counts": dict(provider_candidate_counts),
                     "unique_route_amount_candidates": int(len(candidate_by_key)),
