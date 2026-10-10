@@ -10,6 +10,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     RuntimePrimaryScanFacade,
     _candidate_economic_after_cost_for_sizing,
     _candidate_sizing_sort_key,
+    _merge_size_economic_matrices,
     _selected_provider_frontier_slice_offset,
 )
 
@@ -149,6 +150,22 @@ def test_selected_provider_full_scan_parallelism_is_bounded(monkeypatch):
     assert runtime._selected_provider_full_scan_parallelism() == 3
 
 
+def test_frontier_seed_defaults_span_low_mid_and_high_authorized_sizes(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    monkeypatch.delenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS", raising=False)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES", "3")
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 1500, 2000, 4000, 8000, 16000],
+    )
+
+    # The high probe can cross fixed gas/flash-loan break-even when 1x cannot.
+    assert runtime._selected_provider_frontier_seed_amounts(1000) == [
+        500, 2000, 8000
+    ]
+
+
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     monkeypatch.setenv(
@@ -271,7 +288,10 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
                 },
             }
         )
-        return [candidate] if int(amount_in) == 1500 else []
+        if int(amount_in) != 2000:
+            return []
+        candidate.route.legs[0].amount_in = str(int(amount_in))
+        return [candidate]
 
     probe_calls = []
 
@@ -305,7 +325,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         amount_in=1000,
     )
 
-    assert scan_amounts == [1000, 1000, 1500, 2000, 500]
+    assert scan_amounts == [1000, 1000, 500, 2000, 8000]
     assert provider_comparison_flags == [True, False, False, False, False]
     assert full_graph_base_only_flags == [False, True, True, True, True]
     assert len(probe_calls) == 1
@@ -386,7 +406,7 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
         fake_requote,
     )
 
-    await runtime._run_bounded_selected_provider_size_probe(
+    sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
         object(),
         current_block=123,
         base_amount_in=1000,
@@ -394,7 +414,99 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
         cache=object(),
     )
 
-    assert seen == [500, 1500, 2000]
+    # The seed notional was already quoted; only genuinely different sizes
+    # consume additional RPC budget.
+    assert seen == [500, 2000]
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["amounts_scanned"] == ["500", "1500", "2000"]
+    assert adaptive["economic_matrix_complete"] is True
+    assert sorted(row["amount_in"] for row in telemetry["size_economic_matrix"]) == [
+        "1500", "2000", "500"
+    ]
+    assert len(sized) == 3
+
+
+@pytest.mark.asyncio
+async def test_size_curve_runs_when_base_routes_are_already_profitable(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(safety=SimpleNamespace(slippage_bps=50))
+
+    class Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = Manager()
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 2000],
+    )
+
+    async def noop_annotate(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "_annotate_canonical_after_fee_usd", noop_annotate)
+
+    class Candidate:
+        def __init__(self, route_id, amount_in=1000):
+            self.id = route_id
+            self.route_id = route_id
+            self.strategy = "two-leg:univ3->sushiswap-v2"
+            self.expected_profit_raw = "100"
+            self.route = SimpleNamespace(legs=[SimpleNamespace(amount_in=str(amount_in))])
+            self.meta = {
+                "profitability": {
+                    "revalidated": True,
+                    "authoritative": True,
+                    "valid": True,
+                    "profit_after_costs_wei": "10",
+                    "economic_profit_after_costs_wei": "10",
+                    "reason": "verified",
+                }
+            }
+
+        def model_copy(self, *, deep=True):
+            return Candidate(self.route_id, int(self.route.legs[0].amount_in))
+
+    seen = []
+
+    async def fake_requote(
+        rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps
+    ):
+        seen.append((candidate.route_id, int(new_amount_in)))
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        candidate.meta["profitability"]["profit_after_costs_wei"] = str(int(new_amount_in))
+        candidate.meta["profitability"]["economic_profit_after_costs_wei"] = str(int(new_amount_in))
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[Candidate("route-a"), Candidate("route-b")],
+        cache=object(),
+    )
+
+    assert len(sized) == 6
+    assert sorted(seen) == sorted([
+        ("route-a", 500), ("route-b", 500),
+        ("route-a", 2000), ("route-b", 2000),
+    ])
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["authoritative_positive_candidates_before_probe"] == 2
+    assert adaptive["probe_triggered"] is True
+    assert adaptive["amounts_scanned"] == ["500", "1000", "2000"]
+    assert adaptive["economic_matrix_complete"] is True
 
 
 def test_frozen_provider_graph_slice_preserves_stable_edge_order():
@@ -455,6 +567,86 @@ execution:
 
 
 
+def test_size_economic_matrix_merges_frontier_and_requote_evidence():
+    verified = {
+        "amount_in": "1000",
+        "quote_requests": 10,
+        "quote_successes": 8,
+        "quote_failure_reasons": {"timeout": 2},
+        "candidates": [{
+            "route_id": "route-a",
+            "amount_in": "1000",
+            "revalidated": True,
+            "authoritative": True,
+            "valid": True,
+            "diagnostic_only": False,
+            "reason": "verified",
+            "after_cost_profit_wei": "10",
+            "economic_after_cost_profit_wei": "10",
+        }],
+    }
+    sampled = {
+        "amount_in": "1000",
+        "quote_requests": 4,
+        "quote_successes": 3,
+        "quote_failure_reasons": {"rate_limit": 1},
+        "frontier_seed_sampled": True,
+        "frontier_seed_edge_offset": 96,
+        "frontier_seed_edge_cap": 32,
+        "frontier_seed_graph_edge_count": 160,
+        "frontier_seed_rotation_index": 3,
+        "candidates": [
+            {
+                "route_id": "route-a",
+                "amount_in": "1000",
+                "revalidated": True,
+                "authoritative": False,
+                "valid": False,
+                "diagnostic_only": True,
+                "reason": "profit_after_costs_not_positive",
+                "after_cost_profit_wei": "0",
+                "economic_after_cost_profit_wei": "999",
+            },
+            {
+                "route_id": "route-b",
+                "amount_in": "1000",
+                "revalidated": True,
+                "authoritative": False,
+                "valid": False,
+                "diagnostic_only": True,
+                "reason": "profit_after_costs_not_positive",
+                "after_cost_profit_wei": "0",
+                "economic_after_cost_profit_wei": "-5",
+            },
+        ],
+    }
+
+    merged = _merge_size_economic_matrices([verified], [sampled])
+
+    assert len(merged) == 1
+    row = merged[0]
+    assert row["quote_requests"] == 14
+    assert row["quote_successes"] == 11
+    assert row["quote_failures"] == 3
+    assert row["route_ids"] == ["route-a", "route-b"]
+    assert row["selected_route_id"] == "route-a"
+    assert row["economic_optimum_route_id"] == "route-a"
+    route_a = next(candidate for candidate in row["candidates"] if candidate["route_id"] == "route-a")
+    # A larger diagnostic P&L must never displace an authoritative row at the same size.
+    assert route_a["authoritative"] is True
+    assert route_a["valid"] is True
+    assert row["evidence_sources"] == [
+        "selected_provider_size_scan", "sampled_graph_frontier"
+    ]
+    assert row["frontier_seed_samples"] == [{
+        "edge_offset": 96,
+        "edge_cap": 32,
+        "graph_edge_count": 160,
+        "rotation_index": 3,
+    }]
+    assert row["execution_authority_granted"] is False
+
+
 def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():
     offsets = [
         _selected_provider_frontier_slice_offset(
@@ -473,6 +665,22 @@ def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():
         seed_index=0,
         seed_count=1,
     ) == 169
+
+    # The next block rotates each sample to a new bounded graph window while
+    # retaining spread; subsequent blocks continue to walk the graph.
+    rotated = [
+        _selected_provider_frontier_slice_offset(
+            graph_edge_count=370,
+            edge_cap=32,
+            seed_index=index,
+            seed_count=3,
+            rotation_index=1,
+        )
+        for index in range(3)
+    ]
+    assert rotated == [32, 192, 338]
+    assert len(set(rotated)) == 3
+    assert rotated != offsets
 
 
 def test_size_ranking_uses_signed_economic_profit_not_repayment_failure_sentinel():

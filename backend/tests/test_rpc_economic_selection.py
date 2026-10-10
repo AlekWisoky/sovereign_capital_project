@@ -369,7 +369,7 @@ async def test_bounded_selected_provider_sizing_probes_promising_routes_only(mon
     assert len(sized) == 3
     adaptive = telemetry["adaptive_size_discovery"]
     assert adaptive["probe_triggered"] is True
-    assert adaptive["amounts_scanned"] == ["1000", "500", "2000"]
+    assert adaptive["amounts_scanned"] == ["500", "1000", "2000"]
     assert adaptive["selected_route_count"] == 1
 
 
