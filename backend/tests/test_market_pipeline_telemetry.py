@@ -61,6 +61,8 @@ class _Runtime(RuntimeStateFacade):
                 "quote_phase_ms": 125.0,
                 "route_evaluation_ms": 17.5,
                 "route_groups_evaluated": 3,
+                "route_budget_exhausted": False,
+                "route_budget_stop_reason": "completed",
                 "budget_exhausted_after_quote": False,
             },
             "size_economic_matrix": [{
@@ -138,6 +140,8 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "quote_phase_ms": 125.0,
         "route_evaluation_ms": 17.5,
         "route_groups_evaluated": 3,
+        "route_budget_exhausted": False,
+        "route_budget_stop_reason": "completed",
         "budget_exhausted_after_quote": False,
     }
     assert out["economics"] == {
