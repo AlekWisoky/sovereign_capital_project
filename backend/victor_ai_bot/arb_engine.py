@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time, hashlib, os
 from dataclasses import dataclass
+from bisect import bisect_left
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from .cache import PerBlockCache
 from .models import Opportunity, Route, RouteLeg
@@ -290,6 +291,13 @@ def _quote_outputs_by_pair(
     return outputs
 
 
+def _quote_quality_rank(output: int, unique_outputs: Sequence[int]) -> int:
+    if len(unique_outputs) <= 1:
+        return 5_000
+    rank = bisect_left(unique_outputs, int(output))
+    return int(rank * 10_000 / (len(unique_outputs) - 1))
+
+
 def _pair_quote_percentiles(
     pair: Tuple[str, str],
     candidates: Sequence[Tuple[int, Edge]],
@@ -297,20 +305,16 @@ def _pair_quote_percentiles(
     quoted: Mapping[str, int],
 ) -> Dict[Tuple[str, str, str], int]:
     unique_outputs = sorted(set(outputs))
-    ranks: Dict[Tuple[str, str, str], int] = {}
-    for _order, edge in candidates:
-        if _edge_directed_pair_identity(edge) != pair:
-            continue
-        output = quoted.get(edge_key(edge))
-        if output is None:
-            continue
-        if len(unique_outputs) <= 1:
-            rank_bps = 5_000
-        else:
-            rank = unique_outputs.index(int(output)) if int(output) in unique_outputs else 0
-            rank_bps = int(rank * 10_000 / (len(unique_outputs) - 1))
-        ranks[(pair[0], pair[1], edge_key(edge))] = rank_bps
-    return ranks
+    matching = [
+        (edge, int(quoted[edge_key(edge)]))
+        for _order, edge in candidates
+        if _edge_directed_pair_identity(edge) == pair
+        and edge_key(edge) in quoted
+    ]
+    return {
+        (pair[0], pair[1], edge_key(edge)): _quote_quality_rank(output, unique_outputs)
+        for edge, output in matching
+    }
 
 
 def _frontier_quote_quality_percentiles(
@@ -1867,32 +1871,29 @@ async def find_two_leg_opportunities(
     return opps[: max(1, int(max_opps))]
 
 
-def _opportunity_economic_sort_key(
-    opportunity: Opportunity,
-) -> tuple[int, int, str, int, int, int, str]:
-    """Rank routes in comparable after-cost USD units when available.
-
-    Raw token wei is comparable only inside the same borrow-token group. This is
-    discovery priority, not execution authority; missing USD conversion never
-    gets silently treated as zero-cost or compared to another token's wei.
-    """
-    meta_value = getattr(opportunity, "meta", {}) or {}
-    meta = meta_value if isinstance(meta_value, dict) else {}
+def _profitability_state(meta: Mapping[str, Any]) -> Dict[str, Any]:
     state = meta.get("profitability")
     if not isinstance(state, dict):
         state = meta.get("profitability_diagnostic")
-    state = state if isinstance(state, dict) else {}
+    return state if isinstance(state, dict) else {}
 
-    usd_micro = None
-    canonical_usd = meta.get("canonical_after_fee_usd")
-    if isinstance(canonical_usd, dict):
-        raw_usd = canonical_usd.get("profit_after_costs_usd_micro")
-        if raw_usd not in (None, ""):
-            try:
-                usd_micro = int(raw_usd)
-            except (TypeError, ValueError, OverflowError):
-                usd_micro = None
 
+def _canonical_after_cost_usd_micro(meta: Mapping[str, Any]) -> int | None:
+    canonical = meta.get("canonical_after_fee_usd")
+    if not isinstance(canonical, dict):
+        return None
+    try:
+        raw = canonical.get("profit_after_costs_usd_micro")
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _raw_signed_economic_profit(
+    opportunity: Opportunity,
+    meta: Mapping[str, Any],
+    state: Mapping[str, Any],
+) -> int | None:
     economic = None
     for key in (
         "economic_profit_after_costs_wei",
@@ -1907,63 +1908,71 @@ def _opportunity_economic_sort_key(
                 break
             except (TypeError, ValueError, OverflowError):
                 continue
-    if (
-        economic == -1
-        and str(state.get("reason") or "") == "does_not_repay_flashloan"
-    ):
-        # -1 is a legacy sentinel, not signed net P&L. Reconstruct only from
-        # same-unit inputs; never subtract native-wei gas from token-wei profit.
-        try:
-            gas_token_raw = state.get("gas_cost_profit_token_wei")
-            if gas_token_raw not in (None, ""):
-                gross_raw = state.get("gross_profit_wei")
-                gross_for_model = (
-                    int(gross_raw)
-                    if gross_raw not in (None, "")
-                    else int(getattr(opportunity, "expected_profit_raw", 0) or 0)
-                )
-                economic = (
-                    gross_for_model
-                    - int(state.get("flashloan_fee_wei") or 0)
-                    - int(gas_token_raw)
-                )
-            else:
-                economic = None
-        except (TypeError, ValueError, OverflowError):
-            economic = None
+    if economic != -1 or str(state.get("reason") or "") != "does_not_repay_flashloan":
+        return economic
+    gas_token = state.get("gas_cost_profit_token_wei")
+    if gas_token in (None, ""):
+        return None
+    try:
+        gross_raw = state.get("gross_profit_wei")
+        gross = (
+            int(gross_raw)
+            if gross_raw not in (None, "")
+            else int(getattr(opportunity, "expected_profit_raw", 0) or 0)
+        )
+        return gross - int(state.get("flashloan_fee_wei") or 0) - int(gas_token)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
+
+def _route_borrow_token(opportunity: Opportunity, meta: Mapping[str, Any]) -> str:
     route = getattr(opportunity, "route", None)
     legs = list(getattr(route, "legs", []) or [])
-    borrow_token = str(
-        (getattr(legs[0], "token_in", "") if legs else "")
-        or meta.get("borrow_token")
-        or ""
-    ).strip().lower()
+    first_token = getattr(legs[0], "token_in", "") if legs else ""
+    return str(first_token or meta.get("borrow_token") or "").strip().lower()
+
+
+def _route_gross_profit(opportunity: Opportunity) -> int:
     try:
-        gross = int(getattr(opportunity, "expected_profit_raw", 0) or 0)
+        return int(getattr(opportunity, "expected_profit_raw", 0) or 0)
     except (TypeError, ValueError, OverflowError):
-        gross = 0
-    verified = bool(
+        return 0
+
+
+def _authoritative_positive(state: Mapping[str, Any], profit: int | None) -> bool:
+    return bool(
         state.get("revalidated") is True
         and state.get("authoritative") is True
         and state.get("valid") is True
         and state.get("repayment_valid") is True
+        and profit is not None
+        and profit > 0
     )
+
+
+def _opportunity_economic_sort_key(
+    opportunity: Opportunity,
+) -> tuple[int, int, str, int, int, int, str]:
+    """Rank by comparable USD net value, otherwise by token-local signed net."""
+    meta_value = getattr(opportunity, "meta", {}) or {}
+    meta = meta_value if isinstance(meta_value, dict) else {}
+    state = _profitability_state(meta)
+    usd_micro = _canonical_after_cost_usd_micro(meta)
+    economic = _raw_signed_economic_profit(opportunity, meta, state)
+    borrow_token = _route_borrow_token(opportunity, meta)
+    gross = _route_gross_profit(opportunity)
+    verified_usd = usd_micro is not None and _authoritative_positive(state, usd_micro)
     route_id = str(
         getattr(opportunity, "route_id", "") or getattr(opportunity, "id", "") or ""
     )
-
-    # USD-valued candidates compare across tokens. Without USD conversion, group
-    # by token before comparing signed wei, so wei from different assets cannot
-    # accidentally dominate because one token has more decimal places.
     if usd_micro is not None:
-        return (1, usd_micro, "", 0, int(verified and usd_micro > 0), 0, route_id)
+        return (1, usd_micro, "", 0, int(verified_usd), 0, route_id)
     return (
         0,
         0,
         borrow_token,
         int(economic or 0),
-        int(verified and economic is not None and economic > 0),
+        int(_authoritative_positive(state, economic)),
         gross,
         route_id,
     )
