@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from victor_ai_bot.gas_adjusted_split_router import (
+    _normalize_candidate,
     _prepare_candidate_buckets,
     build_gas_adjusted_split_frontier,
 )
@@ -166,6 +167,48 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
         chain_id=1,
     )
     assert not any(row["route_count"] >= 2 for row in result["plans"])
+
+
+def test_component_must_repay_principal_and_flash_fee():
+    candidate = _candidate(
+        "not-repayable",
+        5_000_000,
+        1_000_000,
+        _legs(TOKEN_X),
+    )
+    candidate["repayment_valid"] = False
+    assert _normalize_candidate(candidate, chain_id=1) is None
+
+
+def test_curve_coin_index_directions_do_not_create_distinct_pool_identities():
+    pool = "0x" + "66" * 20
+    curve_roundtrip = [
+        {
+            "dex": "curve",
+            "venue": pool,
+            "token_in": TOKEN_A,
+            "token_out": TOKEN_X,
+            "amount_in": "5000000",
+            "min_out": "5000500",
+            "data": "0x" + (1 << 8).to_bytes(32, "big").hex(),
+        },
+        {
+            "dex": "curve",
+            "venue": pool,
+            "token_in": TOKEN_X,
+            "token_out": TOKEN_A,
+            "amount_in": "5000500",
+            "min_out": "5000800",
+            "data": "0x" + (1).to_bytes(32, "big").hex(),
+        },
+    ]
+    candidate = _candidate(
+        "curve-same-pool-roundtrip",
+        5_000_000,
+        1_000_000,
+        curve_roundtrip,
+    )
+    assert _normalize_candidate(candidate, chain_id=1) is None
 
 
 def test_split_optimizer_fails_closed_when_gas_conversion_is_missing():
