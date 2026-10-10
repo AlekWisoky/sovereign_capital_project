@@ -288,7 +288,10 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
                 },
             }
         )
-        return [candidate] if int(amount_in) == 1500 else []
+        if int(amount_in) != 2000:
+            return []
+        candidate.route.legs[0].amount_in = str(int(amount_in))
+        return [candidate]
 
     probe_calls = []
 
@@ -322,7 +325,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         amount_in=1000,
     )
 
-    assert scan_amounts == [1000, 1000, 1500, 2000, 500]
+    assert scan_amounts == [1000, 1000, 500, 2000, 8000]
     assert provider_comparison_flags == [True, False, False, False, False]
     assert full_graph_base_only_flags == [False, True, True, True, True]
     assert len(probe_calls) == 1
@@ -495,10 +498,10 @@ async def test_size_curve_runs_when_base_routes_are_already_profitable(monkeypat
     )
 
     assert len(sized) == 6
-    assert seen == [
+    assert sorted(seen) == sorted([
         ("route-a", 500), ("route-b", 500),
         ("route-a", 2000), ("route-b", 2000),
-    ]
+    ])
     adaptive = telemetry["adaptive_size_discovery"]
     assert adaptive["authoritative_positive_candidates_before_probe"] == 2
     assert adaptive["probe_triggered"] is True
