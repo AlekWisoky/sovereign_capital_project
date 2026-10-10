@@ -676,3 +676,28 @@ def test_three_leg_frontier_recomputes_diversity_after_each_selection():
     # the tie-break by discovery order instead of spending both slots on one DEX.
     assert selected == [slipstream_first, univ3]
     assert by_token[token_in] == [slipstream_first, univ3]
+
+
+def test_route_group_scheduler_round_robins_source_token_and_protocol():
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    router = "0x" + "aa" * 20
+    first = arb.Edge("univ3", router, token_a, "0x" + "31" * 20, {"fee": 3000})
+    second = arb.Edge("univ3", router, token_a, "0x" + "32" * 20, {"fee": 3000})
+    other_protocol = arb.Edge("aerodrome", router, token_a, "0x" + "33" * 20, {"stable": True})
+    other_token = arb.Edge("univ3", router, token_b, "0x" + "34" * 20, {"fee": 3000})
+
+    scheduled = arb._round_robin_route_group_edges(
+        [first, second, other_protocol, other_token]
+    )
+
+    # Keep prior order within each family, but ensure less frequent families
+    # get a bounded route-evaluation slot before the dominant family repeats.
+    assert scheduled == [first, other_protocol, other_token, second]
+
+
+def test_route_group_parallelism_is_bounded(monkeypatch):
+    monkeypatch.setenv("VICTOR_ROUTE_GROUP_PARALLELISM", "99")
+    assert arb._route_group_parallelism() == 4
+    monkeypatch.setenv("VICTOR_ROUTE_GROUP_PARALLELISM", "0")
+    assert arb._route_group_parallelism() == 1
