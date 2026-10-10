@@ -2716,6 +2716,9 @@ async def find_three_leg_opportunities(
             break
 
     if telemetry is not None:
+    if time.perf_counter() >= route_deadline:
+        route_budget_exhausted = True
+
         telemetry["quote_phase_ms"] = float(
             (route_eval_started - quote_phase_started) * 1000.0
         )
