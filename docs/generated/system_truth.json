@@ -55,7 +55,7 @@
       "path": "backend/victor_ai_bot/runtime_services/runtime_tick_iteration_facade.py"
     }
   ],
-  "backend_test_file_count": 376,
+  "backend_test_file_count": 377,
   "backend_test_files": [
     "test_95plus_realism.py",
     "test_adaptation_maintenance.py",
@@ -171,6 +171,7 @@
     "test_fund_route_auto_trade_sync.py",
     "test_fund_routes.py",
     "test_fund_summary_component_sync_maintenance.py",
+    "test_gas_adjusted_split_router.py",
     "test_gmao_governance_maintenance.py",
     "test_goal_read_surface_sync_maintenance.py",
     "test_governance_read_surface_auto_trade_sync.py",
@@ -716,9 +717,9 @@
   "generatedAt": "2026-10-04T05:51:11.946Z",
   "generatedAtIso": "2026-10-04T05:51:11.946Z",
   "generatedAtMs": 1791093071946,
-  "generated_at": "2026-10-04T05:51:11.946Z",
-  "generated_at_iso": "2026-10-04T05:51:11.946Z",
-  "generated_at_ms": 1791093071946,
+  "generated_at": "2026-10-10T08:31:15.771000Z",
+  "generated_at_iso": "2026-10-10T08:31:15.771000Z",
+  "generated_at_ms": 1791621075771,
   "health_states": [
     "live",
     "degraded",
