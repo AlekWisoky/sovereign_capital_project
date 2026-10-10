@@ -2040,6 +2040,18 @@ class RuntimePrimaryScanFacade:
                 "route_groups_evaluated": int(
                     two_leg_telemetry.get("route_groups_evaluated", 0)
                 ) + int(three_leg_telemetry.get("route_groups_evaluated", 0)),
+                "route_budget_exhausted": bool(
+                    two_leg_telemetry.get("budget_exhausted_after_quote", False)
+                    or three_leg_telemetry.get("budget_exhausted_after_quote", False)
+                ),
+                "route_budget_stop_reason": (
+                    "time_budget"
+                    if (
+                        two_leg_telemetry.get("budget_exhausted_after_quote", False)
+                        or three_leg_telemetry.get("budget_exhausted_after_quote", False)
+                    )
+                    else "completed"
+                ),
                 "budget_exhausted_after_quote": bool(
                     two_leg_telemetry.get("budget_exhausted_after_quote", False)
                     or three_leg_telemetry.get("budget_exhausted_after_quote", False)
