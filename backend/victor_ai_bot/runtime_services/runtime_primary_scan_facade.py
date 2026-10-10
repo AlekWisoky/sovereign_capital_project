@@ -3130,12 +3130,25 @@ class RuntimePrimaryScanFacade:
                 }
         discovery_context["_shared_provider_gas_price_consensus"] = shared_gas_consensus
         discovery_context["_shared_provider_flashloan_fee_observation"] = shared_flashloan_fee
-        shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
-            bootstrap_rpc,
-            current_block=int(current_block),
-            base_amount_in=int(amount_in),
-            cache=PerBlockCache(),
-        )
+        try:
+            shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
+                bootstrap_rpc,
+                current_block=int(current_block),
+                base_amount_in=int(amount_in),
+                cache=PerBlockCache(),
+            )
+        except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+            # Direct facade/test clients may not have a complete runtime config.
+            # Keep discovery read-only and mark missing sizing inputs instead of
+            # crashing provider orchestration; economic comparability still requires
+            # matching block/graph/size/cost evidence and healthy provider scans.
+            shared_token_scan_amounts = {}
+            shared_token_scan_telemetry = {
+                "enabled": False,
+                "source": "shared_token_sizing_unavailable",
+                "amounts_by_token": {},
+                "error_kind": type(exc).__name__,
+            }
         discovery_context["_shared_token_scan_telemetry"] = dict(shared_token_scan_telemetry)
 
         async def scan_one(url: str) -> tuple[str, List[Opportunity], PerBlockCache, Dict[str, Any], RpcEconomicEvidence]:
