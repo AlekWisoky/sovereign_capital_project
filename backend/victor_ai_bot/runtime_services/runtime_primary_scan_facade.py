@@ -1849,6 +1849,14 @@ class RuntimePrimaryScanFacade:
                             block_number = int(incoming.get("block_number") or 0)
                             by_block = dict(target.get("route_group_schedule_by_block") or {})
                             block_key = str(block_number)
+                            # Seed the map with the base-size scan before adding
+                            # alternate-size probes for this same block.
+                            prior = target.get("route_group_schedule")
+                            if (
+                                isinstance(prior, dict)
+                                and int(prior.get("block_number") or 0) == block_number
+                            ):
+                                by_block.setdefault(block_key, dict(prior))
                             schedule = dict(by_block.get(block_key) or {})
                             for count_key in (
                                 "groups_prepared",
