@@ -45,8 +45,9 @@ def _legs(
     ]
 
 
-def _candidate(route_id: str, economics: tuple[int, int], legs, *, gas_token: str = "700000"):
+def _candidate(route_id: str, economics: tuple[int, int], legs):
     amount, gross = economics
+    gas_token = "700000"
     return {
         "route_id": route_id,
         "amount_in": str(amount),
@@ -82,14 +83,16 @@ def _matrix(*rows):
 
 
 def test_gas_adjusted_split_frontier_finds_better_partition_but_never_grants_authority():
+    route_c = _candidate(
+        "route-c", (10_000_000, 1_500_000), _legs(TOKEN_Z, 10_000_000)
+    )
+    route_c["gas_cost_profit_token_wei"] = "1600000"
     matrix = _matrix(
         (5_000_000, [
             _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X)),
             _candidate("route-b", (5_000_000, 1_000_000), _legs(TOKEN_Y)),
         ]),
-        (10_000_000, [
-            _candidate("route-c", (10_000_000, 1_500_000), _legs(TOKEN_Z, 10_000_000), gas_token="1600000"),
-        ]),
+        (10_000_000, [route_c]),
     )
 
     result = build_gas_adjusted_split_frontier(matrix, chain_id=1)
@@ -211,11 +214,12 @@ def test_curve_coin_index_directions_do_not_create_distinct_pool_identities():
 
 
 def test_split_optimizer_fails_closed_when_gas_conversion_is_missing():
+    route_a = _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X))
+    route_b = _candidate("route-b", (5_000_000, 1_000_000), _legs(TOKEN_Y))
+    route_a["gas_cost_profit_token_wei"] = ""
+    route_b["gas_cost_profit_token_wei"] = ""
     result = build_gas_adjusted_split_frontier(
-        _matrix((5_000_000, [
-            _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X), gas_token=""),
-            _candidate("route-b", (5_000_000, 1_000_000), _legs(TOKEN_Y), gas_token=""),
-        ])),
+        _matrix((5_000_000, [route_a, route_b])),
         chain_id=1,
     )
     assert result["eligible_route_amount_evidence"] == 0
