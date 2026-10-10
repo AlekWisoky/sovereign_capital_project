@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
     monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: [e1, e2])
 
     async def fake_quotes(rpc, cfg, cache, edges, amount_in, metrics=None):
+        await asyncio.sleep(0.01)
         if metrics is not None:
             metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(edges)
             metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(edges)
@@ -62,7 +64,8 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
     assert any(item.expected_profit_raw == "20" for item in out)
     assert telemetry["route_groups_evaluated"] >= 1
     assert telemetry["budget_exhausted_after_quote"] is telemetry["route_budget_exhausted"]
-    assert telemetry["route_budget_stop_reason"] in {"completed", "time_budget"}
+    assert telemetry["route_budget_stop_reason"] == "time_budget"
+    assert telemetry["route_budget_elapsed_ms"] >= 10.0
     assert telemetry["route_universe"]["edges_by_dex"] == {"univ3": 2}
     assert telemetry["route_universe"]["unique_directed_pairs"] == 2
     assert telemetry["route_universe"]["directed_pairs_with_reverse"] == 2
