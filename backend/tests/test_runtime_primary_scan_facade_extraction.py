@@ -166,6 +166,13 @@ async def test_scan_primary_opportunities_does_not_swallow_unexpected_scan_bug(m
     with pytest.raises(KeyError, match='unexpected scan bug'):
         await runtime._scan_primary_opportunities(object(), current_block=7, amount_in=10)
 
+    trace = runtime._market_pipeline_telemetry["scan_error_trace"]
+    assert trace[-1]["function"] == "boom"
+    assert trace[-1]["filename"] == "test_runtime_primary_scan_facade_extraction.py"
+    assert trace[-1]["line"] > 0
+    assert set(trace[-1]) == {"module", "filename", "function", "line"}
+    assert all("locals" not in frame and "source" not in frame for frame in trace)
+
 
 
 @pytest.mark.asyncio
