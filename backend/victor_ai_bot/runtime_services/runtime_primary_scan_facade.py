@@ -863,6 +863,123 @@ def _merge_size_economic_matrices(
     return sorted(merged, key=lambda row: int(row.get("amount_in") or 0))
 
 
+def _merge_route_group_schedule_row(
+    existing: Dict[str, Any] | None,
+    incoming: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Combine two measurements for one block, retaining counters and deadline state."""
+    schedule = dict(existing or {})
+    for count_key in (
+        "groups_prepared",
+        "groups_completed",
+        "quote_batches_completed_and_consumed",
+        "first_leg_quote_batches_total",
+        "first_leg_quote_batches_completed",
+        "first_leg_quote_batches_failed",
+        "first_leg_quote_batches_skipped_budget",
+        "first_leg_quote_waves_started",
+        "route_group_quote_batches_completed_and_consumed",
+        "route_group_quote_batches_coalesced",
+        "route_group_waves_started",
+        "duplicate_quote_batches_coalesced",
+        "waves_started",
+    ):
+        schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
+            incoming.get(count_key, 0) or 0
+        )
+    for limit_key in ("parallelism_limit", "first_leg_quote_parallelism_limit"):
+        schedule[limit_key] = max(
+            int(schedule.get(limit_key, 0) or 0),
+            int(incoming.get(limit_key, 0) or 0),
+        )
+    for flag_key in ("first_leg_deadline_exceeded",):
+        schedule[flag_key] = bool(
+            schedule.get(flag_key, False) or incoming.get(flag_key, False)
+        )
+    schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
+        schedule.get("completed_wave_results_consumed_before_budget_stop", True)
+        and incoming.get("completed_wave_results_consumed_before_budget_stop") is True
+    )
+    schedule["block_number"] = int(incoming.get("block_number") or 0)
+    for text_key in ("ordering", "first_leg_quote_ordering"):
+        if incoming.get(text_key):
+            schedule[text_key] = str(incoming[text_key])
+    return schedule
+
+
+def _merge_route_group_schedule_telemetry(
+    target: Dict[str, Any],
+    source: Dict[str, Any],
+) -> None:
+    """Aggregate scheduler counters per block without inflating the scan method."""
+    incoming_rows = source.get("route_group_schedule_by_block")
+    if not isinstance(incoming_rows, dict) or not incoming_rows:
+        incoming = source.get("route_group_schedule")
+        if not isinstance(incoming, dict):
+            return
+        incoming_rows = {str(int(incoming.get("block_number") or 0)): incoming}
+
+    by_block = dict(target.get("route_group_schedule_by_block") or {})
+    prior = target.get("route_group_schedule")
+    if isinstance(prior, dict):
+        prior_block = int(prior.get("block_number") or 0)
+        by_block.setdefault(str(prior_block), dict(prior))
+    for raw_block, incoming in incoming_rows.items():
+        if not isinstance(incoming, dict):
+            continue
+        try:
+            block_number = int(incoming.get("block_number", raw_block) or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        block_key = str(block_number)
+        by_block[block_key] = _merge_route_group_schedule_row(
+            by_block.get(block_key), incoming
+        )
+    if not by_block:
+        return
+    target["route_group_schedule_by_block"] = by_block
+    latest = source.get("route_group_schedule")
+    if isinstance(latest, dict):
+        latest_block = str(int(latest.get("block_number") or 0))
+    else:
+        latest_block = max(by_block, key=lambda key: int(key))
+    target["route_group_schedule"] = dict(
+        by_block.get(latest_block) or by_block[max(by_block, key=lambda key: int(key))]
+    )
+
+
+
+
+def _resolve_route_budget_deadlines(
+    started_at: float,
+    two_leg_budget_ms: int,
+    three_leg_budget_ms: int,
+    *,
+    two_leg_enabled: bool,
+    three_leg_enabled: bool,
+) -> tuple[int, int, int, float, float]:
+    """Resolve shared per-tick and family windows without resetting deadlines."""
+    total_ms = max(1, int(two_leg_budget_ms + three_leg_budget_ms))
+    two_window_ms = (
+        total_ms
+        if two_leg_enabled and not three_leg_enabled
+        else max(1, int(two_leg_budget_ms))
+    )
+    if two_leg_enabled and three_leg_enabled:
+        three_window_ms = max(1, total_ms - two_window_ms)
+    elif three_leg_enabled:
+        three_window_ms = total_ms
+    else:
+        three_window_ms = 0
+    return (
+        total_ms,
+        two_window_ms,
+        three_window_ms,
+        started_at + two_window_ms / 1000.0,
+        started_at + total_ms / 1000.0,
+    )
+
+
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
 
@@ -1647,6 +1764,26 @@ class RuntimePrimaryScanFacade:
             two_leg_route_budget_ms, three_leg_route_budget_ms = (
                 self._route_evaluation_budgets_ms()
             )
+            # One shared per-tick clock is shared across every amount probe.
+            route_budget_started = time.perf_counter()
+            two_leg_family_enabled = bool(getattr(self.cfg.flags, "enable_two_leg_loops", True))
+            three_leg_family_enabled = bool(
+                getattr(self.cfg.flags, "enable_three_leg_loops", False)
+                or getattr(self.cfg.flags, "enable_v3_triangular", False)
+            )
+            (
+                total_route_budget_ms,
+                two_leg_budget_window_ms,
+                three_leg_budget_window_ms,
+                two_leg_route_deadline,
+                three_leg_route_deadline,
+            ) = _resolve_route_budget_deadlines(
+                route_budget_started,
+                two_leg_route_budget_ms,
+                three_leg_route_budget_ms,
+                two_leg_enabled=two_leg_family_enabled,
+                three_leg_enabled=three_leg_family_enabled,
+            )
 
             async def _run_size_scan(size_amount: int) -> tuple[List[Opportunity], List[Opportunity], Dict[str, Any], Dict[str, Any]]:
                 two: List[Opportunity] = []
@@ -1657,7 +1794,11 @@ class RuntimePrimaryScanFacade:
                 # Recent production telemetry shows the former 1.5s/1.6s route-family
                 # budgets stopping on expanded graphs. Raise each bounded pass modestly;
                 # completed quote batches remain consumed and profitability gates are unchanged.
-                if bool(getattr(self.cfg.flags, "enable_two_leg_loops", True)):
+                two_leg_enabled = bool(getattr(self.cfg.flags, "enable_two_leg_loops", True))
+                remaining_two_leg_budget_ms = int(
+                    (two_leg_route_deadline - time.perf_counter()) * 1000.0
+                )
+                if two_leg_enabled and remaining_two_leg_budget_ms > 0:
                     two = await find_two_leg_opportunities(
                         rpc,
                         self.cfg,
@@ -1665,7 +1806,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=two_leg_route_budget_ms,
+                        time_budget_ms=remaining_two_leg_budget_ms,
                         max_opps=60,
                         telemetry=two_metrics,
                         amount_in_by_token={
@@ -1688,10 +1829,15 @@ class RuntimePrimaryScanFacade:
                         extra_constant_product_pools=extra_constant_product_pools,
                     )
 
-                if bool(
+                three_leg_enabled = bool(
                     getattr(self.cfg.flags, "enable_three_leg_loops", False)
                     or getattr(self.cfg.flags, "enable_v3_triangular", False)
-                ):
+                )
+                remaining_three_leg_budget_ms = min(
+                    int(three_leg_budget_window_ms),
+                    int((three_leg_route_deadline - time.perf_counter()) * 1000.0),
+                )
+                if three_leg_enabled and remaining_three_leg_budget_ms > 0:
                     three = await find_three_leg_opportunities(
                         rpc,
                         self.cfg,
@@ -1699,7 +1845,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=three_leg_route_budget_ms,
+                        time_budget_ms=remaining_three_leg_budget_ms,
                         max_opps=40,
                         telemetry=three_metrics,
                         amount_in_by_token={
@@ -1721,6 +1867,24 @@ class RuntimePrimaryScanFacade:
                         extra_camelot_v2_pools=extra_camelot_v2_pools,
                         extra_constant_product_pools=extra_constant_product_pools,
                     )
+                if two_leg_enabled and remaining_two_leg_budget_ms <= 0:
+                    two_metrics.update({
+                        "route_budget_exhausted": True,
+                        "budget_exhausted_after_quote": True,
+                        "route_budget_stop_reason": "time_budget",
+                        "route_groups_evaluated": 0,
+                        "route_budget_elapsed_ms": 0.0,
+                        "route_budget_deadline_ms": 0,
+                    })
+                if three_leg_enabled and remaining_three_leg_budget_ms <= 0:
+                    three_metrics.update({
+                        "route_budget_exhausted": True,
+                        "budget_exhausted_after_quote": True,
+                        "route_budget_stop_reason": "time_budget",
+                        "route_groups_evaluated": 0,
+                        "route_budget_elapsed_ms": 0.0,
+                        "route_budget_deadline_ms": 0,
+                    })
                 return list(two), list(three), two_metrics, three_metrics
 
             # Base-size scan is authoritative for the normal path.
@@ -1813,6 +1977,13 @@ class RuntimePrimaryScanFacade:
                         (two_leg_telemetry, probe_two_metrics),
                         (three_leg_telemetry, probe_three_metrics),
                     ):
+                        for key in ("budget_exhausted_after_quote", "route_budget_exhausted"):
+                            if key in source:
+                                target[key] = bool(
+                                    target.get(key, False) or source.get(key, False)
+                                )
+                        if source.get("route_budget_exhausted") or source.get("budget_exhausted_after_quote"):
+                            target["route_budget_stop_reason"] = "time_budget"
                         for key in (
                             "quote_requests",
                             "quote_successes",
@@ -1826,11 +1997,17 @@ class RuntimePrimaryScanFacade:
                             "successful_quote_pair_count",
                             "quote_phase_ms",
                             "route_evaluation_ms",
+                            "route_budget_elapsed_ms",
                         ):
                             if key in source:
                                 target[key] = (
                                     float(target.get(key, 0) or 0) + float(source.get(key, 0) or 0)
                                 )
+                        if "route_budget_deadline_ms" in source:
+                            target["route_budget_deadline_ms"] = max(
+                                int(target.get("route_budget_deadline_ms", 0) or 0),
+                                int(source.get("route_budget_deadline_ms", 0) or 0),
+                            )
                         for key in ("quote_failure_reasons", "route_rejections"):
                             merged = dict(target.get(key) or {})
                             for reason, count in dict(source.get(key) or {}).items():
@@ -1842,6 +2019,7 @@ class RuntimePrimaryScanFacade:
                             target["size_economic_diagnostics"].extend(
                                 list(source.get("size_economic_diagnostics") or [])
                             )
+                        _merge_route_group_schedule_telemetry(target, source)
                         target["budget_exhausted_after_quote"] = bool(
                             target.get("budget_exhausted_after_quote", False)
                             or source.get("budget_exhausted_after_quote", False)
@@ -2101,7 +2279,7 @@ class RuntimePrimaryScanFacade:
             telemetry["edges_generated"] = int(
                 two_leg_telemetry.get("edges_generated", 0)
             ) + int(three_leg_telemetry.get("edges_generated", 0))
-            telemetry["route_evaluation"] = {
+            route_evaluation = {
                 "quote_phase_ms": float(
                     two_leg_telemetry.get("quote_phase_ms", 0.0)
                 ) + float(three_leg_telemetry.get("quote_phase_ms", 0.0)),
@@ -2133,6 +2311,32 @@ class RuntimePrimaryScanFacade:
                     or three_leg_telemetry.get("budget_exhausted_after_quote", False)
                 ),
             }
+            scheduler_summary: Dict[str, Any] = {}
+            _merge_route_group_schedule_telemetry(scheduler_summary, two_leg_telemetry)
+            _merge_route_group_schedule_telemetry(scheduler_summary, three_leg_telemetry)
+            route_schedule = dict(scheduler_summary.get("route_group_schedule") or {})
+            route_schedule_by_block = dict(
+                scheduler_summary.get("route_group_schedule_by_block") or {}
+            )
+            if route_schedule:
+                route_evaluation["route_group_schedule"] = route_schedule
+            if route_schedule_by_block:
+                route_evaluation["route_group_schedule_by_block"] = route_schedule_by_block
+                route_evaluation["route_group_schedule_by_block"] = route_schedule_by_block
+            if (
+                "route_budget_elapsed_ms" in two_leg_telemetry
+                or "route_budget_elapsed_ms" in three_leg_telemetry
+            ):
+                two_elapsed = float(two_leg_telemetry.get("route_budget_elapsed_ms", 0.0) or 0.0)
+                three_elapsed = float(three_leg_telemetry.get("route_budget_elapsed_ms", 0.0) or 0.0)
+                route_evaluation.update({
+                    "two_leg_budget_elapsed_ms": two_elapsed,
+                    "three_leg_budget_elapsed_ms": three_elapsed,
+                    "total_route_budget_elapsed_ms": two_elapsed + three_elapsed,
+                    "two_leg_budget_window_ms": int(two_leg_budget_window_ms),
+                    "three_leg_budget_window_ms": int(three_leg_budget_window_ms),
+                })
+            telemetry["route_evaluation"] = route_evaluation
             # Both scanners build the same route graph; expose one canonical
             # pre-quote universe snapshot rather than summing duplicate edges.
             # Prefer the three-leg snapshot because it also carries adjacency

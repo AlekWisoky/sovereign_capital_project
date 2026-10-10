@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _canonical_route_universe_telemetry,
+    _merge_route_group_schedule_telemetry,
 )
 from victor_ai_bot.runtime_services.runtime_state_facade import RuntimeStateFacade
 
@@ -58,6 +59,30 @@ class _Runtime(RuntimeStateFacade):
                 "univ3_configured_pair_fee_coverage_ratio": 10.0 / 12.0,
             },
             "route_evaluation": {
+                "route_group_schedule": {
+                    "block_number": 200,
+                    "groups_prepared": 2,
+                    "groups_completed": 2,
+                    "quote_batches_completed_and_consumed": 2,
+                    "duplicate_quote_batches_coalesced": 0,
+                    "parallelism_limit": 3,
+                    "waves_started": 1,
+                    "ordering": "round_robin_source_token_protocol",
+                    "completed_wave_results_consumed_before_budget_stop": True,
+                },
+                "route_group_schedule_by_block": {
+                    "200": {
+                        "block_number": 200,
+                        "groups_prepared": 2,
+                        "groups_completed": 2,
+                        "quote_batches_completed_and_consumed": 2,
+                        "duplicate_quote_batches_coalesced": 0,
+                        "parallelism_limit": 3,
+                        "waves_started": 1,
+                        "ordering": "round_robin_source_token_protocol",
+                        "completed_wave_results_consumed_before_budget_stop": True,
+                    },
+                },
                 "quote_phase_ms": 125.0,
                 "route_evaluation_ms": 17.5,
                 "route_groups_evaluated": 3,
@@ -137,6 +162,30 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["route_universe"]["univ3_unique_pool_count"] == 10
     assert out["route_universe"]["univ3_configured_pair_fee_coverage_ratio"] == 10.0 / 12.0
     assert out["route_evaluation"] == {
+        "route_group_schedule": {
+            "block_number": 200,
+            "groups_prepared": 2,
+            "groups_completed": 2,
+            "quote_batches_completed_and_consumed": 2,
+            "duplicate_quote_batches_coalesced": 0,
+            "parallelism_limit": 3,
+            "waves_started": 1,
+            "ordering": "round_robin_source_token_protocol",
+            "completed_wave_results_consumed_before_budget_stop": True,
+        },
+        "route_group_schedule_by_block": {
+            "200": {
+                "block_number": 200,
+                "groups_prepared": 2,
+                "groups_completed": 2,
+                "quote_batches_completed_and_consumed": 2,
+                "duplicate_quote_batches_coalesced": 0,
+                "parallelism_limit": 3,
+                "waves_started": 1,
+                "ordering": "round_robin_source_token_protocol",
+                "completed_wave_results_consumed_before_budget_stop": True,
+            },
+        },
         "quote_phase_ms": 125.0,
         "route_evaluation_ms": 17.5,
         "route_groups_evaluated": 3,
@@ -343,3 +392,51 @@ def test_market_pipeline_sanitizes_rpc_urls_and_raw_errors():
     for secret in ("password", "rpc-secret", "secret-path", "error-secret", "/v1"):
         assert secret not in serialized
 
+
+
+
+def test_route_scheduler_aggregation_preserves_block_identity_and_completed_work():
+    target = {
+        "route_group_schedule": {
+            "block_number": 200,
+            "groups_prepared": 4,
+            "groups_completed": 3,
+            "quote_batches_completed_and_consumed": 3,
+            "duplicate_quote_batches_coalesced": 1,
+            "parallelism_limit": 3,
+            "waves_started": 2,
+            "ordering": "round_robin_source_token_protocol",
+            "completed_wave_results_consumed_before_budget_stop": True,
+        }
+    }
+    _merge_route_group_schedule_telemetry(target, {"route_group_schedule": {
+        "block_number": 200,
+        "groups_prepared": 2,
+        "groups_completed": 2,
+        "quote_batches_completed_and_consumed": 1,
+        "duplicate_quote_batches_coalesced": 1,
+        "parallelism_limit": 4,
+        "waves_started": 1,
+        "ordering": "round_robin_source_token_protocol",
+        "completed_wave_results_consumed_before_budget_stop": True,
+    }})
+    _merge_route_group_schedule_telemetry(target, {"route_group_schedule": {
+        "block_number": 201,
+        "groups_prepared": 1,
+        "groups_completed": 1,
+        "quote_batches_completed_and_consumed": 1,
+        "duplicate_quote_batches_coalesced": 0,
+        "parallelism_limit": 2,
+        "waves_started": 1,
+        "ordering": "round_robin_source_token_protocol",
+        "completed_wave_results_consumed_before_budget_stop": True,
+    }})
+
+    by_block = target["route_group_schedule_by_block"]
+    assert by_block["200"]["groups_prepared"] == 6
+    assert by_block["200"]["groups_completed"] == 5
+    assert by_block["200"]["quote_batches_completed_and_consumed"] == 4
+    assert by_block["200"]["duplicate_quote_batches_coalesced"] == 2
+    assert by_block["200"]["parallelism_limit"] == 4
+    assert by_block["201"]["groups_completed"] == 1
+    assert target["route_group_schedule"]["block_number"] == 201

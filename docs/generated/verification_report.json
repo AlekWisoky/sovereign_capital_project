@@ -1,7 +1,7 @@
 {
   "backend": {
     "pytest_command": "cd backend && pytest -q",
-    "test_file_count": 378,
+    "test_file_count": 379,
     "test_files": [
       "backend/tests/test_95plus_realism.py",
       "backend/tests/test_adaptation_maintenance.py",
@@ -19,6 +19,7 @@
       "backend/tests/test_arb_engine_hardening.py",
       "backend/tests/test_arb_engine_route_budget.py",
       "backend/tests/test_arb_engine_route_priority.py",
+    "backend/tests/test_arb_engine_route_scheduler.py",
       "backend/tests/test_arbitrage_adapters_hardening.py",
       "backend/tests/test_arbitrage_runtime_hardening.py",
       "backend/tests/test_arbitrage_screener_helper.py",

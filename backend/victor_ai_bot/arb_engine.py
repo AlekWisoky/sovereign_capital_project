@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import asyncio
 import time, hashlib, os
 from dataclasses import dataclass
 from bisect import bisect_left
@@ -1426,6 +1428,388 @@ def _prefilter_reverse_candidates(
     }
 
 
+def _count_triangle_completions(
+    edge: Edge,
+    adjacency: Mapping[str, Sequence[Edge]],
+    by_pair: Mapping[Tuple[str, str], Sequence[Edge]],
+) -> int:
+    return sum(
+        len(by_pair.get((second.token_out, edge.token_in), ()))
+        for second in adjacency.get(edge.token_out, ())
+        if second.token_out != edge.token_in
+    )
+
+
+def _triangle_edge_group_potential(
+    item: Tuple[int, List[Edge]],
+    *,
+    adjacency: Mapping[str, Sequence[Edge]],
+    by_pair: Mapping[Tuple[str, str], Sequence[Edge]],
+) -> tuple[int, int]:
+    _, grouped_edges = item
+    return (
+        sum(_count_triangle_completions(edge, adjacency, by_pair) for edge in grouped_edges),
+        len(grouped_edges),
+    )
+
+
+def _round_robin_route_group_edges(edges: Sequence[Edge]) -> List[Edge]:
+    """Interleave source-token/protocol families without changing their inner priority."""
+    buckets: Dict[Tuple[str, str], List[Edge]] = {}
+    for edge in edges:
+        protocol = _edge_protocol_identity(edge) or str(edge.dex or "").strip().lower()
+        key = (str(edge.token_in or "").strip().lower(), protocol)
+        buckets.setdefault(key, []).append(edge)
+    ordered: List[Edge] = []
+    families = list(buckets.values())
+    depth = 0
+    while True:
+        added = False
+        for family in families:
+            if depth < len(family):
+                ordered.append(family[depth])
+                added = True
+        if not added:
+            return ordered
+        depth += 1
+
+
+def _route_group_parallelism() -> int:
+    """Bound concurrent route quote batches to protect provider rate limits."""
+    try:
+        requested = int(os.environ.get("VICTOR_ROUTE_GROUP_PARALLELISM", "3") or 3)
+    except (TypeError, ValueError, OverflowError):
+        requested = 3
+    return max(1, min(4, requested))
+
+
+def _consume_bounded_quote_result(
+    result: Any,
+    quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
+) -> tuple[int, int]:
+    """Accumulate a completed first-leg batch without hiding cancellation."""
+    if isinstance(result, asyncio.CancelledError):
+        raise result
+    if isinstance(result, Exception):
+        return 0, 1
+    if isinstance(result, BaseException):
+        raise result
+    quote_map.update(dict(result or {}))
+    return 1, 0
+
+
+async def _quote_edge_groups_in_bounded_waves(
+    rpc: Any,
+    cfg: Any,
+    cache: PerBlockCache,
+    edge_groups: Sequence[Tuple[int, List[Edge]]],
+    *,
+    deadline: float,
+    block_number: int,
+    parallelism: int,
+    metrics: Dict[str, Any],
+) -> tuple[Dict[str, Optional[Tuple[int, Dict[str, Any]]]], Dict[str, Any]]:
+    """Quote prioritized amount groups in bounded waves and retain every result.
+
+    Already-started waves are always consumed in full. Once a wave returns past
+    the absolute deadline, no later wave is started. Rotating the starting
+    amount group by block makes groups skipped on one block observable and gives
+    them first-wave opportunity on later blocks.
+    """
+    ordered = list(edge_groups)
+    if ordered:
+        offset = max(0, int(block_number)) % len(ordered)
+        ordered = ordered[offset:] + ordered[:offset]
+    limit = max(1, min(4, int(parallelism)))
+    quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+    completed = failed = skipped = waves = 0
+    for wave_start in range(0, len(ordered), limit):
+        if time.perf_counter() >= deadline:
+            skipped = len(ordered) - wave_start
+            break
+        wave = ordered[wave_start:wave_start + limit]
+        results = await asyncio.gather(*(
+            quote_edges_batch(rpc, cfg, cache, edges, int(amount), metrics=metrics)
+            for amount, edges in wave
+        ), return_exceptions=True)
+        waves += 1
+        for result in results:
+            batch_completed, batch_failed = _consume_bounded_quote_result(
+                result, quote_map
+            )
+            completed += batch_completed
+            failed += batch_failed
+        next_start = wave_start + len(wave)
+        if next_start < len(ordered) and time.perf_counter() >= deadline:
+            skipped = len(ordered) - next_start
+            break
+    deadline_exceeded = bool(time.perf_counter() >= deadline or skipped)
+    return quote_map, {
+        "batches_total": int(len(ordered)),
+        "batches_completed": int(completed),
+        "batches_failed": int(failed),
+        "batches_skipped_budget": int(skipped),
+        "waves_started": int(waves),
+        "parallelism_limit": int(limit),
+        "deadline_exceeded": deadline_exceeded,
+        "ordering": "route_potential_priority_then_block_rotated",
+    }
+
+
+async def _quote_two_leg_route_group_wave(
+    rpc: Any,
+    cfg: Any,
+    cache: PerBlockCache,
+    groups: Sequence[Mapping[str, Any]],
+    *,
+    metrics: Dict[str, Any],
+) -> tuple[List[Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], int, int]:
+    """Quote a bounded wave once per distinct amount/edge-set signature."""
+    unique_by_signature: Dict[Tuple[int, Tuple[str, ...]], Mapping[str, Any]] = {}
+    signatures: List[Tuple[int, Tuple[str, ...]]] = []
+    for group in groups:
+        signature = (
+            int(group["out1"]),
+            tuple(sorted(edge_key(edge) for edge in group["revs"])),
+        )
+        signatures.append(signature)
+        unique_by_signature.setdefault(signature, group)
+
+    unique_groups = list(unique_by_signature.values())
+    unique_results = await asyncio.gather(*(
+        quote_edges_batch(
+            rpc, cfg, cache, group["revs"], int(group["out1"]), metrics=metrics
+        )
+        for group in unique_groups
+    ))
+    result_by_signature = dict(zip(unique_by_signature.keys(), unique_results))
+    return (
+        [result_by_signature[signature] for signature in signatures],
+        len(unique_groups),
+        len(groups) - len(unique_groups),
+    )
+
+
+@dataclass
+class _TwoLegRouteProcessingContext:
+    cfg: Any
+    block_number: int
+    slippage_bps: int
+    observed_gas_price_wei: Optional[int]
+    metrics: Dict[str, Any]
+    opportunities: List[Opportunity]
+
+
+def _route_aux_for_edge(edge: Edge, meta: Mapping[str, Any]) -> str:
+    if edge.dex == "univ3":
+        return aux_univ3_fee(int(meta.get("fee", edge.params.get("fee", 3000))))
+    if edge.dex == "curve":
+        return aux_curve_from_meta(dict(meta), edge.params)
+    if edge.dex == "balancer":
+        return str(edge.params.get("pool_id") or "0x")
+    if edge.dex == "aerodrome":
+        raw = int(str(edge.params.get("factory") or "0"), 16)
+        raw |= (1 if bool(edge.params.get("stable", False)) else 0) << 160
+        return _aux_u256_to_b32_hex(raw)
+    if edge.dex == "slipstream":
+        return _aux_u256_to_b32_hex(int(edge.params.get("tick_spacing", 0)) & 0xFFFFFF)
+    if edge.dex == "camelot_algebra":
+        return "0x"
+    if edge.dex in {"camelot_v2", "constant_product"}:
+        return _aux_u256_to_b32_hex(int(str(edge.params.get("factory") or "0"), 16))
+    return "0x"
+
+
+@dataclass(frozen=True)
+class _TwoLegCandidateFacts:
+    group: Mapping[str, Any]
+    edge: Edge
+    amount_out: int
+    meta: Dict[str, Any]
+    gross_profit: int
+    min_out_first: int
+    min_out_final: int
+    aux_first: str
+    aux_second: str
+    route_id: str
+
+
+def _record_non_positive_two_leg(
+    context: _TwoLegRouteProcessingContext,
+    facts: _TwoLegCandidateFacts,
+) -> bool:
+    if facts.gross_profit > 0 or os.environ.get("VICTOR_DEBUG_OPPS", "").strip() == "1":
+        return False
+    group, e2, meta2 = facts.group, facts.edge, facts.meta
+    e1 = group["e1"]
+    amount_in = int(group["effective_amount_in"])
+    out1 = int(group["out1"])
+    meta1 = group["meta1"]
+    gas_cost = int(estimate_gas_cost_wei_from_cfg(
+        context.cfg,
+        estimate_route_gas_units({"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}),
+        observed_gas_price_wei=context.observed_gas_price_wei,
+    ))
+    flashloan_fee = (
+        amount_in * int(getattr(getattr(context.cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
+    ) // 10_000
+    _record_size_economic_diagnostic(
+        context.metrics,
+        route_id=facts.route_id,
+        amount_in=amount_in,
+        gross_profit_wei=int(facts.gross_profit),
+        flashloan_fee_wei=int(flashloan_fee),
+        gas_cost_wei=int(gas_cost),
+        reason="non_positive_gross_profit",
+        legs=[
+            {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(amount_in), "quoted_amount_out": str(out1), "min_out": str(facts.min_out_first), "slippage_reserve": str(max(0, out1 - facts.min_out_first)), "quote_meta": dict(meta1)},
+            {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(out1), "quoted_amount_out": str(facts.amount_out), "min_out": str(facts.min_out_final), "slippage_reserve": str(max(0, facts.amount_out - facts.min_out_final)), "quote_meta": dict(meta2)},
+        ],
+    )
+    context.metrics["route_rejections_non_positive_gross_profit"] = int(
+        context.metrics.get("route_rejections_non_positive_gross_profit", 0)
+    ) + 1
+    return True
+
+
+def _append_two_leg_opportunity(
+    context: _TwoLegRouteProcessingContext,
+    facts: _TwoLegCandidateFacts,
+) -> None:
+    cfg = context.cfg
+    group, e2 = facts.group, facts.edge
+    e1 = group["e1"]
+    amount_in = int(group["effective_amount_in"])
+    out1 = int(group["out1"])
+    meta1, meta2 = group["meta1"], facts.meta
+    venues = [e1.dex, e2.dex]
+    route_meta = {"leg1": meta1, "leg2": meta2, "venues": venues}
+    gas_units = estimate_route_gas_units(route_meta)
+    gas_cost = estimate_gas_cost_wei_from_cfg(
+        cfg, gas_units, observed_gas_price_wei=context.observed_gas_price_wei
+    )
+    pool_keys = [
+        _pool_keys_for_leg(
+            e1.dex, e1.token_in, e1.token_out,
+            {"fee": meta1.get("fee", e1.params.get("fee", 3000)), "pool": e1.venue, **e1.params},
+            facts.aux_first,
+        ),
+        _pool_keys_for_leg(
+            e2.dex, e2.token_in, e2.token_out,
+            {"fee": meta2.get("fee", e2.params.get("fee", 3000)), "pool": e2.venue, **e2.params},
+            facts.aux_second,
+        ),
+    ]
+    opportunity_id = _id([
+        cfg.chain.name, "2leg", facts.route_id, str(amount_in), str(context.block_number)
+    ])
+    context.opportunities.append(
+        Opportunity(
+            id=opportunity_id,
+            chain=cfg.chain.name,
+            strategy=f"two-leg:{e1.dex}->{e2.dex}",
+            expected_profit_raw=str(facts.gross_profit),
+            expected_profit_usd="0",
+            route=Route(legs=[
+                RouteLeg(
+                    dex=e1.dex, venue=e1.venue, token_in=e1.token_in, token_out=e1.token_out,
+                    amount_in=str(amount_in), min_out=str(facts.min_out_first), data=facts.aux_first,
+                ),
+                RouteLeg(
+                    dex=e2.dex, venue=e2.venue, token_in=e2.token_in, token_out=e2.token_out,
+                    amount_in=str(out1), min_out=str(facts.min_out_final), data=facts.aux_second,
+                ),
+            ]),
+            min_outs=[str(facts.min_out_first), str(facts.min_out_final)],
+            route_id=facts.route_id,
+            can_execute=False,
+            created_at_ms=_now_ms(),
+            meta={
+                "out1": str(out1),
+                "out2": str(facts.amount_out),
+                "leg1": meta1,
+                "leg2": meta2,
+                "route_type": "2leg",
+                "route_edge_params": [dict(e1.params), dict(e2.params)],
+                "route_family": _classify_route_family(cfg, [e1, e2], route_type="2leg"),
+                "venues": venues,
+                "pool_keys": pool_keys,
+                "gas_estimate_units": str(gas_units),
+                "gas_cost_estimate_wei": str(gas_cost),
+                "profit_after_gas_estimate_wei": str(int(facts.gross_profit) - int(gas_cost)),
+            },
+        )
+    )
+
+
+def _consume_two_leg_quote_result(
+    context: _TwoLegRouteProcessingContext,
+    group: Mapping[str, Any],
+    e2: Edge,
+    qmap2: Mapping[str, Optional[Tuple[int, Dict[str, Any]]]],
+) -> None:
+    """Turn a completed quote into diagnostic or gross opportunity evidence."""
+    cfg = context.cfg
+    block_number = context.block_number
+    slippage_bps = context.slippage_bps
+    observed_gas_price_wei = context.observed_gas_price_wei
+    metrics = context.metrics
+    opps = context.opportunities
+    e1 = group["e1"]
+    effective_amount_in = int(group["effective_amount_in"])
+    out1 = int(group["out1"])
+    meta1 = group["meta1"]
+    q2 = qmap2.get(edge_key(e2))
+    if not q2:
+        metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
+        return
+    out2, meta2 = q2
+    gross_profit = out2 - effective_amount_in
+    # min_outs for legs include slippage haircut
+    min1 = _apply_slippage(out1, slippage_bps)
+    min2 = _apply_slippage(out2, slippage_bps)
+        
+    aux1 = _route_aux_for_edge(e1, meta1)
+    aux2 = _route_aux_for_edge(e2, meta2)
+
+    rid = route_id_hex(
+        [
+            EncLeg(
+                dex=e1.dex,
+                venue=e1.venue,
+                token_in=e1.token_in,
+                token_out=e1.token_out,
+                aux=aux1,
+            ),
+            EncLeg(
+                dex=e2.dex,
+                venue=e2.venue,
+                token_in=e2.token_in,
+                token_out=e2.token_out,
+                aux=aux2,
+            ),
+        ]
+    )
+        
+    facts = _TwoLegCandidateFacts(
+        group=group,
+        edge=e2,
+        amount_out=int(out2),
+        meta=dict(meta2),
+        gross_profit=int(gross_profit),
+        min_out_first=int(min1),
+        min_out_final=int(min2),
+        aux_first=aux1,
+        aux_second=aux2,
+        route_id=rid,
+    )
+    if _record_non_positive_two_leg(context, facts):
+        return
+    _append_two_leg_opportunity(context, facts)
+
+
+
+
 async def find_two_leg_opportunities(
     rpc,
     cfg,
@@ -1452,6 +1836,7 @@ async def find_two_leg_opportunities(
     max_scan_edges: Optional[int] = None,
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
+    route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -1528,36 +1913,39 @@ async def find_two_leg_opportunities(
         3,
         min(12, int(configured_reverse_candidates)),
     )
-    qmap1: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
-    for effective_amount, grouped_edges in edge_groups.items():
-        qmap1.update(
-            await quote_edges_batch(
-                rpc, cfg, cache, grouped_edges, effective_amount, metrics=metrics
-            )
-        )
+    ordered_edge_groups = sorted(
+        edge_groups.items(),
+        key=lambda item: (
+            sum(len(by_pair.get((edge.token_out, edge.token_in), [])) for edge in item[1]),
+            len(item[1]),
+        ),
+        reverse=True,
+    )
+    qmap1, first_leg_quote_schedule = await _quote_edge_groups_in_bounded_waves(
+        rpc,
+        cfg,
+        cache,
+        ordered_edge_groups,
+        deadline=route_deadline,
+        block_number=int(block_number),
+        parallelism=_route_group_parallelism(),
+        metrics=metrics,
+    )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
-    route_budget_exhausted = False
-    for e1 in edges:
-        # Preserve the bounded route-evaluation budget, but always allow the
-        # first viable reverse-pair group after first-leg quote acquisition.
-        if (
-            route_groups_evaluated > 0
-            and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-        ):
+    route_budget_exhausted = bool(first_leg_quote_schedule["deadline_exceeded"])
+    prepared_route_groups: List[Dict[str, Any]] = []
+    # Interleave token/protocol families before budgeting. This is only a
+    # scheduling fairness policy; route economics still determine ranking.
+    for e1 in _round_robin_route_group_edges(edges):
+        if prepared_route_groups and time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
-        # look for e2 that returns to start
         revs = by_pair.get((e1.token_out, e1.token_in), [])
         if not revs:
             metrics["route_rejections_no_reverse_route"] = int(metrics.get("route_rejections_no_reverse_route", 0)) + 1
             continue
 
-        # A two-leg round trip through the exact same pool is structurally
-        # loss-making: the second swap traverses the same stateful liquidity
-        # venue in reverse and pays its swap fee again. It cannot express a
-        # cross-pool price dislocation, so quoting it only consumes the bounded
-        # route/size budget and can hide later cross-venue candidates.
         filtered_revs = [
             e2 for e2 in revs if not _is_same_pool_roundtrip(e1, e2)
         ]
@@ -1600,205 +1988,50 @@ async def find_two_leg_opportunities(
             metrics["route_rejections_first_leg_quote_unavailable"] = int(metrics.get("route_rejections_first_leg_quote_unavailable", 0)) + 1
             continue
         out1, meta1 = q1
-        # Batch quote all candidate second legs for this out1.
-        # This batch is part of the selected route group; process its returned
-        # quotes even if the provider consumed the remaining wall-clock budget.
-        qmap2 = await quote_edges_batch(rpc, cfg, cache, revs, out1, metrics=metrics)
-        route_groups_evaluated += 1
-        for e2 in revs:
-            q2 = qmap2.get(edge_key(e2))
-            if not q2:
-                metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
-                continue
-            out2, meta2 = q2
-            gross_profit = out2 - effective_amount_in
-            # min_outs for legs include slippage haircut
-            min1 = _apply_slippage(out1, slippage_bps)
-            min2 = _apply_slippage(out2, slippage_bps)
+        prepared_route_groups.append({
+            "e1": e1,
+            "revs": revs,
+            "effective_amount_in": effective_amount_in,
+            "out1": out1,
+            "meta1": meta1,
+        })
 
-            # Executor aux data (bytes32)
-            aux1 = "0x"
-            if e1.dex == "univ3":
-                aux1 = aux_univ3_fee(int(e1.params.get("fee", 3000)))
-            elif e1.dex == "curve":
-                aux1 = aux_curve_from_meta(meta1, e1.params)
-            elif e1.dex == "balancer":
-                aux1 = str(e1.params.get("pool_id") or "0x")
-            elif e1.dex == "aerodrome":
-                raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
-                aux1 = _aux_u256_to_b32_hex(raw)
-            elif e1.dex == "slipstream":
-                aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
-            elif e1.dex == "camelot_algebra":
-                aux1 = "0x"
-            elif e1.dex == "camelot_v2":
-                aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
-            elif e1.dex == "constant_product":
-                aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
+    route_group_parallelism = _route_group_parallelism()
+    route_quote_waves_started = 0
+    completed_route_quote_batches = 0
+    coalesced_route_quote_batches = 0
+    processing_context = _TwoLegRouteProcessingContext(
+        cfg=cfg,
+        block_number=int(block_number),
+        slippage_bps=int(slippage_bps),
+        observed_gas_price_wei=observed_gas_price_wei,
+        metrics=metrics,
+        opportunities=opps,
+    )
+    for wave_start in range(0, len(prepared_route_groups), route_group_parallelism):
+        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
+            route_budget_exhausted = True
+            break
+        wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
+        qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
+            rpc, cfg, cache, wave, metrics=metrics
+        )
+        route_quote_waves_started += 1
+        completed_route_quote_batches += int(physical_batches)
+        coalesced_route_quote_batches += int(coalesced_batches)
+        for group, qmap2 in zip(wave, qmaps2):
+            route_groups_evaluated += 1
+            for e2 in group["revs"]:
+                _consume_two_leg_quote_result(processing_context, group, e2, qmap2)
 
-            aux2 = "0x"
-            if e2.dex == "univ3":
-                aux2 = aux_univ3_fee(int(e2.params.get("fee", 3000)))
-            elif e2.dex == "curve":
-                aux2 = aux_curve_from_meta(meta2, e2.params)
-            elif e2.dex == "balancer":
-                aux2 = str(e2.params.get("pool_id") or "0x")
-            elif e2.dex == "aerodrome":
-                raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
-                aux2 = _aux_u256_to_b32_hex(raw)
-            elif e2.dex == "slipstream":
-                aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
-            elif e2.dex == "camelot_algebra":
-                aux2 = "0x"
-            elif e2.dex == "camelot_v2":
-                aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
-            elif e2.dex == "constant_product":
-                aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
-
-            rid = route_id_hex(
-                [
-                    EncLeg(
-                        dex=e1.dex,
-                        venue=e1.venue,
-                        token_in=e1.token_in,
-                        token_out=e1.token_out,
-                        aux=aux1,
-                    ),
-                    EncLeg(
-                        dex=e2.dex,
-                        venue=e2.venue,
-                        token_in=e2.token_in,
-                        token_out=e2.token_out,
-                        aux=aux2,
-                    ),
-                ]
-            )
-
-            if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
-                gas_cost_wei = int(
-                    estimate_gas_cost_wei_from_cfg(
-                        cfg,
-                        estimate_route_gas_units(
-                            {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                        ),
-                        observed_gas_price_wei=observed_gas_price_wei,
-                    )
-                )
-                flashloan_fee_wei = (
-                    int(effective_amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
-                ) // 10_000
-                _record_size_economic_diagnostic(
-                    metrics,
-                    route_id=rid,
-                    amount_in=int(effective_amount_in),
-                    gross_profit_wei=int(gross_profit),
-                    flashloan_fee_wei=int(flashloan_fee_wei),
-                    gas_cost_wei=int(gas_cost_wei),
-                    reason="non_positive_gross_profit",
-                    legs=[
-                        {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(effective_amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
-                        {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
-                    ]
-                )
-                metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
-                continue
-
-            pool_keys = [
-                _pool_keys_for_leg(
-                    e1.dex,
-                    e1.token_in,
-                    e1.token_out,
-                    {
-                        "fee": meta1.get("fee", e1.params.get("fee", 3000)),
-                        "pool": e1.venue,
-                        **e1.params,
-                    },
-                    aux1,
-                ),
-                _pool_keys_for_leg(
-                    e2.dex,
-                    e2.token_in,
-                    e2.token_out,
-                    {
-                        "fee": meta2.get("fee", e2.params.get("fee", 3000)),
-                        "pool": e2.venue,
-                        **e2.params,
-                    },
-                    aux2,
-                ),
-            ]
-            opp_id = _id([cfg.chain.name, "2leg", rid, str(effective_amount_in), str(block_number)])
-            opps.append(
-                Opportunity(
-                    id=opp_id,
-                    chain=cfg.chain.name,
-                    strategy=f"two-leg:{e1.dex}->{e2.dex}",
-                    expected_profit_raw=str(gross_profit),
-                    expected_profit_usd="0",
-                    route=Route(
-                        legs=[
-                            RouteLeg(
-                                dex=e1.dex,
-                                venue=e1.venue,
-                                token_in=e1.token_in,
-                                token_out=e1.token_out,
-                                amount_in=str(effective_amount_in),
-                                min_out=str(min1),
-                                data=aux1,
-                            ),
-                            RouteLeg(
-                                dex=e2.dex,
-                                venue=e2.venue,
-                                token_in=e2.token_in,
-                                token_out=e2.token_out,
-                                amount_in=str(out1),
-                                min_out=str(min2),
-                                data=aux2,
-                            ),
-                        ]
-                    ),
-                    min_outs=[str(min1), str(min2)],
-                    route_id=rid,
-                    can_execute=False,  # upgraded by runtime after safety checks
-                    created_at_ms=_now_ms(),
-                    meta={
-                        "out1": str(out1),
-                        "out2": str(out2),
-                        "leg1": meta1,
-                        "leg2": meta2,
-                        "route_type": "2leg",
-                        "route_edge_params": [dict(e1.params), dict(e2.params)],
-                        "route_family": _classify_route_family(cfg, [e1, e2], route_type="2leg"),
-                        "venues": [e1.dex, e2.dex],
-                        "pool_keys": pool_keys,
-                        "gas_estimate_units": str(
-                            estimate_route_gas_units(
-                                {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                            )
-                        ),
-                        "gas_cost_estimate_wei": str(
-                            estimate_gas_cost_wei_from_cfg(
-                                cfg,
-                                estimate_route_gas_units(
-                                    {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                                ),
-                                observed_gas_price_wei=observed_gas_price_wei,
-                            )
-                        ),
-                        "profit_after_gas_estimate_wei": str(
-                            int(gross_profit)
-                            - int(
-                                estimate_gas_cost_wei_from_cfg(
-                                    cfg,
-                                    estimate_route_gas_units(
-                                        {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                                    ),
-                                )
-                            )
-                        ),
-                    },
-                )
-            )
+        if (
+            wave_start + route_group_parallelism < len(prepared_route_groups)
+            and time.perf_counter() >= route_deadline
+        ):
+            route_budget_exhausted = True
+            break
+    if route_groups_evaluated < len(prepared_route_groups) or time.perf_counter() >= route_deadline:
+        route_budget_exhausted = True
     _finalize_quote_coverage(metrics)
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
@@ -1807,7 +2040,35 @@ async def find_two_leg_opportunities(
         telemetry["route_evaluation_ms"] = float(
             (time.perf_counter() - route_eval_started) * 1000.0
         )
+        telemetry["route_budget_elapsed_ms"] = float(
+            (time.perf_counter() - t_start) * 1000.0
+        )
+        telemetry["route_budget_deadline_ms"] = int(max(1, int(time_budget_ms)))
         telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
+        telemetry["route_group_schedule"] = {
+            "block_number": int(block_number),
+            "groups_prepared": len(prepared_route_groups),
+            "groups_completed": int(route_groups_evaluated),
+            "quote_batches_completed_and_consumed": int(
+                first_leg_quote_schedule["batches_completed"]
+                + completed_route_quote_batches
+            ),
+            "first_leg_quote_batches_total": int(first_leg_quote_schedule["batches_total"]),
+            "first_leg_quote_batches_completed": int(first_leg_quote_schedule["batches_completed"]),
+            "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
+            "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
+            "first_leg_quote_parallelism_limit": int(first_leg_quote_schedule["parallelism_limit"]),
+            "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
+            "first_leg_quote_ordering": str(first_leg_quote_schedule["ordering"]),
+            "route_group_quote_batches_completed_and_consumed": int(completed_route_quote_batches),
+            "route_group_waves_started": int(route_quote_waves_started),
+            "duplicate_quote_batches_coalesced": int(coalesced_route_quote_batches),
+            "parallelism_limit": int(route_group_parallelism),
+            "waves_started": int(route_quote_waves_started),
+            "ordering": "round_robin_source_token_protocol",
+            "completed_wave_results_consumed_before_budget_stop": True,
+        }
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
             "time_budget" if route_budget_exhausted else "completed"
@@ -2047,6 +2308,7 @@ async def find_three_leg_opportunities(
     - no discovery here; pass extra_v3_pairs from DiscoveryManager
     """
     t_start = time.perf_counter()
+    route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -2115,16 +2377,30 @@ async def find_three_leg_opportunities(
     for edge in edges:
         effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
         edge_groups.setdefault(effective_amount, []).append(edge)
-    qmap1_3: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
-    for effective_amount, grouped_edges in edge_groups.items():
-        qmap1_3.update(
-            await quote_edges_batch(
-                rpc, cfg, cache, grouped_edges, effective_amount, metrics=metrics
-            )
-        )
+    ordered_triangle_edge_groups = sorted(
+        edge_groups.items(),
+        key=lambda item: _triangle_edge_group_potential(
+            item, adjacency=adj, by_pair=by_pair
+        ),
+        reverse=True,
+    )
+    qmap1_3, first_leg_quote_schedule = await _quote_edge_groups_in_bounded_waves(
+        rpc,
+        cfg,
+        cache,
+        ordered_triangle_edge_groups,
+        deadline=route_deadline,
+        block_number=int(block_number),
+        parallelism=_route_group_parallelism(),
+        metrics=metrics,
+    )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
-    route_budget_exhausted = False
+    route_budget_exhausted = bool(first_leg_quote_schedule["deadline_exceeded"])
+    triangle_second_leg_quote_batches_completed = 0
+    triangle_third_leg_quote_batches_completed = 0
+    triangle_coalesced_quote_batches = 0
+    triangle_quote_waves_started = 0
 
     # Adaptive frontier: first-leg quotes have already been acquired for the
     # complete graph. Use a small supplemental budget to admit pruned edges only
@@ -2285,46 +2561,65 @@ async def find_three_leg_opportunities(
             ),
         }
 
-    # Iterate first edges under a bounded budget. Once a route group is in
-    # flight, consume its returned quotes before stopping additional groups.
-    for a_in, outs in frontier_adj.items():
-        for e1 in outs:
-            if (
-                route_groups_evaluated > 0
-                and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-            ):
-                route_budget_exhausted = True
-                break
-            if e1.token_in != a_in:
+    # Prepare viable first-edge groups in fair source-token/protocol order.
+    triangle_route_groups: List[Dict[str, Any]] = []
+    triangle_ordered_edges = _round_robin_route_group_edges(
+        [edge for items in frontier_adj.values() for edge in items]
+    )
+    for e1 in triangle_ordered_edges:
+        if normalized_amounts:
+            effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
+            if effective_amount_in <= 0:
+                metrics["route_rejections_input_notional_unavailable"] = int(
+                    metrics.get("route_rejections_input_notional_unavailable", 0)
+                ) + 1
                 continue
-            if normalized_amounts:
-                effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
-                if effective_amount_in <= 0:
-                    metrics["route_rejections_input_notional_unavailable"] = int(
-                        metrics.get("route_rejections_input_notional_unavailable", 0)
-                    ) + 1
-                    continue
-            else:
-                effective_amount_in = int(amount_in)
-            # quote leg1
-            q1 = qmap1_3.get(edge_key(e1))
-            if not q1:
-                continue
-            out1, meta1 = q1
-            # second leg candidates from token_out
-            e2_cands = [e2 for e2 in frontier_adj.get(e1.token_out, []) if e2.token_out != e1.token_in]
-            metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
-            qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
+        else:
+            effective_amount_in = int(amount_in)
+        q1 = qmap1_3.get(edge_key(e1))
+        if not q1:
+            continue
+        out1, meta1 = q1
+        e2_cands = [
+            e2 for e2 in frontier_adj.get(e1.token_out, [])
+            if e2.token_out != e1.token_in
+        ]
+        if not e2_cands:
+            continue
+        metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
+        triangle_route_groups.append({
+            "e1": e1,
+            "effective_amount_in": int(effective_amount_in),
+            "out1": int(out1),
+            "meta1": meta1,
+            "revs": e2_cands,
+        })
+
+    triangle_route_parallelism = _route_group_parallelism()
+    for wave_start in range(0, len(triangle_route_groups), triangle_route_parallelism):
+        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
+            route_budget_exhausted = True
+            break
+        wave = triangle_route_groups[wave_start:wave_start + triangle_route_parallelism]
+        qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
+            rpc, cfg, cache, wave, metrics=metrics
+        )
+        triangle_quote_waves_started += 1
+        triangle_second_leg_quote_batches_completed += int(physical_batches)
+        triangle_coalesced_quote_batches += int(coalesced_batches)
+        for group, qmap2_3 in zip(wave, qmaps2):
+            e1 = group["e1"]
+            effective_amount_in = int(group["effective_amount_in"])
+            out1 = int(group["out1"])
+            meta1 = group["meta1"]
+            e2_cands = group["revs"]
             route_groups_evaluated += 1
             final_leg_quote_batches = 0
             for e2 in e2_cands:
                 # A delayed second-leg batch is already paid for. Let one
                 # viable cycle reach its final-leg quote, then stop starting
                 # further final-leg batches once the route budget is spent.
-                if (
-                    final_leg_quote_batches > 0
-                    and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-                ):
+                if final_leg_quote_batches > 0 and time.perf_counter() >= route_deadline:
                     route_budget_exhausted = True
                     break
                 q2 = qmap2_3.get(edge_key(e2))
@@ -2347,6 +2642,7 @@ async def find_three_leg_opportunities(
                 e3_cands = list(revs[:max_reverse_candidates])
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
                 qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
+                triangle_third_leg_quote_batches_completed += 1
                 final_leg_quote_batches += 1
                 # Consume the complete returned batch. Do not discard an
                 # already-returned quote merely because the RPC crossed the
@@ -2357,12 +2653,12 @@ async def find_three_leg_opportunities(
                         continue
                     out3, meta3 = q3
                     gross_profit = out3 - effective_amount_in
-
+    
                     # slippage haircut
                     min1 = _apply_slippage(out1, slippage_bps)
                     min2 = _apply_slippage(out2, slippage_bps)
                     min3 = _apply_slippage(out3, slippage_bps)
-
+    
                     def _aux_for(edge: Edge, meta: Dict[str, Any]) -> str:
                         if edge.dex == "univ3":
                             return aux_univ3_fee(int(meta.get("fee", edge.params.get("fee", 3000))))
@@ -2378,11 +2674,11 @@ async def find_three_leg_opportunities(
                         if edge.dex == "slipstream":
                             return _aux_u256_to_b32_hex(int(meta.get("tick_spacing", edge.params.get("tick_spacing", 0))) & 0xFFFFFF)
                         return "0x"
-
+    
                     aux1 = _aux_for(e1, meta1)
                     aux2 = _aux_for(e2, meta2)
                     aux3 = _aux_for(e3, meta3)
-
+    
                     rid = route_id_hex(
                         [
                             EncLeg(
@@ -2408,7 +2704,7 @@ async def find_three_leg_opportunities(
                             ),
                         ]
                     )
-
+    
                     if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
                         gas_cost_wei = int(
                             estimate_gas_cost_wei_from_cfg(
@@ -2442,7 +2738,7 @@ async def find_three_leg_opportunities(
                             ]
                         )
                         continue
-
+    
                     pool_keys = [
                         _pool_keys_for_leg(
                             e1.dex,
@@ -2478,7 +2774,7 @@ async def find_three_leg_opportunities(
                             aux3,
                         ),
                     ]
-
+    
                     opp_id = _id([cfg.chain.name, "3leg", rid, str(effective_amount_in), str(block_number)])
                     opps.append(
                         Opportunity(
@@ -2580,6 +2876,15 @@ async def find_three_leg_opportunities(
                 break
         if route_budget_exhausted:
             break
+        if (
+            wave_start + triangle_route_parallelism < len(triangle_route_groups)
+            and time.perf_counter() >= route_deadline
+        ):
+            route_budget_exhausted = True
+            break
+
+    if time.perf_counter() >= route_deadline:
+        route_budget_exhausted = True
 
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
@@ -2588,7 +2893,38 @@ async def find_three_leg_opportunities(
         telemetry["route_evaluation_ms"] = float(
             (time.perf_counter() - route_eval_started) * 1000.0
         )
+        telemetry["route_budget_elapsed_ms"] = float(
+            (time.perf_counter() - t_start) * 1000.0
+        )
+        telemetry["route_budget_deadline_ms"] = int(max(1, int(time_budget_ms)))
         telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
+        telemetry["route_group_schedule"] = {
+            "block_number": int(block_number),
+            "groups_prepared": int(len(triangle_route_groups)),
+            "groups_completed": int(route_groups_evaluated),
+            "quote_batches_completed_and_consumed": int(
+                first_leg_quote_schedule["batches_completed"]
+                + triangle_second_leg_quote_batches_completed
+                + triangle_third_leg_quote_batches_completed
+            ),
+            "first_leg_quote_batches_total": int(first_leg_quote_schedule["batches_total"]),
+            "first_leg_quote_batches_completed": int(first_leg_quote_schedule["batches_completed"]),
+            "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
+            "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
+            "first_leg_quote_parallelism_limit": int(first_leg_quote_schedule["parallelism_limit"]),
+            "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
+            "first_leg_quote_ordering": str(first_leg_quote_schedule["ordering"]),
+            "route_group_quote_batches_completed_and_consumed": int(
+                triangle_second_leg_quote_batches_completed
+                + triangle_third_leg_quote_batches_completed
+            ),
+            "route_group_quote_batches_coalesced": int(triangle_coalesced_quote_batches),
+            "parallelism_limit": int(triangle_route_parallelism),
+            "waves_started": int(triangle_quote_waves_started),
+            "ordering": "round_robin_source_token_protocol",
+            "completed_wave_results_consumed_before_budget_stop": True,
+        }
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
             "time_budget" if route_budget_exhausted else "completed"
