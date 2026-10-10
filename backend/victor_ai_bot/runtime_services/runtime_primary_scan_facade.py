@@ -1755,6 +1755,11 @@ class RuntimePrimaryScanFacade:
             two_leg_route_deadline = (
                 route_budget_started + two_leg_budget_window_ms / 1000.0
             )
+            three_leg_budget_window_ms = (
+                max(1, total_route_budget_ms - two_leg_budget_window_ms)
+                if two_leg_family_enabled and three_leg_family_enabled
+                else (total_route_budget_ms if three_leg_family_enabled else 0)
+            )
             three_leg_route_deadline = (
                 route_budget_started + total_route_budget_ms / 1000.0
             )
@@ -1807,8 +1812,9 @@ class RuntimePrimaryScanFacade:
                     getattr(self.cfg.flags, "enable_three_leg_loops", False)
                     or getattr(self.cfg.flags, "enable_v3_triangular", False)
                 )
-                remaining_three_leg_budget_ms = int(
-                    (three_leg_route_deadline - time.perf_counter()) * 1000.0
+                remaining_three_leg_budget_ms = min(
+                    int(three_leg_budget_window_ms),
+                    int((three_leg_route_deadline - time.perf_counter()) * 1000.0),
                 )
                 if three_leg_enabled and remaining_three_leg_budget_ms > 0:
                     three = await find_three_leg_opportunities(
@@ -2307,11 +2313,7 @@ class RuntimePrimaryScanFacade:
                     "three_leg_budget_elapsed_ms": three_elapsed,
                     "total_route_budget_elapsed_ms": two_elapsed + three_elapsed,
                     "two_leg_budget_window_ms": int(two_leg_budget_window_ms),
-                    "three_leg_budget_window_ms": int(
-                        max(1, total_route_budget_ms - two_leg_budget_window_ms)
-                        if two_leg_family_enabled and three_leg_family_enabled
-                        else (total_route_budget_ms if three_leg_family_enabled else 0)
-                    ),
+                    "three_leg_budget_window_ms": int(three_leg_budget_window_ms),
                 })
             telemetry["route_evaluation"] = route_evaluation
             # Both scanners build the same route graph; expose one canonical
