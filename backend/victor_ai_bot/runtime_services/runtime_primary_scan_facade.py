@@ -95,16 +95,29 @@ def _selected_provider_frontier_slice_offset(
     edge_cap: int,
     seed_index: int,
     seed_count: int,
+    rotation_index: int = 0,
 ) -> int:
-    """Spread bounded size-emergent probes across the graph, not its first edges."""
+    """Spread bounded frontier probes over the graph and rotate coverage each block."""
     edge_count = max(0, int(graph_edge_count))
     cap = max(1, int(edge_cap))
     count = max(1, int(seed_count))
     max_offset = max(0, edge_count - cap)
     if count == 1:
-        return max_offset // 2
-    index = max(0, min(int(seed_index), count - 1))
-    return int(round(float(max_offset) * float(index) / float(count - 1)))
+        base_offset = max_offset // 2
+    else:
+        index = max(0, min(int(seed_index), count - 1))
+        base_offset = int(round(float(max_offset) * float(index) / float(count - 1)))
+
+    # Keep the initial evenly-spaced sampling stable, but do not repeatedly scan
+    # the same three graph windows forever. Rotating by bounded edge-sized slots
+    # lets successive blocks cover the graph without increasing per-tick quote work.
+    rotation = max(0, int(rotation_index))
+    if rotation == 0 or max_offset <= 0:
+        return base_offset
+    chunk_count = max(1, (edge_count + cap - 1) // cap)
+    base_chunk = min(chunk_count - 1, base_offset // cap)
+    rotated_chunk = (base_chunk + rotation) % chunk_count
+    return min(max_offset, int(rotated_chunk * cap))
 
 
 class _FrozenProviderScanPoolEventCache:
@@ -2077,13 +2090,42 @@ class RuntimePrimaryScanFacade:
             if terminal not in probe_amounts:
                 probe_amounts.append(terminal)
 
-        size_scan_records: List[Dict[str, Any]] = [{
-            "amount_in": int(base_amount_in),
-            "two": list(direct),
-            "three": list(triangles),
-            "two_metrics": {},
-            "three_metrics": {},
-        }]
+        # Frontier-discovered candidates can originate at an alternate size.
+        # Keep the economic row aligned to the notional actually quoted rather
+        # than relabeling every seed route as the base-size result.
+        candidates_by_source_size: Dict[int, Dict[str, List[Opportunity]]] = {}
+        for candidate in [*direct, *triangles]:
+            meta = getattr(candidate, "meta", {}) or {}
+            try:
+                source_amount = max(
+                    1, int(meta.get("adaptive_seed_amount_in") or base_amount_in)
+                )
+            except (TypeError, ValueError):
+                source_amount = int(base_amount_in)
+            group = candidates_by_source_size.setdefault(
+                source_amount, {"two": [], "three": []}
+            )
+            strategy = str(getattr(candidate, "strategy", "") or "")
+            group["two" if strategy.startswith("two-leg:") else "three"].append(candidate)
+
+        size_scan_records: List[Dict[str, Any]] = [
+            {
+                "amount_in": int(source_amount),
+                "two": list(group["two"]),
+                "three": list(group["three"]),
+                "two_metrics": {},
+                "three_metrics": {},
+            }
+            for source_amount, group in sorted(candidates_by_source_size.items())
+        ]
+        if not size_scan_records:
+            size_scan_records.append({
+                "amount_in": int(base_amount_in),
+                "two": [],
+                "three": [],
+                "two_metrics": {},
+                "three_metrics": {},
+            })
         sized: List[Opportunity] = []
 
         for probe_amount in probe_amounts:
@@ -2106,6 +2148,10 @@ class RuntimePrimaryScanFacade:
                     reference_amount_in = int(base_amount_in)
                 if reference_amount_in <= 0:
                     reference_amount_in = int(base_amount_in)
+                # Do not spend quote budget requoting a frontier candidate at the
+                # exact notional where it was already discovered.
+                if int(probe_amount) == int(reference_amount_in):
+                    continue
                 raw_probe = max(
                     1,
                     int(
@@ -2189,16 +2235,24 @@ class RuntimePrimaryScanFacade:
         ]
         telemetry["adaptive_size_discovery"].update({
             "amounts_scanned": [
-                str(int(base_amount_in)),
-                *[str(int(amount)) for amount in probe_amounts],
+                str(int(amount))
+                for amount in sorted({
+                    int(record.get("amount_in") or 0)
+                    for record in size_scan_records
+                    if int(record.get("amount_in") or 0) > 0
+                } | {int(amount) for amount in probe_amounts if int(amount) > 0})
             ],
             "probe_triggered": bool(sized),
             "probe_candidate_delta": int(len(sized)),
             "economic_matrix_complete": bool(
                 {str(row.get("amount_in")) for row in matrix}.issuperset(
                     {
-                        str(int(base_amount_in)),
-                        *[str(int(amount)) for amount in probe_amounts],
+                        str(int(amount))
+                        for amount in sorted({
+                            int(record.get("amount_in") or 0)
+                            for record in size_scan_records
+                            if int(record.get("amount_in") or 0) > 0
+                        } | {int(amount) for amount in probe_amounts if int(amount) > 0})
                     }
                 )
             ),
@@ -2885,6 +2939,11 @@ class RuntimePrimaryScanFacade:
                 float(self._selected_provider_frontier_seed_budget_s()),
             )
 
+            frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
+            rotation_slots = max(
+                1, (graph_edge_count + frontier_edge_cap - 1) // frontier_edge_cap
+            )
+            rotation_index = int(current_block) % rotation_slots
             frontier_seed_telemetry = {
                 "enabled": bool(seed_amounts),
                 "amounts_scanned": [str(int(value)) for value in seed_amounts],
@@ -2893,6 +2952,14 @@ class RuntimePrimaryScanFacade:
                 "candidate_counts": [],
                 "scan_errors": [],
                 "scan_latency_ms": [],
+                "size_economic_matrix": [],
+                "size_economic_evidence": [],
+                "rotation_index": int(rotation_index),
+                "graph_edge_count": int(graph_edge_count),
+                "edge_cap": int(frontier_edge_cap),
+                "unique_edges_attempted": 0,
+                "unique_edges_completed": 0,
+                "sampled_graph_coverage_ratio": 0.0,
                 "candidates_added": 0,
                 "single_notional_provider_guard": True,
                 "provider_comparison_cap_applied": False,
@@ -2946,12 +3013,12 @@ class RuntimePrimaryScanFacade:
                     seed_sink: Dict[str, Any] = {}
                     seed_context = dict(discovery_context)
                     if callable(slice_fn):
-                        frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
                         edge_offset = _selected_provider_frontier_slice_offset(
                             graph_edge_count=graph_edge_count,
                             edge_cap=frontier_edge_cap,
                             seed_index=seed_index,
                             seed_count=len(seed_amounts),
+                            rotation_index=rotation_index,
                         )
                         seed_context["_provider_scan_pool_event_cache"] = slice_fn(
                             edge_offset,
@@ -3041,10 +3108,38 @@ class RuntimePrimaryScanFacade:
                                 "edge_offset": int(edge_offset),
                                 "edge_cap": int(frontier_edge_cap),
                                 "graph_edge_count": int(graph_edge_count),
+                                "rotation_index": int(rotation_index),
+                                "status": "completed",
                                 "returned": int(len(frontier or [])),
                                 "added": int(additions),
                             }
                         )
+                        for matrix_row in list(seed_sink.get("size_economic_matrix") or []):
+                            if not isinstance(matrix_row, dict):
+                                continue
+                            row = dict(matrix_row)
+                            row.update({
+                                "frontier_seed_sampled": True,
+                                "frontier_seed_edge_offset": int(edge_offset),
+                                "frontier_seed_edge_cap": int(frontier_edge_cap),
+                                "frontier_seed_graph_edge_count": int(graph_edge_count),
+                                "frontier_seed_rotation_index": int(rotation_index),
+                                "execution_authority_granted": False,
+                            })
+                            frontier_seed_telemetry["size_economic_matrix"].append(row)
+                        for evidence_row in list(seed_sink.get("size_economic_evidence") or []):
+                            if not isinstance(evidence_row, dict):
+                                continue
+                            row = dict(evidence_row)
+                            row.update({
+                                "frontier_seed_sampled": True,
+                                "frontier_seed_edge_offset": int(edge_offset),
+                                "frontier_seed_edge_cap": int(frontier_edge_cap),
+                                "frontier_seed_graph_edge_count": int(graph_edge_count),
+                                "frontier_seed_rotation_index": int(rotation_index),
+                                "execution_authority_granted": False,
+                            })
+                            frontier_seed_telemetry["size_economic_evidence"].append(row)
                         frontier_seed_telemetry["scan_latency_ms"].append(
                             float(
                                 seed_sink.get("scan_latency_ms")
@@ -3052,23 +3147,63 @@ class RuntimePrimaryScanFacade:
                             )
                         )
                     except asyncio.TimeoutError:
+                        frontier_seed_telemetry["candidate_counts"].append({
+                            "amount_in": str(int(seed_amount)),
+                            "edge_offset": int(edge_offset),
+                            "edge_cap": int(frontier_edge_cap),
+                            "graph_edge_count": int(graph_edge_count),
+                            "rotation_index": int(rotation_index),
+                            "status": "timed_out",
+                            "returned": 0,
+                            "added": 0,
+                        })
                         frontier_seed_telemetry["scan_errors"].append(
                             {
                                 "amount_in": str(int(seed_amount)),
+                                "edge_offset": int(edge_offset),
                                 "reason": "frontier_seed_timeout",
                                 "timeout_s": float(timeout),
                             }
                         )
                     except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                        frontier_seed_telemetry["candidate_counts"].append({
+                            "amount_in": str(int(seed_amount)),
+                            "edge_offset": int(edge_offset),
+                            "edge_cap": int(frontier_edge_cap),
+                            "graph_edge_count": int(graph_edge_count),
+                            "rotation_index": int(rotation_index),
+                            "status": "failed",
+                            "returned": 0,
+                            "added": 0,
+                        })
                         frontier_seed_telemetry["scan_errors"].append(
                             {
                                 "amount_in": str(int(seed_amount)),
+                                "edge_offset": int(edge_offset),
                                 "reason": f"{type(exc).__name__}: {exc}",
                             }
                         )
             finally:
                 self._rpc_provider_comparison = previous_provider_comparison
 
+            attempted_edges = set()
+            completed_edges = set()
+            for sample in list(frontier_seed_telemetry.get("candidate_counts") or []):
+                try:
+                    offset = max(0, int(sample.get("edge_offset") or 0))
+                    cap = max(0, int(sample.get("edge_cap") or 0))
+                    end = min(int(graph_edge_count), offset + cap)
+                    attempted_edges.update(range(offset, max(offset, end)))
+                    if str(sample.get("status") or "") == "completed":
+                        completed_edges.update(range(offset, max(offset, end)))
+                except (TypeError, ValueError):
+                    continue
+            frontier_seed_telemetry["unique_edges_attempted"] = len(attempted_edges)
+            frontier_seed_telemetry["unique_edges_completed"] = len(completed_edges)
+            frontier_seed_telemetry["sampled_graph_coverage_ratio"] = round(
+                float(len(completed_edges)) / float(max(1, int(graph_edge_count))),
+                6,
+            )
             selected_opps = merged_seed_candidates
             frontier_seed_telemetry["candidates_added"] = max(
                 0,
