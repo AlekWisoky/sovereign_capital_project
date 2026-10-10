@@ -1843,9 +1843,30 @@ class RuntimePrimaryScanFacade:
                                 list(source.get("size_economic_diagnostics") or [])
                             )
                         if isinstance(source.get("route_group_schedule"), dict):
-                            # This is a structured per-block scheduler snapshot, not
-                            # a numeric counter; never coerce it through the sum loop.
-                            target["route_group_schedule"] = dict(source["route_group_schedule"])
+                            # Aggregate numeric counters across the size probes while
+                            # preserving metadata as a structured per-block snapshot.
+                            incoming = source["route_group_schedule"]
+                            schedule = dict(target.get("route_group_schedule") or {})
+                            for count_key in (
+                                "groups_prepared",
+                                "groups_completed",
+                                "quote_batches_completed_and_consumed",
+                                "waves_started",
+                            ):
+                                schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
+                                    incoming.get(count_key, 0) or 0
+                                )
+                            schedule["parallelism_limit"] = max(
+                                int(schedule.get("parallelism_limit", 0) or 0),
+                                int(incoming.get("parallelism_limit", 0) or 0),
+                            )
+                            schedule["block_number"] = int(incoming.get("block_number") or 0)
+                            schedule["ordering"] = str(incoming.get("ordering") or "")
+                            schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
+                                schedule.get("completed_wave_results_consumed_before_budget_stop", True)
+                                and incoming.get("completed_wave_results_consumed_before_budget_stop") is True
+                            )
+                            target["route_group_schedule"] = schedule
                         target["budget_exhausted_after_quote"] = bool(
                             target.get("budget_exhausted_after_quote", False)
                             or source.get("budget_exhausted_after_quote", False)
