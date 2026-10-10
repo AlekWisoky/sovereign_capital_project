@@ -2140,13 +2140,7 @@ class RuntimePrimaryScanFacade:
             telemetry["edges_generated"] = int(
                 two_leg_telemetry.get("edges_generated", 0)
             ) + int(three_leg_telemetry.get("edges_generated", 0))
-            telemetry["route_evaluation"] = {
-                "route_group_schedule": dict(
-                    two_leg_telemetry.get("route_group_schedule") or {}
-                ),
-                "route_group_schedule_by_block": dict(
-                    two_leg_telemetry.get("route_group_schedule_by_block") or {}
-                ),
+            route_evaluation = {
                 "quote_phase_ms": float(
                     two_leg_telemetry.get("quote_phase_ms", 0.0)
                 ) + float(three_leg_telemetry.get("quote_phase_ms", 0.0)),
@@ -2178,6 +2172,15 @@ class RuntimePrimaryScanFacade:
                     or three_leg_telemetry.get("budget_exhausted_after_quote", False)
                 ),
             }
+            route_schedule = dict(two_leg_telemetry.get("route_group_schedule") or {})
+            route_schedule_by_block = dict(
+                two_leg_telemetry.get("route_group_schedule_by_block") or {}
+            )
+            if route_schedule:
+                route_evaluation["route_group_schedule"] = route_schedule
+            if route_schedule_by_block:
+                route_evaluation["route_group_schedule_by_block"] = route_schedule_by_block
+            telemetry["route_evaluation"] = route_evaluation
             # Both scanners build the same route graph; expose one canonical
             # pre-quote universe snapshot rather than summing duplicate edges.
             # Prefer the three-leg snapshot because it also carries adjacency
