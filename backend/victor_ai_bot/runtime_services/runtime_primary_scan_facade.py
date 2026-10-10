@@ -1647,6 +1647,16 @@ class RuntimePrimaryScanFacade:
             two_leg_route_budget_ms, three_leg_route_budget_ms = (
                 self._route_evaluation_budgets_ms()
             )
+            # Route-family deadlines are shared across every amount probe in this
+            # scan tick. A new notional must not reset the per-tick RPC budget.
+            route_budget_started = time.perf_counter()
+            two_leg_route_deadline = (
+                route_budget_started + max(1, int(two_leg_route_budget_ms)) / 1000.0
+            )
+            three_leg_route_deadline = (
+                route_budget_started
+                + max(1, int(two_leg_route_budget_ms + three_leg_route_budget_ms)) / 1000.0
+            )
 
             async def _run_size_scan(size_amount: int) -> tuple[List[Opportunity], List[Opportunity], Dict[str, Any], Dict[str, Any]]:
                 two: List[Opportunity] = []
@@ -1657,7 +1667,11 @@ class RuntimePrimaryScanFacade:
                 # Recent production telemetry shows the former 1.5s/1.6s route-family
                 # budgets stopping on expanded graphs. Raise each bounded pass modestly;
                 # completed quote batches remain consumed and profitability gates are unchanged.
-                if bool(getattr(self.cfg.flags, "enable_two_leg_loops", True)):
+                two_leg_enabled = bool(getattr(self.cfg.flags, "enable_two_leg_loops", True))
+                remaining_two_leg_budget_ms = int(
+                    (two_leg_route_deadline - time.perf_counter()) * 1000.0
+                )
+                if two_leg_enabled and remaining_two_leg_budget_ms > 0:
                     two = await find_two_leg_opportunities(
                         rpc,
                         self.cfg,
@@ -1665,7 +1679,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=two_leg_route_budget_ms,
+                        time_budget_ms=remaining_two_leg_budget_ms,
                         max_opps=60,
                         telemetry=two_metrics,
                         amount_in_by_token={
@@ -1688,10 +1702,14 @@ class RuntimePrimaryScanFacade:
                         extra_constant_product_pools=extra_constant_product_pools,
                     )
 
-                if bool(
+                three_leg_enabled = bool(
                     getattr(self.cfg.flags, "enable_three_leg_loops", False)
                     or getattr(self.cfg.flags, "enable_v3_triangular", False)
-                ):
+                )
+                remaining_three_leg_budget_ms = int(
+                    (three_leg_route_deadline - time.perf_counter()) * 1000.0
+                )
+                if three_leg_enabled and remaining_three_leg_budget_ms > 0:
                     three = await find_three_leg_opportunities(
                         rpc,
                         self.cfg,
@@ -1699,7 +1717,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=three_leg_route_budget_ms,
+                        time_budget_ms=remaining_three_leg_budget_ms,
                         max_opps=40,
                         telemetry=three_metrics,
                         amount_in_by_token={
@@ -1721,6 +1739,24 @@ class RuntimePrimaryScanFacade:
                         extra_camelot_v2_pools=extra_camelot_v2_pools,
                         extra_constant_product_pools=extra_constant_product_pools,
                     )
+                if two_leg_enabled and remaining_two_leg_budget_ms <= 0:
+                    two_metrics.update({
+                        "route_budget_exhausted": True,
+                        "budget_exhausted_after_quote": True,
+                        "route_budget_stop_reason": "time_budget",
+                        "route_groups_evaluated": 0,
+                        "route_budget_elapsed_ms": 0.0,
+                        "route_budget_deadline_ms": 0,
+                    })
+                if three_leg_enabled and remaining_three_leg_budget_ms <= 0:
+                    three_metrics.update({
+                        "route_budget_exhausted": True,
+                        "budget_exhausted_after_quote": True,
+                        "route_budget_stop_reason": "time_budget",
+                        "route_groups_evaluated": 0,
+                        "route_budget_elapsed_ms": 0.0,
+                        "route_budget_deadline_ms": 0,
+                    })
                 return list(two), list(three), two_metrics, three_metrics
 
             # Base-size scan is authoritative for the normal path.
@@ -1826,11 +1862,17 @@ class RuntimePrimaryScanFacade:
                             "successful_quote_pair_count",
                             "quote_phase_ms",
                             "route_evaluation_ms",
+                            "route_budget_elapsed_ms",
                         ):
                             if key in source:
                                 target[key] = (
                                     float(target.get(key, 0) or 0) + float(source.get(key, 0) or 0)
                                 )
+                        if "route_budget_deadline_ms" in source:
+                            target["route_budget_deadline_ms"] = max(
+                                int(target.get("route_budget_deadline_ms", 0) or 0),
+                                int(source.get("route_budget_deadline_ms", 0) or 0),
+                            )
                         for key in ("quote_failure_reasons", "route_rejections"):
                             merged = dict(target.get(key) or {})
                             for reason, count in dict(source.get(key) or {}).items():
@@ -2180,6 +2222,17 @@ class RuntimePrimaryScanFacade:
                 route_evaluation["route_group_schedule"] = route_schedule
             if route_schedule_by_block:
                 route_evaluation["route_group_schedule_by_block"] = route_schedule_by_block
+            if (
+                "route_budget_elapsed_ms" in two_leg_telemetry
+                or "route_budget_elapsed_ms" in three_leg_telemetry
+            ):
+                two_elapsed = float(two_leg_telemetry.get("route_budget_elapsed_ms", 0.0) or 0.0)
+                three_elapsed = float(three_leg_telemetry.get("route_budget_elapsed_ms", 0.0) or 0.0)
+                route_evaluation.update({
+                    "two_leg_budget_elapsed_ms": two_elapsed,
+                    "three_leg_budget_elapsed_ms": three_elapsed,
+                    "total_route_budget_elapsed_ms": two_elapsed + three_elapsed,
+                })
             telemetry["route_evaluation"] = route_evaluation
             # Both scanners build the same route graph; expose one canonical
             # pre-quote universe snapshot rather than summing duplicate edges.
