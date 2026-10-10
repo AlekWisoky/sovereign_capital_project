@@ -2975,6 +2975,33 @@ class RuntimePrimaryScanFacade:
         )
         discovery_context = dict(discovery_context)
         discovery_context["_provider_scan_pool_event_cache"] = provider_scan_pool_event_cache
+        try:
+            shared_gas_consensus = dict(await self.rpc_manager.gas_price_consensus() or {})
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            shared_gas_consensus = {
+                "gas_price_wei": None,
+                "status": "insufficient_agreement",
+                "observations": [],
+                "anomalies": [],
+            }
+        flash_provider = str(
+            getattr(getattr(self.cfg, "execution", None), "flash_provider", "aave") or "aave"
+        )
+        try:
+            shared_flashloan_fee = dict(await observe_flashloan_fee_bps(
+                bootstrap_rpc,
+                self.cfg,
+                flash_provider,
+                block=f"0x{int(current_block):x}",
+            ) or {})
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            shared_flashloan_fee = {
+                "ok": False,
+                "fee_bps": None,
+                "status": "shared_fee_observation_failed",
+            }
+        discovery_context["_shared_provider_gas_price_consensus"] = shared_gas_consensus
+        discovery_context["_shared_provider_flashloan_fee_observation"] = shared_flashloan_fee
         shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
             bootstrap_rpc,
             current_block=int(current_block),
@@ -3159,13 +3186,30 @@ class RuntimePrimaryScanFacade:
         finally:
             self._rpc_provider_comparison = False
         evidence = [item[4] for item in results]
+        provider_comparison_comparable, provider_comparison_reason = (
+            _provider_results_are_comparable(results, int(current_block))
+        )
         selected, ordered = select_best_rpc_evidence(evidence)
-        if selected is None:
-            selected_url = bootstrap_url or candidates[0]
-            selected_result = next(item for item in results if item[0] == selected_url)
-        else:
+        if provider_comparison_comparable and selected is not None:
             selected_url = selected.endpoint
             selected_result = next(item for item in results if item[0] == selected_url)
+        else:
+            # Never let incomparable economic samples choose the provider.
+            # Prefer a healthy bootstrap endpoint; otherwise retain the first
+            # healthy completed endpoint as an operational fallback.
+            eligible = {
+                item.endpoint: item
+                for item in evidence
+                if item.economically_eligible
+            }
+            fallback_url = (
+                bootstrap_url if bootstrap_url in eligible
+                else next((item[0] for item in results if item[0] in eligible), None)
+            )
+            selected_url = fallback_url or bootstrap_url or candidates[0]
+            selected_result = next(item for item in results if item[0] == selected_url)
+            selected = eligible.get(selected_url)
+            ordered = list(evidence)
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
 
@@ -4311,7 +4355,9 @@ class RuntimePrimaryScanFacade:
         )
 
         selected_telemetry["rpc"]["economic_selection"] = {
-            "mode": "read_only_economic",
+            "mode": "read_only_economic" if provider_comparison_comparable else "read_only_operational_fallback",
+            "economic_comparison_comparable": bool(provider_comparison_comparable),
+            "comparison_reason": str(provider_comparison_reason),
             "selected_endpoint": selected_url,
             "selected_provider": str(urlsplit(selected_url).hostname or ""),
             "candidates": [
@@ -4342,6 +4388,9 @@ class RuntimePrimaryScanFacade:
                 selected_telemetry.get("selected_provider_adaptive") or {}
             ),
             "provider_scan_symmetry": {
+                "economic_comparison_comparable": bool(provider_comparison_comparable),
+                "comparison_reason": str(provider_comparison_reason),
+                "cost_inputs_identical": bool(provider_comparison_comparable),
                 "route_universe_identical": route_universe_equal,
                 "size_ladder_identical": size_ladder_equal,
                 "token_size_ladder_identical": token_ladder_equal,
