@@ -11,15 +11,15 @@ ROUTER = "0x" + "55" * 20
 FEE_AUX = "0x" + (3000).to_bytes(32, "big").hex()
 
 
-def _legs(middle: str, *, first_aux: str = FEE_AUX, second_aux: str = FEE_AUX):
+def _legs(middle: str, amount: int = 5_000_000, *, first_aux: str = FEE_AUX, second_aux: str = FEE_AUX):
     return [
         {
             "dex": "univ3",
             "venue": ROUTER,
             "token_in": TOKEN_A,
             "token_out": middle,
-            "amount_in": "5000000",
-            "min_out": "5000500",
+            "amount_in": str(amount),
+            "min_out": str(amount + 500),
             "data": first_aux,
         },
         {
@@ -27,8 +27,8 @@ def _legs(middle: str, *, first_aux: str = FEE_AUX, second_aux: str = FEE_AUX):
             "venue": ROUTER,
             "token_in": middle,
             "token_out": TOKEN_A,
-            "amount_in": "5000500",
-            "min_out": "5000800",
+            "amount_in": str(amount + 500),
+            "min_out": str(amount + 800),
             "data": second_aux,
         },
     ]
@@ -76,7 +76,7 @@ def test_gas_adjusted_split_frontier_finds_better_partition_but_never_grants_aut
             _candidate("route-b", 5_000_000, 1_000_000, _legs(TOKEN_Y)),
         ]),
         (10_000_000, [
-            _candidate("route-c", 10_000_000, 1_500_000, _legs(TOKEN_Z), gas_token="1600000"),
+            _candidate("route-c", 10_000_000, 1_500_000, _legs(TOKEN_Z, 10_000_000), gas_token="1600000"),
         ]),
     )
 
@@ -127,7 +127,7 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
                 _candidate("route-b-shared-pool", 5_000_000, 1_000_000, shared_route_b),
             ]),
             (10_000_000, [
-                _candidate("route-c", 10_000_000, 2_000_000, _legs(TOKEN_Z)),
+                _candidate("route-c", 10_000_000, 2_000_000, _legs(TOKEN_Z, 10_000_000)),
             ]),
         ),
         chain_id=1,
