@@ -4244,6 +4244,10 @@ class RuntimePrimaryScanFacade:
 
                             cache=adaptive_cache,
 
+                            shared_gas_price_consensus=shared_gas_consensus,
+
+                            shared_flashloan_fee_observation=shared_flashloan_fee,
+
                         ),
 
                         timeout=selection_timeout_s,
