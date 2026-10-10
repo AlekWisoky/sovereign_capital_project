@@ -10,6 +10,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     RuntimePrimaryScanFacade,
     _candidate_economic_after_cost_for_sizing,
     _candidate_sizing_sort_key,
+    _merge_size_economic_matrices,
     _selected_provider_frontier_slice_offset,
 )
 
@@ -147,6 +148,22 @@ def test_selected_provider_full_scan_parallelism_is_bounded(monkeypatch):
 
     monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", "invalid")
     assert runtime._selected_provider_full_scan_parallelism() == 3
+
+
+def test_frontier_seed_defaults_span_low_mid_and_high_authorized_sizes(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    monkeypatch.delenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS", raising=False)
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES", "3")
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 1500, 2000, 4000, 8000, 16000],
+    )
+
+    # The high probe can cross fixed gas/flash-loan break-even when 1x cannot.
+    assert runtime._selected_provider_frontier_seed_amounts(1000) == [
+        500, 2000, 8000
+    ]
 
 
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
@@ -462,6 +479,69 @@ execution:
     assert cfg.execution.executor_address == "0x1111111111111111111111111111111111111111"
     assert cfg.execution.profit_to == "0x2222222222222222222222222222222222222222"
 
+
+
+def test_size_economic_matrix_merges_frontier_and_requote_evidence():
+    verified = {
+        "amount_in": "1000",
+        "quote_requests": 10,
+        "quote_successes": 8,
+        "quote_failure_reasons": {"timeout": 2},
+        "candidates": [{
+            "route_id": "route-a",
+            "amount_in": "1000",
+            "revalidated": True,
+            "authoritative": True,
+            "valid": True,
+            "diagnostic_only": False,
+            "reason": "verified",
+            "after_cost_profit_wei": "10",
+            "economic_after_cost_profit_wei": "10",
+        }],
+    }
+    sampled = {
+        "amount_in": "1000",
+        "quote_requests": 4,
+        "quote_successes": 3,
+        "quote_failure_reasons": {"rate_limit": 1},
+        "frontier_seed_sampled": True,
+        "frontier_seed_edge_offset": 96,
+        "frontier_seed_edge_cap": 32,
+        "frontier_seed_graph_edge_count": 160,
+        "frontier_seed_rotation_index": 3,
+        "candidates": [{
+            "route_id": "route-b",
+            "amount_in": "1000",
+            "revalidated": True,
+            "authoritative": False,
+            "valid": False,
+            "diagnostic_only": True,
+            "reason": "profit_after_costs_not_positive",
+            "after_cost_profit_wei": "0",
+            "economic_after_cost_profit_wei": "-5",
+        }],
+    }
+
+    merged = _merge_size_economic_matrices([verified], [sampled])
+
+    assert len(merged) == 1
+    row = merged[0]
+    assert row["quote_requests"] == 14
+    assert row["quote_successes"] == 11
+    assert row["quote_failures"] == 3
+    assert row["route_ids"] == ["route-a", "route-b"]
+    assert row["selected_route_id"] == "route-a"
+    assert row["economic_optimum_route_id"] == "route-a"
+    assert row["evidence_sources"] == [
+        "selected_provider_size_scan", "sampled_graph_frontier"
+    ]
+    assert row["frontier_seed_samples"] == [{
+        "edge_offset": 96,
+        "edge_cap": 32,
+        "graph_edge_count": 160,
+        "rotation_index": 3,
+    }]
+    assert row["execution_authority_granted"] is False
 
 
 def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():
