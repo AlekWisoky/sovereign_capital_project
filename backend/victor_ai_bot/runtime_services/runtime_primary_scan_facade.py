@@ -3165,6 +3165,22 @@ class RuntimePrimaryScanFacade:
                         task_chunk_indices,
                         full_scan_telemetry["scan_errors"],
                     )
+                    publish_rpc_selection_progress(
+                        "selected_provider_full_scan",
+                        details={
+                            "active_chunks": [],
+                            "chunks_completed": sum(
+                                value == "completed" for value in chunk_statuses.values()
+                            ),
+                            "chunks_timed_out": sum(
+                                value == "timed_out" for value in chunk_statuses.values()
+                            ),
+                            "chunks_failed": sum(
+                                value == "failed" for value in chunk_statuses.values()
+                            ),
+                            "edges_covered": int(full_scan_telemetry["edges_covered"]),
+                        },
+                    )
 
             if callable(slice_fn):
                 if selected_provider_url == bootstrap_url:
