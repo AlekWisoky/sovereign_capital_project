@@ -46,7 +46,11 @@ def _pool_key_inputs(leg: Mapping[str, Any]) -> tuple[str, str, str, str] | None
     token_out = str(leg.get("token_out") or "").strip().lower()
     venue = str(leg.get("venue") or "").strip().lower()
     aux = str(leg.get("data") or leg.get("aux") or "0x").strip().lower()
-    if not protocol or not token_in or not token_out or token_in == token_out:
+    if not protocol:
+        return None
+    if not token_in or not token_out:
+        return None
+    if token_in == token_out:
         return None
     return protocol, venue, "|".join(sorted((token_in, token_out))), aux
 
@@ -136,25 +140,44 @@ def _candidate_numeric_values(candidate: Mapping[str, Any]) -> Dict[str, int] | 
     return values
 
 
+def _positive_amount_and_gross(values: Mapping[str, int]) -> bool:
+    return values["amount"] > 0 and values["gross"] > 0
+
+
+def _fee_and_repayment_are_valid(
+    candidate: Mapping[str, Any], values: Mapping[str, int]
+) -> bool:
+    return values["fee"] >= 0 and candidate.get("repayment_valid") is True
+
+
 def _candidate_has_repay_and_gross_evidence(
     candidate: Mapping[str, Any], values: Mapping[str, int]
 ) -> bool:
     return bool(
-        values["amount"] > 0
-        and values["gross"] > 0
-        and values["fee"] >= 0
-        and candidate.get("repayment_valid") is True
+        _positive_amount_and_gross(values)
+        and _fee_and_repayment_are_valid(candidate, values)
     )
+
+
+def _native_gas_totals_are_consistent(values: Mapping[str, int]) -> bool:
+    if values["native_cost"] <= 0:
+        return False
+    if values["l2_gas"] <= 0:
+        return False
+    if values["l1_fee"] < 0:
+        return False
+    return values["native_cost"] == values["l2_gas"] + values["l1_fee"]
+
+
+def _gas_units_are_estimable(values: Mapping[str, int]) -> bool:
+    return values["gas_units"] > SHARED_EXECUTION_OVERHEAD_GAS_UNITS
 
 
 def _candidate_has_converted_gas_evidence(values: Mapping[str, int]) -> bool:
     return bool(
-        values["gas_token"] > 0
-        and values["native_cost"] > 0
-        and values["l2_gas"] > 0
-        and values["gas_units"] > SHARED_EXECUTION_OVERHEAD_GAS_UNITS
-        and values["l1_fee"] >= 0
-        and values["native_cost"] == values["l2_gas"] + values["l1_fee"]
+        _native_gas_totals_are_consistent(values)
+        and _gas_units_are_estimable(values)
+        and values["gas_token"] > 0
     )
 
 
@@ -170,7 +193,13 @@ def _route_token_pair_is_valid(
     token_out: str,
     expected_token_in: str,
 ) -> bool:
-    return bool(token_in and token_out and token_in != token_out and token_in == expected_token_in)
+    if not token_in:
+        return False
+    if not token_out:
+        return False
+    if token_in == token_out:
+        return False
+    return token_in == expected_token_in
 
 
 def _route_protocol_has_pool(protocol: str, pool_key: str | None) -> bool:
@@ -255,11 +284,11 @@ def _candidate_evidence_rank(row: Mapping[str, Any]) -> tuple[int, int, int, int
 def _candidate_costs_are_admissible(
     candidate: Mapping[str, Any], values: Mapping[str, int], chain_id: int
 ) -> bool:
-    return bool(
-        _candidate_has_repay_and_gross_evidence(candidate, values)
-        and _candidate_has_converted_gas_evidence(values)
-        and _base_l1_fee_is_exact(candidate, chain_id)
-    )
+    if not _candidate_has_repay_and_gross_evidence(candidate, values):
+        return False
+    if not _candidate_has_converted_gas_evidence(values):
+        return False
+    return _base_l1_fee_is_exact(candidate, chain_id)
 
 
 def _normalize_candidate(
