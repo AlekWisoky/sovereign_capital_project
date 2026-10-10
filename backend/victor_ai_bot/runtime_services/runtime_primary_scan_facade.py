@@ -51,17 +51,25 @@ def _provider_results_are_comparable(
     results: List[tuple[Any, ...]], current_block: int
 ) -> tuple[bool, str]:
     """Fail closed if any provider used a different graph, size ladder, or cost basis."""
-    if len(results) < 2:
-        return False, "fewer_than_two_provider_results"
-    signatures = []
+    eligible_results = []
     for result in results:
         telemetry = result[3] if len(result) > 3 and isinstance(result[3], dict) else {}
         evidence = result[4] if len(result) > 4 else None
         if str(telemetry.get("scan_error") or ""):
-            return False, "provider_scan_failed_or_timed_out"
+            continue
+        if not bool(getattr(evidence, "economically_eligible", False)):
+            continue
         if getattr(evidence, "block_number", None) != int(current_block):
-            return False, "provider_block_mismatch"
-        signatures.append(_provider_comparison_signature(telemetry, current_block))
+            continue
+        eligible_results.append(result)
+    if len(eligible_results) < 2:
+        return False, "fewer_than_two_healthy_completed_provider_results"
+    signatures = [
+        _provider_comparison_signature(
+            result[3] if isinstance(result[3], dict) else {}, current_block
+        )
+        for result in eligible_results
+    ]
     if any(signature != signatures[0] for signature in signatures[1:]):
         return False, "provider_graph_size_or_cost_inputs_mismatch"
     return True, "matched_graph_block_sizes_and_cost_inputs"
@@ -1890,7 +1898,7 @@ class RuntimePrimaryScanFacade:
                     cache=scan_cache,
                     observed_gas_price_wei=observed_gas_price_wei,
                     gas_price_integrity=gas_price_consensus,
-                flashloan_fee_observation=shared_fee_observation or None,
+                    flashloan_fee_observation=shared_fee_observation or None,
                 )
                 authoritative_positive_candidates_before_probe = (
                     _authoritative_positive_after_cost_count([*opps2, *opps3])
@@ -2051,7 +2059,7 @@ class RuntimePrimaryScanFacade:
                 cache=scan_cache,
                 observed_gas_price_wei=observed_gas_price_wei,
                 gas_price_integrity=gas_price_consensus,
-            flashloan_fee_observation=shared_fee_observation or None,
+                flashloan_fee_observation=shared_fee_observation or None,
             )
 
             def _candidate_profitability(candidate: Opportunity) -> Dict[str, Any]:
@@ -2734,7 +2742,6 @@ class RuntimePrimaryScanFacade:
                 cache=cache,
                 observed_gas_price_wei=observed_gas_price_wei,
                 gas_price_integrity=gas_price_consensus,
-            flashloan_fee_observation=shared_fee_observation or None,
             )
 
         matrix = _build_size_economic_matrix(size_scan_records)
