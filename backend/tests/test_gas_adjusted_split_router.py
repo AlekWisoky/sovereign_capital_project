@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from victor_ai_bot.gas_adjusted_split_router import build_gas_adjusted_split_frontier
+from victor_ai_bot.gas_adjusted_split_router import (
+    _prepare_candidate_buckets,
+    build_gas_adjusted_split_frontier,
+)
 
 
 TOKEN_A = "0x" + "11" * 20
@@ -119,10 +122,7 @@ def test_candidate_shortlist_keeps_near_best_pool_diversity_not_raw_router_count
             _candidate("economically-distant", 5_000_000, 900_000, _legs(TOKEN_Z)),
         ])
     )
-    buckets = __import__(
-        "victor_ai_bot.gas_adjusted_split_router",
-        fromlist=["_prepare_candidate_buckets"],
-    )._prepare_candidate_buckets(
+    buckets = _prepare_candidate_buckets(
         matrix,
         chain_id=1,
         max_per_amount=2,
