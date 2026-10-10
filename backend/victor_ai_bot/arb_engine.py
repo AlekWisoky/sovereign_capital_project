@@ -242,6 +242,14 @@ def _edge_pool_identity(edge: Edge) -> str | None:
     return f"{protocol}:pair:{pair}:{dimensions}"
 
 
+def _edge_directed_pair_identity(edge: Edge) -> tuple[str, str] | None:
+    token_in = str(getattr(edge, "token_in", "") or "").strip().lower()
+    token_out = str(getattr(edge, "token_out", "") or "").strip().lower()
+    if not token_in or not token_out or token_in == token_out:
+        return None
+    return token_in, token_out
+
+
 def _edge_router_identity(edge: Edge) -> str | None:
     """Return router identity, excluding protocols whose venue is the pool."""
     protocol = _edge_protocol_identity(edge)
@@ -277,12 +285,45 @@ def _select_three_leg_frontier_edges(
     active_routers_by_token: Dict[str, set[str]],
     per_token_cap: int,
     global_cap: int,
+    quoted_output_by_edge: Optional[Dict[str, int]] = None,
 ) -> Tuple[List[Edge], Dict[str, List[Edge]]]:
-    """Greedily select bounded edges, recomputing diversity after each pick."""
+    """Select an economically informed, diversity-aware bounded edge frontier.
+
+    Raw output amounts are comparable only for the same directed token pair.
+    Quote quality is ranked within each directed pair, then used as the primary
+    priority. Protocol, pool and router novelty are tie-breakers, not a substitute
+    for economics. Full-cycle after-cost ranking occurs after routes are quoted.
+    """
     pending = list(candidates)
     selected: List[Edge] = []
-    by_token: Dict[str, List[Edge]] = {}
     selected_by_token: Dict[str, List[Edge]] = {}
+    quoted = {
+        str(key): int(value)
+        for key, value in dict(quoted_output_by_edge or {}).items()
+        if int(value) > 0
+    }
+    pair_outputs: Dict[tuple[str, str], List[int]] = {}
+    for _order, edge in pending:
+        pair = _edge_directed_pair_identity(edge)
+        output = quoted.get(edge_key(edge))
+        if pair is not None and output is not None:
+            pair_outputs.setdefault(pair, []).append(output)
+
+    pair_percentile: Dict[tuple[str, str, str], int] = {}
+    for pair, outputs in pair_outputs.items():
+        unique_outputs = sorted(set(outputs))
+        for _order, edge in pending:
+            if _edge_directed_pair_identity(edge) != pair:
+                continue
+            output = quoted.get(edge_key(edge))
+            if output is None:
+                continue
+            if len(unique_outputs) <= 1:
+                rank_bps = 5_000
+            else:
+                rank = unique_outputs.index(output) if output in unique_outputs else 0
+                rank_bps = int(rank * 10_000 / (len(unique_outputs) - 1))
+            pair_percentile[(pair[0], pair[1], edge_key(edge))] = rank_bps
 
     while pending and len(selected) < max(0, int(global_cap)):
         best_index = None
@@ -311,7 +352,12 @@ def _select_three_leg_frontier_edges(
                 active_pools=pools,
                 active_routers=routers,
             )
-            score = (protocol_new, pool_new, router_new, -int(order))
+            pair = _edge_directed_pair_identity(edge)
+            quote_quality = (
+                pair_percentile.get((pair[0], pair[1], edge_key(edge)), 0)
+                if pair is not None else 0
+            )
+            score = (quote_quality, protocol_new, pool_new, router_new, -int(order))
             if best_score is None or score > best_score:
                 best_index = candidate_index
                 best_score = score
@@ -323,9 +369,7 @@ def _select_three_leg_frontier_edges(
         selected_by_token.setdefault(token, []).append(edge)
         selected.append(edge)
 
-    # Preserve insertion order for downstream adjacency construction.
-    by_token = {token: list(items) for token, items in selected_by_token.items()}
-    return selected, by_token
+    return selected, {token: list(items) for token, items in selected_by_token.items()}
 
 
 async def quote_edge(
@@ -1750,10 +1794,58 @@ async def find_two_leg_opportunities(
             "scan_edges_selected": int(metrics.get("scan_edges_selected", len(edges))),
             "scan_edges_capped": int(metrics.get("scan_edges_capped", 0)),
         })
-    # Rank the complete bounded scan result, then enforce the caller's output
-    # cap. Discovery order must not hard-stop candidate generation.
-    opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
+    # Rank completed routes by signed after-cost economics before gross
+    # fallback. Validation authority remains a downstream execution gate.
+    opps.sort(key=_opportunity_economic_sort_key, reverse=True)
     return opps[: max(1, int(max_opps))]
+
+
+def _opportunity_economic_sort_key(opportunity: Opportunity) -> tuple[int, int, int, int, int, str]:
+    """Rank routes by signed net value, keeping gross only as a fallback.
+
+    This is a discovery-priority key, not an execution-authority check.
+    """
+    meta_value = getattr(opportunity, "meta", {}) or {}
+    meta = meta_value if isinstance(meta_value, dict) else {}
+    state = meta.get("profitability")
+    if not isinstance(state, dict):
+        state = meta.get("profitability_diagnostic")
+    state = state if isinstance(state, dict) else {}
+    economic = None
+    for key in (
+        "economic_profit_after_costs_wei",
+        "economic_after_cost_profit_wei",
+        "profit_after_costs_wei",
+        "after_cost_profit_wei",
+    ):
+        raw = state.get(key, meta.get(key))
+        if raw not in (None, ""):
+            try:
+                economic = int(raw)
+                break
+            except (TypeError, ValueError, OverflowError):
+                continue
+    try:
+        gross = int(getattr(opportunity, "expected_profit_raw", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        gross = 0
+    verified = bool(
+        state.get("revalidated") is True
+        and state.get("authoritative") is True
+        and state.get("valid") is True
+        and state.get("repayment_valid") is True
+    )
+    route_id = str(
+        getattr(opportunity, "route_id", "") or getattr(opportunity, "id", "") or ""
+    )
+    return (
+        int(economic is not None),
+        int(economic or 0),
+        int(verified and economic is not None and economic > 0),
+        int(state.get("revalidated") is True),
+        gross,
+        route_id,
+    )
 
 
 def _prioritize_three_leg_adjacency(
@@ -1968,6 +2060,11 @@ async def find_three_leg_opportunities(
     # Quote viability and cycle closure are hard gates. The selector recomputes
     # protocol, pool, and router novelty after each pick so duplicate diversity
     # gains cannot consume the bounded frontier quota.
+    quoted_output_by_edge = {
+        key: int(value[0])
+        for key, value in qmap1_3.items()
+        if value and int(value[0]) > 0
+    }
     frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
         frontier_candidates,
         active_protocols_by_token=active_protocols_by_token,
@@ -1975,6 +2072,7 @@ async def find_three_leg_opportunities(
         active_routers_by_token=active_routers_by_token,
         per_token_cap=frontier_per_token,
         global_cap=frontier_global,
+        quoted_output_by_edge=quoted_output_by_edge,
     )
 
     frontier_adj: Dict[str, List[Edge]] = {
@@ -1984,6 +2082,20 @@ async def find_three_leg_opportunities(
         frontier_adj.setdefault(token, []).extend(items)
 
     if telemetry is not None:
+        active_directed_pairs = {
+            (str(edge.token_in).lower(), str(edge.token_out).lower())
+            for items in adj.values() for edge in items
+        }
+        frontier_directed_pairs = {
+            pair for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        }
+        new_directed_pairs = frontier_directed_pairs - active_directed_pairs
+        selected_quote_percentiles = [
+            pair_percentile.get((pair[0], pair[1], edge_key(edge)), 0)
+            for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        ]
         new_protocols = {
             (edge.token_in, protocol)
             for edge in frontier_selected
@@ -2025,6 +2137,14 @@ async def find_three_leg_opportunities(
             "protocol_diverse_edges": int(len(new_protocols)),
             "pool_diverse_edges": int(len(new_pools)),
             "router_diverse_edges": int(len(new_routers)),
+            "directed_pair_diverse_edges": int(len(new_directed_pairs)),
+            "directed_pair_identity": "token_in->token_out",
+            "quote_quality_priority_used": bool(quoted_output_by_edge),
+            "quote_quality_directed_pair_groups": int(len(pair_outputs)),
+            "selected_mean_quote_quality_percentile_bps": (
+                int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
+                if selected_quote_percentiles else None
+            ),
         }
 
     # Iterate first edges under a bounded budget. Once a route group is in
