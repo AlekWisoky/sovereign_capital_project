@@ -863,6 +863,49 @@ def _merge_size_economic_matrices(
     return sorted(merged, key=lambda row: int(row.get("amount_in") or 0))
 
 
+def _merge_route_group_schedule_telemetry(
+    target: Dict[str, Any],
+    source: Dict[str, Any],
+) -> None:
+    """Aggregate scheduler counters per block without inflating the scan method."""
+    incoming = source.get("route_group_schedule")
+    if not isinstance(incoming, dict):
+        return
+    block_number = int(incoming.get("block_number") or 0)
+    by_block = dict(target.get("route_group_schedule_by_block") or {})
+    block_key = str(block_number)
+    prior = target.get("route_group_schedule")
+    if (
+        isinstance(prior, dict)
+        and int(prior.get("block_number") or 0) == block_number
+    ):
+        by_block.setdefault(block_key, dict(prior))
+    schedule = dict(by_block.get(block_key) or {})
+    for count_key in (
+        "groups_prepared",
+        "groups_completed",
+        "quote_batches_completed_and_consumed",
+        "duplicate_quote_batches_coalesced",
+        "waves_started",
+    ):
+        schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
+            incoming.get(count_key, 0) or 0
+        )
+    schedule["parallelism_limit"] = max(
+        int(schedule.get("parallelism_limit", 0) or 0),
+        int(incoming.get("parallelism_limit", 0) or 0),
+    )
+    schedule["block_number"] = block_number
+    schedule["ordering"] = str(incoming.get("ordering") or "")
+    schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
+        schedule.get("completed_wave_results_consumed_before_budget_stop", True)
+        and incoming.get("completed_wave_results_consumed_before_budget_stop") is True
+    )
+    by_block[block_key] = schedule
+    target["route_group_schedule_by_block"] = by_block
+    target["route_group_schedule"] = dict(schedule)
+
+
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
 
@@ -1905,45 +1948,7 @@ class RuntimePrimaryScanFacade:
                             target["size_economic_diagnostics"].extend(
                                 list(source.get("size_economic_diagnostics") or [])
                             )
-                        if isinstance(source.get("route_group_schedule"), dict):
-                            # Aggregate only within the same block. A long market
-                            # pipeline can cross a block boundary between size probes.
-                            incoming = source["route_group_schedule"]
-                            block_number = int(incoming.get("block_number") or 0)
-                            by_block = dict(target.get("route_group_schedule_by_block") or {})
-                            block_key = str(block_number)
-                            # Seed the map with the base-size scan before adding
-                            # alternate-size probes for this same block.
-                            prior = target.get("route_group_schedule")
-                            if (
-                                isinstance(prior, dict)
-                                and int(prior.get("block_number") or 0) == block_number
-                            ):
-                                by_block.setdefault(block_key, dict(prior))
-                            schedule = dict(by_block.get(block_key) or {})
-                            for count_key in (
-                                "groups_prepared",
-                                "groups_completed",
-                                "quote_batches_completed_and_consumed",
-                                "duplicate_quote_batches_coalesced",
-                                "waves_started",
-                            ):
-                                schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
-                                    incoming.get(count_key, 0) or 0
-                                )
-                            schedule["parallelism_limit"] = max(
-                                int(schedule.get("parallelism_limit", 0) or 0),
-                                int(incoming.get("parallelism_limit", 0) or 0),
-                            )
-                            schedule["block_number"] = block_number
-                            schedule["ordering"] = str(incoming.get("ordering") or "")
-                            schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
-                                schedule.get("completed_wave_results_consumed_before_budget_stop", True)
-                                and incoming.get("completed_wave_results_consumed_before_budget_stop") is True
-                            )
-                            by_block[block_key] = schedule
-                            target["route_group_schedule_by_block"] = by_block
-                            target["route_group_schedule"] = dict(schedule)
+                        _merge_route_group_schedule_telemetry(target, source)
                         target["budget_exhausted_after_quote"] = bool(
                             target.get("budget_exhausted_after_quote", False)
                             or source.get("budget_exhausted_after_quote", False)
