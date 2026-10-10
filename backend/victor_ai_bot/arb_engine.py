@@ -1570,9 +1570,6 @@ async def find_two_leg_opportunities(
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
     route_budget_exhausted = False
-    route_eval_started = time.perf_counter()
-    route_groups_evaluated = 0
-    route_budget_exhausted = False
     prepared_route_groups: List[Dict[str, Any]] = []
     # Interleave token/protocol families before budgeting. This is only a
     # scheduling fairness policy; route economics still determine ranking.
