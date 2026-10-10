@@ -170,7 +170,8 @@ async def test_scan_primary_opportunities_does_not_swallow_unexpected_scan_bug(m
     assert trace[-1]["function"] == "boom"
     assert trace[-1]["filename"] == "test_runtime_primary_scan_facade_extraction.py"
     assert trace[-1]["line"] > 0
-    assert "unexpected scan bug" not in str(trace)
+    assert set(trace[-1]) == {"module", "filename", "function", "line"}
+    assert all("locals" not in frame and "source" not in frame for frame in trace)
 
 
 
