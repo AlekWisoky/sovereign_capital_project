@@ -950,6 +950,36 @@ def _merge_route_group_schedule_telemetry(
 
 
 
+def _resolve_route_budget_deadlines(
+    started_at: float,
+    two_leg_budget_ms: int,
+    three_leg_budget_ms: int,
+    *,
+    two_leg_enabled: bool,
+    three_leg_enabled: bool,
+) -> tuple[int, int, int, float, float]:
+    """Resolve shared per-tick and family windows without resetting deadlines."""
+    total_ms = max(1, int(two_leg_budget_ms + three_leg_budget_ms))
+    two_window_ms = (
+        total_ms
+        if two_leg_enabled and not three_leg_enabled
+        else max(1, int(two_leg_budget_ms))
+    )
+    if two_leg_enabled and three_leg_enabled:
+        three_window_ms = max(1, total_ms - two_window_ms)
+    elif three_leg_enabled:
+        three_window_ms = total_ms
+    else:
+        three_window_ms = 0
+    return (
+        total_ms,
+        two_window_ms,
+        three_window_ms,
+        started_at + two_window_ms / 1000.0,
+        started_at + total_ms / 1000.0,
+    )
+
+
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
 
@@ -1734,34 +1764,25 @@ class RuntimePrimaryScanFacade:
             two_leg_route_budget_ms, three_leg_route_budget_ms = (
                 self._route_evaluation_budgets_ms()
             )
-            # Route-family deadlines are shared across every amount probe in this
-            # scan tick. A new notional must not reset the per-tick RPC budget.
+            # One shared per-tick clock is shared across every amount probe.
             route_budget_started = time.perf_counter()
             two_leg_family_enabled = bool(getattr(self.cfg.flags, "enable_two_leg_loops", True))
             three_leg_family_enabled = bool(
                 getattr(self.cfg.flags, "enable_three_leg_loops", False)
                 or getattr(self.cfg.flags, "enable_v3_triangular", False)
             )
-            total_route_budget_ms = max(
-                1, int(two_leg_route_budget_ms + three_leg_route_budget_ms)
-            )
-            # When triangles are disabled, let the two-leg frontier use the full
-            # route budget over its size ladder instead of stranding the triangle slice.
-            two_leg_budget_window_ms = (
-                total_route_budget_ms
-                if two_leg_family_enabled and not three_leg_family_enabled
-                else max(1, int(two_leg_route_budget_ms))
-            )
-            two_leg_route_deadline = (
-                route_budget_started + two_leg_budget_window_ms / 1000.0
-            )
-            three_leg_budget_window_ms = (
-                max(1, total_route_budget_ms - two_leg_budget_window_ms)
-                if two_leg_family_enabled and three_leg_family_enabled
-                else (total_route_budget_ms if three_leg_family_enabled else 0)
-            )
-            three_leg_route_deadline = (
-                route_budget_started + total_route_budget_ms / 1000.0
+            (
+                total_route_budget_ms,
+                two_leg_budget_window_ms,
+                three_leg_budget_window_ms,
+                two_leg_route_deadline,
+                three_leg_route_deadline,
+            ) = _resolve_route_budget_deadlines(
+                route_budget_started,
+                two_leg_route_budget_ms,
+                three_leg_route_budget_ms,
+                two_leg_enabled=two_leg_family_enabled,
+                three_leg_enabled=three_leg_family_enabled,
             )
 
             async def _run_size_scan(size_amount: int) -> tuple[List[Opportunity], List[Opportunity], Dict[str, Any], Dict[str, Any]]:
