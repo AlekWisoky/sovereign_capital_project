@@ -76,6 +76,20 @@ def _selected_provider_full_scan_chunk_order(
     return [(start + offset) % chunk_count for offset in range(chunk_count)]
 
 
+def _selected_provider_minimum_chunk_window_s(
+    *, total_budget_s: float, chunk_timeout_s: float
+) -> float:
+    """Do not start another chunk wave when the remaining deadline is too short.
+
+    The full-scan deadline is shared by all chunk waves. Reserve at least 75%
+    of the configured total (bounded to 4-8s) before starting a wave so a newly
+    enlarged per-route budget is not routinely cut off by a tiny tail deadline.
+    """
+    total = max(1.0, float(total_budget_s))
+    timeout = max(1.0, float(chunk_timeout_s))
+    return min(timeout, max(4.0, min(8.0, total * 0.75)))
+
+
 def _selected_provider_chunk_accounting(
     *,
     graph_edge_count: int,
@@ -3033,6 +3047,7 @@ class RuntimePrimaryScanFacade:
                     "edges_total": int(graph_edge_count),
                     "edges_covered": 0,
                     "budget_s": float(total_budget_s),
+                    "minimum_chunk_window_s": float(minimum_chunk_window_s),
                     "rotation_start_chunk": int(chunk_order[0]),
                     "chunk_order_preview": [
                         int(index) for index in chunk_order[: min(12, len(chunk_order))]
@@ -3154,6 +3169,11 @@ class RuntimePrimaryScanFacade:
             chunk_timeout_s = float(full_scan_telemetry["chunk_timeout_s"])
             chunk_parallelism = int(full_scan_telemetry["parallelism"])
 
+            minimum_chunk_window_s = _selected_provider_minimum_chunk_window_s(
+                total_budget_s=total_budget_s,
+                chunk_timeout_s=chunk_timeout_s,
+            )
+
             async def _run_selected_full_scan_chunks(scan_rpc: Any) -> None:
                 for batch_start in range(0, chunk_total, chunk_parallelism):
                     tasks = []
@@ -3165,10 +3185,11 @@ class RuntimePrimaryScanFacade:
                         remaining = total_budget_s - (
                             time.perf_counter() - full_scan_started
                         )
-                        # Observed rescue chunks take several seconds. Avoid launching
-                        # a slice with too little time to finish: wait_for cancellation
-                        # cleanup can otherwise consume the frontier's separate budget.
-                        if remaining < min(4.0, chunk_timeout_s):
+                        # The remaining deadline is shared by all waves. Do not
+                        # start a new chunk with a short tail window: once route budgets
+                        # are enlarged, cancelling late chunks can discard the candidates
+                        # they accumulated before cancellation.
+                        if remaining < minimum_chunk_window_s:
                             break
                         timeout_s = min(chunk_timeout_s, remaining)
                         chunk_statuses[int(chunk_index)] = "running"
