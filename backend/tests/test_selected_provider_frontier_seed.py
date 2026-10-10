@@ -380,6 +380,8 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         base_amount_in,
         base_opps,
         cache,
+        shared_gas_price_consensus=None,
+        shared_flashloan_fee_observation=None,
     ):
         probe_calls.append(list(base_opps))
         return list(base_opps), {

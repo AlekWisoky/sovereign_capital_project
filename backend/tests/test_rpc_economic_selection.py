@@ -111,6 +111,9 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
         def observe_quote_telemetry(self, url, **kwargs):
             self.telemetry.append((url, kwargs))
 
+        async def gas_price_consensus(self):
+            return {"gas_price_wei": 100, "status": "consensus", "observations": [], "anomalies": []}
+
         def snapshot(self):
             return {
                 "read": [
@@ -135,11 +138,23 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
 
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
-    runtime.cfg = SimpleNamespace()
+    runtime.cfg = SimpleNamespace(execution=SimpleNamespace(flash_provider="aave"))
     monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
 
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_fee_observation(*args, **kwargs):
+        return {"ok": True, "fee_bps": 9, "status": "ok"}
+
+    async def fake_token_amounts(*args, **kwargs):
+        return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
+
+    runtime._build_token_scan_amounts = fake_token_amounts
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.observe_flashloan_fee_bps",
+        fake_fee_observation,
+    )
 
     async def fake_scan(
         rpc,
@@ -157,6 +172,15 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
             {
                 "quotes": {"requests": 10, "successes": 10, "failure_reasons": {}},
                 "scan_latency_ms": 1.0,
+                "provider_comparison_cost_inputs": {
+                    "block_number": 123,
+                    "base_amount_in": str(int(amount_in)),
+                    "gas_price_wei": "100",
+                    "gas_price_status": "consensus",
+                    "flashloan_fee_bps": "9",
+                    "flashloan_fee_ok": True,
+                    "flashloan_fee_status": "ok",
+                },
                 "route_universe": {"edges_by_dex": {"univ3": 2}},
                 "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
                 "adaptive_size_discovery": {"amounts_scanned": ["1000", "2000"]},
@@ -287,6 +311,8 @@ async def test_rpc_selection_publishes_inflight_provider_progress(monkeypatch):
         base_amount_in,
         base_opps,
         cache,
+        shared_gas_price_consensus=None,
+        shared_flashloan_fee_observation=None,
     ):
         return list(base_opps), {
             "adaptive_size_discovery": {
@@ -388,6 +414,8 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
         base_amount_in,
         base_opps,
         cache,
+        shared_gas_price_consensus=None,
+        shared_flashloan_fee_observation=None,
     ):
         selected_probe_calls.append((rpc.url, list(base_opps), int(base_amount_in)))
         return [], {
@@ -512,6 +540,9 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
         def observe_quote_telemetry(self, url, **kwargs):
             self.telemetry.append((url, kwargs))
 
+        async def gas_price_consensus(self):
+            return {"gas_price_wei": 100, "status": "consensus", "observations": [], "anomalies": []}
+
         def snapshot(self):
             return {
                 "read": [
@@ -536,11 +567,23 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
 
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
-    runtime.cfg = SimpleNamespace()
+    runtime.cfg = SimpleNamespace(execution=SimpleNamespace(flash_provider="aave"))
     monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
 
     async def fake_discovery(rpc, *, current_block):
         return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_fee_observation(*args, **kwargs):
+        return {"ok": True, "fee_bps": 9, "status": "ok"}
+
+    async def fake_token_amounts(*args, **kwargs):
+        return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
+
+    runtime._build_token_scan_amounts = fake_token_amounts
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.observe_flashloan_fee_bps",
+        fake_fee_observation,
+    )
 
     async def fake_scan(
         rpc,
@@ -556,6 +599,15 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
         telemetry_sink.update({
             "quotes": {"requests": 10, "successes": 10, "failure_reasons": {}},
             "scan_latency_ms": 1.0,
+            "provider_comparison_cost_inputs": {
+                "block_number": 123,
+                "base_amount_in": str(int(amount_in)),
+                "gas_price_wei": "100",
+                "gas_price_status": "consensus",
+                "flashloan_fee_bps": "9",
+                "flashloan_fee_ok": True,
+                "flashloan_fee_status": "ok",
+            },
             "route_universe": {"edges_by_dex": {"univ3": 2}},
             "scan_sizing": {"amounts_by_token": {"weth": "1000"}},
             "adaptive_size_discovery": {"amounts_scanned": ["1000", "2000"]},
