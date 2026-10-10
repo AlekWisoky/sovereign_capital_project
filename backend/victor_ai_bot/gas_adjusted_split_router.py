@@ -7,7 +7,7 @@ not multiple independent cycles funded from partitions of one flash loan.
 """
 
 from dataclasses import dataclass
-from itertools import chain
+from itertools import chain, zip_longest
 from typing import Any, Dict, Iterator, List, Mapping, Sequence
 
 from .gas_adjusted_split_identity import (
@@ -69,14 +69,16 @@ def _iter_mapping_rows(rows: Any) -> Iterator[Mapping[str, Any]]:
     return (row for row in (rows or []) if isinstance(row, Mapping))
 
 
+def _candidate_rows(size_row: Mapping[str, Any]) -> Any:
+    return size_row.get("candidates", [])
+
+
 def _iter_quote_backed_candidates(
     size_matrix: Sequence[Mapping[str, Any]],
 ) -> Iterator[Mapping[str, Any]]:
     eligible_rows = filter(_is_quote_backed_size_row, size_matrix)
-    return chain.from_iterable(
-        _iter_mapping_rows(size_row.get("candidates", []))
-        for size_row in eligible_rows
-    )
+    rows = map(_candidate_rows, eligible_rows)
+    return chain.from_iterable(map(_iter_mapping_rows, rows))
 
 
 def _deduplicate_candidates(
@@ -422,13 +424,20 @@ def _collect_split_plans(
     return plans, evaluated, truncated
 
 
-def _round_robin_split_plans(
-    plans: Sequence[Mapping[str, Any]], max_plans: int
-) -> tuple[List[Dict[str, Any]], int, int]:
-    by_token: Dict[str, List[Dict[str, Any]]] = {}
+def _group_split_plans_by_token(
+    plans: Sequence[Mapping[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
     for plan in plans:
-        by_token.setdefault(str(plan.get("borrow_token") or ""), []).append(dict(plan))
-    for token_plans in by_token.values():
+        token = str(plan.get("borrow_token") or "")
+        grouped.setdefault(token, []).append(dict(plan))
+    return grouped
+
+
+def _sort_split_plans_by_net(
+    plans_by_token: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    for token_plans in plans_by_token.values():
         token_plans.sort(
             key=lambda row: (
                 int(row["economic_after_cost_profit_wei"]),
@@ -438,18 +447,33 @@ def _round_robin_split_plans(
             reverse=True,
         )
 
-    interleaved: List[Dict[str, Any]] = []
-    max_rank = max((len(rows) for rows in by_token.values()), default=0)
-    for rank in range(max_rank):
-        for token in sorted(by_token):
-            token_plans = by_token[token]
-            if rank < len(token_plans):
-                interleaved.append(token_plans[rank])
-    positive_count = sum(
-        int(row.get("economic_after_cost_profit_wei") or 0) > 0
-        for row in interleaved
-    )
-    return interleaved[:max(1, min(int(max_plans), 32))], len(interleaved), positive_count
+
+def _present_plans(plans: Sequence[Dict[str, Any] | None]):
+    return filter(None, plans)
+
+
+def _interleave_split_plans_by_token(
+    plans_by_token: Mapping[str, Sequence[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    token_order = sorted(plans_by_token)
+    ranked_lists = [plans_by_token[token] for token in token_order]
+    rank_groups = zip_longest(*ranked_lists, fillvalue=None)
+    return list(chain.from_iterable(map(_present_plans, rank_groups)))
+
+
+def _count_positive_split_plans(plans: Sequence[Mapping[str, Any]]) -> int:
+    return sum(int(row.get("economic_after_cost_profit_wei") or 0) > 0 for row in plans)
+
+
+def _round_robin_split_plans(
+    plans: Sequence[Mapping[str, Any]], max_plans: int
+) -> tuple[List[Dict[str, Any]], int, int]:
+    grouped = _group_split_plans_by_token(plans)
+    _sort_split_plans_by_net(grouped)
+    interleaved = _interleave_split_plans_by_token(grouped)
+    positive_count = _count_positive_split_plans(interleaved)
+    limit = max(1, min(int(max_plans), 32))
+    return interleaved[:limit], len(interleaved), positive_count
 
 
 def build_gas_adjusted_split_frontier(
