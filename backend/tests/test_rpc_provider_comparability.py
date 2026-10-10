@@ -1,21 +1,21 @@
 from __future__ import annotations
 
+from typing import Any
+
 from victor_ai_bot.rpc_economic_selector import RpcEconomicEvidence
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _provider_results_are_comparable,
 )
 
 
-def _provider_row(
-    endpoint: str,
-    *,
-    block: int = 123,
-    amount_ladder: tuple[str, ...] = ("1000",),
-    gas_price: str = "100",
-    fee_bps: str = "5",
-    healthy: bool = True,
-    scan_error: str = "",
-):
+def _provider_row(endpoint: str, options: dict[str, Any] | None = None):
+    options = dict(options or {})
+    block = int(options.get("block", 123))
+    amount_ladder = tuple(options.get("amount_ladder", ("1000",)))
+    gas_price = str(options.get("gas_price", "100"))
+    fee_bps = str(options.get("fee_bps", "5"))
+    healthy = bool(options.get("healthy", True))
+    scan_error = str(options.get("scan_error", ""))
     telemetry = {
         "route_universe": {
             "configured_token_count": 4,
@@ -59,14 +59,14 @@ def test_provider_economics_requires_matching_block_graph_size_and_costs():
     )
 
     wrong_size = _provider_row(
-        "https://rpc-b.example", amount_ladder=("1000", "2000")
+        "https://rpc-b.example", {"amount_ladder": ("1000", "2000")}
     )
     assert _provider_results_are_comparable([a, wrong_size], 123) == (
         False,
         "provider_graph_size_or_cost_inputs_mismatch",
     )
 
-    wrong_cost = _provider_row("https://rpc-b.example", gas_price="101")
+    wrong_cost = _provider_row("https://rpc-b.example", {"gas_price": "101"})
     assert _provider_results_are_comparable([a, wrong_cost], 123) == (
         False,
         "provider_graph_size_or_cost_inputs_mismatch",
@@ -75,21 +75,22 @@ def test_provider_economics_requires_matching_block_graph_size_and_costs():
 
 def test_provider_economics_fails_closed_for_unusable_costs_or_incomplete_race():
     a = _provider_row("https://rpc-a.example")
-    unavailable = _provider_row("https://rpc-b.example", gas_price="")
+    unavailable = _provider_row("https://rpc-b.example", {"gas_price": ""})
     assert _provider_results_are_comparable([a, unavailable], 123) == (
         False,
         "shared_provider_cost_inputs_unavailable",
     )
 
     failed = _provider_row(
-        "https://rpc-b.example", healthy=False, scan_error="provider_scan_timeout"
+        "https://rpc-b.example",
+        {"healthy": False, "scan_error": "provider_scan_timeout"},
     )
     assert _provider_results_are_comparable([a, failed], 123) == (
         False,
         "fewer_than_two_healthy_completed_provider_results",
     )
 
-    different_block = _provider_row("https://rpc-b.example", block=124)
+    different_block = _provider_row("https://rpc-b.example", {"block": 124})
     assert _provider_results_are_comparable([a, different_block], 123) == (
         False,
         "fewer_than_two_healthy_completed_provider_results",
