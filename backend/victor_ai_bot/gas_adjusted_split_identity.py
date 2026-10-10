@@ -174,11 +174,11 @@ def _gas_units_are_estimable(values: Mapping[str, int]) -> bool:
 
 
 def _candidate_has_converted_gas_evidence(values: Mapping[str, int]) -> bool:
-    return bool(
-        _native_gas_totals_are_consistent(values)
-        and _gas_units_are_estimable(values)
-        and values["gas_token"] > 0
-    )
+    if not _native_gas_totals_are_consistent(values):
+        return False
+    if not _gas_units_are_estimable(values):
+        return False
+    return values["gas_token"] > 0
 
 
 def _base_l1_fee_is_exact(candidate: Mapping[str, Any], chain_id: int) -> bool:
