@@ -255,6 +255,8 @@ def _evaluate_split(parts: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     net = gross - fee - gas_token_cost
     return {
         "amount_in": str(amount),
+        "economic_comparison_scope": "within_borrow_token_only",
+        "profit_units": "borrow_token_wei",
         "gross_profit_wei": str(gross),
         "flashloan_fee_wei": str(fee),
         "gas_cost_wei_estimate": str(native_cost),
@@ -432,19 +434,34 @@ def build_gas_adjusted_split_frontier(
                 best_for_target["selection_basis"] = "gas_adjusted_split_economic_diagnostic"
                 plans.append(best_for_target)
 
-    plans.sort(
-        key=lambda row: (
-            int(row["economic_after_cost_profit_wei"]),
-            int(row.get("improvement_over_best_single_wei") or 0),
-            int(row.get("gross_profit_wei") or 0),
-        ),
-        reverse=True,
-    )
-    plans = plans[:max(1, min(int(max_plans), 32))]
+    # Token wei is only comparable inside one borrow-token group. Rank each
+    # token's own frontier by net P&L, then interleave groups so arbitrary token
+    # addresses/decimal scales cannot crowd other assets out of the output.
+    plans_by_token: Dict[str, List[Dict[str, Any]]] = {}
+    for plan in plans:
+        plans_by_token.setdefault(str(plan.get("borrow_token") or ""), []).append(plan)
+    for token_plans in plans_by_token.values():
+        token_plans.sort(
+            key=lambda row: (
+                int(row["economic_after_cost_profit_wei"]),
+                int(row.get("improvement_over_best_single_wei") or 0),
+                int(row.get("gross_profit_wei") or 0),
+            ),
+            reverse=True,
+        )
+    interleaved: List[Dict[str, Any]] = []
+    max_rank = max((len(rows) for rows in plans_by_token.values()), default=0)
+    for rank in range(max_rank):
+        for token in sorted(plans_by_token):
+            token_plans = plans_by_token[token]
+            if rank < len(token_plans):
+                interleaved.append(token_plans[rank])
+    plans = interleaved[:max(1, min(int(max_plans), 32))]
     return {
         "enabled": True,
         "mode": "bounded_gas_adjusted_split_diagnostic",
         "chain_id": int(chain_id),
+        "ranking_scope": "within_borrow_token_only_then_round_robin_across_tokens",
         "eligible_route_amount_evidence": int(eligible_routes),
         "split_combinations_evaluated": int(evaluated),
         "search_states_limit_per_target": int(search_limit),
