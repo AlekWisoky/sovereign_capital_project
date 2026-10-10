@@ -1422,6 +1422,7 @@ async def find_two_leg_opportunities(
         )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
+    route_budget_exhausted = False
     for e1 in edges:
         # Preserve the bounded route-evaluation budget, but always allow the
         # first viable reverse-pair group after first-leg quote acquisition.
@@ -1429,6 +1430,7 @@ async def find_two_leg_opportunities(
             route_groups_evaluated > 0
             and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
         ):
+            route_budget_exhausted = True
             break
         # look for e2 that returns to start
         revs = by_pair.get((e1.token_out, e1.token_in), [])
@@ -1691,11 +1693,11 @@ async def find_two_leg_opportunities(
             (time.perf_counter() - route_eval_started) * 1000.0
         )
         telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
-        telemetry["budget_exhausted_after_quote"] = bool(
-            route_groups_evaluated == 0
-            and bool(edges)
-            and bool(qmap1)
+        telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
+        telemetry["route_budget_stop_reason"] = (
+            "time_budget" if route_budget_exhausted else "completed"
         )
+        telemetry["budget_exhausted_after_quote"] = bool(route_budget_exhausted)
 
     snapshot = scan_efficiency_snapshot(
         elapsed_ms=(time.perf_counter() - t_start) * 1000.0,
@@ -1900,6 +1902,7 @@ async def find_three_leg_opportunities(
         )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
+    route_budget_exhausted = False
 
     # Adaptive frontier: first-leg quotes have already been acquired for the
     # complete graph. Use a small supplemental budget to admit pruned edges only
@@ -2024,13 +2027,15 @@ async def find_three_leg_opportunities(
             "router_diverse_edges": int(len(new_routers)),
         }
 
-    # iterate first edge; use time budget
+    # Iterate first edges under a bounded budget. Once a route group is in
+    # flight, consume its returned quotes before stopping additional groups.
     for a_in, outs in frontier_adj.items():
         for e1 in outs:
             if (
                 route_groups_evaluated > 0
                 and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
             ):
+                route_budget_exhausted = True
                 break
             if e1.token_in != a_in:
                 continue
@@ -2053,11 +2058,16 @@ async def find_three_leg_opportunities(
             metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e2_cands)
             qmap2_3 = await quote_edges_batch(rpc, cfg, cache, e2_cands, out1, metrics=metrics)
             route_groups_evaluated += 1
+            final_leg_quote_batches = 0
             for e2 in e2_cands:
+                # A delayed second-leg batch is already paid for. Let one
+                # viable cycle reach its final-leg quote, then stop starting
+                # further final-leg batches once the route budget is spent.
                 if (
-                    route_groups_evaluated > 0
+                    final_leg_quote_batches > 0
                     and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
                 ):
+                    route_budget_exhausted = True
                     break
                 q2 = qmap2_3.get(edge_key(e2))
                 if not q2:
@@ -2079,9 +2089,11 @@ async def find_three_leg_opportunities(
                 e3_cands = list(revs[:max_reverse_candidates])
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
                 qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
+                final_leg_quote_batches += 1
+                # Consume the complete returned batch. Do not discard an
+                # already-returned quote merely because the RPC crossed the
+                # budget while in flight; budget checks gate the next batch.
                 for e3 in e3_cands:
-                    if (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms:
-                        break
                     q3 = qmap3_3.get(edge_key(e3))
                     if not q3:
                         continue
@@ -2306,6 +2318,10 @@ async def find_three_leg_opportunities(
                             },
                         )
                     )
+            if route_budget_exhausted:
+                break
+        if route_budget_exhausted:
+            break
 
     if telemetry is not None:
         telemetry["quote_phase_ms"] = float(
@@ -2315,11 +2331,11 @@ async def find_three_leg_opportunities(
             (time.perf_counter() - route_eval_started) * 1000.0
         )
         telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
-        telemetry["budget_exhausted_after_quote"] = bool(
-            route_groups_evaluated == 0
-            and bool(edges)
-            and bool(qmap1_3)
+        telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
+        telemetry["route_budget_stop_reason"] = (
+            "time_budget" if route_budget_exhausted else "completed"
         )
+        telemetry["budget_exhausted_after_quote"] = bool(route_budget_exhausted)
 
     snapshot = scan_efficiency_snapshot(
         elapsed_ms=(time.perf_counter() - t_start) * 1000.0,
