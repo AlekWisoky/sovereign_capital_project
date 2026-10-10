@@ -1458,6 +1458,40 @@ def _route_group_parallelism() -> int:
     return max(1, min(4, requested))
 
 
+async def _quote_two_leg_route_group_wave(
+    rpc: Any,
+    cfg: Any,
+    cache: PerBlockCache,
+    groups: Sequence[Mapping[str, Any]],
+    *,
+    metrics: Dict[str, Any],
+) -> tuple[List[Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], int, int]:
+    """Quote a bounded wave once per distinct amount/edge-set signature."""
+    unique_by_signature: Dict[Tuple[int, Tuple[str, ...]], Mapping[str, Any]] = {}
+    signatures: List[Tuple[int, Tuple[str, ...]]] = []
+    for group in groups:
+        signature = (
+            int(group["out1"]),
+            tuple(sorted(edge_key(edge) for edge in group["revs"])),
+        )
+        signatures.append(signature)
+        unique_by_signature.setdefault(signature, group)
+
+    unique_groups = list(unique_by_signature.values())
+    unique_results = await asyncio.gather(*(
+        quote_edges_batch(
+            rpc, cfg, cache, group["revs"], int(group["out1"]), metrics=metrics
+        )
+        for group in unique_groups
+    ))
+    result_by_signature = dict(zip(unique_by_signature.keys(), unique_results))
+    return (
+        [result_by_signature[signature] for signature in signatures],
+        len(unique_groups),
+        len(groups) - len(unique_groups),
+    )
+
+
 async def find_two_leg_opportunities(
     rpc,
     cfg,
@@ -1638,6 +1672,7 @@ async def find_two_leg_opportunities(
     route_group_parallelism = _route_group_parallelism()
     route_quote_waves_started = 0
     completed_route_quote_batches = 0
+    coalesced_route_quote_batches = 0
     for wave_start in range(0, len(prepared_route_groups), route_group_parallelism):
         if (
             route_groups_evaluated > 0
@@ -1646,11 +1681,12 @@ async def find_two_leg_opportunities(
             route_budget_exhausted = True
             break
         wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
-        qmaps2 = await asyncio.gather(*(
-            quote_edges_batch(rpc, cfg, cache, group["revs"], group["out1"], metrics=metrics)
-            for group in wave
-        ))
+        qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
+            rpc, cfg, cache, wave, metrics=metrics
+        )
         route_quote_waves_started += 1
+        completed_route_quote_batches += int(physical_batches)
+        coalesced_route_quote_batches += int(coalesced_batches)
         for group, qmap2 in zip(wave, qmaps2):
             e1 = group["e1"]
             revs = group["revs"]
@@ -1658,7 +1694,6 @@ async def find_two_leg_opportunities(
             out1 = int(group["out1"])
             meta1 = group["meta1"]
             route_groups_evaluated += 1
-            completed_route_quote_batches += 1
             for e2 in revs:
                 q2 = qmap2.get(edge_key(e2))
                 if not q2:
@@ -1876,6 +1911,7 @@ async def find_two_leg_opportunities(
             "groups_prepared": len(prepared_route_groups),
             "groups_completed": int(route_groups_evaluated),
             "quote_batches_completed_and_consumed": int(completed_route_quote_batches),
+            "duplicate_quote_batches_coalesced": int(coalesced_route_quote_batches),
             "parallelism_limit": int(route_group_parallelism),
             "waves_started": int(route_quote_waves_started),
             "ordering": "round_robin_source_token_protocol",
