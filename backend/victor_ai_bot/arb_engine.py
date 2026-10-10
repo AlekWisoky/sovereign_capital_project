@@ -1492,6 +1492,228 @@ async def _quote_two_leg_route_group_wave(
     )
 
 
+@dataclass
+class _TwoLegRouteProcessingContext:
+    cfg: Any
+    block_number: int
+    slippage_bps: int
+    observed_gas_price_wei: Optional[int]
+    metrics: Dict[str, Any]
+    opportunities: List[Opportunity]
+
+
+def _consume_two_leg_quote_result(
+    context: _TwoLegRouteProcessingContext,
+    group: Mapping[str, Any],
+    e2: Edge,
+    qmap2: Mapping[str, Optional[Tuple[int, Dict[str, Any]]]],
+) -> None:
+    """Turn a completed quote into diagnostic or gross opportunity evidence."""
+    cfg = context.cfg
+    block_number = context.block_number
+    slippage_bps = context.slippage_bps
+    observed_gas_price_wei = context.observed_gas_price_wei
+    metrics = context.metrics
+    opps = context.opportunities
+    e1 = group["e1"]
+    effective_amount_in = int(group["effective_amount_in"])
+    out1 = int(group["out1"])
+    meta1 = group["meta1"]
+            q2 = qmap2.get(edge_key(e2))
+            if not q2:
+                metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
+                return
+            out2, meta2 = q2
+            gross_profit = out2 - effective_amount_in
+            # min_outs for legs include slippage haircut
+            min1 = _apply_slippage(out1, slippage_bps)
+            min2 = _apply_slippage(out2, slippage_bps)
+        
+            # Executor aux data (bytes32)
+            aux1 = "0x"
+            if e1.dex == "univ3":
+                aux1 = aux_univ3_fee(int(e1.params.get("fee", 3000)))
+            elif e1.dex == "curve":
+                aux1 = aux_curve_from_meta(meta1, e1.params)
+            elif e1.dex == "balancer":
+                aux1 = str(e1.params.get("pool_id") or "0x")
+            elif e1.dex == "aerodrome":
+                raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
+                aux1 = _aux_u256_to_b32_hex(raw)
+            elif e1.dex == "slipstream":
+                aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
+            elif e1.dex == "camelot_algebra":
+                aux1 = "0x"
+            elif e1.dex == "camelot_v2":
+                aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
+            elif e1.dex == "constant_product":
+                aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
+        
+            aux2 = "0x"
+            if e2.dex == "univ3":
+                aux2 = aux_univ3_fee(int(e2.params.get("fee", 3000)))
+            elif e2.dex == "curve":
+                aux2 = aux_curve_from_meta(meta2, e2.params)
+            elif e2.dex == "balancer":
+                aux2 = str(e2.params.get("pool_id") or "0x")
+            elif e2.dex == "aerodrome":
+                raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
+                aux2 = _aux_u256_to_b32_hex(raw)
+            elif e2.dex == "slipstream":
+                aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
+            elif e2.dex == "camelot_algebra":
+                aux2 = "0x"
+            elif e2.dex == "camelot_v2":
+                aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
+            elif e2.dex == "constant_product":
+                aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
+        
+            rid = route_id_hex(
+                [
+                    EncLeg(
+                        dex=e1.dex,
+                        venue=e1.venue,
+                        token_in=e1.token_in,
+                        token_out=e1.token_out,
+                        aux=aux1,
+                    ),
+                    EncLeg(
+                        dex=e2.dex,
+                        venue=e2.venue,
+                        token_in=e2.token_in,
+                        token_out=e2.token_out,
+                        aux=aux2,
+                    ),
+                ]
+            )
+        
+            if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
+                gas_cost_wei = int(
+                    estimate_gas_cost_wei_from_cfg(
+                        cfg,
+                        estimate_route_gas_units(
+                            {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
+                        ),
+                        observed_gas_price_wei=observed_gas_price_wei,
+                    )
+                )
+                flashloan_fee_wei = (
+                    int(effective_amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
+                ) // 10_000
+                _record_size_economic_diagnostic(
+                    metrics,
+                    route_id=rid,
+                    amount_in=int(effective_amount_in),
+                    gross_profit_wei=int(gross_profit),
+                    flashloan_fee_wei=int(flashloan_fee_wei),
+                    gas_cost_wei=int(gas_cost_wei),
+                    reason="non_positive_gross_profit",
+                    legs=[
+                        {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(effective_amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
+                        {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
+                    ]
+                )
+                metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
+                return
+        
+            pool_keys = [
+                _pool_keys_for_leg(
+                    e1.dex,
+                    e1.token_in,
+                    e1.token_out,
+                    {
+                        "fee": meta1.get("fee", e1.params.get("fee", 3000)),
+                        "pool": e1.venue,
+                        **e1.params,
+                    },
+                    aux1,
+                ),
+                _pool_keys_for_leg(
+                    e2.dex,
+                    e2.token_in,
+                    e2.token_out,
+                    {
+                        "fee": meta2.get("fee", e2.params.get("fee", 3000)),
+                        "pool": e2.venue,
+                        **e2.params,
+                    },
+                    aux2,
+                ),
+            ]
+            opp_id = _id([cfg.chain.name, "2leg", rid, str(effective_amount_in), str(block_number)])
+            opps.append(
+                Opportunity(
+                    id=opp_id,
+                    chain=cfg.chain.name,
+                    strategy=f"two-leg:{e1.dex}->{e2.dex}",
+                    expected_profit_raw=str(gross_profit),
+                    expected_profit_usd="0",
+                    route=Route(
+                        legs=[
+                            RouteLeg(
+                                dex=e1.dex,
+                                venue=e1.venue,
+                                token_in=e1.token_in,
+                                token_out=e1.token_out,
+                                amount_in=str(effective_amount_in),
+                                min_out=str(min1),
+                                data=aux1,
+                            ),
+                            RouteLeg(
+                                dex=e2.dex,
+                                venue=e2.venue,
+                                token_in=e2.token_in,
+                                token_out=e2.token_out,
+                                amount_in=str(out1),
+                                min_out=str(min2),
+                                data=aux2,
+                            ),
+                        ]
+                    ),
+                    min_outs=[str(min1), str(min2)],
+                    route_id=rid,
+                    can_execute=False,  # upgraded by runtime after safety checks
+                    created_at_ms=_now_ms(),
+                    meta={
+                        "out1": str(out1),
+                        "out2": str(out2),
+                        "leg1": meta1,
+                        "leg2": meta2,
+                        "route_type": "2leg",
+                        "route_edge_params": [dict(e1.params), dict(e2.params)],
+                        "route_family": _classify_route_family(cfg, [e1, e2], route_type="2leg"),
+                        "venues": [e1.dex, e2.dex],
+                        "pool_keys": pool_keys,
+                        "gas_estimate_units": str(
+                            estimate_route_gas_units(
+                                {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
+                            )
+                        ),
+                        "gas_cost_estimate_wei": str(
+                            estimate_gas_cost_wei_from_cfg(
+                                cfg,
+                                estimate_route_gas_units(
+                                    {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
+                                ),
+                                observed_gas_price_wei=observed_gas_price_wei,
+                            )
+                        ),
+                        "profit_after_gas_estimate_wei": str(
+                            int(gross_profit)
+                            - int(
+                                estimate_gas_cost_wei_from_cfg(
+                                    cfg,
+                                    estimate_route_gas_units(
+                                        {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
+                                    ),
+                                )
+                            )
+                        ),
+                    },
+                )
+            )
+
+
 async def find_two_leg_opportunities(
     rpc,
     cfg,
@@ -1673,6 +1895,14 @@ async def find_two_leg_opportunities(
     route_quote_waves_started = 0
     completed_route_quote_batches = 0
     coalesced_route_quote_batches = 0
+    processing_context = _TwoLegRouteProcessingContext(
+        cfg=cfg,
+        block_number=int(block_number),
+        slippage_bps=int(slippage_bps),
+        observed_gas_price_wei=observed_gas_price_wei,
+        metrics=metrics,
+        opportunities=opps,
+    )
     for wave_start in range(0, len(prepared_route_groups), route_group_parallelism):
         if (
             route_groups_evaluated > 0
@@ -1688,206 +1918,9 @@ async def find_two_leg_opportunities(
         completed_route_quote_batches += int(physical_batches)
         coalesced_route_quote_batches += int(coalesced_batches)
         for group, qmap2 in zip(wave, qmaps2):
-            e1 = group["e1"]
-            revs = group["revs"]
-            effective_amount_in = int(group["effective_amount_in"])
-            out1 = int(group["out1"])
-            meta1 = group["meta1"]
             route_groups_evaluated += 1
-            for e2 in revs:
-                q2 = qmap2.get(edge_key(e2))
-                if not q2:
-                    metrics["route_rejections_second_leg_quote_unavailable"] = int(metrics.get("route_rejections_second_leg_quote_unavailable", 0)) + 1
-                    continue
-                out2, meta2 = q2
-                gross_profit = out2 - effective_amount_in
-                # min_outs for legs include slippage haircut
-                min1 = _apply_slippage(out1, slippage_bps)
-                min2 = _apply_slippage(out2, slippage_bps)
-
-                # Executor aux data (bytes32)
-                aux1 = "0x"
-                if e1.dex == "univ3":
-                    aux1 = aux_univ3_fee(int(e1.params.get("fee", 3000)))
-                elif e1.dex == "curve":
-                    aux1 = aux_curve_from_meta(meta1, e1.params)
-                elif e1.dex == "balancer":
-                    aux1 = str(e1.params.get("pool_id") or "0x")
-                elif e1.dex == "aerodrome":
-                    raw = int(str(e1.params.get("factory") or "0"), 16) | ((1 if bool(e1.params.get("stable", False)) else 0) << 160)
-                    aux1 = _aux_u256_to_b32_hex(raw)
-                elif e1.dex == "slipstream":
-                    aux1 = _aux_u256_to_b32_hex(int(e1.params.get("tick_spacing", 0)) & 0xFFFFFF)
-                elif e1.dex == "camelot_algebra":
-                    aux1 = "0x"
-                elif e1.dex == "camelot_v2":
-                    aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
-                elif e1.dex == "constant_product":
-                    aux1 = _aux_u256_to_b32_hex(int(str(e1.params.get("factory") or "0"), 16))
-
-                aux2 = "0x"
-                if e2.dex == "univ3":
-                    aux2 = aux_univ3_fee(int(e2.params.get("fee", 3000)))
-                elif e2.dex == "curve":
-                    aux2 = aux_curve_from_meta(meta2, e2.params)
-                elif e2.dex == "balancer":
-                    aux2 = str(e2.params.get("pool_id") or "0x")
-                elif e2.dex == "aerodrome":
-                    raw = int(str(e2.params.get("factory") or "0"), 16) | ((1 if bool(e2.params.get("stable", False)) else 0) << 160)
-                    aux2 = _aux_u256_to_b32_hex(raw)
-                elif e2.dex == "slipstream":
-                    aux2 = _aux_u256_to_b32_hex(int(e2.params.get("tick_spacing", 0)) & 0xFFFFFF)
-                elif e2.dex == "camelot_algebra":
-                    aux2 = "0x"
-                elif e2.dex == "camelot_v2":
-                    aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
-                elif e2.dex == "constant_product":
-                    aux2 = _aux_u256_to_b32_hex(int(str(e2.params.get("factory") or "0"), 16))
-
-                rid = route_id_hex(
-                    [
-                        EncLeg(
-                            dex=e1.dex,
-                            venue=e1.venue,
-                            token_in=e1.token_in,
-                            token_out=e1.token_out,
-                            aux=aux1,
-                        ),
-                        EncLeg(
-                            dex=e2.dex,
-                            venue=e2.venue,
-                            token_in=e2.token_in,
-                            token_out=e2.token_out,
-                            aux=aux2,
-                        ),
-                    ]
-                )
-
-                if gross_profit <= 0 and os.environ.get("VICTOR_DEBUG_OPPS", "").strip() != "1":
-                    gas_cost_wei = int(
-                        estimate_gas_cost_wei_from_cfg(
-                            cfg,
-                            estimate_route_gas_units(
-                                {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                            ),
-                            observed_gas_price_wei=observed_gas_price_wei,
-                        )
-                    )
-                    flashloan_fee_wei = (
-                        int(effective_amount_in) * int(getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0)
-                    ) // 10_000
-                    _record_size_economic_diagnostic(
-                        metrics,
-                        route_id=rid,
-                        amount_in=int(effective_amount_in),
-                        gross_profit_wei=int(gross_profit),
-                        flashloan_fee_wei=int(flashloan_fee_wei),
-                        gas_cost_wei=int(gas_cost_wei),
-                        reason="non_positive_gross_profit",
-                        legs=[
-                            {"dex": str(e1.dex), "venue": str(e1.venue), "token_in": str(e1.token_in), "token_out": str(e1.token_out), "fee": int(meta1.get("fee", e1.params.get("fee", 0) or 0)), "pool": str(e1.params.get("pool") or e1.venue), "amount_in": str(int(effective_amount_in)), "quoted_amount_out": str(int(out1)), "min_out": str(int(min1)), "slippage_reserve": str(max(0, int(out1) - int(min1))), "quote_meta": dict(meta1)},
-                            {"dex": str(e2.dex), "venue": str(e2.venue), "token_in": str(e2.token_in), "token_out": str(e2.token_out), "fee": int(meta2.get("fee", e2.params.get("fee", 0) or 0)), "pool": str(e2.params.get("pool") or e2.venue), "amount_in": str(int(out1)), "quoted_amount_out": str(int(out2)), "min_out": str(int(min2)), "slippage_reserve": str(max(0, int(out2) - int(min2))), "quote_meta": dict(meta2)},
-                        ]
-                    )
-                    metrics["route_rejections_non_positive_gross_profit"] = int(metrics.get("route_rejections_non_positive_gross_profit", 0)) + 1
-                    continue
-
-                pool_keys = [
-                    _pool_keys_for_leg(
-                        e1.dex,
-                        e1.token_in,
-                        e1.token_out,
-                        {
-                            "fee": meta1.get("fee", e1.params.get("fee", 3000)),
-                            "pool": e1.venue,
-                            **e1.params,
-                        },
-                        aux1,
-                    ),
-                    _pool_keys_for_leg(
-                        e2.dex,
-                        e2.token_in,
-                        e2.token_out,
-                        {
-                            "fee": meta2.get("fee", e2.params.get("fee", 3000)),
-                            "pool": e2.venue,
-                            **e2.params,
-                        },
-                        aux2,
-                    ),
-                ]
-                opp_id = _id([cfg.chain.name, "2leg", rid, str(effective_amount_in), str(block_number)])
-                opps.append(
-                    Opportunity(
-                        id=opp_id,
-                        chain=cfg.chain.name,
-                        strategy=f"two-leg:{e1.dex}->{e2.dex}",
-                        expected_profit_raw=str(gross_profit),
-                        expected_profit_usd="0",
-                        route=Route(
-                            legs=[
-                                RouteLeg(
-                                    dex=e1.dex,
-                                    venue=e1.venue,
-                                    token_in=e1.token_in,
-                                    token_out=e1.token_out,
-                                    amount_in=str(effective_amount_in),
-                                    min_out=str(min1),
-                                    data=aux1,
-                                ),
-                                RouteLeg(
-                                    dex=e2.dex,
-                                    venue=e2.venue,
-                                    token_in=e2.token_in,
-                                    token_out=e2.token_out,
-                                    amount_in=str(out1),
-                                    min_out=str(min2),
-                                    data=aux2,
-                                ),
-                            ]
-                        ),
-                        min_outs=[str(min1), str(min2)],
-                        route_id=rid,
-                        can_execute=False,  # upgraded by runtime after safety checks
-                        created_at_ms=_now_ms(),
-                        meta={
-                            "out1": str(out1),
-                            "out2": str(out2),
-                            "leg1": meta1,
-                            "leg2": meta2,
-                            "route_type": "2leg",
-                            "route_edge_params": [dict(e1.params), dict(e2.params)],
-                            "route_family": _classify_route_family(cfg, [e1, e2], route_type="2leg"),
-                            "venues": [e1.dex, e2.dex],
-                            "pool_keys": pool_keys,
-                            "gas_estimate_units": str(
-                                estimate_route_gas_units(
-                                    {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                                )
-                            ),
-                            "gas_cost_estimate_wei": str(
-                                estimate_gas_cost_wei_from_cfg(
-                                    cfg,
-                                    estimate_route_gas_units(
-                                        {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                                    ),
-                                    observed_gas_price_wei=observed_gas_price_wei,
-                                )
-                            ),
-                            "profit_after_gas_estimate_wei": str(
-                                int(gross_profit)
-                                - int(
-                                    estimate_gas_cost_wei_from_cfg(
-                                        cfg,
-                                        estimate_route_gas_units(
-                                            {"leg1": meta1, "leg2": meta2, "venues": [e1.dex, e2.dex]}
-                                        ),
-                                    )
-                                )
-                            ),
-                        },
-                    )
-                )
+            for e2 in group["revs"]:
+                _consume_two_leg_quote_result(processing_context, group, e2, qmap2)
 
         if (
             wave_start + route_group_parallelism < len(prepared_route_groups)
