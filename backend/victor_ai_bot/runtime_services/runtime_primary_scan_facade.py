@@ -2133,6 +2133,12 @@ class RuntimePrimaryScanFacade:
                 two_leg_telemetry.get("edges_generated", 0)
             ) + int(three_leg_telemetry.get("edges_generated", 0))
             telemetry["route_evaluation"] = {
+                "route_group_schedule": dict(
+                    two_leg_telemetry.get("route_group_schedule") or {}
+                ),
+                "route_group_schedule_by_block": dict(
+                    two_leg_telemetry.get("route_group_schedule_by_block") or {}
+                ),
                 "quote_phase_ms": float(
                     two_leg_telemetry.get("quote_phase_ms", 0.0)
                 ) + float(three_leg_telemetry.get("quote_phase_ms", 0.0)),
