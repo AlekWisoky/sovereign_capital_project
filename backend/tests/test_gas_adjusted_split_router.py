@@ -121,10 +121,15 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
         },
     ]
     result = build_gas_adjusted_split_frontier(
-        _matrix((5_000_000, [
-            _candidate("route-a", 5_000_000, 1_000_000, _legs(TOKEN_X)),
-            _candidate("route-b-shared-pool", 5_000_000, 1_000_000, shared_route_b),
-        ])),
+        _matrix(
+            (5_000_000, [
+                _candidate("route-a", 5_000_000, 1_000_000, _legs(TOKEN_X)),
+                _candidate("route-b-shared-pool", 5_000_000, 1_000_000, shared_route_b),
+            ]),
+            (10_000_000, [
+                _candidate("route-c", 10_000_000, 2_000_000, _legs(TOKEN_Z)),
+            ]),
+        ),
         chain_id=1,
     )
     assert not any(row["route_count"] >= 2 for row in result["plans"])
