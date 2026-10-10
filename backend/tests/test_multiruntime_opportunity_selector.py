@@ -260,3 +260,24 @@ async def test_research_token_candidate_is_economic_evidence_but_not_execution_e
     assert candidate["eligible"] is False
     assert candidate["blocking_reason"] == "input_token_not_execution_authorized"
     assert out["selected"] is None
+
+@pytest.mark.asyncio
+async def test_selector_bounds_slow_runtime_summary_and_fails_closed(monkeypatch):
+    monkeypatch.setenv("VICTOR_GLOBAL_SELECTION_SUMMARY_TIMEOUT_S", "0.25")
+
+    class _SlowRuntime(_Runtime):
+        async def summary(self):
+            await asyncio.sleep(1.0)
+            return await super().summary()
+
+    selector = MultiRuntimeOpportunitySelector()
+    out = await selector.select({
+        "ethereum": _SlowRuntime(_candidate("eth", 10)),
+    })
+
+    assert out["selected"] is None
+    assert out["candidates"][0]["eligible"] is False
+    assert out["candidates"][0]["blocking_reason"] == "auto_trade_gate_unavailable"
+    assert out["runtime_errors"]["ethereum"] == "summary_failed:TimeoutError"
+    assert out["summary_timeout_s"] == 0.25
+

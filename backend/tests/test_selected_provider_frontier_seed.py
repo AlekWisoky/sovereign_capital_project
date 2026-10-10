@@ -19,7 +19,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_frontier(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S", raising=False)
-    monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", raising=False)
+    monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", "16")
     monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_PARALLELISM", raising=False)
 
     baseline = runtime._selected_provider_full_scan_budget_s(235)
@@ -105,7 +105,7 @@ def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     env_name = "VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE"
 
-    assert runtime._selected_provider_full_scan_chunk_size() == 16
+    assert runtime._selected_provider_full_scan_chunk_size() == 8
 
     monkeypatch.setenv(env_name, "8")
     assert runtime._selected_provider_full_scan_chunk_size() == 8
@@ -120,10 +120,10 @@ def test_selected_provider_full_scan_chunk_size_is_bounded(monkeypatch):
     assert runtime._selected_provider_full_scan_chunk_size() == 256
 
     monkeypatch.setenv(env_name, "invalid")
-    assert runtime._selected_provider_full_scan_chunk_size() == 16
+    assert runtime._selected_provider_full_scan_chunk_size() == 8
 
     monkeypatch.setenv(env_name, "")
-    assert runtime._selected_provider_full_scan_chunk_size() == 16
+    assert runtime._selected_provider_full_scan_chunk_size() == 8
 
 
 @pytest.mark.asyncio

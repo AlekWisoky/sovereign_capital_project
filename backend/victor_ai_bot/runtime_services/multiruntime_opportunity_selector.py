@@ -7,12 +7,47 @@ active chain, enable auto-trading, size an order, mutate an opportunity, or
 submit a transaction.
 """
 
+import asyncio
+import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..profitability_state import profitability_state_view
 from .profitability_truth import inspect_profit_after_costs_truth
 from .route_runtime_truth import execution_route_truth
+
+
+def _runtime_summary_timeout_s() -> float:
+    try:
+        configured = float(
+            os.environ.get("VICTOR_GLOBAL_SELECTION_SUMMARY_TIMEOUT_S", "1.5") or 1.5
+        )
+    except (TypeError, ValueError):
+        configured = 1.5
+    return max(0.25, min(configured, 3.0))
+
+
+def _consume_background_task(task: asyncio.Task[Any]) -> None:
+    """Retrieve a cancelled/timed-out summary task's terminal exception."""
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
+async def _bounded_runtime_summary(runtime: Any) -> Mapping[str, Any]:
+    """Wait only for the read budget; cancellation cleanup must not stall this API."""
+    task = asyncio.create_task(runtime.summary())
+    done, _pending = await asyncio.wait(
+        {task},
+        timeout=_runtime_summary_timeout_s(),
+    )
+    if not done:
+        task.cancel()
+        task.add_done_callback(_consume_background_task)
+        raise asyncio.TimeoutError()
+    result = task.result()
+    return result if isinstance(result, Mapping) else {}
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -511,10 +546,16 @@ class MultiRuntimeOpportunitySelector:
         self, runtime_name: str, runtime: Any
     ) -> tuple[list[RuntimeOpportunityEvidence], str | None]:
         try:
-            summary = await runtime.summary()
-        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            summary = await _bounded_runtime_summary(runtime)
+        except (
+            asyncio.TimeoutError,
+            AttributeError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             summary = {}
-            error = f"summary_failed:{exc}"
+            error = f"summary_failed:{type(exc).__name__}"
         else:
             error = None
 
@@ -562,14 +603,26 @@ class MultiRuntimeOpportunitySelector:
 
         evidence: list[RuntimeOpportunityEvidence] = []
         runtime_errors: dict[str, str] = {}
+        runtime_items = list(runtimes.items())
+        runtime_results = await asyncio.gather(
+            *[
+                self._runtime_evidence(str(runtime_name), runtime)
+                for runtime_name, runtime in runtime_items
+            ],
+            return_exceptions=True,
+        )
 
-        for runtime_name, runtime in runtimes.items():
-            runtime_evidence, runtime_error = await self._runtime_evidence(
-                str(runtime_name), runtime
-            )
+        for (runtime_name, _runtime), result in zip(runtime_items, runtime_results):
+            name = str(runtime_name)
+            if isinstance(result, BaseException):
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
+                runtime_errors[name] = f"runtime_evidence_failed:{type(result).__name__}"
+                continue
+            runtime_evidence, runtime_error = result
             evidence.extend(runtime_evidence)
             if runtime_error:
-                runtime_errors[str(runtime_name)] = runtime_error
+                runtime_errors[name] = runtime_error
 
         eligible = [item for item in evidence if item.eligible]
         selected = max(eligible, key=lambda item: item.selection_score) if eligible else None
@@ -610,6 +663,7 @@ class MultiRuntimeOpportunitySelector:
             "selected": selected.to_dict() if selected else None,
             "runtime_count": len(runtimes),
             "runtimes_inspected": [str(name) for name in runtimes.keys()],
+            "summary_timeout_s": _runtime_summary_timeout_s(),
             "candidates": [item.to_dict() for item in evidence],
             "global_discovery_candidates": discovery_rows,
             "global_discovery_best": best_discovery,

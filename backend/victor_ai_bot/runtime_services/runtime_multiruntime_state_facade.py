@@ -89,27 +89,27 @@ class RuntimeMultiruntimeStateFacade:
         return self._runtimes[self._active_chain].brain_state()
 
     async def market_pipeline_telemetry_readonly(self) -> dict:
-        """Return per-runtime market-pipeline telemetry without changing active state."""
-        async def one(name: str, rt: Any):
+        """Return cached market telemetry without live RPC, quote, or summary work."""
+        pairs = []
+        for name, rt in self._runtimes.items():
             try:
                 telemetry = dict(rt.market_pipeline_telemetry_state())
             except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                return name, {
+                pairs.append((name, {
                     "ok": False,
                     "status": "unavailable",
                     "reason_code": "market_pipeline_telemetry_unavailable",
                     "error": str(exc),
-                }
+                }))
+                continue
 
-            gate = {}
-            recovery = {}
-            admission_error = ""
-            try:
-                summary = await asyncio.wait_for(rt.summary(), timeout=self.SNAPSHOT_TIMEOUT_S)
-                gate = dict(summary.get("auto_trade_gate") or {}) if isinstance(summary, dict) else {}
-                recovery = dict(summary.get("auto_trade_recovery") or {}) if isinstance(summary, dict) else {}
-            except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                admission_error = str(exc)
+            cached_admission = telemetry.get("admission")
+            cached_admission = dict(cached_admission) if isinstance(cached_admission, dict) else {}
+            gate = cached_admission.get("auto_trade_gate")
+            gate = dict(gate) if isinstance(gate, dict) else {}
+            recovery = cached_admission.get("recovery")
+            recovery = dict(recovery) if isinstance(recovery, dict) else {}
+            admission_sampled = bool(gate or recovery)
 
             telemetry["runtime_lifecycle"] = dict(
                 getattr(self, "_runtime_lifecycle", {}).get(name) or {}
@@ -125,35 +125,49 @@ class RuntimeMultiruntimeStateFacade:
                 },
                 "auto_trade_gate": gate,
                 "recovery": recovery,
-                "status": "available" if not admission_error else "unavailable",
-                "reason_code": "" if not admission_error else "market_pipeline_admission_summary_unavailable",
-                "error": admission_error,
+                "status": "cached" if admission_sampled else "not_sampled",
+                "reason_code": (
+                    "" if admission_sampled else "live_summary_skipped_for_read_latency"
+                ),
+                "error": "",
             }
-            return name, telemetry
-        pairs = await asyncio.gather(*[one(name, rt) for name, rt in self._runtimes.items()])
+            pairs.append((name, telemetry))
+
         jupiter = {"status": "unavailable", "execution_authority": False}
         if hasattr(self, "_solana_jupiter"):
             try:
-                jupiter = await asyncio.wait_for(self._solana_jupiter.discover(), timeout=90.0)
-            except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError):
-                jupiter = self._solana_jupiter.snapshot()
+                snapshot = getattr(self._solana_jupiter, "snapshot", None)
+                if callable(snapshot):
+                    jupiter = dict(snapshot() or {})
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                jupiter = {"status": "snapshot_unavailable", "execution_authority": False}
+
         return {
             "ok": True,
             "active": self._active_chain,
             "chains": {k: v for k, v in pairs},
             "solana_jupiter": jupiter,
+            "solana_jupiter_source": "last_completed_snapshot",
             "active_chain_changed": False,
         }
 
     async def select_best_opportunity_readonly(self) -> dict:
-        """Return global EVM + Solana discovery evidence without changing runtime state."""
+        """Select from runtime evidence and the last completed external snapshot."""
         selector = MultiRuntimeOpportunitySelector()
         jupiter = {"status": "unavailable", "execution_authority": False}
         if hasattr(self, "_solana_jupiter"):
             try:
-                jupiter = await asyncio.wait_for(self._solana_jupiter.discover(), timeout=90.0)
-            except (asyncio.TimeoutError, AttributeError, RuntimeError, TypeError, ValueError):
-                jupiter = self._solana_jupiter.snapshot()
+                snapshot_request = getattr(
+                    self._solana_jupiter, "snapshot_or_schedule_refresh", None
+                )
+                if callable(snapshot_request):
+                    jupiter = dict(snapshot_request() or {})
+                else:
+                    snapshot = getattr(self._solana_jupiter, "snapshot", None)
+                    if callable(snapshot):
+                        jupiter = dict(snapshot() or {})
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                jupiter = {"status": "snapshot_unavailable", "execution_authority": False}
         return await selector.select(self._runtimes, external_discovery=jupiter)
 
     async def dispatch_selected_auto_trade(self, *, current_block: int) -> bool:
