@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Tuple
 
 from ..deploy_mode import deployment_mode, is_public_mode, public_broadcast_override_enabled
@@ -35,6 +36,7 @@ class RuntimeRoutesService:
                 "mode": deployment_mode(),
                 "public_mode": bool(is_public_mode()),
                 "public_allow_broadcast": bool(public_broadcast_override_enabled()),
+                "git_sha": (os.environ.get("VICTOR_GIT_SHA", "") or "").strip() or "unknown",
                 "brand": {"name": "x∆v", "slogan": "Sovereign Capital"},
             }
         )

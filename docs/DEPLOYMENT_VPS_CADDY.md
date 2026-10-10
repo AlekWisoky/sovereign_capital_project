@@ -56,15 +56,19 @@ If using both UpCloud L3 firewall and UFW, configure and verify both before enab
 
 ## 6) Deployment identity
 
-Deploy the exact verified Git SHA, then record:
+Stamp the exact checked-out Git SHA into the backend container, then verify the running API reports the same identity before proceeding:
 
 ```bash
-git rev-parse HEAD
-docker compose -f deploy/docker-compose.prod.yml ps
-curl -fsS https://YOUR_API_HOST/api/deploy/info
+SHA="$(git rev-parse HEAD)"
+test "${#SHA}" -eq 40
+VICTOR_GIT_SHA="$SHA" docker compose -f deploy/docker-compose.prod.yml up -d --build --force-recreate victor-backend
+docker compose -f deploy/docker-compose.prod.yml ps victor-backend
+DEPLOYED_SHA="$(curl -fsS https://YOUR_API_HOST/api/deploy/info | python3 -c 'import json,sys; print(json.load(sys.stdin).get("git_sha", "unknown"))')"
+printf 'EXPECTED_SHA=%s\nDEPLOYED_SHA=%s\n' "$SHA" "$DEPLOYED_SHA"
+test "$DEPLOYED_SHA" = "$SHA"
 ```
 
-The returned deployment identity must match the deployed Git SHA before proceeding to safe-mode smoke gates.
+The `/api/deploy/info` endpoint reports `git_sha` from `VICTOR_GIT_SHA` and reports `unknown` when a build was not stamped. Do not treat `unknown` or a mismatch as a verified deployment.
 
 ## 7) Safe mode
 

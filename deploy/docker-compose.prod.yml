@@ -15,6 +15,7 @@ services:
       VICTOR_LOG_JSON: "1"
       VICTOR_AUTOSTART: "1"
       VICTOR_DEPLOYMENT_MODE: private
+      VICTOR_GIT_SHA: ${VICTOR_GIT_SHA:-unknown}
     volumes:
       - ../backend/config:/app/backend/config:ro
       - ../../backend-data:/app/backend/data
