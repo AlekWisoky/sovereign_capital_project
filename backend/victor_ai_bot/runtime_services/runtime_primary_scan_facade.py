@@ -3896,6 +3896,24 @@ class RuntimePrimaryScanFacade:
                     adaptive_matrix,
                     frontier_matrix,
                 )
+                # Recompute against the union of sampled and adaptive amounts.
+                # Do not leave the strongest size/frontier quote out of the split
+                # diagnostic simply because it arrived from a later scan pass.
+                try:
+                    selected_telemetry["gas_adjusted_split_routing"] = build_gas_adjusted_split_frontier(
+                        list(selected_telemetry["size_economic_matrix"]),
+                        chain_id=int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0),
+                    )
+                except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
+                    selected_telemetry["gas_adjusted_split_routing"] = {
+                        "enabled": True,
+                        "mode": "bounded_gas_adjusted_split_diagnostic",
+                        "available": False,
+                        "execution_supported": False,
+                        "execution_authority_granted": False,
+                        "reason_code": "split_frontier_model_failed",
+                        "error_type": type(exc).__name__,
+                    }
             adaptive_evidence = list(selected_adaptive.get("size_economic_evidence") or [])
             frontier_evidence = list(frontier_seed_telemetry.get("size_economic_evidence") or [])
             if adaptive_evidence or frontier_evidence:
