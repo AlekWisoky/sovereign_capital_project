@@ -61,7 +61,8 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
     assert len(out) >= 1
     assert any(item.expected_profit_raw == "20" for item in out)
     assert telemetry["route_groups_evaluated"] >= 1
-    assert telemetry["budget_exhausted_after_quote"] is False
+    assert telemetry["budget_exhausted_after_quote"] is telemetry["route_budget_exhausted"]
+    assert telemetry["route_budget_stop_reason"] in {"completed", "time_budget"}
     assert telemetry["route_universe"]["edges_by_dex"] == {"univ3": 2}
     assert telemetry["route_universe"]["unique_directed_pairs"] == 2
     assert telemetry["route_universe"]["directed_pairs_with_reverse"] == 2
@@ -202,10 +203,14 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
 
     assert len(out) >= 1
     assert telemetry["route_groups_evaluated"] >= 1
+    assert telemetry["route_budget_exhausted"] is True
+    assert telemetry["budget_exhausted_after_quote"] is True
+    assert telemetry["route_budget_stop_reason"] == "time_budget"
 
 
 @pytest.mark.asyncio
-async def test_three_leg_route_evaluation_survives_slow_first_quote_phase(monkeypatch):
+@pytest.mark.parametrize("slow_phase", ["first", "second", "third"])
+async def test_three_leg_route_evaluation_consumes_quotes_returned_after_budget(monkeypatch, slow_phase):
     a = "0x2222222222222222222222222222222222222222"
     b = "0x3333333333333333333333333333333333333333"
     c = "0x4444444444444444444444444444444444444444"
@@ -221,11 +226,13 @@ async def test_three_leg_route_evaluation_survives_slow_first_quote_phase(monkey
 
     calls = {"count": 0}
 
-    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+    async def fake_quotes(rpc, cfg, requested_edges, amount_in, metrics=None):
         calls["count"] += 1
-        if calls["count"] == 1:
-            # Simulate a slow first-leg quote phase without advancing the
-            # post-quote route-evaluation clock.
+        slow_call = {"first": 1, "second": 2, "third": 3}[slow_phase]
+        if calls["count"] == slow_call:
+            # Simulate a provider response arriving after the route budget.
+            # First-leg delay is outside the timer; second/third-leg delays
+            # must not make us discard the returned cycle quotes.
             clock["now"] = 5.0
         if metrics is not None:
             metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
@@ -276,7 +283,12 @@ async def test_three_leg_route_evaluation_survives_slow_first_quote_phase(monkey
     assert len(out) >= 1
     assert any(item.expected_profit_raw == "20" for item in out)
     assert telemetry["route_groups_evaluated"] >= 1
-    assert telemetry["budget_exhausted_after_quote"] is False
+    expected_budget_stop = slow_phase != "first"
+    assert telemetry["route_budget_exhausted"] is expected_budget_stop
+    assert telemetry["budget_exhausted_after_quote"] is expected_budget_stop
+    assert telemetry["route_budget_stop_reason"] == (
+        "time_budget" if expected_budget_stop else "completed"
+    )
 
 
 def test_three_leg_route_universe_exposes_pruned_edge_identity_and_pool():
