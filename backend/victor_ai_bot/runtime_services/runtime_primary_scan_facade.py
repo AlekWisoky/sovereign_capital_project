@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import linecache
 import os
 import time
 from dataclasses import dataclass
@@ -23,6 +24,25 @@ from .profitability_truth import opportunity_profit_sort_key
 from ..gas_adjusted_split_router import build_gas_adjusted_split_frontier
 
 _SAFE_SCAN_TELEMETRY_EXCEPTIONS = (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
+def _scan_error_trace(exc: BaseException, *, max_frames: int = 8) -> List[Dict[str, Any]]:
+    """Expose bounded source-frame metadata for a failed scan without frame locals."""
+    frames: List[Dict[str, Any]] = []
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        filename = os.path.basename(str(frame.f_code.co_filename or ""))
+        source_line = linecache.getline(frame.f_code.co_filename, tb.tb_lineno).strip()
+        frames.append({
+            "module": str(frame.f_globals.get("__name__") or ""),
+            "filename": filename,
+            "function": str(frame.f_code.co_name or ""),
+            "line": int(tb.tb_lineno),
+            "source": source_line[:240],
+        })
+        tb = tb.tb_next
+    return frames[-max(1, int(max_frames)):]
 
 
 def _canonical_provider_value(value: Any) -> str:
@@ -2574,6 +2594,7 @@ class RuntimePrimaryScanFacade:
         except _SAFE_SCAN_TELEMETRY_EXCEPTIONS as exc:
             telemetry["scan_status"] = "failed"
             telemetry["scan_error"] = f"{type(exc).__name__}: {exc}"
+            telemetry["scan_error_trace"] = _scan_error_trace(exc)
             telemetry["scan_latency_ms"] = float(
                 (time.perf_counter() - scan_started) * 1000.0
             )
