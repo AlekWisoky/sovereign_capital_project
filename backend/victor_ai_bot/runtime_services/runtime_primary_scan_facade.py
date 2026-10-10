@@ -1821,6 +1821,7 @@ class RuntimePrimaryScanFacade:
                             "gross_candidates",
                             "candidate_count",
                             "route_groups_evaluated",
+                            "route_group_schedule",
                             "successful_quote_edge_count",
                             "successful_quote_pool_count",
                             "successful_quote_pair_count",
