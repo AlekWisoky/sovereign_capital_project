@@ -423,6 +423,89 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
     assert len(sized) == 3
 
 
+@pytest.mark.asyncio
+async def test_size_curve_runs_when_base_routes_are_already_profitable(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(safety=SimpleNamespace(slippage_bps=50))
+
+    class Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = Manager()
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 2000],
+    )
+
+    async def noop_annotate(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "_annotate_canonical_after_fee_usd", noop_annotate)
+
+    class Candidate:
+        def __init__(self, route_id, amount_in=1000):
+            self.id = route_id
+            self.route_id = route_id
+            self.strategy = "two-leg:univ3->sushiswap-v2"
+            self.expected_profit_raw = "100"
+            self.route = SimpleNamespace(legs=[SimpleNamespace(amount_in=str(amount_in))])
+            self.meta = {
+                "profitability": {
+                    "revalidated": True,
+                    "authoritative": True,
+                    "valid": True,
+                    "profit_after_costs_wei": "10",
+                    "economic_profit_after_costs_wei": "10",
+                    "reason": "verified",
+                }
+            }
+
+        def model_copy(self, *, deep=True):
+            return Candidate(self.route_id, int(self.route.legs[0].amount_in))
+
+    seen = []
+
+    async def fake_requote(
+        rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps
+    ):
+        seen.append((candidate.route_id, int(new_amount_in)))
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        candidate.meta["profitability"]["profit_after_costs_wei"] = str(int(new_amount_in))
+        candidate.meta["profitability"]["economic_profit_after_costs_wei"] = str(int(new_amount_in))
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[Candidate("route-a"), Candidate("route-b")],
+        cache=object(),
+    )
+
+    assert len(sized) == 6
+    assert seen == [
+        ("route-a", 500), ("route-b", 500),
+        ("route-a", 2000), ("route-b", 2000),
+    ]
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["authoritative_positive_candidates_before_probe"] == 2
+    assert adaptive["probe_triggered"] is True
+    assert adaptive["amounts_scanned"] == ["500", "1000", "2000"]
+    assert adaptive["economic_matrix_complete"] is True
+
+
 def test_frozen_provider_graph_slice_preserves_stable_edge_order():
     from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
         _FrozenProviderScanPoolEventCache,
