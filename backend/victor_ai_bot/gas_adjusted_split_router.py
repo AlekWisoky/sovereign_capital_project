@@ -44,14 +44,15 @@ def _leg_pool_key(leg: Mapping[str, Any]) -> str | None:
     if dex == "balancer":
         return f"balancer|{aux}" if aux not in {"", "0x"} else None
     if dex in {"univ3", "slipstream", "aerodrome", "camelot_algebra", "camelot_v2", "constant_product"}:
-        # For Algebra and V2 families, the token pair identifies the single pool
-        # exposed by their configured factory/router. Other families include
-        # native fee/factory/tick/pool parameters in aux.
+        # Include router identity plus pair. Native fee/factory/tick/pool data
+        # disambiguates protocol-specific pools that share the same router.
+        if not venue:
+            return None
         if dex in {"camelot_algebra", "camelot_v2", "constant_product"}:
-            return f"{dex}|{pair}"
+            return f"{dex}|{venue}|{pair}"
         if aux in {"", "0x"}:
             return None
-        return f"{dex}|{pair}|{aux}"
+        return f"{dex}|{venue}|{pair}|{aux}"
     return f"{dex}|{venue}|{pair}|{aux}" if venue else None
 
 
@@ -147,10 +148,15 @@ def _prepare_candidate_buckets(
                 continue
             key = (candidate["borrow_token"], candidate["amount_in"], candidate["route_id"])
             prior = by_key.get(key)
-            if prior is None or (
-                int(candidate["authoritative"]) > int(prior["authoritative"])
-                or candidate["single_route_net_wei"] > prior["single_route_net_wei"]
-            ):
+            def evidence_rank(row: Mapping[str, Any]) -> tuple[int, int, int, int, int]:
+                return (
+                    int(bool(row.get("revalidated") and row.get("authoritative") and row.get("valid") and row.get("repayment_valid"))),
+                    int(bool(row.get("authoritative"))),
+                    int(bool(row.get("revalidated"))),
+                    int(row.get("single_route_net_wei") or 0),
+                    int(row.get("gross_profit_wei") or 0),
+                )
+            if prior is None or evidence_rank(candidate) > evidence_rank(prior):
                 by_key[key] = candidate
 
     by_token: Dict[str, List[Dict[str, Any]]] = {}
