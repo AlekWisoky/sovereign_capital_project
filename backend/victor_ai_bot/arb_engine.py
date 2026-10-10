@@ -2194,7 +2194,11 @@ async def find_three_leg_opportunities(
             "directed_pair_diverse_edges": int(len(new_directed_pairs)),
             "directed_pair_identity": "token_in->token_out",
             "quote_quality_priority_used": bool(quoted_output_by_edge),
-            "quote_quality_directed_pair_groups": int(len(pair_outputs)),
+            "quote_quality_directed_pair_groups": int(len({
+                (str(edge.token_in).lower(), str(edge.token_out).lower())
+                for edge in frontier_candidates
+                if edge_key(edge) in quoted_output_by_edge
+            })),
             "selected_mean_quote_quality_percentile_bps": (
                 int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
                 if selected_quote_percentiles else None
