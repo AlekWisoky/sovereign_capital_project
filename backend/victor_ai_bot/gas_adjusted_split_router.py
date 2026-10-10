@@ -8,7 +8,7 @@ No plan produced here grants execution authority.
 """
 
 from fractions import Fraction
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 # Must remain aligned with gas_model.estimate_route_gas_units().
 _SHARED_EXECUTION_OVERHEAD_GAS_UNITS = 180_000 + 90_000
@@ -87,6 +87,8 @@ def _normalize_candidate(candidate: Mapping[str, Any], *, chain_id: int) -> Dict
     prior_out = borrow_token
     pool_keys = []
     protocols = set()
+    routers = set()
+    directed_pairs = set()
     for leg in legs:
         token_in = str(leg.get("token_in") or "").strip().lower()
         token_out = str(leg.get("token_out") or "").strip().lower()
@@ -97,6 +99,12 @@ def _normalize_candidate(candidate: Mapping[str, Any], *, chain_id: int) -> Dict
         if not protocol:
             return None
         protocols.add(protocol)
+        venue = str(leg.get("venue") or "").strip().lower()
+        # Curve venue is the pool itself, not a router. Preserve pool identity
+        # separately and do not mislabel it as a router.
+        if venue and protocol != "curve":
+            routers.add(venue)
+        directed_pairs.add(f"{token_in}->{token_out}")
         key = _leg_pool_key(leg)
         if key is None:
             return None
@@ -122,6 +130,8 @@ def _normalize_candidate(candidate: Mapping[str, Any], *, chain_id: int) -> Dict
         "legs": legs,
         "pool_keys": set(pool_keys),
         "protocols": protocols,
+        "routers": routers,
+        "directed_pairs": directed_pairs,
         "single_route_net_wei": gross - fee - gas_token,
         "gas_token_per_native_wei": conversion,
         "revalidated": candidate.get("revalidated") is True,
@@ -186,10 +196,10 @@ def _prepare_candidate_buckets(
                 pick_idx = max(
                     range(len(pending)),
                     key=lambda idx: (
-                        len(pending[idx]["protocols"] - set().union(*(x["protocols"] for x in chosen))) if chosen else len(pending[idx]["protocols"]),
-                        len(pending[idx]["pool_keys"] - set().union(*(x["pool_keys"] for x in chosen))) if chosen else len(pending[idx]["pool_keys"]),
                         pending[idx]["single_route_net_wei"],
                         pending[idx]["gross_profit_wei"],
+                        len(pending[idx]["protocols"] - set().union(*(x["protocols"] for x in chosen))) if chosen else len(pending[idx]["protocols"]),
+                        len(pending[idx]["pool_keys"] - set().union(*(x["pool_keys"] for x in chosen))) if chosen else len(pending[idx]["pool_keys"]),
                     ),
                 )
                 chosen.append(pending.pop(pick_idx))
@@ -245,6 +255,13 @@ def _evaluate_split(parts: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "simulation_required_before_authority": True,
         "route_count": len(parts),
         "route_ids": [str(row["route_id"]) for row in parts],
+        "identity_coverage": {
+            "unique_protocols": len(set().union(*(row["protocols"] for row in parts))),
+            "unique_pool_keys": len(set().union(*(row["pool_keys"] for row in parts))),
+            "unique_router_ids": len(set().union(*(row["routers"] for row in parts))),
+            "unique_directed_pairs": len(set().union(*(row["directed_pairs"] for row in parts))),
+            "router_identity_is_not_a_profit_score": True,
+        },
         "allocations": [
             {
                 "route_id": str(row["route_id"]),
@@ -254,6 +271,8 @@ def _evaluate_split(parts: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
                 "gas_cost_profit_token_wei_observed": str(row["gas_cost_profit_token_wei"]),
                 "protocols": sorted(row["protocols"]),
                 "pool_keys": sorted(row["pool_keys"]),
+                "router_ids": sorted(row["routers"]),
+                "directed_pairs": sorted(row["directed_pairs"]),
                 "legs": [
                     {
                         "dex": str(leg.get("dex") or ""),
