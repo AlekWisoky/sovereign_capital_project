@@ -637,6 +637,7 @@ def test_frontier_identity_separates_protocol_pool_and_router_diversity():
     assert arb._edge_router_identity(curve) is None
 
 
+
 def test_three_leg_frontier_recomputes_diversity_after_each_selection():
     token_in = "0x" + "11" * 20
     univ3 = arb.Edge(
