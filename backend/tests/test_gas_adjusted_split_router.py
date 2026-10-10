@@ -45,7 +45,8 @@ def _legs(
     ]
 
 
-def _candidate(route_id: str, amount: int, gross: int, legs, *, gas_token: str = "700000"):
+def _candidate(route_id: str, economics: tuple[int, int], legs, *, gas_token: str = "700000"):
+    amount, gross = economics
     return {
         "route_id": route_id,
         "amount_in": str(amount),
@@ -83,11 +84,11 @@ def _matrix(*rows):
 def test_gas_adjusted_split_frontier_finds_better_partition_but_never_grants_authority():
     matrix = _matrix(
         (5_000_000, [
-            _candidate("route-a", 5_000_000, 1_000_000, _legs(TOKEN_X)),
-            _candidate("route-b", 5_000_000, 1_000_000, _legs(TOKEN_Y)),
+            _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X)),
+            _candidate("route-b", (5_000_000, 1_000_000), _legs(TOKEN_Y)),
         ]),
         (10_000_000, [
-            _candidate("route-c", 10_000_000, 1_500_000, _legs(TOKEN_Z, 10_000_000), gas_token="1600000"),
+            _candidate("route-c", (10_000_000, 1_500_000), _legs(TOKEN_Z, 10_000_000), gas_token="1600000"),
         ]),
     )
 
@@ -118,9 +119,9 @@ def test_gas_adjusted_split_frontier_finds_better_partition_but_never_grants_aut
 def test_candidate_shortlist_keeps_near_best_pool_diversity_not_raw_router_count():
     matrix = _matrix(
         (5_000_000, [
-            _candidate("best-net", 5_000_000, 1_000_000, _legs(TOKEN_X)),
-            _candidate("near-net-diverse-pool", 5_000_000, 998_600, _legs(TOKEN_Y)),
-            _candidate("economically-distant", 5_000_000, 900_000, _legs(TOKEN_Z)),
+            _candidate("best-net", (5_000_000, 1_000_000), _legs(TOKEN_X)),
+            _candidate("near-net-diverse-pool", (5_000_000, 998_600), _legs(TOKEN_Y)),
+            _candidate("economically-distant", (5_000_000, 900_000), _legs(TOKEN_Z)),
         ])
     )
     buckets = _prepare_candidate_buckets(
@@ -157,11 +158,11 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
     result = build_gas_adjusted_split_frontier(
         _matrix(
             (5_000_000, [
-                _candidate("route-a", 5_000_000, 1_000_000, _legs(TOKEN_X)),
-                _candidate("route-b-shared-pool", 5_000_000, 1_000_000, shared_route_b),
+                _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X)),
+                _candidate("route-b-shared-pool", (5_000_000, 1_000_000), shared_route_b),
             ]),
             (10_000_000, [
-                _candidate("route-c", 10_000_000, 2_000_000, _legs(TOKEN_Z, 10_000_000)),
+                _candidate("route-c", (10_000_000, 2_000_000), _legs(TOKEN_Z, 10_000_000)),
             ]),
         ),
         chain_id=1,
@@ -172,8 +173,7 @@ def test_split_optimizer_rejects_reuse_of_same_pool_across_routes():
 def test_component_must_repay_principal_and_flash_fee():
     candidate = _candidate(
         "not-repayable",
-        5_000_000,
-        1_000_000,
+        (5_000_000, 1_000_000),
         _legs(TOKEN_X),
     )
     candidate["repayment_valid"] = False
@@ -204,8 +204,7 @@ def test_curve_coin_index_directions_do_not_create_distinct_pool_identities():
     ]
     candidate = _candidate(
         "curve-same-pool-roundtrip",
-        5_000_000,
-        1_000_000,
+        (5_000_000, 1_000_000),
         curve_roundtrip,
     )
     assert _normalize_candidate(candidate, chain_id=1) is None
@@ -214,8 +213,8 @@ def test_curve_coin_index_directions_do_not_create_distinct_pool_identities():
 def test_split_optimizer_fails_closed_when_gas_conversion_is_missing():
     result = build_gas_adjusted_split_frontier(
         _matrix((5_000_000, [
-            _candidate("route-a", 5_000_000, 1_000_000, _legs(TOKEN_X), gas_token=""),
-            _candidate("route-b", 5_000_000, 1_000_000, _legs(TOKEN_Y), gas_token=""),
+            _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X), gas_token=""),
+            _candidate("route-b", (5_000_000, 1_000_000), _legs(TOKEN_Y), gas_token=""),
         ])),
         chain_id=1,
     )
@@ -227,8 +226,8 @@ def test_split_optimizer_fails_closed_when_gas_conversion_is_missing():
 def test_base_split_optimizer_requires_exact_l1_fee_evidence():
     result = build_gas_adjusted_split_frontier(
         _matrix((5_000_000, [
-            _candidate("route-a", 5_000_000, 1_000_000, _legs(TOKEN_X)),
-            _candidate("route-b", 5_000_000, 1_000_000, _legs(TOKEN_Y)),
+            _candidate("route-a", (5_000_000, 1_000_000), _legs(TOKEN_X)),
+            _candidate("route-b", (5_000_000, 1_000_000), _legs(TOKEN_Y)),
         ])),
         chain_id=8453,
     )
