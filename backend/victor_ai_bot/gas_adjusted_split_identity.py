@@ -40,19 +40,30 @@ def _router_pair_pool_key(protocol: str, venue: str, pair: str, aux: str) -> str
     return f"{protocol}|{venue}|{pair}|{aux}"
 
 
+def _normalized_leg_text(leg: Mapping[str, Any], key: str) -> str:
+    return str(leg.get(key) or "").strip().lower()
+
+
+def _normalized_leg_aux(leg: Mapping[str, Any]) -> str:
+    value = leg.get("data")
+    if value in (None, ""):
+        value = leg.get("aux")
+    if value in (None, ""):
+        value = "0x"
+    return str(value).strip().lower()
+
+
+def _pool_tokens_are_valid(protocol: str, token_in: str, token_out: str) -> bool:
+    return bool(protocol and token_in and token_out and token_in != token_out)
+
+
 def _pool_key_inputs(leg: Mapping[str, Any]) -> tuple[str, str, str, str] | None:
-    protocol = str(leg.get("dex") or "").strip().lower()
-    token_in = str(leg.get("token_in") or "").strip().lower()
-    token_out = str(leg.get("token_out") or "").strip().lower()
-    venue = str(leg.get("venue") or "").strip().lower()
-    aux = str(leg.get("data") or leg.get("aux") or "0x").strip().lower()
-    if not protocol:
-        return None
-    if not token_in:
-        return None
-    if not token_out:
-        return None
-    if token_in == token_out:
+    protocol = _normalized_leg_text(leg, "dex")
+    token_in = _normalized_leg_text(leg, "token_in")
+    token_out = _normalized_leg_text(leg, "token_out")
+    venue = _normalized_leg_text(leg, "venue")
+    aux = _normalized_leg_aux(leg)
+    if not _pool_tokens_are_valid(protocol, token_in, token_out):
         return None
     return protocol, venue, "|".join(sorted((token_in, token_out))), aux
 
