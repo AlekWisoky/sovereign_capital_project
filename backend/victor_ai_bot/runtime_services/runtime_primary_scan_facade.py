@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import linecache
 import os
 import time
 from dataclasses import dataclass
@@ -33,13 +32,11 @@ def _scan_error_trace(exc: BaseException, *, max_frames: int = 8) -> List[Dict[s
     while tb is not None:
         frame = tb.tb_frame
         filename = os.path.basename(str(frame.f_code.co_filename or ""))
-        source_line = linecache.getline(frame.f_code.co_filename, tb.tb_lineno).strip()
         frames.append({
             "module": str(frame.f_globals.get("__name__") or ""),
             "filename": filename,
             "function": str(frame.f_code.co_name or ""),
             "line": int(tb.tb_lineno),
-            "source": source_line[:240],
         })
         tb = tb.tb_next
     return frames[-max(1, int(max_frames)):]
