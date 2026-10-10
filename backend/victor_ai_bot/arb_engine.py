@@ -1,7 +1,7 @@
 from __future__ import annotations
 import time, hashlib, os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from .cache import PerBlockCache
 from .models import Opportunity, Route, RouteLeg
 from .quote_univ3 import quote_exact_input_single, quote_exact_input_single_batch
