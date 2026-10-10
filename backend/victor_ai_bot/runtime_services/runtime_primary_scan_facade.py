@@ -1837,7 +1837,12 @@ class RuntimePrimaryScanFacade:
                     else ""
                 ),
                 "flashloan_fee_ok": shared_fee_observation.get("ok") is True,
-                "flashloan_fee_status": str(shared_fee_observation.get("status") or ""),
+                # observe_flashloan_fee_bps does not return a status field on
+                # success; normalize its result so a valid observation is usable.
+                "flashloan_fee_status": str(
+                    shared_fee_observation.get("status")
+                    or ("observed" if shared_fee_observation.get("ok") is True else "unavailable")
+                ),
             }
         observed_gas_price_wei = (
             int(gas_price_consensus.get("gas_price_wei"))
