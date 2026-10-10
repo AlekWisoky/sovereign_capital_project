@@ -249,6 +249,13 @@ class RuntimeStateFacade:
             "candidate_token_discovery": dict(
                 telemetry.get("candidate_token_discovery") or {}
             ),
+            "rpc_selection_phase": str(telemetry.get("rpc_selection_phase") or ""),
+            "rpc_selection_started_ms": telemetry.get("rpc_selection_started_ms"),
+            "rpc_selection_completed_ms": telemetry.get("rpc_selection_completed_ms"),
+            "rpc_provider_scan_timeout_s": telemetry.get("rpc_provider_scan_timeout_s"),
+            "rpc_selection_progress": dict(
+                telemetry.get("rpc_selection_progress") or {}
+            ),
             "quotes": {
                 "requests": requests,
                 "successes": successes,
