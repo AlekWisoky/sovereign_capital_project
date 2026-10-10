@@ -12,6 +12,7 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _candidate_sizing_sort_key,
     _merge_size_economic_matrices,
     _selected_provider_frontier_slice_offset,
+    _selected_provider_full_scan_chunk_order,
 )
 
 
@@ -24,13 +25,15 @@ def test_selected_provider_full_scan_budget_scales_with_graph_and_reserves_front
     baseline = runtime._selected_provider_full_scan_budget_s(235)
     dense_graph = runtime._selected_provider_full_scan_budget_s(370)
 
-    assert baseline == 35.0
-    assert dense_graph == 56.0
+    assert baseline == 10.0
+    assert dense_graph == 12.0
     assert dense_graph > baseline
     assert runtime._selected_provider_frontier_seed_budget_s() == 10.0
 
+    # Explicit settings remain supported but can no longer monopolize a chain
+    # runtime for longer than the hard per-tick rescue cap.
     monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_BUDGET_S", "44")
-    assert runtime._selected_provider_full_scan_budget_s(10_000) == 60.0
+    assert runtime._selected_provider_full_scan_budget_s(10_000) == 12.0
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_BUDGET_S", "99")
     assert runtime._selected_provider_frontier_seed_budget_s() == 12.0
 
@@ -41,11 +44,31 @@ def test_arbitrum_full_scan_defaults_to_smaller_rescue_chunks(monkeypatch):
     monkeypatch.delenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", raising=False)
 
     assert runtime._selected_provider_full_scan_chunk_size() == 8
-    assert runtime._selected_provider_full_scan_budget_s(370) == 60.0
+    assert runtime._selected_provider_full_scan_budget_s(370) == 12.0
 
     # An explicit operator override remains supported and bounded.
     monkeypatch.setenv("VICTOR_SELECTED_PROVIDER_FULL_SCAN_CHUNK_SIZE", "16")
     assert runtime._selected_provider_full_scan_chunk_size() == 16
+
+
+def test_selected_provider_full_scan_rotates_and_covers_each_chunk_once():
+    first = _selected_provider_full_scan_chunk_order(
+        graph_edge_count=526,
+        chunk_size=16,
+        rotation_index=10,
+    )
+    second = _selected_provider_full_scan_chunk_order(
+        graph_edge_count=526,
+        chunk_size=16,
+        rotation_index=11,
+    )
+
+    assert len(first) == 33
+    assert first[0] == 10
+    assert second[0] == 11
+    assert set(first) == set(range(33))
+    assert len(first) == len(set(first))
+    assert first[1:] + first[:1] == second
 
 
 def test_selected_provider_chunk_accounting_covers_completed_timeout_failed_and_skipped():
