@@ -8,6 +8,9 @@ import pytest
 from victor_ai_bot.config import load_config
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     RuntimePrimaryScanFacade,
+    _candidate_economic_after_cost_for_sizing,
+    _candidate_sizing_sort_key,
+    _selected_provider_frontier_slice_offset,
 )
 
 
@@ -449,3 +452,64 @@ execution:
 
     assert cfg.execution.executor_address == "0x1111111111111111111111111111111111111111"
     assert cfg.execution.profit_to == "0x2222222222222222222222222222222222222222"
+
+
+
+def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():
+    offsets = [
+        _selected_provider_frontier_slice_offset(
+            graph_edge_count=370,
+            edge_cap=32,
+            seed_index=index,
+            seed_count=3,
+        )
+        for index in range(3)
+    ]
+
+    assert offsets == [0, 169, 338]
+    assert _selected_provider_frontier_slice_offset(
+        graph_edge_count=370,
+        edge_cap=32,
+        seed_index=0,
+        seed_count=1,
+    ) == 169
+
+
+def test_size_ranking_uses_signed_economic_profit_not_repayment_failure_sentinel():
+    cannot_repay = SimpleNamespace(
+        id="route-a",
+        route_id="route-a",
+        expected_profit_raw="5000",
+        meta={
+            "profitability": {
+                "revalidated": True,
+                "authoritative": False,
+                "valid": False,
+                "reason": "does_not_repay_flashloan",
+                "profit_after_costs_wei": "-1",
+                "economic_profit_after_costs_wei": "-1000",
+            }
+        },
+    )
+    better_diagnostic = SimpleNamespace(
+        id="route-b",
+        route_id="route-b",
+        expected_profit_raw="100",
+        meta={
+            "profitability": {
+                "revalidated": True,
+                "authoritative": False,
+                "valid": False,
+                "reason": "profit_after_costs_not_positive",
+                "profit_after_costs_wei": "-200",
+                "economic_profit_after_costs_wei": "-200",
+            }
+        },
+    )
+
+    assert _candidate_economic_after_cost_for_sizing(cannot_repay) == -1000
+    assert (
+        _candidate_sizing_sort_key(better_diagnostic)
+        > _candidate_sizing_sort_key(cannot_repay)
+    )
+    assert not _candidate_sizing_sort_key(cannot_repay)[0]
