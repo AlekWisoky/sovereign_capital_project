@@ -48,7 +48,9 @@ def _pool_key_inputs(leg: Mapping[str, Any]) -> tuple[str, str, str, str] | None
     aux = str(leg.get("data") or leg.get("aux") or "0x").strip().lower()
     if not protocol:
         return None
-    if not token_in or not token_out:
+    if not token_in:
+        return None
+    if not token_out:
         return None
     if token_in == token_out:
         return None
