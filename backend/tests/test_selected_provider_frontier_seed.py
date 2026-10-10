@@ -386,7 +386,7 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
         fake_requote,
     )
 
-    await runtime._run_bounded_selected_provider_size_probe(
+    sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
         object(),
         current_block=123,
         base_amount_in=1000,
@@ -394,7 +394,16 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
         cache=object(),
     )
 
-    assert seen == [500, 1500, 2000]
+    # The seed notional was already quoted; only genuinely different sizes
+    # consume additional RPC budget.
+    assert seen == [500, 2000]
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["amounts_scanned"] == ["500", "1500", "2000"]
+    assert adaptive["economic_matrix_complete"] is True
+    assert sorted(row["amount_in"] for row in telemetry["size_economic_matrix"]) == [
+        "1500", "2000", "500"
+    ]
+    assert len(sized) == 3
 
 
 def test_frozen_provider_graph_slice_preserves_stable_edge_order():
@@ -473,6 +482,22 @@ def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():
         seed_index=0,
         seed_count=1,
     ) == 169
+
+    # The next block rotates each sample to a new bounded graph window while
+    # retaining spread; subsequent blocks continue to walk the graph.
+    rotated = [
+        _selected_provider_frontier_slice_offset(
+            graph_edge_count=370,
+            edge_cap=32,
+            seed_index=index,
+            seed_count=3,
+            rotation_index=1,
+        )
+        for index in range(3)
+    ]
+    assert rotated == [32, 192, 338]
+    assert len(set(rotated)) == 3
+    assert rotated != offsets
 
 
 def test_size_ranking_uses_signed_economic_profit_not_repayment_failure_sentinel():
