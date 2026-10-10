@@ -592,17 +592,30 @@ def test_size_economic_matrix_merges_frontier_and_requote_evidence():
         "frontier_seed_edge_cap": 32,
         "frontier_seed_graph_edge_count": 160,
         "frontier_seed_rotation_index": 3,
-        "candidates": [{
-            "route_id": "route-b",
-            "amount_in": "1000",
-            "revalidated": True,
-            "authoritative": False,
-            "valid": False,
-            "diagnostic_only": True,
-            "reason": "profit_after_costs_not_positive",
-            "after_cost_profit_wei": "0",
-            "economic_after_cost_profit_wei": "-5",
-        }],
+        "candidates": [
+            {
+                "route_id": "route-a",
+                "amount_in": "1000",
+                "revalidated": True,
+                "authoritative": False,
+                "valid": False,
+                "diagnostic_only": True,
+                "reason": "profit_after_costs_not_positive",
+                "after_cost_profit_wei": "0",
+                "economic_after_cost_profit_wei": "999",
+            },
+            {
+                "route_id": "route-b",
+                "amount_in": "1000",
+                "revalidated": True,
+                "authoritative": False,
+                "valid": False,
+                "diagnostic_only": True,
+                "reason": "profit_after_costs_not_positive",
+                "after_cost_profit_wei": "0",
+                "economic_after_cost_profit_wei": "-5",
+            },
+        ],
     }
 
     merged = _merge_size_economic_matrices([verified], [sampled])
@@ -615,6 +628,10 @@ def test_size_economic_matrix_merges_frontier_and_requote_evidence():
     assert row["route_ids"] == ["route-a", "route-b"]
     assert row["selected_route_id"] == "route-a"
     assert row["economic_optimum_route_id"] == "route-a"
+    route_a = next(candidate for candidate in row["candidates"] if candidate["route_id"] == "route-a")
+    # A larger diagnostic P&L must never displace an authoritative row at the same size.
+    assert route_a["authoritative"] is True
+    assert route_a["valid"] is True
     assert row["evidence_sources"] == [
         "selected_provider_size_scan", "sampled_graph_frontier"
     ]
