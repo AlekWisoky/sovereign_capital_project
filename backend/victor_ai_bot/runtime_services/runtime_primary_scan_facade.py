@@ -48,6 +48,79 @@ def _provider_comparison_signature(
     )
 
 
+async def _resolve_gas_price_consensus(
+    rpc_manager: Any,
+    shared_consensus: Dict[str, Any] | None = None,
+    *,
+    require_shared: bool = False,
+) -> Dict[str, Any]:
+    """Resolve one gas-price snapshot, never querying each provider when symmetry is required."""
+    shared = dict(shared_consensus or {})
+    if shared:
+        return shared
+    if require_shared:
+        return {
+            "gas_price_wei": None,
+            "status": "insufficient_agreement",
+            "observations": [],
+            "anomalies": [],
+        }
+    try:
+        return dict(await rpc_manager.gas_price_consensus() or {})
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return {
+            "gas_price_wei": None,
+            "status": "insufficient_agreement",
+            "observations": [],
+            "anomalies": [],
+        }
+
+
+async def _resolve_scan_provider_cost_inputs(
+    rpc_manager: Any,
+    rpc: Any,
+    cfg: Any,
+    discovery_context: Dict[str, Any] | None,
+    *,
+    current_block: int,
+    amount_in: int,
+    provider_comparison_active: bool,
+) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any] | None]:
+    """Collect shared provider economics once and normalize the emitted comparison row."""
+    context = dict(discovery_context or {})
+    gas_consensus = await _resolve_gas_price_consensus(
+        rpc_manager,
+        dict(context.get("_shared_provider_gas_price_consensus") or {}),
+        require_shared=provider_comparison_active,
+    )
+    fee_observation = dict(
+        context.get("_shared_provider_flashloan_fee_observation") or {}
+    )
+    if provider_comparison_active and not fee_observation:
+        fee_observation = {
+            "ok": False,
+            "fee_bps": None,
+            "status": "shared_provider_flashloan_fee_unavailable",
+        }
+
+    provider_cost_inputs = None
+    if provider_comparison_active:
+        fee_bps = fee_observation.get("fee_bps")
+        provider_cost_inputs = {
+            "block_number": int(current_block),
+            "base_amount_in": str(int(amount_in)),
+            "gas_price_wei": str(gas_consensus.get("gas_price_wei") or ""),
+            "gas_price_status": str(gas_consensus.get("status") or ""),
+            "flashloan_fee_bps": str(fee_bps) if fee_bps is not None else "",
+            "flashloan_fee_ok": fee_observation.get("ok") is True,
+            "flashloan_fee_status": str(
+                fee_observation.get("status")
+                or ("observed" if fee_observation.get("ok") is True else "unavailable")
+            ),
+        }
+    return gas_consensus, fee_observation, provider_cost_inputs
+
+
 def _provider_cost_inputs_are_usable(telemetry: Dict[str, Any]) -> bool:
     costs = dict(telemetry.get("provider_comparison_cost_inputs") or {})
     try:
@@ -1807,43 +1880,21 @@ class RuntimePrimaryScanFacade:
                 "research_tokens_unpriced": list(shared_telemetry.get("research_tokens_unpriced") or []),
             }
         telemetry["scan_sizing"] = dict(token_scan_telemetry)
-        shared_gas_consensus = dict(
-            (discovery_context or {}).get("_shared_provider_gas_price_consensus") or {}
+        (
+            gas_price_consensus,
+            shared_fee_observation,
+            provider_cost_inputs,
+        ) = await _resolve_scan_provider_cost_inputs(
+            self.rpc_manager,
+            rpc,
+            self.cfg,
+            discovery_context,
+            current_block=int(current_block),
+            amount_in=int(amount_in),
+            provider_comparison_active=provider_comparison_active,
         )
-        if shared_gas_consensus:
-            gas_price_consensus = shared_gas_consensus
-        else:
-            try:
-                gas_price_consensus = await self.rpc_manager.gas_price_consensus()
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                gas_price_consensus = {
-                    "gas_price_wei": None,
-                    "status": "insufficient_agreement",
-                    "observations": [],
-                    "anomalies": [],
-                }
-        shared_fee_observation = dict(
-            (discovery_context or {}).get("_shared_provider_flashloan_fee_observation") or {}
-        )
-        if provider_comparison_active:
-            telemetry["provider_comparison_cost_inputs"] = {
-                "block_number": int(current_block),
-                "base_amount_in": str(int(amount_in)),
-                "gas_price_wei": str(gas_price_consensus.get("gas_price_wei") or ""),
-                "gas_price_status": str(gas_price_consensus.get("status") or ""),
-                "flashloan_fee_bps": (
-                    str(shared_fee_observation.get("fee_bps"))
-                    if shared_fee_observation.get("fee_bps") is not None
-                    else ""
-                ),
-                "flashloan_fee_ok": shared_fee_observation.get("ok") is True,
-                # observe_flashloan_fee_bps does not return a status field on
-                # success; normalize its result so a valid observation is usable.
-                "flashloan_fee_status": str(
-                    shared_fee_observation.get("status")
-                    or ("observed" if shared_fee_observation.get("ok") is True else "unavailable")
-                ),
-            }
+        if provider_cost_inputs is not None:
+            telemetry["provider_comparison_cost_inputs"] = provider_cost_inputs
         observed_gas_price_wei = (
             int(gas_price_consensus.get("gas_price_wei"))
             if gas_price_consensus.get("gas_price_wei") not in (None, "")
@@ -2831,17 +2882,10 @@ class RuntimePrimaryScanFacade:
                 "three_metrics": {},
             })
 
-        gas_price_consensus = dict(shared_gas_price_consensus or {})
-        if not gas_price_consensus:
-            try:
-                gas_price_consensus = dict(await self.rpc_manager.gas_price_consensus() or {})
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                gas_price_consensus = {
-                    "gas_price_wei": None,
-                    "status": "insufficient_agreement",
-                    "observations": [],
-                    "anomalies": [],
-                }
+        gas_price_consensus = await _resolve_gas_price_consensus(
+            self.rpc_manager,
+            shared_gas_price_consensus,
+        )
         observed_gas_price_wei = (
             int(gas_price_consensus.get("gas_price_wei"))
             if gas_price_consensus.get("gas_price_wei") not in (None, "")
