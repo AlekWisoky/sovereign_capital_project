@@ -2240,18 +2240,16 @@ class RuntimePrimaryScanFacade:
             if len(selected) >= route_cap:
                 break
 
-        # Diagnostics guide sizing, but only canonical positive after-cost outcomes
-        # satisfy the executable sufficiency gate.
+        # Profitability at the current notional does not prove that the notional
+        # is optimal. Whenever routes are available and the authorized ladder has
+        # alternatives, evaluate their size curve before handing candidates on.
+        # The canonical-positive count remains diagnostic and never grants
+        # execution authority; when no routes exist, graph-frontier discovery is
+        # responsible for introducing size-emergent routes.
         positive_base = sum(
             1 for candidate in base_opps if _authoritative_positive(candidate)
         )
-        should_probe = bool(
-            len(adaptive_amounts) > 1
-            and (
-                positive_base < min_opportunities
-                or len(selected) < min_opportunities
-            )
-        )
+        should_probe = bool(len(adaptive_amounts) > 1 and selected)
         telemetry["adaptive_size_discovery"] = {
             "enabled": bool(len(adaptive_amounts) > 1),
             "base_amount_in": str(int(base_amount_in)),
@@ -3483,15 +3481,21 @@ class RuntimePrimaryScanFacade:
                 selected_telemetry["adaptive_size_discovery"] = dict(
                     selected_adaptive["adaptive_size_discovery"]
                 )
-            if "size_economic_matrix" in selected_adaptive:
+            adaptive_matrix = list(selected_adaptive.get("size_economic_matrix") or [])
+            frontier_matrix = list(frontier_seed_telemetry.get("size_economic_matrix") or [])
+            if adaptive_matrix or frontier_matrix:
                 selected_telemetry["size_economic_matrix"] = _merge_size_economic_matrices(
-                    list(selected_adaptive.get("size_economic_matrix") or []),
-                    list(frontier_seed_telemetry.get("size_economic_matrix") or []),
+                    list(selected_telemetry.get("size_economic_matrix") or []),
+                    adaptive_matrix,
+                    frontier_matrix,
                 )
-            if "size_economic_evidence" in selected_adaptive:
+            adaptive_evidence = list(selected_adaptive.get("size_economic_evidence") or [])
+            frontier_evidence = list(frontier_seed_telemetry.get("size_economic_evidence") or [])
+            if adaptive_evidence or frontier_evidence:
                 selected_telemetry["size_economic_evidence"] = [
-                    *list(selected_adaptive.get("size_economic_evidence") or []),
-                    *list(frontier_seed_telemetry.get("size_economic_evidence") or []),
+                    *list(selected_telemetry.get("size_economic_evidence") or []),
+                    *adaptive_evidence,
+                    *frontier_evidence,
                 ]
         if adaptive_opps:
             selected_telemetry["rpc"] = dict(selected_telemetry.get("rpc") or {})
