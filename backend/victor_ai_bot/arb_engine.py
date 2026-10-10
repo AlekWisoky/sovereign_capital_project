@@ -1738,6 +1738,7 @@ async def find_two_leg_opportunities(
     max_scan_edges: Optional[int] = None,
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
+    route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -1828,10 +1829,7 @@ async def find_two_leg_opportunities(
     # Interleave token/protocol families before budgeting. This is only a
     # scheduling fairness policy; route economics still determine ranking.
     for e1 in _round_robin_route_group_edges(edges):
-        if (
-            prepared_route_groups
-            and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-        ):
+        if prepared_route_groups and time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         revs = by_pair.get((e1.token_out, e1.token_in), [])
@@ -1902,10 +1900,7 @@ async def find_two_leg_opportunities(
         opportunities=opps,
     )
     for wave_start in range(0, len(prepared_route_groups), route_group_parallelism):
-        if (
-            route_groups_evaluated > 0
-            and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-        ):
+        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
@@ -1922,11 +1917,11 @@ async def find_two_leg_opportunities(
 
         if (
             wave_start + route_group_parallelism < len(prepared_route_groups)
-            and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
+            and time.perf_counter() >= route_deadline
         ):
             route_budget_exhausted = True
             break
-    if route_groups_evaluated < len(prepared_route_groups):
+    if route_groups_evaluated < len(prepared_route_groups) or time.perf_counter() >= route_deadline:
         route_budget_exhausted = True
     _finalize_quote_coverage(metrics)
     if telemetry is not None:
@@ -1936,6 +1931,10 @@ async def find_two_leg_opportunities(
         telemetry["route_evaluation_ms"] = float(
             (time.perf_counter() - route_eval_started) * 1000.0
         )
+        telemetry["route_budget_elapsed_ms"] = float(
+            (time.perf_counter() - t_start) * 1000.0
+        )
+        telemetry["route_budget_deadline_ms"] = int(max(1, int(time_budget_ms)))
         telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
         telemetry["route_group_schedule"] = {
             "block_number": int(block_number),
@@ -2187,6 +2186,7 @@ async def find_three_leg_opportunities(
     - no discovery here; pass extra_v3_pairs from DiscoveryManager
     """
     t_start = time.perf_counter()
+    route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -2429,10 +2429,7 @@ async def find_three_leg_opportunities(
     # flight, consume its returned quotes before stopping additional groups.
     for a_in, outs in frontier_adj.items():
         for e1 in outs:
-            if (
-                route_groups_evaluated > 0
-                and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-            ):
+            if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
                 route_budget_exhausted = True
                 break
             if e1.token_in != a_in:
@@ -2461,10 +2458,7 @@ async def find_three_leg_opportunities(
                 # A delayed second-leg batch is already paid for. Let one
                 # viable cycle reach its final-leg quote, then stop starting
                 # further final-leg batches once the route budget is spent.
-                if (
-                    final_leg_quote_batches > 0
-                    and (time.perf_counter() - route_eval_started) * 1000.0 > time_budget_ms
-                ):
+                if final_leg_quote_batches > 0 and time.perf_counter() >= route_deadline:
                     route_budget_exhausted = True
                     break
                 q2 = qmap2_3.get(edge_key(e2))
@@ -2728,6 +2722,10 @@ async def find_three_leg_opportunities(
         telemetry["route_evaluation_ms"] = float(
             (time.perf_counter() - route_eval_started) * 1000.0
         )
+        telemetry["route_budget_elapsed_ms"] = float(
+            (time.perf_counter() - t_start) * 1000.0
+        )
+        telemetry["route_budget_deadline_ms"] = int(max(1, int(time_budget_ms)))
         telemetry["route_groups_evaluated"] = int(route_groups_evaluated)
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
