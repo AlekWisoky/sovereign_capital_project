@@ -3084,6 +3084,43 @@ class RuntimePrimaryScanFacade:
         )
         discovery_context = dict(discovery_context)
         discovery_context["_provider_scan_pool_event_cache"] = provider_scan_pool_event_cache
+        try:
+            shared_gas_consensus = dict(await self.rpc_manager.gas_price_consensus() or {})
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            shared_gas_consensus = {
+                "gas_price_wei": None,
+                "status": "insufficient_agreement",
+                "observations": [],
+                "anomalies": [],
+            }
+        runtime_cfg = getattr(self, "cfg", None)
+        flash_provider = str(
+            getattr(getattr(runtime_cfg, "execution", None), "flash_provider", "aave") or "aave"
+        )
+        if runtime_cfg is None:
+            shared_flashloan_fee = {
+                "ok": False,
+                "fee_bps": None,
+                "status": "configuration_unavailable",
+            }
+        else:
+            try:
+                shared_flashloan_fee = dict(
+                    await observe_flashloan_fee_bps(
+                        bootstrap_rpc,
+                        runtime_cfg,
+                        flash_provider,
+                        block=f"0x{int(current_block):x}",
+                    ) or {}
+                )
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                shared_flashloan_fee = {
+                    "ok": False,
+                    "fee_bps": None,
+                    "status": "shared_fee_observation_failed",
+                }
+        discovery_context["_shared_provider_gas_price_consensus"] = shared_gas_consensus
+        discovery_context["_shared_provider_flashloan_fee_observation"] = shared_flashloan_fee
         shared_token_scan_amounts, shared_token_scan_telemetry = await self._build_token_scan_amounts(
             bootstrap_rpc,
             current_block=int(current_block),
@@ -3268,13 +3305,30 @@ class RuntimePrimaryScanFacade:
         finally:
             self._rpc_provider_comparison = False
         evidence = [item[4] for item in results]
+        provider_comparison_comparable, provider_comparison_reason = (
+            _provider_results_are_comparable(results, int(current_block))
+        )
         selected, ordered = select_best_rpc_evidence(evidence)
-        if selected is None:
-            selected_url = bootstrap_url or candidates[0]
-            selected_result = next(item for item in results if item[0] == selected_url)
-        else:
+        if provider_comparison_comparable and selected is not None:
             selected_url = selected.endpoint
             selected_result = next(item for item in results if item[0] == selected_url)
+        else:
+            # If graph/size/cost evidence differs, economics are not a fair race.
+            # Keep a healthy bootstrap provider when possible; otherwise use the
+            # first healthy completed provider and make the non-comparable state explicit.
+            eligible = {
+                item.endpoint: item
+                for item in evidence
+                if item.economically_eligible
+            }
+            fallback_url = (
+                bootstrap_url if bootstrap_url in eligible
+                else next((item[0] for item in results if item[0] in eligible), None)
+            )
+            selected_url = fallback_url or bootstrap_url or candidates[0]
+            selected_result = next(item for item in results if item[0] == selected_url)
+            selected = eligible.get(selected_url)
+            ordered = list(evidence)
 
         _, selected_opps, selected_cache, selected_telemetry, _ = selected_result
 
@@ -4277,6 +4331,10 @@ class RuntimePrimaryScanFacade:
             provider_eligible[str(url)] = bool(provider_evidence.economically_eligible)
             provider_candidate_counts[str(url)] = len(provider_opps or [])
             if not provider_evidence.economically_eligible:
+                continue
+            if not provider_comparison_comparable and str(url) != str(selected_url):
+                # A union across mismatched block/graph/size/cost evidence would
+                # make the economic comparison meaningless. Keep only fallback.
                 continue
             for opportunity in list(provider_opps or []):
                 route_id = str(getattr(opportunity, "route_id", "") or "")
