@@ -600,6 +600,192 @@ def _build_size_economic_matrix(size_scan_records: List[Dict[str, Any]]) -> List
 
 
 
+
+def _merge_size_economic_matrices(
+    *matrices: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge sampled and route-requoted evidence without losing per-size economics."""
+    merged_by_amount: Dict[str, Dict[str, Any]] = {}
+    sources_by_amount: Dict[str, List[str]] = {}
+    samples_by_amount: Dict[str, List[Dict[str, Any]]] = {}
+
+    def candidate_key(row: Dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(row.get("route_id") or ""),
+            str(row.get("amount_in") or ""),
+        )
+
+    def candidate_rank(row: Dict[str, Any]) -> tuple[int, int, int, int]:
+        try:
+            after_cost = int(row.get("after_cost_profit_wei") or 0)
+        except (TypeError, ValueError, OverflowError):
+            after_cost = 0
+        try:
+            economic = int(_economic_after_cost_profit(row) or 0)
+        except (TypeError, ValueError, OverflowError):
+            economic = after_cost
+        valid_authority = bool(
+            row.get("revalidated") and row.get("authoritative") and row.get("valid")
+        )
+        return (
+            int(valid_authority and after_cost > 0),
+            int(valid_authority),
+            int(bool(row.get("revalidated") or row.get("diagnostic_only"))),
+            economic,
+        )
+
+    for matrix in matrices:
+        for source_row in list(matrix or []):
+            if not isinstance(source_row, dict):
+                continue
+            amount = str(source_row.get("amount_in") or "")
+            try:
+                if int(amount) <= 0:
+                    continue
+            except (TypeError, ValueError, OverflowError):
+                continue
+
+            incoming = dict(source_row)
+            incoming_candidates = [
+                dict(row)
+                for row in list(incoming.get("candidates") or [])
+                if isinstance(row, dict)
+            ]
+            source_name = (
+                "sampled_graph_frontier"
+                if bool(incoming.get("frontier_seed_sampled"))
+                else "selected_provider_size_scan"
+            )
+            existing = merged_by_amount.get(amount)
+            if existing is None:
+                merged_by_amount[amount] = incoming
+                existing_candidates = incoming_candidates
+                merged_by_amount[amount]["candidates"] = existing_candidates
+                sources_by_amount[amount] = [source_name]
+            else:
+                sources = sources_by_amount.setdefault(amount, [])
+                if source_name not in sources:
+                    sources.append(source_name)
+                existing_candidates = [
+                    dict(row)
+                    for row in list(existing.get("candidates") or [])
+                    if isinstance(row, dict)
+                ]
+                by_candidate = {
+                    candidate_key(row): row
+                    for row in existing_candidates
+                    if candidate_key(row)[0]
+                }
+                for candidate in incoming_candidates:
+                    key = candidate_key(candidate)
+                    if not key[0]:
+                        existing_candidates.append(candidate)
+                        continue
+                    prior = by_candidate.get(key)
+                    if prior is None:
+                        existing_candidates.append(candidate)
+                        by_candidate[key] = candidate
+                    elif candidate_rank(candidate) > candidate_rank(prior):
+                        prior_index = existing_candidates.index(prior)
+                        existing_candidates[prior_index] = candidate
+                        by_candidate[key] = candidate
+
+                for metric in ("quote_requests", "quote_successes", "failed_quote_edge_count"):
+                    existing[metric] = int(existing.get(metric, 0) or 0) + int(
+                        incoming.get(metric, 0) or 0
+                    )
+                existing["quote_failures"] = max(
+                    0,
+                    int(existing.get("quote_requests", 0) or 0)
+                    - int(existing.get("quote_successes", 0) or 0),
+                )
+                failure_reasons = dict(existing.get("quote_failure_reasons") or {})
+                for reason, count in dict(incoming.get("quote_failure_reasons") or {}).items():
+                    failure_reasons[str(reason)] = int(failure_reasons.get(str(reason), 0) or 0) + int(count or 0)
+                existing["quote_failure_reasons"] = failure_reasons
+                samples = [
+                    *list(existing.get("failed_quote_edge_samples") or []),
+                    *list(incoming.get("failed_quote_edge_samples") or []),
+                ]
+                unique_samples = []
+                seen_samples = set()
+                for sample in samples:
+                    identity = str(sample)
+                    if identity in seen_samples:
+                        continue
+                    seen_samples.add(identity)
+                    unique_samples.append(sample)
+                existing["failed_quote_edge_samples"] = unique_samples[:256]
+                existing["candidates"] = existing_candidates
+                existing["frontier_seed_sampled"] = bool(
+                    existing.get("frontier_seed_sampled")
+                    or incoming.get("frontier_seed_sampled")
+                )
+
+            target = merged_by_amount[amount]
+            if source_name not in sources_by_amount.setdefault(amount, []):
+                sources_by_amount[amount].append(source_name)
+            if bool(incoming.get("frontier_seed_sampled")):
+                sample = {
+                    "edge_offset": incoming.get("frontier_seed_edge_offset"),
+                    "edge_cap": incoming.get("frontier_seed_edge_cap"),
+                    "graph_edge_count": incoming.get("frontier_seed_graph_edge_count"),
+                    "rotation_index": incoming.get("frontier_seed_rotation_index"),
+                }
+                sample_key = tuple(str(sample.get(k)) for k in (
+                    "edge_offset", "edge_cap", "graph_edge_count", "rotation_index"
+                ))
+                known = {
+                    tuple(str(item.get(k)) for k in (
+                        "edge_offset", "edge_cap", "graph_edge_count", "rotation_index"
+                    ))
+                    for item in samples_by_amount.setdefault(amount, [])
+                }
+                if sample_key not in known:
+                    samples_by_amount[amount].append(sample)
+
+    merged: List[Dict[str, Any]] = []
+    for amount, row in merged_by_amount.items():
+        candidates = [
+            dict(item)
+            for item in list(row.get("candidates") or [])
+            if isinstance(item, dict)
+        ]
+        selected, economic = _size_matrix_selection(candidates)
+        row["route_ids"] = list(dict.fromkeys(
+            str(item.get("route_id") or "") for item in candidates
+            if str(item.get("route_id") or "")
+        ))
+        row["selection_basis"] = (
+            "verified_after_cost_profit"
+            if selected
+            else (
+                "economic_optimum_diagnostic"
+                if economic
+                else "no_economic_evidence"
+            )
+        )
+        if economic and not selected and str(economic.get("reason") or "") == "non_positive_gross_profit":
+            row["selection_basis"] = "gross_profit_diagnostic_only"
+        row["selected_route_id"] = str(selected.get("route_id") or "") if selected else ""
+        row["selected_after_cost_profit_wei"] = str(selected.get("after_cost_profit_wei") or "0") if selected else "0"
+        row["economic_optimum_route_id"] = str(economic.get("route_id") or "") if economic else ""
+        row["economic_optimum_after_cost_profit_wei"] = (
+            str(_economic_after_cost_profit(economic))
+            if economic and _economic_after_cost_profit(economic) is not None
+            else "0"
+        )
+        row["economic_optimum_authoritative"] = bool(economic and economic.get("authoritative"))
+        row["economic_optimum_executable"] = bool(selected)
+        row["evidence_sources"] = list(sources_by_amount.get(amount) or [])
+        row["frontier_seed_samples"] = list(samples_by_amount.get(amount) or [])
+        row["evidence_only"] = True
+        row["execution_authority_granted"] = False
+        merged.append(row)
+
+    return sorted(merged, key=lambda row: int(row.get("amount_in") or 0))
+
+
 class RuntimePrimaryScanFacade:
     """Primary DEX loop-scan compatibility facade.
 
@@ -1940,9 +2126,12 @@ class RuntimePrimaryScanFacade:
             max_probes = 3
 
         preferred: List[int] = []
+        # Sample a low, middle, and upper authorized notional. Larger sizes
+        # matter disproportionately when fixed gas/flash-loan costs create a
+        # break-even threshold; do not spend every frontier probe near 1x.
         raw = os.environ.get(
             "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS",
-            "1.5,2.0,0.5",
+            "0.5,2.0,8.0",
         )
         ladder_set = set(ladder)
         for item in str(raw).split(","):
@@ -3295,13 +3484,15 @@ class RuntimePrimaryScanFacade:
                     selected_adaptive["adaptive_size_discovery"]
                 )
             if "size_economic_matrix" in selected_adaptive:
-                selected_telemetry["size_economic_matrix"] = list(
-                    selected_adaptive.get("size_economic_matrix") or []
+                selected_telemetry["size_economic_matrix"] = _merge_size_economic_matrices(
+                    list(selected_adaptive.get("size_economic_matrix") or []),
+                    list(frontier_seed_telemetry.get("size_economic_matrix") or []),
                 )
             if "size_economic_evidence" in selected_adaptive:
-                selected_telemetry["size_economic_evidence"] = list(
-                    selected_adaptive.get("size_economic_evidence") or []
-                )
+                selected_telemetry["size_economic_evidence"] = [
+                    *list(selected_adaptive.get("size_economic_evidence") or []),
+                    *list(frontier_seed_telemetry.get("size_economic_evidence") or []),
+                ]
         if adaptive_opps:
             selected_telemetry["rpc"] = dict(selected_telemetry.get("rpc") or {})
             selected_telemetry["rpc"].update({
