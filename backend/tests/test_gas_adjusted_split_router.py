@@ -12,7 +12,13 @@ FEE_AUX = "0x" + (3000).to_bytes(32, "big").hex()
 SECOND_FEE_AUX = "0x" + (500).to_bytes(32, "big").hex()
 
 
-def _legs(middle: str, amount: int = 5_000_000, *, first_aux: str = FEE_AUX, second_aux: str = SECOND_FEE_AUX):
+def _legs(
+    middle: str,
+    amount: int = 5_000_000,
+    *,
+    first_aux: str = FEE_AUX,
+    second_aux: str = SECOND_FEE_AUX,
+):
     return [
         {
             "dex": "univ3",
