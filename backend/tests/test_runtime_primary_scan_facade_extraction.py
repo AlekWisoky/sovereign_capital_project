@@ -112,8 +112,8 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
 
     assert runtime._discovery.calls[0]['block_number'] == 321
     assert calls['two']['amount_in'] == 10
-    assert calls['two']['time_budget_ms'] == 2400
-    assert calls['three']['time_budget_ms'] == 2600
+    assert calls['two']['time_budget_ms'] == 4000
+    assert calls['three']['time_budget_ms'] == 5000
     assert calls['two']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_v3_pairs'] == ['v3-a', 'v3-b']
     assert calls['three']['extra_camelot_v2_pools'] == [{
