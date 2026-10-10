@@ -277,6 +277,126 @@ def _edge_diversity_novelty(
     )
 
 
+def _quote_outputs_by_pair(
+    candidates: Sequence[Tuple[int, Edge]],
+    quoted: Mapping[str, int],
+) -> Dict[Tuple[str, str], List[int]]:
+    outputs: Dict[Tuple[str, str], List[int]] = {}
+    for _order, edge in candidates:
+        pair = _edge_directed_pair_identity(edge)
+        output = quoted.get(edge_key(edge))
+        if pair is not None and output is not None:
+            outputs.setdefault(pair, []).append(int(output))
+    return outputs
+
+
+def _pair_quote_percentiles(
+    pair: Tuple[str, str],
+    candidates: Sequence[Tuple[int, Edge]],
+    outputs: Sequence[int],
+    quoted: Mapping[str, int],
+) -> Dict[Tuple[str, str, str], int]:
+    unique_outputs = sorted(set(outputs))
+    ranks: Dict[Tuple[str, str, str], int] = {}
+    for _order, edge in candidates:
+        if _edge_directed_pair_identity(edge) != pair:
+            continue
+        output = quoted.get(edge_key(edge))
+        if output is None:
+            continue
+        if len(unique_outputs) <= 1:
+            rank_bps = 5_000
+        else:
+            rank = unique_outputs.index(int(output)) if int(output) in unique_outputs else 0
+            rank_bps = int(rank * 10_000 / (len(unique_outputs) - 1))
+        ranks[(pair[0], pair[1], edge_key(edge))] = rank_bps
+    return ranks
+
+
+def _frontier_quote_quality_percentiles(
+    candidates: Sequence[Tuple[int, Edge]],
+    quoted: Mapping[str, int],
+) -> Dict[Tuple[str, str, str], int]:
+    outputs_by_pair = _quote_outputs_by_pair(candidates, quoted)
+    percentiles: Dict[Tuple[str, str, str], int] = {}
+    for pair, outputs in outputs_by_pair.items():
+        percentiles.update(_pair_quote_percentiles(pair, candidates, outputs, quoted))
+    return percentiles
+
+
+@dataclass(frozen=True)
+class _FrontierSelectionContext:
+    active_protocols_by_token: Dict[str, set[str]]
+    active_pools_by_token: Dict[str, set[str]]
+    active_routers_by_token: Dict[str, set[str]]
+    per_token_cap: int
+    quote_quality_by_edge: Dict[Tuple[str, str, str], int]
+
+
+def _frontier_identity_sets(
+    edge: Edge,
+    already_selected: Sequence[Edge],
+    context: _FrontierSelectionContext,
+) -> Tuple[set[str], set[str], set[str]]:
+    token = str(edge.token_in)
+    protocols = set(context.active_protocols_by_token.get(token, set()))
+    pools = set(context.active_pools_by_token.get(token, set()))
+    routers = set(context.active_routers_by_token.get(token, set()))
+    for chosen in already_selected:
+        protocol = _edge_protocol_identity(chosen)
+        pool = _edge_pool_identity(chosen)
+        router = _edge_router_identity(chosen)
+        if protocol:
+            protocols.add(protocol)
+        if pool:
+            pools.add(pool)
+        if router:
+            routers.add(router)
+    return protocols, pools, routers
+
+
+def _frontier_candidate_score(
+    order: int,
+    edge: Edge,
+    selected_by_token: Dict[str, List[Edge]],
+    context: _FrontierSelectionContext,
+) -> Tuple[int, int, int, int, int] | None:
+    token = str(edge.token_in)
+    bucket = selected_by_token.get(token, [])
+    if len(bucket) >= max(0, int(context.per_token_cap)):
+        return None
+    protocols, pools, routers = _frontier_identity_sets(edge, bucket, context)
+    protocol_new, pool_new, router_new = _edge_diversity_novelty(
+        edge,
+        active_protocols=protocols,
+        active_pools=pools,
+        active_routers=routers,
+    )
+    pair = _edge_directed_pair_identity(edge)
+    quote_quality = (
+        context.quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
+        if pair is not None else 0
+    )
+    return quote_quality, protocol_new, pool_new, router_new, -int(order)
+
+
+def _best_frontier_candidate_index(
+    pending: Sequence[Tuple[int, Edge]],
+    selected_by_token: Dict[str, List[Edge]],
+    context: _FrontierSelectionContext,
+) -> int | None:
+    best_index = None
+    best_score = None
+    for candidate_index, (order, edge) in enumerate(pending):
+        score = _frontier_candidate_score(order, edge, selected_by_token, context)
+        if score is None:
+            continue
+        if best_score is None or score > best_score:
+            best_index = candidate_index
+            best_score = score
+    return best_index
+
+
 def _select_three_leg_frontier_edges(
     candidates: List[Tuple[int, Edge]],
     *,
@@ -286,14 +406,9 @@ def _select_three_leg_frontier_edges(
     per_token_cap: int,
     global_cap: int,
     quoted_output_by_edge: Optional[Dict[str, int]] = None,
+    quote_quality_by_edge: Optional[Dict[Tuple[str, str, str], int]] = None,
 ) -> Tuple[List[Edge], Dict[str, List[Edge]]]:
-    """Select an economically informed, diversity-aware bounded edge frontier.
-
-    Raw output amounts are comparable only for the same directed token pair.
-    Quote quality is ranked within each directed pair, then used as the primary
-    priority. Protocol, pool and router novelty are tie-breakers, not a substitute
-    for economics. Full-cycle after-cost ranking occurs after routes are quoted.
-    """
+    """Select a bounded, quote-aware edge frontier with independent identity axes."""
     pending = list(candidates)
     selected: List[Edge] = []
     selected_by_token: Dict[str, List[Edge]] = {}
@@ -302,73 +417,25 @@ def _select_three_leg_frontier_edges(
         for key, value in dict(quoted_output_by_edge or {}).items()
         if int(value) > 0
     }
-    pair_outputs: Dict[tuple[str, str], List[int]] = {}
-    for _order, edge in pending:
-        pair = _edge_directed_pair_identity(edge)
-        output = quoted.get(edge_key(edge))
-        if pair is not None and output is not None:
-            pair_outputs.setdefault(pair, []).append(output)
-
-    pair_percentile: Dict[tuple[str, str, str], int] = {}
-    for pair, outputs in pair_outputs.items():
-        unique_outputs = sorted(set(outputs))
-        for _order, edge in pending:
-            if _edge_directed_pair_identity(edge) != pair:
-                continue
-            output = quoted.get(edge_key(edge))
-            if output is None:
-                continue
-            if len(unique_outputs) <= 1:
-                rank_bps = 5_000
-            else:
-                rank = unique_outputs.index(output) if output in unique_outputs else 0
-                rank_bps = int(rank * 10_000 / (len(unique_outputs) - 1))
-            pair_percentile[(pair[0], pair[1], edge_key(edge))] = rank_bps
-
+    quality = dict(
+        quote_quality_by_edge
+        if quote_quality_by_edge is not None
+        else _frontier_quote_quality_percentiles(pending, quoted)
+    )
+    context = _FrontierSelectionContext(
+        active_protocols_by_token=active_protocols_by_token,
+        active_pools_by_token=active_pools_by_token,
+        active_routers_by_token=active_routers_by_token,
+        per_token_cap=max(0, int(per_token_cap)),
+        quote_quality_by_edge=quality,
+    )
     while pending and len(selected) < max(0, int(global_cap)):
-        best_index = None
-        best_score = None
-        for candidate_index, (order, edge) in enumerate(pending):
-            token = str(edge.token_in)
-            bucket = selected_by_token.get(token, [])
-            if len(bucket) >= max(0, int(per_token_cap)):
-                continue
-            protocols = set(active_protocols_by_token.get(token, set()))
-            pools = set(active_pools_by_token.get(token, set()))
-            routers = set(active_routers_by_token.get(token, set()))
-            for chosen in bucket:
-                protocol = _edge_protocol_identity(chosen)
-                pool = _edge_pool_identity(chosen)
-                router = _edge_router_identity(chosen)
-                if protocol:
-                    protocols.add(protocol)
-                if pool:
-                    pools.add(pool)
-                if router:
-                    routers.add(router)
-            protocol_new, pool_new, router_new = _edge_diversity_novelty(
-                edge,
-                active_protocols=protocols,
-                active_pools=pools,
-                active_routers=routers,
-            )
-            pair = _edge_directed_pair_identity(edge)
-            quote_quality = (
-                pair_percentile.get((pair[0], pair[1], edge_key(edge)), 0)
-                if pair is not None else 0
-            )
-            score = (quote_quality, protocol_new, pool_new, router_new, -int(order))
-            if best_score is None or score > best_score:
-                best_index = candidate_index
-                best_score = score
-
+        best_index = _best_frontier_candidate_index(pending, selected_by_token, context)
         if best_index is None:
             break
         _order, edge = pending.pop(best_index)
-        token = str(edge.token_in)
-        selected_by_token.setdefault(token, []).append(edge)
+        selected_by_token.setdefault(str(edge.token_in), []).append(edge)
         selected.append(edge)
-
     return selected, {token: list(items) for token, items in selected_by_token.items()}
 
 
@@ -2119,6 +2186,9 @@ async def find_three_leg_opportunities(
         for key, value in qmap1_3.items()
         if value and int(value[0]) > 0
     }
+    quote_quality_by_edge = _frontier_quote_quality_percentiles(
+        frontier_candidates, quoted_output_by_edge
+    )
     frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
         frontier_candidates,
         active_protocols_by_token=active_protocols_by_token,
@@ -2127,6 +2197,7 @@ async def find_three_leg_opportunities(
         per_token_cap=frontier_per_token,
         global_cap=frontier_global,
         quoted_output_by_edge=quoted_output_by_edge,
+        quote_quality_by_edge=quote_quality_by_edge,
     )
 
     frontier_adj: Dict[str, List[Edge]] = {
@@ -2146,7 +2217,7 @@ async def find_three_leg_opportunities(
         }
         new_directed_pairs = frontier_directed_pairs - active_directed_pairs
         selected_quote_percentiles = [
-            pair_percentile.get((pair[0], pair[1], edge_key(edge)), 0)
+            quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
             for edge in frontier_selected
             if (pair := _edge_directed_pair_identity(edge)) is not None
         ]
