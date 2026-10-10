@@ -3011,6 +3011,13 @@ class RuntimePrimaryScanFacade:
             full_scan_telemetry["edges_total"] = int(graph_edge_count)
             total_budget_s = float(self._selected_provider_full_scan_budget_s(graph_edge_count))
             full_scan_telemetry["budget_s"] = total_budget_s
+            minimum_chunk_window_s = _selected_provider_minimum_chunk_window_s(
+                total_budget_s=total_budget_s,
+                chunk_timeout_s=float(full_scan_telemetry["chunk_timeout_s"]),
+            )
+            full_scan_telemetry["minimum_chunk_window_s"] = float(
+                minimum_chunk_window_s
+            )
             chunk_order = _selected_provider_full_scan_chunk_order(
                 graph_edge_count=graph_edge_count,
                 chunk_size=chunk_size,
@@ -3168,11 +3175,6 @@ class RuntimePrimaryScanFacade:
 
             chunk_timeout_s = float(full_scan_telemetry["chunk_timeout_s"])
             chunk_parallelism = int(full_scan_telemetry["parallelism"])
-
-            minimum_chunk_window_s = _selected_provider_minimum_chunk_window_s(
-                total_budget_s=total_budget_s,
-                chunk_timeout_s=chunk_timeout_s,
-            )
 
             async def _run_selected_full_scan_chunks(scan_rpc: Any) -> None:
                 for batch_start in range(0, chunk_total, chunk_parallelism):
