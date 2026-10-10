@@ -813,3 +813,67 @@ def test_best_read_excludes_quote_quarantined_provider():
     assert manager.best_read() == "https://rpc-b.example"
     manager._read["https://rpc-b.example"].quote_unhealthy_until = 9_999_999_999.0
     assert manager.best_read() == ""
+
+def test_provider_comparison_rejects_mismatched_size_or_cost_snapshots():
+    from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+        _provider_results_are_comparable,
+    )
+
+    def evidence(endpoint):
+        return RpcEconomicEvidence(
+            endpoint=endpoint,
+            provider=endpoint.rsplit("/", 1)[-1],
+            profit_after_costs_usd_micro=0,
+            profitable_opportunity_count=0,
+            quote_requests=10,
+            quote_successes=9,
+            block_number=123,
+        )
+
+    base_telemetry = {
+        "route_universe": {"edges_by_dex": {"univ3": 20}, "pool_count": 8},
+        "adaptive_size_discovery": {"amounts_scanned": ["1000"]},
+        "scan_sizing": {"amounts_by_token": {"0xtoken": "1000"}},
+        "provider_comparison_cost_inputs": {
+            "block_number": 123,
+            "gas_price_wei": "100",
+            "gas_price_status": "agreed",
+            "flashloan_fee_bps": "5",
+            "flashloan_fee_ok": True,
+            "flashloan_fee_status": "ok",
+        },
+    }
+    same = [
+        ("https://rpc-a.example", [], None, dict(base_telemetry), evidence("https://rpc-a.example")),
+        ("https://rpc-b.example", [], None, dict(base_telemetry), evidence("https://rpc-b.example")),
+    ]
+    assert _provider_results_are_comparable(same, 123) == (
+        True,
+        "matched_graph_block_sizes_and_cost_inputs",
+    )
+
+    different_size = dict(base_telemetry)
+    different_size["adaptive_size_discovery"] = {"amounts_scanned": ["1000", "2000"]}
+    mismatched_size = [
+        same[0],
+        ("https://rpc-b.example", [], None, different_size, evidence("https://rpc-b.example")),
+    ]
+    assert _provider_results_are_comparable(mismatched_size, 123) == (
+        False,
+        "provider_graph_size_or_cost_inputs_mismatch",
+    )
+
+    different_cost = dict(base_telemetry)
+    different_cost["provider_comparison_cost_inputs"] = {
+        **base_telemetry["provider_comparison_cost_inputs"],
+        "gas_price_wei": "101",
+    }
+    mismatched_cost = [
+        same[0],
+        ("https://rpc-b.example", [], None, different_cost, evidence("https://rpc-b.example")),
+    ]
+    assert _provider_results_are_comparable(mismatched_cost, 123) == (
+        False,
+        "provider_graph_size_or_cost_inputs_mismatch",
+    )
+
