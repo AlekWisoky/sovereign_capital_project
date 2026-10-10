@@ -51,6 +51,7 @@ def _provider_comparison_signature(
 def _provider_cost_inputs_are_usable(telemetry: Dict[str, Any]) -> bool:
     costs = dict(telemetry.get("provider_comparison_cost_inputs") or {})
     try:
+        base_amount = int(costs.get("base_amount_in") or 0)
         gas_price = int(costs.get("gas_price_wei") or 0)
         fee_bps = int(costs.get("flashloan_fee_bps"))
     except (TypeError, ValueError, OverflowError):
@@ -58,7 +59,8 @@ def _provider_cost_inputs_are_usable(telemetry: Dict[str, Any]) -> bool:
     gas_status = str(costs.get("gas_price_status") or "").strip().lower()
     fee_status = str(costs.get("flashloan_fee_status") or "").strip().lower()
     return bool(
-        gas_price > 0
+        base_amount > 0
+        and gas_price > 0
         and gas_status not in {"", "insufficient_agreement", "unavailable", "failed", "error"}
         and costs.get("flashloan_fee_ok") is True
         and fee_bps >= 0
