@@ -6,7 +6,7 @@ Separates immutable route/cost evidence normalization from search/ranking logic.
 """
 
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Sequence
 
 
 SHARED_EXECUTION_OVERHEAD_GAS_UNITS = 180_000 + 90_000
@@ -40,8 +40,7 @@ def _router_pair_pool_key(protocol: str, venue: str, pair: str, aux: str) -> str
     return f"{protocol}|{venue}|{pair}|{aux}"
 
 
-def _leg_pool_key(leg: Mapping[str, Any]) -> str | None:
-    """Return physical pool identity; never use router identity as profit evidence."""
+def _pool_key_inputs(leg: Mapping[str, Any]) -> tuple[str, str, str, str] | None:
     protocol = str(leg.get("dex") or "").strip().lower()
     token_in = str(leg.get("token_in") or "").strip().lower()
     token_out = str(leg.get("token_out") or "").strip().lower()
@@ -49,17 +48,72 @@ def _leg_pool_key(leg: Mapping[str, Any]) -> str | None:
     aux = str(leg.get("data") or leg.get("aux") or "0x").strip().lower()
     if not protocol or not token_in or not token_out or token_in == token_out:
         return None
-    pair = "|".join(sorted((token_in, token_out)))
-    if protocol == "curve":
-        return _curve_pool_key(venue)
-    if protocol == "balancer":
-        return _balancer_pool_key(aux)
-    if protocol in {
-        "univ3", "slipstream", "aerodrome",
-        "camelot_algebra", "camelot_v2", "constant_product",
-    }:
-        return _router_pair_pool_key(protocol, venue, pair, aux)
+    return protocol, venue, "|".join(sorted((token_in, token_out))), aux
+
+
+def _curve_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _curve_pool_key(venue)
+
+
+def _balancer_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _balancer_pool_key(aux)
+
+
+def _router_fee_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _router_pair_pool_key("univ3", venue, pair, aux)
+
+
+def _slipstream_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _router_pair_pool_key("slipstream", venue, pair, aux)
+
+
+def _aerodrome_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _router_pair_pool_key("aerodrome", venue, pair, aux)
+
+
+def _camelot_algebra_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _router_pair_pool_key("camelot_algebra", venue, pair, aux)
+
+
+def _camelot_v2_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _router_pair_pool_key("camelot_v2", venue, pair, aux)
+
+
+def _constant_product_key_resolver(venue: str, pair: str, aux: str) -> str | None:
+    return _router_pair_pool_key("constant_product", venue, pair, aux)
+
+
+_POOL_KEY_RESOLVERS: Dict[str, Callable[[str, str, str], str | None]] = {
+    "curve": _curve_key_resolver,
+    "balancer": _balancer_key_resolver,
+    "univ3": _router_fee_key_resolver,
+    "slipstream": _slipstream_key_resolver,
+    "aerodrome": _aerodrome_key_resolver,
+    "camelot_algebra": _camelot_algebra_key_resolver,
+    "camelot_v2": _camelot_v2_key_resolver,
+    "constant_product": _constant_product_key_resolver,
+}
+
+
+def _generic_pool_key(protocol: str, venue: str, pair: str, aux: str) -> str | None:
     return f"{protocol}|{venue}|{pair}|{aux}" if venue else None
+
+
+def _resolve_pool_key(
+    protocol: str, venue: str, pair: str, aux: str
+) -> str | None:
+    resolver = _POOL_KEY_RESOLVERS.get(protocol)
+    if resolver is None:
+        return _generic_pool_key(protocol, venue, pair, aux)
+    return resolver(venue, pair, aux)
+
+
+def _leg_pool_key(leg: Mapping[str, Any]) -> str | None:
+    """Return physical pool identity; never use router identity as profit evidence."""
+    components = _pool_key_inputs(leg)
+    if components is None:
+        return None
+    return _resolve_pool_key(*components)
 
 
 def _candidate_numeric_values(candidate: Mapping[str, Any]) -> Dict[str, int] | None:
