@@ -139,15 +139,22 @@ async def test_runtime_rpc_race_selects_higher_economic_provider_without_broadca
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace(execution=SimpleNamespace(flash_provider="aave"))
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_fee_observation(*args, **kwargs):
+        return {"ok": True, "fee_bps": 9, "status": "ok"}
+
+    async def fake_token_amounts(*args, **kwargs):
+        return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
+
     runtime._build_token_scan_amounts = fake_token_amounts
     monkeypatch.setattr(
         "victor_ai_bot.runtime_services.runtime_primary_scan_facade.observe_flashloan_fee_bps",
         fake_fee_observation,
     )
-    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
-
-    async def fake_discovery(rpc, *, current_block):
-        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
 
     async def fake_token_amounts(*args, **kwargs):
         return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
@@ -560,15 +567,22 @@ async def test_runtime_rpc_race_preserves_healthy_provider_opportunity_union(mon
     runtime = RuntimePrimaryScanFacade()
     runtime.rpc_manager = _Manager()
     runtime.cfg = SimpleNamespace(execution=SimpleNamespace(flash_provider="aave"))
+    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
+
+    async def fake_discovery(rpc, *, current_block):
+        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
+
+    async def fake_fee_observation(*args, **kwargs):
+        return {"ok": True, "fee_bps": 9, "status": "ok"}
+
+    async def fake_token_amounts(*args, **kwargs):
+        return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
+
     runtime._build_token_scan_amounts = fake_token_amounts
     monkeypatch.setattr(
         "victor_ai_bot.runtime_services.runtime_primary_scan_facade.observe_flashloan_fee_bps",
         fake_fee_observation,
     )
-    monkeypatch.setattr(runtime, "_build_provider_comparison_pool_event_cache", lambda *args, **kwargs: object())
-
-    async def fake_discovery(rpc, *, current_block):
-        return {"v3_pairs": [], "curve_pools": [], "balancer_pools": []}
 
     async def fake_token_amounts(*args, **kwargs):
         return {"weth": 1000}, {"enabled": True, "amounts_by_token": {"weth": "1000"}}
