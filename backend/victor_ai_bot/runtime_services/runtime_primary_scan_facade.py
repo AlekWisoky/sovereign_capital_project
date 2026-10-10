@@ -89,6 +89,24 @@ def _selected_provider_chunk_accounting(
     }
 
 
+def _selected_provider_frontier_slice_offset(
+    *,
+    graph_edge_count: int,
+    edge_cap: int,
+    seed_index: int,
+    seed_count: int,
+) -> int:
+    """Spread bounded size-emergent probes across the graph, not its first edges."""
+    edge_count = max(0, int(graph_edge_count))
+    cap = max(1, int(edge_cap))
+    count = max(1, int(seed_count))
+    max_offset = max(0, edge_count - cap)
+    if count == 1:
+        return max_offset // 2
+    index = max(0, min(int(seed_index), count - 1))
+    return int(round(float(max_offset) * float(index) / float(count - 1)))
+
+
 class _FrozenProviderScanPoolEventCache:
     """Immutable provider-comparison graph and edge-priority view for one tick."""
 
@@ -207,6 +225,80 @@ def _economic_after_cost_profit(row: Dict[str, Any]) -> int | None:
     if row.get("reason") == "does_not_repay_flashloan" or after_cost == -1:
         return _reconstruct_nonrepay_economic_profit(row)
     return after_cost
+
+
+def _candidate_economic_after_cost_for_sizing(candidate: Any) -> int | None:
+    """Return signed P&L for sizing diagnostics only, never execution authority."""
+    meta = getattr(candidate, "meta", {}) or {}
+    if not isinstance(meta, dict):
+        return None
+    state = meta.get("profitability")
+    if not isinstance(state, dict):
+        state = meta.get("profitability_diagnostic")
+    if not isinstance(state, dict) or not bool(state.get("revalidated")):
+        return None
+    explicit = state.get("economic_profit_after_costs_wei")
+    if explicit not in (None, ""):
+        try:
+            return int(explicit)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    try:
+        after_cost = int(state.get("profit_after_costs_wei"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if str(state.get("reason") or "") == "does_not_repay_flashloan" or after_cost == -1:
+        gas_token_raw = state.get("gas_cost_profit_token_wei")
+        # Do not subtract native gas units from profit-token units.
+        if gas_token_raw in (None, ""):
+            return None
+        try:
+            gross_raw = state.get("gross_profit_wei")
+            gross = int(
+                gross_raw if gross_raw not in (None, "")
+                else getattr(candidate, "expected_profit_raw", 0)
+            )
+            fee = int(state.get("flashloan_fee_wei") or 0)
+            gas_token = int(gas_token_raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return gross - fee - gas_token
+    return after_cost
+
+
+def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]:
+    """Prefer verified executable positives, then best signed economic evidence."""
+    meta = getattr(candidate, "meta", {}) or {}
+    meta = meta if isinstance(meta, dict) else {}
+    state = meta.get("profitability")
+    if not isinstance(state, dict):
+        state = meta.get("profitability_diagnostic")
+    state = state if isinstance(state, dict) else {}
+    economic = _candidate_economic_after_cost_for_sizing(candidate)
+    try:
+        canonical_after_cost = int(state.get("profit_after_costs_wei") or 0)
+    except (TypeError, ValueError, OverflowError):
+        canonical_after_cost = 0
+    executable_positive = bool(
+        state.get("revalidated")
+        and state.get("authoritative")
+        and state.get("valid")
+        and canonical_after_cost > 0
+    )
+    try:
+        gross = int(getattr(candidate, "expected_profit_raw", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        gross = 0
+    route_id = str(
+        getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""
+    )
+    return (
+        int(executable_positive),
+        int(economic is not None),
+        int(economic) if economic is not None else gross,
+        gross,
+        route_id,
+    )
 
 
 def _candidate_route_snapshot(candidate: Opportunity) -> tuple[List[Dict[str, str]], str]:
@@ -1484,36 +1576,7 @@ class RuntimePrimaryScanFacade:
                     return ""
 
             def _candidate_after_cost(candidate: Opportunity) -> int | None:
-                meta = getattr(candidate, "meta", {}) or {}
-                if not isinstance(meta, dict):
-                    return None
-                profitability = meta.get("profitability")
-                diagnostic = meta.get("profitability_diagnostic")
-                state = profitability if isinstance(profitability, dict) else diagnostic
-                if not isinstance(state, dict):
-                    return None
-                # Authoritative state is preferred, but a fully revalidated
-                # loss-making state is still the canonical economic diagnostic.
-                # It must participate in sizing/route optimization even though
-                # it cannot execute.
-                if not bool(state.get("revalidated")):
-                    return None
-                if "profit_after_costs_wei" not in state and "economic_profit_after_costs_wei" not in state:
-                    return None
-                try:
-                    explicit_economic = state.get("economic_profit_after_costs_wei")
-                    if explicit_economic not in (None, ""):
-                        return int(explicit_economic)
-                    after_cost = int(state.get("profit_after_costs_wei") or 0)
-                    if str(state.get("reason") or "") == "does_not_repay_flashloan" or after_cost == -1:
-                        return (
-                            int(state.get("gross_profit_wei") or 0)
-                            - int(state.get("flashloan_fee_wei") or 0)
-                            - int(state.get("gas_cost_profit_token_wei") or 0)
-                        )
-                    return after_cost
-                except (TypeError, ValueError):
-                    return None
+                return _candidate_economic_after_cost_for_sizing(candidate)
 
             # Revalidate every scanned candidate before route-size
             # deduplication. Otherwise the sizing selector cannot see the
@@ -1913,15 +1976,20 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             min_opportunities = 2
 
-        def _after_cost(candidate: Any) -> int:
+        def _authoritative_positive(candidate: Any) -> bool:
             meta = getattr(candidate, "meta", {}) or {}
-            profitability = meta.get("profitability") if isinstance(meta, dict) else {}
-            if not isinstance(profitability, dict):
-                return -1
+            state = meta.get("profitability") if isinstance(meta, dict) else {}
+            if not isinstance(state, dict):
+                return False
             try:
-                return int(profitability.get("profit_after_costs_wei") or -1)
-            except (TypeError, ValueError):
-                return -1
+                return bool(
+                    state.get("revalidated")
+                    and state.get("authoritative")
+                    and state.get("valid")
+                    and int(state.get("profit_after_costs_wei") or 0) > 0
+                )
+            except (TypeError, ValueError, OverflowError):
+                return False
 
         def _route_key(candidate: Any) -> str:
             return str(
@@ -1940,8 +2008,8 @@ class RuntimePrimaryScanFacade:
             for candidate in list(base_opps or [])
             if str(getattr(candidate, "strategy", "") or "").startswith("tri:")
         ]
-        direct.sort(key=opportunity_profit_sort_key, reverse=True)
-        triangles.sort(key=opportunity_profit_sort_key, reverse=True)
+        direct.sort(key=_candidate_sizing_sort_key, reverse=True)
+        triangles.sort(key=_candidate_sizing_sort_key, reverse=True)
 
         try:
             route_cap = max(
@@ -1970,7 +2038,11 @@ class RuntimePrimaryScanFacade:
             if len(selected) >= route_cap:
                 break
 
-        positive_base = sum(1 for candidate in base_opps if _after_cost(candidate) > 0)
+        # Diagnostics guide sizing, but only canonical positive after-cost outcomes
+        # satisfy the executable sufficiency gate.
+        positive_base = sum(
+            1 for candidate in base_opps if _authoritative_positive(candidate)
+        )
         should_probe = bool(
             len(adaptive_amounts) > 1
             and (
@@ -2135,7 +2207,22 @@ class RuntimePrimaryScanFacade:
                     "route_id": _route_key(candidate),
                     "amount_in": str(getattr(getattr(candidate.route, "legs", [])[0], "amount_in", "")),
                     "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
-                    "after_cost_profit_wei": str(_after_cost(candidate)),
+                    "after_cost_profit_wei": str(
+                        (
+                            (getattr(candidate, "meta", {}) or {}).get("profitability")
+                            or {}
+                        ).get("profit_after_costs_wei", "")
+                    ),
+                    "economic_after_cost_profit_wei": (
+                        str(_candidate_economic_after_cost_for_sizing(candidate))
+                        if _candidate_economic_after_cost_for_sizing(candidate) is not None
+                        else ""
+                    ),
+                    "sizing_selection_basis": (
+                        "signed_economic_after_cost"
+                        if _candidate_economic_after_cost_for_sizing(candidate) is not None
+                        else "gross_diagnostic_fallback"
+                    ),
                     "revalidated": bool(
                         (
                             (getattr(candidate, "meta", {}) or {}).get("profitability")
@@ -2145,7 +2232,7 @@ class RuntimePrimaryScanFacade:
                 }
                 for candidate in sorted(
                     sized,
-                    key=opportunity_profit_sort_key,
+                    key=_candidate_sizing_sort_key,
                     reverse=True,
                 )[:32]
             ],
@@ -2859,10 +2946,20 @@ class RuntimePrimaryScanFacade:
                     seed_sink: Dict[str, Any] = {}
                     seed_context = dict(discovery_context)
                     if callable(slice_fn):
-                        seed_context["_provider_scan_pool_event_cache"] = slice_fn(
-                            int(seed_index * self._selected_provider_frontier_edge_cap()),
-                            int(self._selected_provider_frontier_edge_cap()),
+                        frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
+                        edge_offset = _selected_provider_frontier_slice_offset(
+                            graph_edge_count=graph_edge_count,
+                            edge_cap=frontier_edge_cap,
+                            seed_index=seed_index,
+                            seed_count=len(seed_amounts),
                         )
+                        seed_context["_provider_scan_pool_event_cache"] = slice_fn(
+                            edge_offset,
+                            frontier_edge_cap,
+                        )
+                    else:
+                        frontier_edge_cap = 0
+                        edge_offset = 0
                     # Critical guard: a frontier seed represents exactly one
                     # alternate notional. It must never recurse into the adaptive
                     # ladder inside _scan_primary_opportunities.
@@ -2941,6 +3038,9 @@ class RuntimePrimaryScanFacade:
                         frontier_seed_telemetry["candidate_counts"].append(
                             {
                                 "amount_in": str(int(seed_amount)),
+                                "edge_offset": int(edge_offset),
+                                "edge_cap": int(frontier_edge_cap),
+                                "graph_edge_count": int(graph_edge_count),
                                 "returned": int(len(frontier or [])),
                                 "added": int(additions),
                             }
