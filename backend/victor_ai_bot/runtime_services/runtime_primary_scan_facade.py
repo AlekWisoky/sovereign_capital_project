@@ -1601,6 +1601,9 @@ class RuntimePrimaryScanFacade:
                 two_metrics: Dict[str, Any] = {}
                 three_metrics: Dict[str, Any] = {}
 
+                # Recent production telemetry shows the former 1.5s/1.6s route-family
+                # budgets stopping on expanded graphs. Raise each bounded pass modestly;
+                # completed quote batches remain consumed and profitability gates are unchanged.
                 if bool(getattr(self.cfg.flags, "enable_two_leg_loops", True)):
                     two = await find_two_leg_opportunities(
                         rpc,
@@ -1609,7 +1612,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=1500,
+                        time_budget_ms=2400,
                         max_opps=60,
                         telemetry=two_metrics,
                         amount_in_by_token={
@@ -1643,7 +1646,7 @@ class RuntimePrimaryScanFacade:
                         current_block,
                         amount_in=int(size_amount),
                         slippage_bps=self.cfg.safety.slippage_bps,
-                        time_budget_ms=1600,
+                        time_budget_ms=2600,
                         max_opps=40,
                         telemetry=three_metrics,
                         amount_in_by_token={
