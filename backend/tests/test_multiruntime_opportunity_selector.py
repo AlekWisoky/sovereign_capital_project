@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -277,7 +278,7 @@ async def test_selector_bounds_slow_runtime_summary_and_fails_closed(monkeypatch
 
     assert out["selected"] is None
     assert out["candidates"][0]["eligible"] is False
-    assert out["candidates"][0]["blocking_reason"] == "auto_trade_gate_unavailable"
+    assert out["candidates"][0]["admission"]["gate_allowed"] is False
     assert out["runtime_errors"]["ethereum"] == "summary_failed:TimeoutError"
     assert out["summary_timeout_s"] == 0.25
 
