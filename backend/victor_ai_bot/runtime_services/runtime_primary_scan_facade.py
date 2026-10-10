@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, List
 from urllib.parse import urlsplit
 
@@ -76,25 +77,30 @@ async def _resolve_gas_price_consensus(
         }
 
 
+@dataclass(frozen=True)
+class _ProviderScanCostContext:
+    rpc_manager: Any
+    discovery_context: Dict[str, Any] | None
+    current_block: int
+    amount_in: int
+    provider_comparison_active: bool
+
+
 async def _resolve_scan_provider_cost_inputs(
-    rpc_manager: Any,
-    rpc: Any,
-    cfg: Any,
-    discovery_context: Dict[str, Any] | None,
-    *,
-    current_block: int,
-    amount_in: int,
-    provider_comparison_active: bool,
+    context: _ProviderScanCostContext,
 ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any] | None]:
     """Collect shared provider economics once and normalize the emitted comparison row."""
-    context = dict(discovery_context or {})
+    discovery = dict(context.discovery_context or {})
+    provider_comparison_active = bool(context.provider_comparison_active)
+    current_block = int(context.current_block)
+    amount_in = int(context.amount_in)
     gas_consensus = await _resolve_gas_price_consensus(
-        rpc_manager,
-        dict(context.get("_shared_provider_gas_price_consensus") or {}),
+        context.rpc_manager,
+        dict(discovery.get("_shared_provider_gas_price_consensus") or {}),
         require_shared=provider_comparison_active,
     )
     fee_observation = dict(
-        context.get("_shared_provider_flashloan_fee_observation") or {}
+        discovery.get("_shared_provider_flashloan_fee_observation") or {}
     )
     if provider_comparison_active and not fee_observation:
         fee_observation = {
@@ -107,8 +113,8 @@ async def _resolve_scan_provider_cost_inputs(
     if provider_comparison_active:
         fee_bps = fee_observation.get("fee_bps")
         provider_cost_inputs = {
-            "block_number": int(current_block),
-            "base_amount_in": str(int(amount_in)),
+            "block_number": current_block,
+            "base_amount_in": str(amount_in),
             "gas_price_wei": str(gas_consensus.get("gas_price_wei") or ""),
             "gas_price_status": str(gas_consensus.get("status") or ""),
             "flashloan_fee_bps": str(fee_bps) if fee_bps is not None else "",
@@ -1885,13 +1891,13 @@ class RuntimePrimaryScanFacade:
             shared_fee_observation,
             provider_cost_inputs,
         ) = await _resolve_scan_provider_cost_inputs(
-            self.rpc_manager,
-            rpc,
-            self.cfg,
-            discovery_context,
-            current_block=int(current_block),
-            amount_in=int(amount_in),
-            provider_comparison_active=provider_comparison_active,
+            _ProviderScanCostContext(
+                rpc_manager=self.rpc_manager,
+                discovery_context=discovery_context,
+                current_block=int(current_block),
+                amount_in=int(amount_in),
+                provider_comparison_active=provider_comparison_active,
+            )
         )
         if provider_cost_inputs is not None:
             telemetry["provider_comparison_cost_inputs"] = provider_cost_inputs
