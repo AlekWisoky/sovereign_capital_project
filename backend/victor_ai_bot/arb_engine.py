@@ -2547,9 +2547,9 @@ async def find_three_leg_opportunities(
             "scan_edges_selected": int(metrics.get("scan_edges_selected", len(edges))),
             "scan_edges_capped": int(metrics.get("scan_edges_capped", 0)),
         })
-    # Rank the complete bounded scan result, then enforce the caller's output
-    # cap. Discovery order must not hard-stop candidate generation.
-    opps.sort(key=lambda o: int(o.expected_profit_raw), reverse=True)
+    # Rank completed two-leg routes by comparable after-cost USD economics,
+    # then use token-local net P&L only when conversion evidence is absent.
+    opps.sort(key=_opportunity_economic_sort_key, reverse=True)
     return opps[: max(1, int(max_opps))]
 
 
