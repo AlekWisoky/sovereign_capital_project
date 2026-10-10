@@ -877,3 +877,54 @@ def test_provider_comparison_rejects_mismatched_size_or_cost_snapshots():
         "provider_graph_size_or_cost_inputs_mismatch",
     )
 
+def test_provider_comparison_rejects_different_blocks_and_ignores_failed_provider():
+    from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+        _provider_results_are_comparable,
+    )
+
+    def make_evidence(endpoint, *, block, healthy=True):
+        return RpcEconomicEvidence(
+            endpoint=endpoint,
+            provider=endpoint.rsplit("/", 1)[-1],
+            profit_after_costs_usd_micro=0,
+            profitable_opportunity_count=0,
+            quote_requests=10,
+            quote_successes=9,
+            block_number=block,
+            healthy=healthy,
+        )
+
+    telemetry = {
+        "route_universe": {"edges_by_dex": {"univ3": 20}},
+        "adaptive_size_discovery": {"amounts_scanned": ["1000"]},
+        "scan_sizing": {"amounts_by_token": {"0xtoken": "1000"}},
+        "provider_comparison_cost_inputs": {
+            "block_number": 123,
+            "gas_price_wei": "100",
+            "gas_price_status": "agreed",
+            "flashloan_fee_bps": "5",
+            "flashloan_fee_ok": True,
+            "flashloan_fee_status": "ok",
+        },
+    }
+    valid = (
+        "https://rpc-a.example", [], None, dict(telemetry),
+        make_evidence("https://rpc-a.example", block=123),
+    )
+    failed = (
+        "https://rpc-b.example", [], None, {**dict(telemetry), "scan_error": "timeout"},
+        make_evidence("https://rpc-b.example", block=123, healthy=False),
+    )
+    assert _provider_results_are_comparable([valid, failed], 123) == (
+        False,
+        "fewer_than_two_healthy_completed_provider_results",
+    )
+    different_block = (
+        "https://rpc-c.example", [], None, dict(telemetry),
+        make_evidence("https://rpc-c.example", block=124),
+    )
+    assert _provider_results_are_comparable([valid, different_block], 123) == (
+        False,
+        "fewer_than_two_healthy_completed_provider_results",
+    )
+
