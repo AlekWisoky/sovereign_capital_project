@@ -2342,6 +2342,178 @@ def _prioritize_three_leg_adjacency(
     return adj, pruned
 
 
+
+
+def _build_three_leg_frontier(
+    edges: Sequence[Edge],
+    pruned_edges: Sequence[Edge],
+    adj: Mapping[str, Sequence[Edge]],
+    by_pair: Mapping[Tuple[str, str], Sequence[Edge]],
+    first_leg_quotes: Mapping[str, Optional[Tuple[int, Dict[str, Any]]]],
+    *,
+    telemetry: Optional[Dict[str, Any]] = None,
+) -> Dict[str, List[Edge]]:
+    # Adaptive frontier: first-leg quotes have already been acquired for the
+    # complete graph. Use a small supplemental budget to admit pruned edges only
+    # when they are quote-viable, can close a triangle in the full graph, and add
+    # venue diversity. The original per-token adjacency cap remains unchanged;
+    # the frontier has its own hard global/per-token bounds.
+    frontier_per_token = max(
+        1,
+        min(
+            2,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_PER_TOKEN", "2") or 2),
+        ),
+    )
+    frontier_global = max(
+        0,
+        min(
+            32,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_MAX_EDGES", "24") or 24),
+        ),
+    )
+    frontier_by_token: Dict[str, List[Edge]] = {}
+    frontier_selected: List[Edge] = []
+    active_venues_by_token = {
+        token: {str(edge.venue).strip().lower() for edge in items if str(edge.venue or "").strip()}
+        for token, items in adj.items()
+    }
+    active_protocols_by_token = {
+        token: {
+            protocol
+            for edge in items
+            if (protocol := _edge_protocol_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    active_pools_by_token = {
+        token: {
+            pool
+            for edge in items
+            if (pool := _edge_pool_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    active_routers_by_token = {
+        token: {
+            router
+            for edge in items
+            if (router := _edge_router_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    frontier_candidates: List[Tuple[int, Edge]] = []
+    for order, edge in enumerate(pruned_edges):
+        if not first_leg_quotes.get(edge_key(edge)):
+            continue
+        closes = any(
+            bool(by_pair.get((middle.token_out, edge.token_in)))
+            for middle in edges
+            if middle.token_in == edge.token_out and middle.token_out != edge.token_in
+        )
+        if closes:
+            frontier_candidates.append((order, edge))
+
+    # Quote viability and cycle closure are hard gates. The selector recomputes
+    # protocol, pool, and router novelty after each pick so duplicate diversity
+    # gains cannot consume the bounded frontier quota.
+    quoted_output_by_edge = {
+        key: int(value[0])
+        for key, value in first_leg_quotes.items()
+        if value and int(value[0]) > 0
+    }
+    quote_quality_by_edge = _frontier_quote_quality_percentiles(
+        frontier_candidates, quoted_output_by_edge
+    )
+    frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
+        frontier_candidates,
+        active_protocols_by_token=active_protocols_by_token,
+        active_pools_by_token=active_pools_by_token,
+        active_routers_by_token=active_routers_by_token,
+        per_token_cap=frontier_per_token,
+        global_cap=frontier_global,
+        quoted_output_by_edge=quoted_output_by_edge,
+        quote_quality_by_edge=quote_quality_by_edge,
+    )
+
+    frontier_adj: Dict[str, List[Edge]] = {
+        token: list(items) for token, items in adj.items()
+    }
+    for token, items in frontier_by_token.items():
+        frontier_adj.setdefault(token, []).extend(items)
+
+    if telemetry is not None:
+        active_directed_pairs = {
+            (str(edge.token_in).lower(), str(edge.token_out).lower())
+            for items in adj.values() for edge in items
+        }
+        frontier_directed_pairs = {
+            pair for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        }
+        new_directed_pairs = frontier_directed_pairs - active_directed_pairs
+        selected_quote_percentiles = [
+            quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
+            for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        ]
+        new_protocols = {
+            (edge.token_in, protocol)
+            for edge in frontier_selected
+            if (protocol := _edge_protocol_identity(edge)) is not None
+            and protocol not in active_protocols_by_token.get(edge.token_in, set())
+        }
+        new_pools = {
+            (edge.token_in, pool)
+            for edge in frontier_selected
+            if (pool := _edge_pool_identity(edge)) is not None
+            and pool not in active_pools_by_token.get(edge.token_in, set())
+        }
+        new_routers = {
+            (edge.token_in, router)
+            for edge in frontier_selected
+            if (router := _edge_router_identity(edge)) is not None
+            and router not in active_routers_by_token.get(edge.token_in, set())
+        }
+        telemetry["three_leg_frontier"] = {
+            "enabled": bool(frontier_selected),
+            "initial_pruned_edges": int(len(pruned_edges)),
+            "selected_edges": int(len(frontier_selected)),
+            "per_token_cap": int(frontier_per_token),
+            "global_cap": int(frontier_global),
+            "quote_viable_edges": int(
+                sum(1 for edge in pruned_edges if first_leg_quotes.get(edge_key(edge)))
+            ),
+            # Compatibility field retains the old raw venue-address meaning.
+            # Prefer the three separate identity dimensions for new consumers.
+            "venue_diversity_semantics": "legacy_edge_venue_address",
+            "venue_diverse_edges": int(
+                sum(
+                    1
+                    for edge in frontier_selected
+                    if str(edge.venue).strip().lower()
+                    not in active_venues_by_token.get(edge.token_in, set())
+                )
+            ),
+            "protocol_diverse_edges": int(len(new_protocols)),
+            "pool_diverse_edges": int(len(new_pools)),
+            "router_diverse_edges": int(len(new_routers)),
+            "directed_pair_diverse_edges": int(len(new_directed_pairs)),
+            "directed_pair_identity": "token_in->token_out",
+            "quote_quality_priority_used": bool(quoted_output_by_edge),
+            "quote_quality_directed_pair_groups": _frontier_quote_quality_directed_pair_group_count(
+                frontier_candidates,
+                quoted_output_by_edge,
+            ),
+            "selected_mean_quote_quality_percentile_bps": (
+                int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
+                if selected_quote_percentiles else None
+            ),
+        }
+
+    return frontier_adj
+
+
 async def find_three_leg_opportunities(
     rpc,
     cfg,
@@ -2473,163 +2645,14 @@ async def find_three_leg_opportunities(
     triangle_coalesced_quote_batches = 0
     triangle_quote_waves_started = 0
 
-    # Adaptive frontier: first-leg quotes have already been acquired for the
-    # complete graph. Use a small supplemental budget to admit pruned edges only
-    # when they are quote-viable, can close a triangle in the full graph, and add
-    # venue diversity. The original per-token adjacency cap remains unchanged;
-    # the frontier has its own hard global/per-token bounds.
-    frontier_per_token = max(
-        1,
-        min(
-            2,
-            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_PER_TOKEN", "2") or 2),
-        ),
+    frontier_adj = _build_three_leg_frontier(
+        edges,
+        pruned_edges,
+        adj,
+        by_pair,
+        qmap1_3,
+        telemetry=telemetry,
     )
-    frontier_global = max(
-        0,
-        min(
-            32,
-            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_MAX_EDGES", "24") or 24),
-        ),
-    )
-    frontier_by_token: Dict[str, List[Edge]] = {}
-    frontier_selected: List[Edge] = []
-    active_venues_by_token = {
-        token: {str(edge.venue).strip().lower() for edge in items if str(edge.venue or "").strip()}
-        for token, items in adj.items()
-    }
-    active_protocols_by_token = {
-        token: {
-            protocol
-            for edge in items
-            if (protocol := _edge_protocol_identity(edge)) is not None
-        }
-        for token, items in adj.items()
-    }
-    active_pools_by_token = {
-        token: {
-            pool
-            for edge in items
-            if (pool := _edge_pool_identity(edge)) is not None
-        }
-        for token, items in adj.items()
-    }
-    active_routers_by_token = {
-        token: {
-            router
-            for edge in items
-            if (router := _edge_router_identity(edge)) is not None
-        }
-        for token, items in adj.items()
-    }
-    frontier_candidates: List[Tuple[int, Edge]] = []
-    for order, edge in enumerate(pruned_edges):
-        if not qmap1_3.get(edge_key(edge)):
-            continue
-        closes = any(
-            bool(by_pair.get((middle.token_out, edge.token_in)))
-            for middle in edges
-            if middle.token_in == edge.token_out and middle.token_out != edge.token_in
-        )
-        if closes:
-            frontier_candidates.append((order, edge))
-
-    # Quote viability and cycle closure are hard gates. The selector recomputes
-    # protocol, pool, and router novelty after each pick so duplicate diversity
-    # gains cannot consume the bounded frontier quota.
-    quoted_output_by_edge = {
-        key: int(value[0])
-        for key, value in qmap1_3.items()
-        if value and int(value[0]) > 0
-    }
-    quote_quality_by_edge = _frontier_quote_quality_percentiles(
-        frontier_candidates, quoted_output_by_edge
-    )
-    frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
-        frontier_candidates,
-        active_protocols_by_token=active_protocols_by_token,
-        active_pools_by_token=active_pools_by_token,
-        active_routers_by_token=active_routers_by_token,
-        per_token_cap=frontier_per_token,
-        global_cap=frontier_global,
-        quoted_output_by_edge=quoted_output_by_edge,
-        quote_quality_by_edge=quote_quality_by_edge,
-    )
-
-    frontier_adj: Dict[str, List[Edge]] = {
-        token: list(items) for token, items in adj.items()
-    }
-    for token, items in frontier_by_token.items():
-        frontier_adj.setdefault(token, []).extend(items)
-
-    if telemetry is not None:
-        active_directed_pairs = {
-            (str(edge.token_in).lower(), str(edge.token_out).lower())
-            for items in adj.values() for edge in items
-        }
-        frontier_directed_pairs = {
-            pair for edge in frontier_selected
-            if (pair := _edge_directed_pair_identity(edge)) is not None
-        }
-        new_directed_pairs = frontier_directed_pairs - active_directed_pairs
-        selected_quote_percentiles = [
-            quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
-            for edge in frontier_selected
-            if (pair := _edge_directed_pair_identity(edge)) is not None
-        ]
-        new_protocols = {
-            (edge.token_in, protocol)
-            for edge in frontier_selected
-            if (protocol := _edge_protocol_identity(edge)) is not None
-            and protocol not in active_protocols_by_token.get(edge.token_in, set())
-        }
-        new_pools = {
-            (edge.token_in, pool)
-            for edge in frontier_selected
-            if (pool := _edge_pool_identity(edge)) is not None
-            and pool not in active_pools_by_token.get(edge.token_in, set())
-        }
-        new_routers = {
-            (edge.token_in, router)
-            for edge in frontier_selected
-            if (router := _edge_router_identity(edge)) is not None
-            and router not in active_routers_by_token.get(edge.token_in, set())
-        }
-        telemetry["three_leg_frontier"] = {
-            "enabled": bool(frontier_selected),
-            "initial_pruned_edges": int(len(pruned_edges)),
-            "selected_edges": int(len(frontier_selected)),
-            "per_token_cap": int(frontier_per_token),
-            "global_cap": int(frontier_global),
-            "quote_viable_edges": int(
-                sum(1 for edge in pruned_edges if qmap1_3.get(edge_key(edge)))
-            ),
-            # Compatibility field retains the old raw venue-address meaning.
-            # Prefer the three separate identity dimensions for new consumers.
-            "venue_diversity_semantics": "legacy_edge_venue_address",
-            "venue_diverse_edges": int(
-                sum(
-                    1
-                    for edge in frontier_selected
-                    if str(edge.venue).strip().lower()
-                    not in active_venues_by_token.get(edge.token_in, set())
-                )
-            ),
-            "protocol_diverse_edges": int(len(new_protocols)),
-            "pool_diverse_edges": int(len(new_pools)),
-            "router_diverse_edges": int(len(new_routers)),
-            "directed_pair_diverse_edges": int(len(new_directed_pairs)),
-            "directed_pair_identity": "token_in->token_out",
-            "quote_quality_priority_used": bool(quoted_output_by_edge),
-            "quote_quality_directed_pair_groups": _frontier_quote_quality_directed_pair_group_count(
-                frontier_candidates,
-                quoted_output_by_edge,
-            ),
-            "selected_mean_quote_quality_percentile_bps": (
-                int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
-                if selected_quote_percentiles else None
-            ),
-        }
 
     # Prepare viable first-edge groups in fair source-token/protocol order.
     triangle_route_groups: List[Dict[str, Any]] = []
