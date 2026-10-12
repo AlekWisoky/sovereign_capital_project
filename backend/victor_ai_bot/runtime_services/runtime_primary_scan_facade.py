@@ -418,6 +418,26 @@ def _resolve_scan_quoted_amount(meta: Dict[str, Any]) -> int | None:
 
 
 
+def _discovered_pool_count(discovery_context: Dict[str, Any]) -> int:
+    """Count every venue family admitted to the current read-only discovery graph."""
+    keys = (
+        "v3_pairs",
+        "curve_pools",
+        "balancer_pools",
+        "aerodrome_pools",
+        "slipstream_pools",
+        "camelot_algebra_pools",
+        "camelot_v2_pools",
+        "constant_product_pools",
+    )
+    total = 0
+    for key in keys:
+        rows = discovery_context.get(key)
+        if isinstance(rows, (list, tuple)):
+            total += len(rows)
+    return total
+
+
 def _canonical_route_universe_telemetry(
     two_leg: Dict[str, Any],
     three_leg: Dict[str, Any],
@@ -2459,8 +2479,8 @@ class RuntimePrimaryScanFacade:
                 "successes": successes,
                 "failure_reasons": quote_failure_reasons,
             }
-            telemetry["discovery"]["pools_seen"] = (
-                len(extra_v3_pairs) + len(extra_curve_pools) + len(extra_balancer_pools)
+            telemetry["discovery"]["pools_seen"] = _discovered_pool_count(
+                discovery_context
             )
             telemetry["routes_considered"] = int(
                 two_leg_telemetry.get("routes_considered", 0)
@@ -4953,10 +4973,19 @@ class RuntimePrimaryScanFacade:
             name: str,
             operation: Any,
             fallback: Any,
+            *,
+            timeout_override_s: float | None = None,
         ) -> Any:
             started = time.perf_counter()
+            stage_timeout_s = (
+                float(timeout_s)
+                if timeout_override_s is None
+                else max(0.25, min(float(timeout_override_s), 15.0))
+            )
             try:
-                result = await asyncio.wait_for(operation, timeout=timeout_s)
+                result = await asyncio.wait_for(
+                    operation, timeout=stage_timeout_s
+                )
                 stages.append(
                     {
                         "stage": name,
@@ -4964,7 +4993,7 @@ class RuntimePrimaryScanFacade:
                         "elapsed_ms": float(
                             (time.perf_counter() - started) * 1000.0
                         ),
-                        "timeout_s": float(timeout_s),
+                        "timeout_s": float(stage_timeout_s),
                     }
                 )
                 return result
@@ -4976,7 +5005,7 @@ class RuntimePrimaryScanFacade:
                         "elapsed_ms": float(
                             (time.perf_counter() - started) * 1000.0
                         ),
-                        "timeout_s": float(timeout_s),
+                        "timeout_s": float(stage_timeout_s),
                     }
                 )
                 return fallback
@@ -4989,7 +5018,7 @@ class RuntimePrimaryScanFacade:
                         "elapsed_ms": float(
                             (time.perf_counter() - started) * 1000.0
                         ),
-                        "timeout_s": float(timeout_s),
+                        "timeout_s": float(stage_timeout_s),
                     }
                 )
                 return fallback
@@ -5009,11 +5038,26 @@ class RuntimePrimaryScanFacade:
             else None
         )
         if callable(discover_venues):
+            # Each venue now has its own timeout inside DiscoveryManager and
+            # runs independently. Give the outer stage a small margin so it
+            # cannot cancel all adapters at the same deadline.
+            venue_timeout_s = min(15.0, max(timeout_s, timeout_s * 1.5))
             venue_pools = await bounded_stage(
                 "venues",
                 discover_venues(rpc, self.cfg, int(current_block)),
                 venue_fallback,
+                timeout_override_s=venue_timeout_s,
             )
+            venue_diagnostics = getattr(
+                discovery, "_last_venue_discovery_telemetry", {}
+            )
+            if isinstance(venue_diagnostics, dict):
+                for row in list(venue_diagnostics.get("stages") or []):
+                    if not isinstance(row, dict):
+                        continue
+                    stage_row = dict(row)
+                    stage_row["stage"] = f"venue:{str(stage_row.get('stage') or 'unknown')}"
+                    stages.append(stage_row)
 
         return {
             "v3_pairs": list(extra_v3_pairs or []),
