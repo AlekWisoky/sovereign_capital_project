@@ -1142,7 +1142,9 @@ def _merge_route_group_schedule_row(
         "first_leg_quote_batches_total",
         "first_leg_quote_batches_completed",
         "first_leg_quote_batches_failed",
+        "first_leg_quote_batches_cancelled",
         "first_leg_quote_batches_skipped_budget",
+        "first_leg_quote_budget_ms",
         "first_leg_quote_waves_started",
         "route_group_quote_batches_completed_and_consumed",
         "route_group_quote_batches_coalesced",
@@ -1158,7 +1160,7 @@ def _merge_route_group_schedule_row(
             int(schedule.get(limit_key, 0) or 0),
             int(incoming.get(limit_key, 0) or 0),
         )
-    for flag_key in ("first_leg_deadline_exceeded",):
+    for flag_key in ("first_leg_deadline_exceeded", "first_leg_quote_budget_exhausted"):
         schedule[flag_key] = bool(
             schedule.get(flag_key, False) or incoming.get(flag_key, False)
         )

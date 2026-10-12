@@ -1495,6 +1495,14 @@ def _route_group_parallelism() -> int:
     return max(1, min(4, requested))
 
 
+def _first_leg_quote_budget_ms(time_budget_ms: int) -> int:
+    """Reserve most of the shared scan window for route-group evaluation."""
+    total_ms = max(1, int(time_budget_ms))
+    if total_ms <= 1:
+        return total_ms
+    return max(1, min(total_ms - 1, (total_ms * 40) // 100))
+
+
 def _consume_bounded_quote_result(
     result: Any,
     quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
@@ -1510,6 +1518,50 @@ def _consume_bounded_quote_result(
     return 1, 0
 
 
+async def _wait_for_quote_tasks_until_deadline(
+    tasks: Sequence[asyncio.Task],
+    *,
+    deadline: float,
+) -> tuple[set, set]:
+    """Wait only until the phase deadline and always drain unfinished tasks."""
+    done: set = set()
+    pending: set = set(tasks)
+    try:
+        remaining_s = max(0.0, deadline - time.perf_counter())
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=remaining_s,
+            return_when=asyncio.ALL_COMPLETED,
+        )
+    finally:
+        unfinished = [task for task in tasks if not task.done()]
+        for task in unfinished:
+            task.cancel()
+        if unfinished:
+            await asyncio.gather(*unfinished, return_exceptions=True)
+    return done, pending
+
+
+def _consume_quote_task_results(
+    tasks: Sequence[asyncio.Task],
+    done: set,
+    quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
+) -> tuple[int, int]:
+    """Retain finished results and count per-batch failures consistently."""
+    completed = failed = 0
+    for task in tasks:
+        if task not in done:
+            continue
+        if task.cancelled():
+            raise asyncio.CancelledError()
+        task_error = task.exception()
+        result = task.result() if task_error is None else task_error
+        batch_completed, batch_failed = _consume_bounded_quote_result(result, quote_map)
+        completed += batch_completed
+        failed += batch_failed
+    return completed, failed
+
+
 async def _quote_edge_groups_in_bounded_waves(
     rpc: Any,
     cfg: Any,
@@ -1521,12 +1573,12 @@ async def _quote_edge_groups_in_bounded_waves(
     parallelism: int,
     metrics: Dict[str, Any],
 ) -> tuple[Dict[str, Optional[Tuple[int, Dict[str, Any]]]], Dict[str, Any]]:
-    """Quote prioritized amount groups in bounded waves and retain every result.
+    """Quote prioritized amount groups under a hard phase deadline.
 
-    Already-started waves are always consumed in full. Once a wave returns past
-    the absolute deadline, no later wave is started. Rotating the starting
-    amount group by block makes groups skipped on one block observable and gives
-    them first-wave opportunity on later blocks.
+    Results from batches completed by the deadline are retained. In-flight
+    batches are cancelled when the deadline expires and later waves are not
+    started. The caller budgets this phase separately from route evaluation.
+    Rotating the starting group by block prevents persistent starvation.
     """
     ordered = list(edge_groups)
     if ordered:
@@ -1534,39 +1586,56 @@ async def _quote_edge_groups_in_bounded_waves(
         ordered = ordered[offset:] + ordered[:offset]
     limit = max(1, min(4, int(parallelism)))
     quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
-    completed = failed = skipped = waves = 0
+    completed = failed = skipped = waves = cancelled = 0
     for wave_start in range(0, len(ordered), limit):
         if time.perf_counter() >= deadline:
             skipped = len(ordered) - wave_start
             break
         wave = ordered[wave_start:wave_start + limit]
-        results = await asyncio.gather(*(
-            quote_edges_batch(rpc, cfg, cache, edges, int(amount), metrics=metrics)
-            for amount, edges in wave
-        ), return_exceptions=True)
-        waves += 1
-        for result in results:
-            batch_completed, batch_failed = _consume_bounded_quote_result(
-                result, quote_map
+        tasks = [
+            asyncio.create_task(
+                quote_edges_batch(rpc, cfg, cache, edges, int(amount), metrics=metrics)
             )
-            completed += batch_completed
-            failed += batch_failed
+            for amount, edges in wave
+        ]
+        done, pending = await _wait_for_quote_tasks_until_deadline(
+            tasks,
+            deadline=deadline,
+        )
+        waves += 1
+        batch_completed, batch_failed = _consume_quote_task_results(
+            tasks,
+            done,
+            quote_map,
+        )
+        completed += batch_completed
+        failed += batch_failed
+
+        pending_count = len(pending)
+        if pending_count:
+            cancelled += pending_count
+
         next_start = wave_start + len(wave)
-        if next_start < len(ordered) and time.perf_counter() >= deadline:
+        if pending_count or (
+            next_start < len(ordered) and time.perf_counter() >= deadline
+        ):
             skipped = len(ordered) - next_start
             break
-    deadline_exceeded = bool(time.perf_counter() >= deadline or skipped)
+
+    deadline_exceeded = bool(
+        cancelled or time.perf_counter() >= deadline or skipped
+    )
     return quote_map, {
         "batches_total": int(len(ordered)),
         "batches_completed": int(completed),
         "batches_failed": int(failed),
+        "batches_cancelled": int(cancelled),
         "batches_skipped_budget": int(skipped),
         "waves_started": int(waves),
         "parallelism_limit": int(limit),
         "deadline_exceeded": deadline_exceeded,
         "ordering": "route_potential_priority_then_block_rotated",
     }
-
 
 async def _quote_two_leg_route_group_wave(
     rpc: Any,
@@ -1849,6 +1918,10 @@ async def find_two_leg_opportunities(
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
     route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
+    first_leg_quote_budget_ms = _first_leg_quote_budget_ms(time_budget_ms)
+    first_leg_quote_deadline = min(
+        route_deadline, t_start + first_leg_quote_budget_ms / 1000.0
+    )
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -1938,19 +2011,19 @@ async def find_two_leg_opportunities(
         cfg,
         cache,
         ordered_edge_groups,
-        deadline=route_deadline,
+        deadline=first_leg_quote_deadline,
         block_number=int(block_number),
         parallelism=_route_group_parallelism(),
         metrics=metrics,
     )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
-    route_budget_exhausted = bool(first_leg_quote_schedule["deadline_exceeded"])
+    route_budget_exhausted = bool(time.perf_counter() >= route_deadline)
     prepared_route_groups: List[Dict[str, Any]] = []
     # Interleave token/protocol families before budgeting. This is only a
     # scheduling fairness policy; route economics still determine ranking.
     for e1 in _round_robin_route_group_edges(edges):
-        if prepared_route_groups and time.perf_counter() >= route_deadline:
+        if time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         revs = by_pair.get((e1.token_out, e1.token_in), [])
@@ -2021,7 +2094,7 @@ async def find_two_leg_opportunities(
         opportunities=opps,
     )
     for wave_start in range(0, len(prepared_route_groups), route_group_parallelism):
-        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
+        if time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
@@ -2068,7 +2141,10 @@ async def find_two_leg_opportunities(
             "first_leg_quote_batches_total": int(first_leg_quote_schedule["batches_total"]),
             "first_leg_quote_batches_completed": int(first_leg_quote_schedule["batches_completed"]),
             "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
+            "first_leg_quote_batches_cancelled": int(first_leg_quote_schedule["batches_cancelled"]),
             "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_budget_ms": int(first_leg_quote_budget_ms),
+            "first_leg_quote_budget_exhausted": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
             "first_leg_quote_parallelism_limit": int(first_leg_quote_schedule["parallelism_limit"]),
             "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
@@ -2081,6 +2157,9 @@ async def find_two_leg_opportunities(
             "ordering": "round_robin_source_token_protocol",
             "completed_wave_results_consumed_before_budget_stop": True,
         }
+        telemetry["first_leg_quote_budget_ms"] = int(first_leg_quote_budget_ms)
+        telemetry["first_leg_quote_budget_exhausted"] = bool(first_leg_quote_schedule["deadline_exceeded"])
+        telemetry["first_leg_quote_batches_cancelled"] = int(first_leg_quote_schedule["batches_cancelled"])
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
             "time_budget" if route_budget_exhausted else "completed"
@@ -2287,6 +2366,178 @@ def _prioritize_three_leg_adjacency(
     return adj, pruned
 
 
+
+
+def _build_three_leg_frontier(
+    edges: Sequence[Edge],
+    pruned_edges: Sequence[Edge],
+    adj: Mapping[str, Sequence[Edge]],
+    by_pair: Mapping[Tuple[str, str], Sequence[Edge]],
+    first_leg_quotes: Mapping[str, Optional[Tuple[int, Dict[str, Any]]]],
+    *,
+    telemetry: Optional[Dict[str, Any]] = None,
+) -> Dict[str, List[Edge]]:
+    # Adaptive frontier: first-leg quotes have already been acquired for the
+    # complete graph. Use a small supplemental budget to admit pruned edges only
+    # when they are quote-viable, can close a triangle in the full graph, and add
+    # venue diversity. The original per-token adjacency cap remains unchanged;
+    # the frontier has its own hard global/per-token bounds.
+    frontier_per_token = max(
+        1,
+        min(
+            2,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_PER_TOKEN", "2") or 2),
+        ),
+    )
+    frontier_global = max(
+        0,
+        min(
+            32,
+            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_MAX_EDGES", "24") or 24),
+        ),
+    )
+    frontier_by_token: Dict[str, List[Edge]] = {}
+    frontier_selected: List[Edge] = []
+    active_venues_by_token = {
+        token: {str(edge.venue).strip().lower() for edge in items if str(edge.venue or "").strip()}
+        for token, items in adj.items()
+    }
+    active_protocols_by_token = {
+        token: {
+            protocol
+            for edge in items
+            if (protocol := _edge_protocol_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    active_pools_by_token = {
+        token: {
+            pool
+            for edge in items
+            if (pool := _edge_pool_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    active_routers_by_token = {
+        token: {
+            router
+            for edge in items
+            if (router := _edge_router_identity(edge)) is not None
+        }
+        for token, items in adj.items()
+    }
+    frontier_candidates: List[Tuple[int, Edge]] = []
+    for order, edge in enumerate(pruned_edges):
+        if not first_leg_quotes.get(edge_key(edge)):
+            continue
+        closes = any(
+            bool(by_pair.get((middle.token_out, edge.token_in)))
+            for middle in edges
+            if middle.token_in == edge.token_out and middle.token_out != edge.token_in
+        )
+        if closes:
+            frontier_candidates.append((order, edge))
+
+    # Quote viability and cycle closure are hard gates. The selector recomputes
+    # protocol, pool, and router novelty after each pick so duplicate diversity
+    # gains cannot consume the bounded frontier quota.
+    quoted_output_by_edge = {
+        key: int(value[0])
+        for key, value in first_leg_quotes.items()
+        if value and int(value[0]) > 0
+    }
+    quote_quality_by_edge = _frontier_quote_quality_percentiles(
+        frontier_candidates, quoted_output_by_edge
+    )
+    frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
+        frontier_candidates,
+        active_protocols_by_token=active_protocols_by_token,
+        active_pools_by_token=active_pools_by_token,
+        active_routers_by_token=active_routers_by_token,
+        per_token_cap=frontier_per_token,
+        global_cap=frontier_global,
+        quoted_output_by_edge=quoted_output_by_edge,
+        quote_quality_by_edge=quote_quality_by_edge,
+    )
+
+    frontier_adj: Dict[str, List[Edge]] = {
+        token: list(items) for token, items in adj.items()
+    }
+    for token, items in frontier_by_token.items():
+        frontier_adj.setdefault(token, []).extend(items)
+
+    if telemetry is not None:
+        active_directed_pairs = {
+            (str(edge.token_in).lower(), str(edge.token_out).lower())
+            for items in adj.values() for edge in items
+        }
+        frontier_directed_pairs = {
+            pair for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        }
+        new_directed_pairs = frontier_directed_pairs - active_directed_pairs
+        selected_quote_percentiles = [
+            quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
+            for edge in frontier_selected
+            if (pair := _edge_directed_pair_identity(edge)) is not None
+        ]
+        new_protocols = {
+            (edge.token_in, protocol)
+            for edge in frontier_selected
+            if (protocol := _edge_protocol_identity(edge)) is not None
+            and protocol not in active_protocols_by_token.get(edge.token_in, set())
+        }
+        new_pools = {
+            (edge.token_in, pool)
+            for edge in frontier_selected
+            if (pool := _edge_pool_identity(edge)) is not None
+            and pool not in active_pools_by_token.get(edge.token_in, set())
+        }
+        new_routers = {
+            (edge.token_in, router)
+            for edge in frontier_selected
+            if (router := _edge_router_identity(edge)) is not None
+            and router not in active_routers_by_token.get(edge.token_in, set())
+        }
+        telemetry["three_leg_frontier"] = {
+            "enabled": bool(frontier_selected),
+            "initial_pruned_edges": int(len(pruned_edges)),
+            "selected_edges": int(len(frontier_selected)),
+            "per_token_cap": int(frontier_per_token),
+            "global_cap": int(frontier_global),
+            "quote_viable_edges": int(
+                sum(1 for edge in pruned_edges if first_leg_quotes.get(edge_key(edge)))
+            ),
+            # Compatibility field retains the old raw venue-address meaning.
+            # Prefer the three separate identity dimensions for new consumers.
+            "venue_diversity_semantics": "legacy_edge_venue_address",
+            "venue_diverse_edges": int(
+                sum(
+                    1
+                    for edge in frontier_selected
+                    if str(edge.venue).strip().lower()
+                    not in active_venues_by_token.get(edge.token_in, set())
+                )
+            ),
+            "protocol_diverse_edges": int(len(new_protocols)),
+            "pool_diverse_edges": int(len(new_pools)),
+            "router_diverse_edges": int(len(new_routers)),
+            "directed_pair_diverse_edges": int(len(new_directed_pairs)),
+            "directed_pair_identity": "token_in->token_out",
+            "quote_quality_priority_used": bool(quoted_output_by_edge),
+            "quote_quality_directed_pair_groups": _frontier_quote_quality_directed_pair_group_count(
+                frontier_candidates,
+                quoted_output_by_edge,
+            ),
+            "selected_mean_quote_quality_percentile_bps": (
+                int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
+                if selected_quote_percentiles else None
+            ),
+        }
+
+    return frontier_adj
+
+
 async def find_three_leg_opportunities(
     rpc,
     cfg,
@@ -2321,6 +2572,10 @@ async def find_three_leg_opportunities(
     """
     t_start = time.perf_counter()
     route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
+    first_leg_quote_budget_ms = _first_leg_quote_budget_ms(time_budget_ms)
+    first_leg_quote_deadline = min(
+        route_deadline, t_start + first_leg_quote_budget_ms / 1000.0
+    )
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -2401,176 +2656,27 @@ async def find_three_leg_opportunities(
         cfg,
         cache,
         ordered_triangle_edge_groups,
-        deadline=route_deadline,
+        deadline=first_leg_quote_deadline,
         block_number=int(block_number),
         parallelism=_route_group_parallelism(),
         metrics=metrics,
     )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
-    route_budget_exhausted = bool(first_leg_quote_schedule["deadline_exceeded"])
+    route_budget_exhausted = bool(time.perf_counter() >= route_deadline)
     triangle_second_leg_quote_batches_completed = 0
     triangle_third_leg_quote_batches_completed = 0
     triangle_coalesced_quote_batches = 0
     triangle_quote_waves_started = 0
 
-    # Adaptive frontier: first-leg quotes have already been acquired for the
-    # complete graph. Use a small supplemental budget to admit pruned edges only
-    # when they are quote-viable, can close a triangle in the full graph, and add
-    # venue diversity. The original per-token adjacency cap remains unchanged;
-    # the frontier has its own hard global/per-token bounds.
-    frontier_per_token = max(
-        1,
-        min(
-            2,
-            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_PER_TOKEN", "2") or 2),
-        ),
+    frontier_adj = _build_three_leg_frontier(
+        edges,
+        pruned_edges,
+        adj,
+        by_pair,
+        qmap1_3,
+        telemetry=telemetry,
     )
-    frontier_global = max(
-        0,
-        min(
-            32,
-            int(os.environ.get("VICTOR_THREE_LEG_FRONTIER_MAX_EDGES", "24") or 24),
-        ),
-    )
-    frontier_by_token: Dict[str, List[Edge]] = {}
-    frontier_selected: List[Edge] = []
-    active_venues_by_token = {
-        token: {str(edge.venue).strip().lower() for edge in items if str(edge.venue or "").strip()}
-        for token, items in adj.items()
-    }
-    active_protocols_by_token = {
-        token: {
-            protocol
-            for edge in items
-            if (protocol := _edge_protocol_identity(edge)) is not None
-        }
-        for token, items in adj.items()
-    }
-    active_pools_by_token = {
-        token: {
-            pool
-            for edge in items
-            if (pool := _edge_pool_identity(edge)) is not None
-        }
-        for token, items in adj.items()
-    }
-    active_routers_by_token = {
-        token: {
-            router
-            for edge in items
-            if (router := _edge_router_identity(edge)) is not None
-        }
-        for token, items in adj.items()
-    }
-    frontier_candidates: List[Tuple[int, Edge]] = []
-    for order, edge in enumerate(pruned_edges):
-        if not qmap1_3.get(edge_key(edge)):
-            continue
-        closes = any(
-            bool(by_pair.get((middle.token_out, edge.token_in)))
-            for middle in edges
-            if middle.token_in == edge.token_out and middle.token_out != edge.token_in
-        )
-        if closes:
-            frontier_candidates.append((order, edge))
-
-    # Quote viability and cycle closure are hard gates. The selector recomputes
-    # protocol, pool, and router novelty after each pick so duplicate diversity
-    # gains cannot consume the bounded frontier quota.
-    quoted_output_by_edge = {
-        key: int(value[0])
-        for key, value in qmap1_3.items()
-        if value and int(value[0]) > 0
-    }
-    quote_quality_by_edge = _frontier_quote_quality_percentiles(
-        frontier_candidates, quoted_output_by_edge
-    )
-    frontier_selected, frontier_by_token = _select_three_leg_frontier_edges(
-        frontier_candidates,
-        active_protocols_by_token=active_protocols_by_token,
-        active_pools_by_token=active_pools_by_token,
-        active_routers_by_token=active_routers_by_token,
-        per_token_cap=frontier_per_token,
-        global_cap=frontier_global,
-        quoted_output_by_edge=quoted_output_by_edge,
-        quote_quality_by_edge=quote_quality_by_edge,
-    )
-
-    frontier_adj: Dict[str, List[Edge]] = {
-        token: list(items) for token, items in adj.items()
-    }
-    for token, items in frontier_by_token.items():
-        frontier_adj.setdefault(token, []).extend(items)
-
-    if telemetry is not None:
-        active_directed_pairs = {
-            (str(edge.token_in).lower(), str(edge.token_out).lower())
-            for items in adj.values() for edge in items
-        }
-        frontier_directed_pairs = {
-            pair for edge in frontier_selected
-            if (pair := _edge_directed_pair_identity(edge)) is not None
-        }
-        new_directed_pairs = frontier_directed_pairs - active_directed_pairs
-        selected_quote_percentiles = [
-            quote_quality_by_edge.get((pair[0], pair[1], edge_key(edge)), 0)
-            for edge in frontier_selected
-            if (pair := _edge_directed_pair_identity(edge)) is not None
-        ]
-        new_protocols = {
-            (edge.token_in, protocol)
-            for edge in frontier_selected
-            if (protocol := _edge_protocol_identity(edge)) is not None
-            and protocol not in active_protocols_by_token.get(edge.token_in, set())
-        }
-        new_pools = {
-            (edge.token_in, pool)
-            for edge in frontier_selected
-            if (pool := _edge_pool_identity(edge)) is not None
-            and pool not in active_pools_by_token.get(edge.token_in, set())
-        }
-        new_routers = {
-            (edge.token_in, router)
-            for edge in frontier_selected
-            if (router := _edge_router_identity(edge)) is not None
-            and router not in active_routers_by_token.get(edge.token_in, set())
-        }
-        telemetry["three_leg_frontier"] = {
-            "enabled": bool(frontier_selected),
-            "initial_pruned_edges": int(len(pruned_edges)),
-            "selected_edges": int(len(frontier_selected)),
-            "per_token_cap": int(frontier_per_token),
-            "global_cap": int(frontier_global),
-            "quote_viable_edges": int(
-                sum(1 for edge in pruned_edges if qmap1_3.get(edge_key(edge)))
-            ),
-            # Compatibility field retains the old raw venue-address meaning.
-            # Prefer the three separate identity dimensions for new consumers.
-            "venue_diversity_semantics": "legacy_edge_venue_address",
-            "venue_diverse_edges": int(
-                sum(
-                    1
-                    for edge in frontier_selected
-                    if str(edge.venue).strip().lower()
-                    not in active_venues_by_token.get(edge.token_in, set())
-                )
-            ),
-            "protocol_diverse_edges": int(len(new_protocols)),
-            "pool_diverse_edges": int(len(new_pools)),
-            "router_diverse_edges": int(len(new_routers)),
-            "directed_pair_diverse_edges": int(len(new_directed_pairs)),
-            "directed_pair_identity": "token_in->token_out",
-            "quote_quality_priority_used": bool(quoted_output_by_edge),
-            "quote_quality_directed_pair_groups": _frontier_quote_quality_directed_pair_group_count(
-                frontier_candidates,
-                quoted_output_by_edge,
-            ),
-            "selected_mean_quote_quality_percentile_bps": (
-                int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
-                if selected_quote_percentiles else None
-            ),
-        }
 
     # Prepare viable first-edge groups in fair source-token/protocol order.
     triangle_route_groups: List[Dict[str, Any]] = []
@@ -2578,6 +2684,9 @@ async def find_three_leg_opportunities(
         [edge for items in frontier_adj.values() for edge in items]
     )
     for e1 in triangle_ordered_edges:
+        if time.perf_counter() >= route_deadline:
+            route_budget_exhausted = True
+            break
         if normalized_amounts:
             effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
             if effective_amount_in <= 0:
@@ -2608,7 +2717,7 @@ async def find_three_leg_opportunities(
 
     triangle_route_parallelism = _route_group_parallelism()
     for wave_start in range(0, len(triangle_route_groups), triangle_route_parallelism):
-        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
+        if time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         wave = triangle_route_groups[wave_start:wave_start + triangle_route_parallelism]
@@ -2921,7 +3030,10 @@ async def find_three_leg_opportunities(
             "first_leg_quote_batches_total": int(first_leg_quote_schedule["batches_total"]),
             "first_leg_quote_batches_completed": int(first_leg_quote_schedule["batches_completed"]),
             "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
+            "first_leg_quote_batches_cancelled": int(first_leg_quote_schedule["batches_cancelled"]),
             "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_budget_ms": int(first_leg_quote_budget_ms),
+            "first_leg_quote_budget_exhausted": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
             "first_leg_quote_parallelism_limit": int(first_leg_quote_schedule["parallelism_limit"]),
             "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
@@ -2936,6 +3048,9 @@ async def find_three_leg_opportunities(
             "ordering": "round_robin_source_token_protocol",
             "completed_wave_results_consumed_before_budget_stop": True,
         }
+        telemetry["first_leg_quote_budget_ms"] = int(first_leg_quote_budget_ms)
+        telemetry["first_leg_quote_budget_exhausted"] = bool(first_leg_quote_schedule["deadline_exceeded"])
+        telemetry["first_leg_quote_batches_cancelled"] = int(first_leg_quote_schedule["batches_cancelled"])
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
             "time_budget" if route_budget_exhausted else "completed"
