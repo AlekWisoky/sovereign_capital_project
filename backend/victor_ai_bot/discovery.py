@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -258,6 +259,11 @@ class DiscoveryManager:
         self.path = os.path.join(data_dir, "discovery", f"{chain_name}.json")
         self._last_run_block: int = 0
         self._last_venue_run_block: int = 0
+        self._last_curve_run_block: int = 0
+        self._last_balancer_run_block: int = 0
+        self._last_venue_discovery_telemetry: Dict[str, Any] = {
+            "enabled": False, "timeout_s": 0.0, "stages": []
+        }
         self._last_aerodrome_run_block: int = 0
         self._last_slipstream_run_block: int = 0
         self._last_camelot_algebra_run_block: int = 0
@@ -1077,28 +1083,14 @@ class DiscoveryManager:
             return [v.to_pool() for v in self._constant_product.values()]
 
     async def maybe_discover_venues(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> Dict[str, List[Dict[str, Any]]]:
-        if not self._venue_discovery_enabled(cfg):
-            return {
-                "curve": self.curve_pools(),
-                "balancer": self.balancer_pools(),
-                "aerodrome": self.aerodrome_pools(),
-                "slipstream": self.slipstream_pools(),
-                "camelot_algebra": self.camelot_algebra_pools(),
-                "camelot_v2": self.camelot_v2_pools(),
-            }
-        changed = False
-        try:
-            curve_changed = await self._discover_curve(rpc, cfg, block_number)
-            balancer_changed = await self._discover_balancer(rpc, cfg, block_number)
-            aerodrome_changed = await self._discover_aerodrome(rpc, cfg, block_number)
-            slipstream_changed = await self._discover_slipstream(rpc, cfg, block_number)
-            camelot_algebra_changed = await self._discover_camelot_algebra(rpc, cfg, block_number)
-            camelot_v2_changed = await self._discover_camelot_v2(rpc, cfg, block_number)
-            constant_product_before = len(self._constant_product)
-            constant_product = await self.maybe_discover_constant_product(rpc, cfg, block_number)
-            constant_product_changed = len(self._constant_product) > constant_product_before
-            changed = curve_changed or balancer_changed or aerodrome_changed or slipstream_changed or camelot_algebra_changed or camelot_v2_changed or constant_product_changed
-        except _SAFE_DISCOVERY_RUNTIME_EXCEPTIONS:
+        """Discover independent venue families without letting one adapter starve the rest.
+
+        Every venue receives its own bounded wall-clock budget. A timeout or RPC
+        failure is recorded for that venue only; other venues continue. This is
+        deliberately read-only and only admits factory-verified / validated pools
+        through the existing adapter implementations.
+        """
+        def snapshot() -> Dict[str, List[Dict[str, Any]]]:
             return {
                 "curve": self.curve_pools(),
                 "balancer": self.balancer_pools(),
@@ -1108,17 +1100,161 @@ class DiscoveryManager:
                 "camelot_v2": self.camelot_v2_pools(),
                 "constant_product": [v.to_pool() for v in self._constant_product.values()],
             }
-        if changed:
-            self._save()
-        return {
-            "curve": self.curve_pools(),
-            "balancer": self.balancer_pools(),
-            "aerodrome": self.aerodrome_pools(),
-            "slipstream": self.slipstream_pools(),
-            "camelot_algebra": self.camelot_algebra_pools(),
-            "camelot_v2": self.camelot_v2_pools(),
-            "constant_product": [v.to_pool() for v in self._constant_product.values()],
+
+        venue_names = (
+            "curve", "balancer", "aerodrome", "slipstream",
+            "camelot_algebra", "camelot_v2", "constant_product",
+        )
+        if not self._venue_discovery_enabled(cfg):
+            self._last_venue_discovery_telemetry = {
+                "enabled": False,
+                "timeout_s": 0.0,
+                "stages": [
+                    {"stage": name, "status": "skipped_disabled", "pools_returned": len(snapshot().get(name) or [])}
+                    for name in venue_names
+                ],
+            }
+            return snapshot()
+
+        try:
+            configured_timeout = float(
+                os.environ.get("VICTOR_DISCOVERY_TIMEOUT_S", "2.0") or 2.0
+            )
+        except (TypeError, ValueError, OverflowError):
+            configured_timeout = 2.0
+        stage_timeout_s = max(0.25, min(configured_timeout, 10.0))
+        try:
+            interval_blocks = max(
+                1, int(getattr(cfg.chain, "discovery_interval_blocks", 50) or 50)
+            )
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            interval_blocks = 50
+
+        before_counts = {
+            "curve": len(self._curve),
+            "balancer": len(self._balancer),
+            "aerodrome": len(self._aerodrome),
+            "slipstream": len(self._slipstream),
+            "camelot_algebra": len(self._camelot_algebra),
+            "camelot_v2": len(self._camelot_v2),
+            "constant_product": len(self._constant_product),
         }
+
+        async def discover_constant_product() -> bool:
+            before = len(self._constant_product)
+            await self.maybe_discover_constant_product(rpc, cfg, block_number)
+            return len(self._constant_product) > before
+
+        operations = {
+            "curve": lambda: self._discover_curve(rpc, cfg, block_number),
+            "balancer": lambda: self._discover_balancer(rpc, cfg, block_number),
+            "aerodrome": lambda: self._discover_aerodrome(rpc, cfg, block_number),
+            "slipstream": lambda: self._discover_slipstream(rpc, cfg, block_number),
+            "camelot_algebra": lambda: self._discover_camelot_algebra(rpc, cfg, block_number),
+            "camelot_v2": lambda: self._discover_camelot_v2(rpc, cfg, block_number),
+            "constant_product": discover_constant_product,
+        }
+        # Curve and Balancer enumerate historical state rather than maintaining
+        # the block-interval guard used by the event-backed adapters. Bound their
+        # cadence explicitly so a large historical scan is not repeated every tick.
+        interval_attrs = {
+            "curve": "_last_curve_run_block",
+            "balancer": "_last_balancer_run_block",
+        }
+
+        async def run_stage(name: str, operation: Any) -> Dict[str, Any]:
+            started = time.perf_counter()
+            last_attr = interval_attrs.get(name)
+            if last_attr:
+                last_block = int(getattr(self, last_attr, 0) or 0)
+                if last_block and int(block_number) - last_block < interval_blocks:
+                    return {
+                        "stage": name,
+                        "status": "skipped_interval",
+                        "timeout_s": float(stage_timeout_s),
+                        "elapsed_ms": 0.0,
+                        "changed": False,
+                    }
+                setattr(self, last_attr, int(block_number))
+
+            try:
+                changed = bool(
+                    await asyncio.wait_for(operation(), timeout=stage_timeout_s)
+                )
+                return {
+                    "stage": name,
+                    "status": "completed",
+                    "timeout_s": float(stage_timeout_s),
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 1),
+                    "changed": changed,
+                }
+            except (asyncio.TimeoutError, TimeoutError):
+                # Keep the run marker set on timeout to avoid hammering the same
+                # expensive historical query each block; it becomes eligible again
+                # after discovery_interval_blocks.
+                return {
+                    "stage": name,
+                    "status": "timed_out",
+                    "timeout_s": float(stage_timeout_s),
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 1),
+                    "changed": False,
+                    "error_type": "TimeoutError",
+                }
+            except (_SAFE_DISCOVERY_RUNTIME_EXCEPTIONS + (KeyError,)) as exc:
+                return {
+                    "stage": name,
+                    "status": "failed",
+                    "timeout_s": float(stage_timeout_s),
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 1),
+                    "changed": False,
+                    "error_type": type(exc).__name__,
+                }
+
+        stage_rows = await asyncio.gather(
+            *(run_stage(name, operation) for name, operation in operations.items())
+        )
+
+        # A timed-out stage may have validated and inserted pools before its next
+        # awaited RPC. Persist any such partial, verified progress even when its
+        # coroutine did not return normally.
+        after_counts = {
+            "curve": len(self._curve),
+            "balancer": len(self._balancer),
+            "aerodrome": len(self._aerodrome),
+            "slipstream": len(self._slipstream),
+            "camelot_algebra": len(self._camelot_algebra),
+            "camelot_v2": len(self._camelot_v2),
+            "constant_product": len(self._constant_product),
+        }
+        changed = any(after_counts[name] > before_counts[name] for name in venue_names)
+        changed = changed or any(bool(row.get("changed")) for row in stage_rows)
+        if changed:
+            try:
+                self._save()
+            except _SAFE_DISCOVERY_SAVE_EXCEPTIONS as exc:
+                stage_rows.append({
+                    "stage": "persistence",
+                    "status": "failed",
+                    "timeout_s": 0.0,
+                    "elapsed_ms": 0.0,
+                    "changed": False,
+                    "error_type": type(exc).__name__,
+                })
+
+        current = snapshot()
+        for row in stage_rows:
+            name = str(row.get("stage") or "")
+            if name in current:
+                row["pools_returned"] = len(current[name] or [])
+        self._last_venue_discovery_telemetry = {
+            "enabled": True,
+            "timeout_s": float(stage_timeout_s),
+            "parallelism": len(operations),
+            "timed_out_count": sum(row.get("status") == "timed_out" for row in stage_rows),
+            "failed_count": sum(row.get("status") == "failed" for row in stage_rows),
+            "stages": stage_rows,
+        }
+        return current
 
     async def _discover_camelot_v2(self, rpc: JsonRpcClient, cfg: Any, block_number: int) -> bool:
         if not str(getattr(cfg.chain, "camelot_v2_factory", "") or ""):
