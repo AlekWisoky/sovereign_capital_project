@@ -409,14 +409,19 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
                 legs=[SimpleNamespace(amount_in=str(amount), min_out=str(amount), token_in="0xtoken")]
             ),
             meta={
+                "gas_cost_estimate_wei": "100000",
+                "out2": str(int(amount) + 100000),
                 "profitability": {
                     "valid": True,
                     "revalidated": True,
                     "authoritative": True,
                     "reason": "after_cost_non_positive",
+                    "amount_in_wei": str(int(amount)),
+                    "amount_out_wei": str(int(amount) + 100000),
                     "profit_after_costs_wei": "0",
-                    "flashloan_fee_wei": "90",
+                    "flashloan_fee_wei": "0",
                     "gas_cost_wei": "100000",
+                    "gas_cost_profit_token_wei": "100000",
                 }
             },
         )
