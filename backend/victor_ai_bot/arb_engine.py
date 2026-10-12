@@ -1554,12 +1554,25 @@ async def _quote_edge_groups_in_bounded_waves(
             )
             for amount, edges in wave
         ]
-        remaining_s = max(0.0, deadline - time.perf_counter())
-        done, pending = await asyncio.wait(
-            tasks,
-            timeout=remaining_s,
-            return_when=asyncio.ALL_COMPLETED,
-        )
+        done = set()
+        pending = set(tasks)
+        try:
+            remaining_s = max(0.0, deadline - time.perf_counter())
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=remaining_s,
+                return_when=asyncio.ALL_COMPLETED,
+            )
+        finally:
+            # Also clean up on outer task cancellation. asyncio.wait does not
+            # cancel its children automatically, so leaving this block without
+            # draining unfinished quotes would create orphaned RPC work.
+            unfinished = [task for task in tasks if not task.done()]
+            for task in unfinished:
+                task.cancel()
+            if unfinished:
+                await asyncio.gather(*unfinished, return_exceptions=True)
+
         waves += 1
         for task in tasks:
             if task not in done:
@@ -1576,9 +1589,6 @@ async def _quote_edge_groups_in_bounded_waves(
 
         pending_count = len(pending)
         if pending_count:
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
             cancelled += pending_count
 
         next_start = wave_start + len(wave)
