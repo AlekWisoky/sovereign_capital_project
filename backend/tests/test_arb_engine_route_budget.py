@@ -56,15 +56,18 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
         123,
         amount_in=100,
         slippage_bps=50,
-        time_budget_ms=1,
+        time_budget_ms=100,
         telemetry=telemetry,
     )
 
     assert len(out) >= 1
     assert any(item.expected_profit_raw == "20" for item in out)
     assert telemetry["route_groups_evaluated"] >= 1
+    assert telemetry["first_leg_quote_budget_ms"] == 40
+    assert telemetry["first_leg_quote_budget_exhausted"] is False
     assert telemetry["budget_exhausted_after_quote"] is telemetry["route_budget_exhausted"]
-    assert telemetry["route_budget_stop_reason"] == "time_budget"
+    assert telemetry["route_budget_exhausted"] is False
+    assert telemetry["route_budget_stop_reason"] == "completed"
     assert telemetry["route_budget_elapsed_ms"] >= 10.0
     assert telemetry["route_universe"]["edges_by_dex"] == {"univ3": 2}
     assert telemetry["route_universe"]["unique_directed_pairs"] == 2
@@ -138,7 +141,7 @@ async def test_provider_comparison_edge_cap_bounds_quote_workload(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatch):
+async def test_two_leg_route_budget_stops_before_starting_group_after_deadline(monkeypatch):
     edges = [
         arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333", {"fee": 3000}),
         arb.Edge("univ3", "0x1111111111111111111111111111111111111111", "0x3333333333333333333333333333333333333333", "0x2222222222222222222222222222222222222222", {"fee": 3000}),
@@ -204,8 +207,8 @@ async def test_two_leg_route_budget_remains_bounded_after_first_group(monkeypatc
         telemetry=telemetry,
     )
 
-    assert len(out) >= 1
-    assert telemetry["route_groups_evaluated"] >= 1
+    assert out == []
+    assert telemetry["route_groups_evaluated"] == 0
     assert telemetry["route_budget_exhausted"] is True
     assert telemetry["budget_exhausted_after_quote"] is True
     assert telemetry["route_budget_stop_reason"] == "time_budget"
