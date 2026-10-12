@@ -591,6 +591,43 @@ async def test_selected_rescue_reverse_candidate_cap_bounds_two_leg_fanout(monke
     assert max(batch_sizes[1:]) <= 3
 
 
+def test_frontier_quote_quality_group_count_unpacks_order_edge_pairs():
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    router_a = "0x" + "aa" * 20
+    router_b = "0x" + "bb" * 20
+
+    same_pair_fee_500 = arb.Edge(
+        "univ3", router_a, token_a, token_b, {"fee": 500}
+    )
+    same_pair_fee_3000 = arb.Edge(
+        "univ3", router_a, token_a, token_b, {"fee": 3000}
+    )
+    distinct_pair = arb.Edge(
+        "curve", "0x" + "cc" * 20, token_b, token_c, {"i": 0, "j": 1}
+    )
+    unquoted_pair = arb.Edge(
+        "slipstream", router_b, token_c, token_a,
+        {"factory": "0x" + "dd" * 20, "tick_spacing": 100},
+    )
+    candidates = [
+        (0, same_pair_fee_500),
+        (1, same_pair_fee_3000),
+        (2, distinct_pair),
+        (3, unquoted_pair),
+    ]
+    quoted = {
+        arb.edge_key(same_pair_fee_500): 101,
+        arb.edge_key(same_pair_fee_3000): 102,
+        arb.edge_key(distinct_pair): 103,
+    }
+
+    # The source collection stores (discovery_order, Edge), not bare Edge values.
+    # Same directed pair counts once; a pair without a quote is excluded.
+    assert arb._frontier_quote_quality_directed_pair_group_count(candidates, quoted) == 2
+
+
 def test_frontier_identity_separates_protocol_pool_and_router_diversity():
     token_a = "0x" + "11" * 20
     token_b = "0x" + "22" * 20
