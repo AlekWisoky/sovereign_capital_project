@@ -448,7 +448,6 @@ def _existing_profitability_matches_scan_inputs(
             and int(state.get("gas_cost_wei")) == int(gas_cost_wei)
             and int(state.get("gas_cost_profit_token_wei")) == int(gas_cost_profit_token_wei)
             and int(state.get("flashloan_fee_wei")) == int(expected_fee)
-            and int(state.get("profit_after_costs_wei")) > 0
         )
     except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
         return False
