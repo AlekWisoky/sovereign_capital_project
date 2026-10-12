@@ -1564,12 +1564,10 @@ async def _quote_edge_groups_in_bounded_waves(
         for task in tasks:
             if task not in done:
                 continue
-            try:
-                result = task.result()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                result = exc
+            if task.cancelled():
+                raise asyncio.CancelledError()
+            task_error = task.exception()
+            result = task.result() if task_error is None else task_error
             batch_completed, batch_failed = _consume_bounded_quote_result(
                 result, quote_map
             )
