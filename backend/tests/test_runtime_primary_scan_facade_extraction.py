@@ -76,16 +76,32 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         kwargs['telemetry'].update({'quote_requests': 10, 'quote_successes': 8, 'routes_considered': 12, 'edges_generated': 6, 'quote_phase_ms': 100.0, 'route_evaluation_ms': 20.0, 'route_groups_evaluated': 2, 'budget_exhausted_after_quote': True})
         candidates = [_opp(5), _opp(20), _opp(-1, expected=11)]
         for candidate in candidates:
+            gross = int(candidate.expected_profit_raw)
+            candidate.route = SimpleNamespace(
+                legs=[
+                    SimpleNamespace(
+                        amount_in="10",
+                        token_in="0xtoken",
+                        token_out="0xother",
+                        min_out=str(10 + gross),
+                    )
+                ]
+            )
+            candidate.meta.update({
+                "gas_cost_estimate_wei": "1",
+                "out2": str(10 + gross),
+            })
             candidate.meta["profitability"] = {
                 "valid": True,
                 "revalidated": True,
                 "authoritative": True,
                 "reason": "ok",
-                "profit_after_costs_wei": str(
-                    int(candidate.meta.get("profit_after_gas_estimate_wei") or candidate.expected_profit_raw)
-                ),
-                "flashloan_fee_wei": "1",
+                "amount_in_wei": "10",
+                "amount_out_wei": str(10 + gross),
+                "profit_after_costs_wei": str(gross - 1),
                 "gas_cost_wei": "1",
+                "gas_cost_profit_token_wei": "1",
+                "flashloan_fee_wei": "0",
             }
         return candidates
 
@@ -93,14 +109,28 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         calls['three'] = {'rpc': rpc, 'cfg': cfg, 'cache': cache, 'block_number': block_number, **kwargs}
         kwargs['telemetry'].update({'quote_requests': 4, 'quote_successes': 4, 'routes_considered': 5, 'edges_generated': 3, 'quote_phase_ms': 30.0, 'route_evaluation_ms': 7.5, 'route_groups_evaluated': 1, 'budget_exhausted_after_quote': False})
         candidate = _opp(15)
+        candidate.route = SimpleNamespace(
+            legs=[
+                SimpleNamespace(
+                    amount_in="10",
+                    token_in="0xtoken",
+                    token_out="0xother",
+                    min_out="25",
+                )
+            ]
+        )
+        candidate.meta.update({"gas_cost_estimate_wei": "1", "out2": "25"})
         candidate.meta["profitability"] = {
             "valid": True,
             "revalidated": True,
             "authoritative": True,
             "reason": "ok",
-            "profit_after_costs_wei": "15",
-            "flashloan_fee_wei": "1",
+            "amount_in_wei": "10",
+            "amount_out_wei": "25",
+            "profit_after_costs_wei": "14",
             "gas_cost_wei": "1",
+            "gas_cost_profit_token_wei": "1",
+            "flashloan_fee_wei": "0",
         }
         return [candidate]
 
