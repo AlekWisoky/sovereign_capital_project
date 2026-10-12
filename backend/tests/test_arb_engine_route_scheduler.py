@@ -152,3 +152,48 @@ async def test_first_leg_quote_wave_cancels_late_batches_and_retains_completed_r
     assert schedule["deadline_exceeded"] is True
     assert arb.edge_key(edges[0]) in quotes
     assert arb.edge_key(edges[1]) not in quotes
+
+
+
+@pytest.mark.asyncio
+async def test_first_leg_quote_wave_cleans_up_when_caller_is_cancelled(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    edge = arb.Edge(
+        "univ3",
+        "0x" + "aa" * 20,
+        token_a,
+        token_b,
+        {"fee": 3000},
+    )
+    started = asyncio.Event()
+    cleaned = []
+
+    async def slow_quote_batch(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+        started.set()
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cleaned.append(int(amount_in))
+        return {}
+
+    monkeypatch.setattr(arb, "quote_edges_batch", slow_quote_batch)
+    scan = asyncio.create_task(
+        arb._quote_edge_groups_in_bounded_waves(
+            object(),
+            object(),
+            object(),
+            [(100, [edge]), (200, [edge])],
+            deadline=__import__("time").perf_counter() + 10,
+            block_number=0,
+            parallelism=1,
+            metrics={},
+        )
+    )
+
+    await asyncio.wait_for(started.wait(), timeout=1)
+    scan.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await scan
+
+    assert cleaned == [100]
