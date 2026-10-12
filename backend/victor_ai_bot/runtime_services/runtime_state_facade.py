@@ -28,6 +28,31 @@ def _safe_provider_host(value: Any) -> str:
     return label[:128] or "unknown"
 
 
+
+def _sanitize_scan_error_trace(value: Any) -> list[Dict[str, Any]]:
+    """Expose bounded, allow-listed exception frame metadata on public telemetry."""
+    if not isinstance(value, list):
+        return []
+    frames: list[Dict[str, Any]] = []
+    for row in value[-8:]:
+        if not isinstance(row, dict):
+            continue
+        try:
+            line = int(row.get("line"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if line < 1:
+            continue
+        filename = str(row.get("filename") or "").replace("\\", "/").rsplit("/", 1)[-1][:128]
+        frames.append({
+            "module": str(row.get("module") or "")[:160],
+            "filename": filename,
+            "function": str(row.get("function") or "")[:128],
+            "line": line,
+        })
+    return frames
+
+
 def _safe_rpc_error_kind(value: Any) -> str:
     """Replace raw provider errors with stable categories safe for a public API."""
     message = str(value or "").lower()
@@ -229,6 +254,7 @@ class RuntimeStateFacade:
                 "last_block": telemetry.get("last_block"),
                 "scan_latency_ms": telemetry.get("scan_latency_ms"),
                 "scan_error": str(telemetry.get("scan_error") or ""),
+                "scan_error_trace": _sanitize_scan_error_trace(telemetry.get("scan_error_trace")),
                 "runtime_loop": dict(getattr(self, "_runtime_loop_telemetry", {}) or {}),
                 "pool_event_state": (
                     dict(getattr(self, "_pool_event_cache", None).snapshot() or {})
