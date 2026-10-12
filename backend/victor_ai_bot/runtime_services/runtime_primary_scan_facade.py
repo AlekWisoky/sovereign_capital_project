@@ -486,7 +486,9 @@ def _clear_stale_after_fee_projection(meta: Dict[str, Any]) -> None:
     """Remove profitability projections that refer to an older size or quote."""
     _clear_stale_after_fee_usd(meta)
     for key in (
+        "profit_after_gas_estimate_wei",
         "profit_after_gas_estimate_usd_micro",
+        "profit_after_costs",
         "profit_after_all_costs_estimate_wei",
     ):
         meta.pop(key, None)
@@ -1502,12 +1504,6 @@ class RuntimePrimaryScanFacade:
                 # quote, fee and token-denominated gas are revalidated below.
                 meta.pop("profitability", None)
                 meta.pop("profitability_diagnostic", None)
-                for key in (
-                    "profit_after_gas_estimate_wei",
-                    "profit_after_costs",
-                    "profit_after_all_costs_estimate_wei",
-                ):
-                    meta.pop(key, None)
 
             base_l1_pricing_required = int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID
             if has_route_gas_inputs and (observed_gas_price_wei is None or (base_l1_pricing_required and l1_fee_status not in {"exact_calldata", "exact_calldata_cached"})):
