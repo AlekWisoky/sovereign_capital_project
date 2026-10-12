@@ -280,6 +280,18 @@ def _edge_diversity_novelty(
     )
 
 
+def _frontier_quote_quality_directed_pair_group_count(
+    candidates: Sequence[Tuple[int, Edge]],
+    quoted_output_by_edge: Mapping[str, Any],
+) -> int:
+    """Count quote-covered directed pairs while respecting (discovery_order, Edge) records."""
+    return len({
+        (str(edge.token_in).lower(), str(edge.token_out).lower())
+        for _order, edge in candidates
+        if edge_key(edge) in quoted_output_by_edge
+    })
+
+
 def _quote_outputs_by_pair(
     candidates: Sequence[Tuple[int, Edge]],
     quoted: Mapping[str, int],
@@ -2550,11 +2562,10 @@ async def find_three_leg_opportunities(
             "directed_pair_diverse_edges": int(len(new_directed_pairs)),
             "directed_pair_identity": "token_in->token_out",
             "quote_quality_priority_used": bool(quoted_output_by_edge),
-            "quote_quality_directed_pair_groups": int(len({
-                (str(edge.token_in).lower(), str(edge.token_out).lower())
-                for edge in frontier_candidates
-                if edge_key(edge) in quoted_output_by_edge
-            })),
+            "quote_quality_directed_pair_groups": _frontier_quote_quality_directed_pair_group_count(
+                frontier_candidates,
+                quoted_output_by_edge,
+            ),
             "selected_mean_quote_quality_percentile_bps": (
                 int(sum(selected_quote_percentiles) / len(selected_quote_percentiles))
                 if selected_quote_percentiles else None
