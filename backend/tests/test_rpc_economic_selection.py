@@ -705,12 +705,16 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
         ),
         meta={
             "gas_cost_estimate_wei": "0",
+            "out2": "750",
             "profitability": {
                 "revalidated": True,
                 "authoritative": True,
                 "valid": True,
+                "amount_in_wei": "1000",
+                "amount_out_wei": "750",
                 "profit_after_costs_wei": "-250",
                 "gas_cost_wei": "0",
+                "gas_cost_profit_token_wei": "0",
                 "flashloan_fee_wei": "0",
             },
             "venues": ["univ3"],
