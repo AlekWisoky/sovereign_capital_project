@@ -286,15 +286,19 @@ async def test_three_leg_route_evaluation_consumes_quotes_returned_after_budget(
         telemetry=telemetry,
     )
 
-    assert len(out) >= 1
-    assert any(item.expected_profit_raw == "20" for item in out)
-    assert telemetry["route_groups_evaluated"] >= 1
-    # Every quote phase is inside the absolute per-call deadline. A late
-    # first-leg response is still consumed into a completed cycle, but the
-    # scan correctly reports that the budget was exceeded while obtaining it.
+    # A late first-leg batch can be retained as quote evidence, but once the
+    # absolute route deadline has elapsed the scanner must not start route work.
+    # Second/third-leg batches already in flight are consumed before stopping.
     assert telemetry["route_budget_exhausted"] is True
     assert telemetry["budget_exhausted_after_quote"] is True
     assert telemetry["route_budget_stop_reason"] == "time_budget"
+    if slow_phase == "first":
+        assert out == []
+        assert telemetry["route_groups_evaluated"] == 0
+    else:
+        assert len(out) >= 1
+        assert any(item.expected_profit_raw == "20" for item in out)
+        assert telemetry["route_groups_evaluated"] >= 1
 
 
 def test_three_leg_route_universe_exposes_pruned_edge_identity_and_pool():
