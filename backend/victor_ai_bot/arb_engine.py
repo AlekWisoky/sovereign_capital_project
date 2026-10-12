@@ -1518,6 +1518,50 @@ def _consume_bounded_quote_result(
     return 1, 0
 
 
+async def _wait_for_quote_tasks_until_deadline(
+    tasks: Sequence[asyncio.Task],
+    *,
+    deadline: float,
+) -> tuple[set, set]:
+    """Wait only until the phase deadline and always drain unfinished tasks."""
+    done: set = set()
+    pending: set = set(tasks)
+    try:
+        remaining_s = max(0.0, deadline - time.perf_counter())
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=remaining_s,
+            return_when=asyncio.ALL_COMPLETED,
+        )
+    finally:
+        unfinished = [task for task in tasks if not task.done()]
+        for task in unfinished:
+            task.cancel()
+        if unfinished:
+            await asyncio.gather(*unfinished, return_exceptions=True)
+    return done, pending
+
+
+def _consume_quote_task_results(
+    tasks: Sequence[asyncio.Task],
+    done: set,
+    quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
+) -> tuple[int, int]:
+    """Retain finished results and count per-batch failures consistently."""
+    completed = failed = 0
+    for task in tasks:
+        if task not in done:
+            continue
+        if task.cancelled():
+            raise asyncio.CancelledError()
+        task_error = task.exception()
+        result = task.result() if task_error is None else task_error
+        batch_completed, batch_failed = _consume_bounded_quote_result(result, quote_map)
+        completed += batch_completed
+        failed += batch_failed
+    return completed, failed
+
+
 async def _quote_edge_groups_in_bounded_waves(
     rpc: Any,
     cfg: Any,
@@ -1554,38 +1598,18 @@ async def _quote_edge_groups_in_bounded_waves(
             )
             for amount, edges in wave
         ]
-        done = set()
-        pending = set(tasks)
-        try:
-            remaining_s = max(0.0, deadline - time.perf_counter())
-            done, pending = await asyncio.wait(
-                tasks,
-                timeout=remaining_s,
-                return_when=asyncio.ALL_COMPLETED,
-            )
-        finally:
-            # Also clean up on outer task cancellation. asyncio.wait does not
-            # cancel its children automatically, so leaving this block without
-            # draining unfinished quotes would create orphaned RPC work.
-            unfinished = [task for task in tasks if not task.done()]
-            for task in unfinished:
-                task.cancel()
-            if unfinished:
-                await asyncio.gather(*unfinished, return_exceptions=True)
-
+        done, pending = await _wait_for_quote_tasks_until_deadline(
+            tasks,
+            deadline=deadline,
+        )
         waves += 1
-        for task in tasks:
-            if task not in done:
-                continue
-            if task.cancelled():
-                raise asyncio.CancelledError()
-            task_error = task.exception()
-            result = task.result() if task_error is None else task_error
-            batch_completed, batch_failed = _consume_bounded_quote_result(
-                result, quote_map
-            )
-            completed += batch_completed
-            failed += batch_failed
+        batch_completed, batch_failed = _consume_quote_task_results(
+            tasks,
+            done,
+            quote_map,
+        )
+        completed += batch_completed
+        failed += batch_failed
 
         pending_count = len(pending)
         if pending_count:
