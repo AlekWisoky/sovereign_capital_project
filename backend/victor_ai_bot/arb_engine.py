@@ -1495,6 +1495,14 @@ def _route_group_parallelism() -> int:
     return max(1, min(4, requested))
 
 
+def _first_leg_quote_budget_ms(time_budget_ms: int) -> int:
+    """Reserve most of the shared scan window for route-group evaluation."""
+    total_ms = max(1, int(time_budget_ms))
+    if total_ms <= 1:
+        return total_ms
+    return max(1, min(total_ms - 1, (total_ms * 40) // 100))
+
+
 def _consume_bounded_quote_result(
     result: Any,
     quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
@@ -1521,12 +1529,12 @@ async def _quote_edge_groups_in_bounded_waves(
     parallelism: int,
     metrics: Dict[str, Any],
 ) -> tuple[Dict[str, Optional[Tuple[int, Dict[str, Any]]]], Dict[str, Any]]:
-    """Quote prioritized amount groups in bounded waves and retain every result.
+    """Quote prioritized amount groups under a hard phase deadline.
 
-    Already-started waves are always consumed in full. Once a wave returns past
-    the absolute deadline, no later wave is started. Rotating the starting
-    amount group by block makes groups skipped on one block observable and gives
-    them first-wave opportunity on later blocks.
+    Results from batches completed by the deadline are retained. In-flight
+    batches are cancelled when the deadline expires and later waves are not
+    started. The caller budgets this phase separately from route evaluation.
+    Rotating the starting group by block prevents persistent starvation.
     """
     ordered = list(edge_groups)
     if ordered:
@@ -1534,39 +1542,68 @@ async def _quote_edge_groups_in_bounded_waves(
         ordered = ordered[offset:] + ordered[:offset]
     limit = max(1, min(4, int(parallelism)))
     quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
-    completed = failed = skipped = waves = 0
+    completed = failed = skipped = waves = cancelled = 0
     for wave_start in range(0, len(ordered), limit):
         if time.perf_counter() >= deadline:
             skipped = len(ordered) - wave_start
             break
         wave = ordered[wave_start:wave_start + limit]
-        results = await asyncio.gather(*(
-            quote_edges_batch(rpc, cfg, cache, edges, int(amount), metrics=metrics)
+        tasks = [
+            asyncio.create_task(
+                quote_edges_batch(rpc, cfg, cache, edges, int(amount), metrics=metrics)
+            )
             for amount, edges in wave
-        ), return_exceptions=True)
+        ]
+        remaining_s = max(0.0, deadline - time.perf_counter())
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=remaining_s,
+            return_when=asyncio.ALL_COMPLETED,
+        )
         waves += 1
-        for result in results:
+        for task in tasks:
+            if task not in done:
+                continue
+            try:
+                result = task.result()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                result = exc
             batch_completed, batch_failed = _consume_bounded_quote_result(
                 result, quote_map
             )
             completed += batch_completed
             failed += batch_failed
+
+        pending_count = len(pending)
+        if pending_count:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            cancelled += pending_count
+
         next_start = wave_start + len(wave)
-        if next_start < len(ordered) and time.perf_counter() >= deadline:
+        if pending_count or (
+            next_start < len(ordered) and time.perf_counter() >= deadline
+        ):
             skipped = len(ordered) - next_start
             break
-    deadline_exceeded = bool(time.perf_counter() >= deadline or skipped)
+
+    deadline_exceeded = bool(
+        cancelled or time.perf_counter() >= deadline or skipped
+    )
     return quote_map, {
         "batches_total": int(len(ordered)),
         "batches_completed": int(completed),
         "batches_failed": int(failed),
+        "batches_cancelled": int(cancelled),
         "batches_skipped_budget": int(skipped),
         "waves_started": int(waves),
         "parallelism_limit": int(limit),
         "deadline_exceeded": deadline_exceeded,
         "ordering": "route_potential_priority_then_block_rotated",
     }
-
 
 async def _quote_two_leg_route_group_wave(
     rpc: Any,
@@ -1849,6 +1886,10 @@ async def find_two_leg_opportunities(
 ) -> List[Opportunity]:
     t_start = time.perf_counter()
     route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
+    first_leg_quote_budget_ms = _first_leg_quote_budget_ms(time_budget_ms)
+    first_leg_quote_deadline = min(
+        route_deadline, t_start + first_leg_quote_budget_ms / 1000.0
+    )
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -1938,19 +1979,19 @@ async def find_two_leg_opportunities(
         cfg,
         cache,
         ordered_edge_groups,
-        deadline=route_deadline,
+        deadline=first_leg_quote_deadline,
         block_number=int(block_number),
         parallelism=_route_group_parallelism(),
         metrics=metrics,
     )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
-    route_budget_exhausted = bool(first_leg_quote_schedule["deadline_exceeded"])
+    route_budget_exhausted = bool(time.perf_counter() >= route_deadline)
     prepared_route_groups: List[Dict[str, Any]] = []
     # Interleave token/protocol families before budgeting. This is only a
     # scheduling fairness policy; route economics still determine ranking.
     for e1 in _round_robin_route_group_edges(edges):
-        if prepared_route_groups and time.perf_counter() >= route_deadline:
+        if time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         revs = by_pair.get((e1.token_out, e1.token_in), [])
@@ -2021,7 +2062,7 @@ async def find_two_leg_opportunities(
         opportunities=opps,
     )
     for wave_start in range(0, len(prepared_route_groups), route_group_parallelism):
-        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
+        if time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
@@ -2068,7 +2109,10 @@ async def find_two_leg_opportunities(
             "first_leg_quote_batches_total": int(first_leg_quote_schedule["batches_total"]),
             "first_leg_quote_batches_completed": int(first_leg_quote_schedule["batches_completed"]),
             "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
+            "first_leg_quote_batches_cancelled": int(first_leg_quote_schedule["batches_cancelled"]),
             "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_budget_ms": int(first_leg_quote_budget_ms),
+            "first_leg_quote_budget_exhausted": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
             "first_leg_quote_parallelism_limit": int(first_leg_quote_schedule["parallelism_limit"]),
             "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
@@ -2081,6 +2125,9 @@ async def find_two_leg_opportunities(
             "ordering": "round_robin_source_token_protocol",
             "completed_wave_results_consumed_before_budget_stop": True,
         }
+        telemetry["first_leg_quote_budget_ms"] = int(first_leg_quote_budget_ms)
+        telemetry["first_leg_quote_budget_exhausted"] = bool(first_leg_quote_schedule["deadline_exceeded"])
+        telemetry["first_leg_quote_batches_cancelled"] = int(first_leg_quote_schedule["batches_cancelled"])
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
             "time_budget" if route_budget_exhausted else "completed"
@@ -2321,6 +2368,10 @@ async def find_three_leg_opportunities(
     """
     t_start = time.perf_counter()
     route_deadline = t_start + max(1, int(time_budget_ms)) / 1000.0
+    first_leg_quote_budget_ms = _first_leg_quote_budget_ms(time_budget_ms)
+    first_leg_quote_deadline = min(
+        route_deadline, t_start + first_leg_quote_budget_ms / 1000.0
+    )
     metrics: Dict[str, int] = {}
     edges = build_edges(
         cfg,
@@ -2401,14 +2452,14 @@ async def find_three_leg_opportunities(
         cfg,
         cache,
         ordered_triangle_edge_groups,
-        deadline=route_deadline,
+        deadline=first_leg_quote_deadline,
         block_number=int(block_number),
         parallelism=_route_group_parallelism(),
         metrics=metrics,
     )
     route_eval_started = time.perf_counter()
     route_groups_evaluated = 0
-    route_budget_exhausted = bool(first_leg_quote_schedule["deadline_exceeded"])
+    route_budget_exhausted = bool(time.perf_counter() >= route_deadline)
     triangle_second_leg_quote_batches_completed = 0
     triangle_third_leg_quote_batches_completed = 0
     triangle_coalesced_quote_batches = 0
@@ -2578,6 +2629,9 @@ async def find_three_leg_opportunities(
         [edge for items in frontier_adj.values() for edge in items]
     )
     for e1 in triangle_ordered_edges:
+        if time.perf_counter() >= route_deadline:
+            route_budget_exhausted = True
+            break
         if normalized_amounts:
             effective_amount_in = int(normalized_amounts.get(str(e1.token_in).lower(), 0))
             if effective_amount_in <= 0:
@@ -2608,7 +2662,7 @@ async def find_three_leg_opportunities(
 
     triangle_route_parallelism = _route_group_parallelism()
     for wave_start in range(0, len(triangle_route_groups), triangle_route_parallelism):
-        if route_groups_evaluated > 0 and time.perf_counter() >= route_deadline:
+        if time.perf_counter() >= route_deadline:
             route_budget_exhausted = True
             break
         wave = triangle_route_groups[wave_start:wave_start + triangle_route_parallelism]
@@ -2921,7 +2975,10 @@ async def find_three_leg_opportunities(
             "first_leg_quote_batches_total": int(first_leg_quote_schedule["batches_total"]),
             "first_leg_quote_batches_completed": int(first_leg_quote_schedule["batches_completed"]),
             "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
+            "first_leg_quote_batches_cancelled": int(first_leg_quote_schedule["batches_cancelled"]),
             "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_budget_ms": int(first_leg_quote_budget_ms),
+            "first_leg_quote_budget_exhausted": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
             "first_leg_quote_parallelism_limit": int(first_leg_quote_schedule["parallelism_limit"]),
             "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
@@ -2936,6 +2993,9 @@ async def find_three_leg_opportunities(
             "ordering": "round_robin_source_token_protocol",
             "completed_wave_results_consumed_before_budget_stop": True,
         }
+        telemetry["first_leg_quote_budget_ms"] = int(first_leg_quote_budget_ms)
+        telemetry["first_leg_quote_budget_exhausted"] = bool(first_leg_quote_schedule["deadline_exceeded"])
+        telemetry["first_leg_quote_batches_cancelled"] = int(first_leg_quote_schedule["batches_cancelled"])
         telemetry["route_budget_exhausted"] = bool(route_budget_exhausted)
         telemetry["route_budget_stop_reason"] = (
             "time_budget" if route_budget_exhausted else "completed"
