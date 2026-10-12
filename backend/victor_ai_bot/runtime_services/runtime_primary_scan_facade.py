@@ -454,18 +454,42 @@ def _existing_profitability_matches_scan_inputs(
         return False
 
 
-def _clear_stale_after_fee_projection(meta: Dict[str, Any]) -> None:
-    """Remove profitability/USD projections that refer to an older size or quote."""
-    for key in (
-        "canonical_after_fee_usd",
-        "profit_after_gas_estimate_usd_micro",
-        "profit_after_all_costs_estimate_wei",
-    ):
-        meta.pop(key, None)
+def _canonical_after_fee_usd_matches(
+    value: Any,
+    state: Dict[str, Any],
+    *,
+    current_block: int,
+) -> bool:
+    """Validate that a displayed USD projection belongs to this state and block."""
+    if not isinstance(value, dict):
+        return False
+    try:
+        return bool(
+            value.get("verified")
+            and int(value.get("block_number") or 0) == int(current_block)
+            and str(value.get("profit_after_costs_wei") or "")
+            == str(state.get("profit_after_costs_wei") or "")
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _clear_stale_after_fee_usd(meta: Dict[str, Any]) -> None:
+    meta.pop("canonical_after_fee_usd", None)
     safety = meta.get("safety")
     if isinstance(safety, dict):
         safety.pop("profit_after_costs_usd_micro", None)
         safety.pop("profit_after_costs_usd_source", None)
+
+
+def _clear_stale_after_fee_projection(meta: Dict[str, Any]) -> None:
+    """Remove profitability projections that refer to an older size or quote."""
+    _clear_stale_after_fee_usd(meta)
+    for key in (
+        "profit_after_gas_estimate_usd_micro",
+        "profit_after_all_costs_estimate_wei",
+    ):
+        meta.pop(key, None)
 
 
 def _discovered_pool_count(discovery_context: Dict[str, Any]) -> int:
@@ -1459,14 +1483,14 @@ class RuntimePrimaryScanFacade:
                 flashloan_fee_bps=int(effective_flashloan_fee_bps),
             )
             prior_after_fee_usd = meta.get("canonical_after_fee_usd")
-            after_fee_usd_matches = bool(
-                isinstance(prior_after_fee_usd, dict)
-                and int(prior_after_fee_usd.get("block_number") or 0) == int(current_block)
-                and str(prior_after_fee_usd.get("profit_after_costs_wei") or "")
-                == str(existing_profitability.get("profit_after_costs_wei") or "")
-                and bool(prior_after_fee_usd.get("verified"))
+            after_fee_usd_matches = _canonical_after_fee_usd_matches(
+                prior_after_fee_usd,
+                existing_profitability,
+                current_block=int(current_block),
             )
-            if not profitability_matches_current_inputs or not after_fee_usd_matches:
+            if not after_fee_usd_matches:
+                _clear_stale_after_fee_usd(meta)
+            if not profitability_matches_current_inputs:
                 _clear_stale_after_fee_projection(meta)
             if not profitability_matches_current_inputs and (
                 existing_profitability
@@ -1488,7 +1512,7 @@ class RuntimePrimaryScanFacade:
             base_l1_pricing_required = int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID
             if has_route_gas_inputs and (observed_gas_price_wei is None or (base_l1_pricing_required and l1_fee_status not in {"exact_calldata", "exact_calldata_cached"})):
                 meta.pop("profitability", None)
-                meta.pop("canonical_after_fee_usd", None)
+                _clear_stale_after_fee_projection(meta)
                 state = {
                     "stage": "scan_after_fee_revalidation",
                     "source": "runtime_primary_scan",
