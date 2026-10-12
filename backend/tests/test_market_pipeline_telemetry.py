@@ -203,6 +203,46 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["size_economic_evidence"][0]["route_id"] == "route-1"
 
 
+
+
+def test_market_pipeline_exposes_bounded_scan_error_trace_without_frame_locals():
+    runtime = _Runtime()
+    runtime._market_pipeline_telemetry["scan_error"] = (
+        "AttributeError: 'tuple' object has no attribute 'dex'"
+    )
+    runtime._market_pipeline_telemetry["scan_error_trace"] = [
+        {
+            "module": "victor_ai_bot.runtime.scan",
+            "filename": f"/srv/private/scan_{index}.py",
+            "function": f"scan_{index}",
+            "line": index + 1,
+            "locals": {"VICTOR_PRIVATE_KEY": "top-secret"},
+            "source": "secret source text",
+        }
+        for index in range(10)
+    ]
+
+    out = runtime.market_pipeline_telemetry_state()
+    scanner = out["scanner"]
+    trace = scanner["scan_error_trace"]
+
+    assert scanner["scan_error"] == "AttributeError: 'tuple' object has no attribute 'dex'"
+    assert len(trace) == 8
+    assert trace[0] == {
+        "module": "victor_ai_bot.runtime.scan",
+        "filename": "scan_2.py",
+        "function": "scan_2",
+        "line": 3,
+    }
+    assert trace[-1]["filename"] == "scan_9.py"
+    assert all(set(frame) == {"module", "filename", "function", "line"} for frame in trace)
+    serialized = str(trace)
+    assert "/srv/private" not in serialized
+    assert "top-secret" not in serialized
+    assert "secret source text" not in serialized
+
+
+
 def test_market_pipeline_exposes_live_rpc_selection_progress_without_endpoint_urls():
     runtime = _Runtime()
     runtime._market_pipeline_telemetry.update({
