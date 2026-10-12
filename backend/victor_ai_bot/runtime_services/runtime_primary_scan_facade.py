@@ -418,6 +418,56 @@ def _resolve_scan_quoted_amount(meta: Dict[str, Any]) -> int | None:
 
 
 
+def _existing_profitability_matches_scan_inputs(
+    state: Dict[str, Any],
+    *,
+    opportunity: Any,
+    meta: Dict[str, Any],
+    gas_cost_wei: int,
+    gas_cost_profit_token_wei: int | None,
+    flashloan_fee_bps: int,
+) -> bool:
+    """Only reuse an authoritative result when every size- and cost-sensitive input matches."""
+    if not (
+        bool(state.get("revalidated"))
+        and bool(state.get("authoritative"))
+        and bool(state.get("valid"))
+        and gas_cost_profit_token_wei is not None
+    ):
+        return False
+    try:
+        legs = list(getattr(getattr(opportunity, "route", None), "legs", []) or [])
+        amount_in = int(getattr(legs[0], "amount_in", 0) or 0) if legs else 0
+        amount_out = _resolve_scan_quoted_amount(meta)
+        if amount_in <= 0 or amount_out is None or int(amount_out) <= 0:
+            return False
+        expected_fee = (int(amount_in) * max(0, int(flashloan_fee_bps))) // 10_000
+        return bool(
+            int(state.get("amount_in_wei")) == int(amount_in)
+            and int(state.get("amount_out_wei")) == int(amount_out)
+            and int(state.get("gas_cost_wei")) == int(gas_cost_wei)
+            and int(state.get("gas_cost_profit_token_wei")) == int(gas_cost_profit_token_wei)
+            and int(state.get("flashloan_fee_wei")) == int(expected_fee)
+            and int(state.get("profit_after_costs_wei")) > 0
+        )
+    except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def _clear_stale_after_fee_projection(meta: Dict[str, Any]) -> None:
+    """Remove profitability/USD projections that refer to an older size or quote."""
+    for key in (
+        "canonical_after_fee_usd",
+        "profit_after_gas_estimate_usd_micro",
+        "profit_after_all_costs_estimate_wei",
+    ):
+        meta.pop(key, None)
+    safety = meta.get("safety")
+    if isinstance(safety, dict):
+        safety.pop("profit_after_costs_usd_micro", None)
+        safety.pop("profit_after_costs_usd_source", None)
+
+
 def _discovered_pool_count(discovery_context: Dict[str, Any]) -> int:
     """Count every venue family admitted to the current read-only discovery graph."""
     keys = (
@@ -1382,8 +1432,63 @@ class RuntimePrimaryScanFacade:
                 except _SAFE_SCAN_TELEMETRY_EXCEPTIONS:
                     gas_cost_in_profit_token_wei = None
 
+            effective_flashloan_fee_bps = (
+                int(native_flashloan_fee_bps)
+                if native_flashloan_fee_bps is not None
+                else max(
+                    0,
+                    int(getattr(getattr(self.cfg, "execution", None), "flashloan_fee_bps", 0) or 0),
+                )
+            )
+            existing_profitability = meta.get("profitability")
+            existing_profitability = (
+                existing_profitability
+                if isinstance(existing_profitability, dict)
+                else {}
+            )
+            profitability_matches_current_inputs = _existing_profitability_matches_scan_inputs(
+                existing_profitability,
+                opportunity=opportunity,
+                meta=meta,
+                gas_cost_wei=int(gas_cost_wei),
+                gas_cost_profit_token_wei=(
+                    gas_cost_in_profit_token_wei
+                    if has_route_gas_inputs
+                    else int(gas_cost_wei)
+                ),
+                flashloan_fee_bps=int(effective_flashloan_fee_bps),
+            )
+            prior_after_fee_usd = meta.get("canonical_after_fee_usd")
+            after_fee_usd_matches = bool(
+                isinstance(prior_after_fee_usd, dict)
+                and int(prior_after_fee_usd.get("block_number") or 0) == int(current_block)
+                and str(prior_after_fee_usd.get("profit_after_costs_wei") or "")
+                == str(existing_profitability.get("profit_after_costs_wei") or "")
+                and bool(prior_after_fee_usd.get("verified"))
+            )
+            if not profitability_matches_current_inputs or not after_fee_usd_matches:
+                _clear_stale_after_fee_projection(meta)
+            if not profitability_matches_current_inputs and (
+                existing_profitability
+                or isinstance(meta.get("profitability_diagnostic"), dict)
+                or "requoted_amount_in" in meta
+            ):
+                # A candidate may keep the prior size's state when requote_opportunity
+                # updates its amount/outN fields. Discard that state so the exact new
+                # quote, fee and token-denominated gas are revalidated below.
+                meta.pop("profitability", None)
+                meta.pop("profitability_diagnostic", None)
+                for key in (
+                    "profit_after_gas_estimate_wei",
+                    "profit_after_costs",
+                    "profit_after_all_costs_estimate_wei",
+                ):
+                    meta.pop(key, None)
+
             base_l1_pricing_required = int(getattr(getattr(self.cfg, "chain", None), "chain_id", 0) or 0) == BASE_CHAIN_ID
             if has_route_gas_inputs and (observed_gas_price_wei is None or (base_l1_pricing_required and l1_fee_status not in {"exact_calldata", "exact_calldata_cached"})):
+                meta.pop("profitability", None)
+                meta.pop("canonical_after_fee_usd", None)
                 state = {
                     "stage": "scan_after_fee_revalidation",
                     "source": "runtime_primary_scan",
@@ -1411,8 +1516,18 @@ class RuntimePrimaryScanFacade:
             existing_profitability = meta.get("profitability")
             if (
                 isinstance(existing_profitability, dict)
-                and bool(existing_profitability.get("revalidated"))
-                and bool(existing_profitability.get("authoritative"))
+                and _existing_profitability_matches_scan_inputs(
+                    existing_profitability,
+                    opportunity=opportunity,
+                    meta=meta,
+                    gas_cost_wei=int(gas_cost_wei),
+                    gas_cost_profit_token_wei=(
+                        gas_cost_in_profit_token_wei
+                        if has_route_gas_inputs
+                        else int(gas_cost_wei)
+                    ),
+                    flashloan_fee_bps=int(effective_flashloan_fee_bps),
+                )
             ):
                 state = dict(existing_profitability)
             else:
