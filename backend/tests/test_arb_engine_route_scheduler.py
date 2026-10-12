@@ -99,34 +99,38 @@ async def test_completed_first_leg_quote_is_consumed_but_no_more_than_one_wave_a
         time_budget_ms=1, telemetry=telemetry,
     )
 
-    assert telemetry["route_budget_elapsed_ms"] >= 10.0
     assert telemetry["route_budget_exhausted"] is True
-    assert telemetry["route_groups_evaluated"] <= arb._route_group_parallelism()
+    assert telemetry["route_groups_evaluated"] == 0
+    assert telemetry["first_leg_quote_batches_cancelled"] == 1
     assert telemetry["route_budget_stop_reason"] == "time_budget"
 
 
 @pytest.mark.asyncio
-async def test_first_leg_quote_wave_stops_at_deadline_and_retains_completed_results(monkeypatch):
+async def test_first_leg_quote_wave_cancels_late_batches_and_retains_completed_results(monkeypatch):
     token_a = "0x" + "11" * 20
     token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
     router = "0x" + "aa" * 20
     edges = [
         arb.Edge("univ3", router, token_a, token_b, {"fee": 500}),
-        arb.Edge("univ3", router, token_a, token_b, {"fee": 3000}),
-        arb.Edge("aerodrome", router, token_b, token_a, {"stable": True}),
+        arb.Edge("univ3", router, token_b, token_c, {"fee": 3000}),
+        arb.Edge("aerodrome", router, token_c, token_a, {"stable": True}),
     ]
     calls = []
 
     async def fake_quote_batch(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
         calls.append((int(amount_in), tuple(arb.edge_key(edge) for edge in requested_edges)))
-        await asyncio.sleep(0.01)
+        if int(amount_in) == 200:
+            await asyncio.sleep(0.2)
+        else:
+            await asyncio.sleep(0.001)
         return {
             arb.edge_key(edge): (123 + int(amount_in), {"fee": 3000})
             for edge in requested_edges
         }
 
     monkeypatch.setattr(arb, "quote_edges_batch", fake_quote_batch)
-    deadline = __import__("time").perf_counter() + 0.001
+    deadline = __import__("time").perf_counter() + 0.03
     quotes, schedule = await arb._quote_edge_groups_in_bounded_waves(
         object(),
         object(),
@@ -134,17 +138,17 @@ async def test_first_leg_quote_wave_stops_at_deadline_and_retains_completed_resu
         [(100, [edges[0]]), (200, [edges[1]]), (300, [edges[2]])],
         deadline=deadline,
         block_number=0,
-        parallelism=1,
+        parallelism=2,
         metrics={},
     )
 
-    assert len(calls) == 1
+    assert sorted(amount for amount, _ in calls) == [100, 200]
     assert schedule["batches_total"] == 3
     assert schedule["batches_completed"] == 1
-    assert schedule["batches_skipped_budget"] == 2
+    assert schedule["batches_failed"] == 0
+    assert schedule["batches_cancelled"] == 1
+    assert schedule["batches_skipped_budget"] == 1
     assert schedule["waves_started"] == 1
     assert schedule["deadline_exceeded"] is True
-    # A successful result from the already-started wave survives the deadline.
-    first_edge = edges[0]
-    assert arb.edge_key(first_edge) in quotes
-    assert quotes[arb.edge_key(first_edge)][0] == 223
+    assert arb.edge_key(edges[0]) in quotes
+    assert arb.edge_key(edges[1]) not in quotes
