@@ -94,6 +94,13 @@ def _safe_discovery_number(value: Any) -> float | None:
     return number if 0 <= number < 1_000_000_000 else None
 
 
+def _safe_discovery_pool_count(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def _safe_discovery_error_type(raw: Dict[str, Any]) -> str:
     error_type = str(raw.get("error_type") or "").strip()
     if (
@@ -112,27 +119,26 @@ def _safe_discovery_error_type(raw: Dict[str, Any]) -> str:
     return ""
 
 
+def _safe_discovery_stage_timing(raw: Dict[str, Any]) -> Dict[str, float]:
+    return {
+        key: number
+        for key in ("elapsed_ms", "timeout_s")
+        if (number := _safe_discovery_number(raw.get(key))) is not None
+    }
+
+
 def _safe_discovery_stage(raw: Any) -> Dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     row: Dict[str, Any] = {
         "stage": str(raw.get("stage") or "unknown")[:80],
         "status": str(raw.get("status") or "unknown")[:32],
+        "changed": bool(raw.get("changed")),
+        "pools_returned": _safe_discovery_pool_count(raw.get("pools_returned")),
     }
-    for key in ("elapsed_ms", "timeout_s"):
-        number = _safe_discovery_number(raw.get(key))
-        if number is not None:
-            row[key] = number
-    if "changed" in raw:
-        row["changed"] = bool(raw.get("changed"))
-    if "pools_returned" in raw:
-        try:
-            row["pools_returned"] = max(0, int(raw.get("pools_returned") or 0))
-        except (TypeError, ValueError, OverflowError):
-            pass
+    row.update(_safe_discovery_stage_timing(raw))
     error_type = _safe_discovery_error_type(raw)
-    if error_type:
-        row["error_type"] = error_type
+    row["error_type"] = error_type or None
     return row
 
 
