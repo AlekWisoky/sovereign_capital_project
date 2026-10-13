@@ -958,6 +958,28 @@ def _append_size_probe_candidate(
         seen_route_ids.add(route_id)
 
 
+def _existing_size_probe_route_ids(candidates: List[Opportunity]) -> set[str]:
+    route_ids: set[str] = set()
+    for candidate in candidates:
+        route_id = _size_probe_route_key(candidate)
+        if route_id:
+            route_ids.add(route_id)
+    return route_ids
+
+
+def _merge_size_probe_group(
+    record: Dict[str, Any],
+    group: str,
+    candidates: List[Opportunity],
+) -> None:
+    existing = record[group]
+    seen_route_ids = _existing_size_probe_route_ids(existing)
+    for candidate in candidates:
+        if _size_probe_group(candidate) != group:
+            continue
+        _append_size_probe_candidate(existing, seen_route_ids, candidate)
+
+
 def _merge_size_probe_rows(
     records_by_amount: Dict[int, Dict[str, Any]],
     amount_in: int,
@@ -973,23 +995,8 @@ def _merge_size_probe_rows(
             "three_metrics": {},
         }
         records_by_amount[int(amount_in)] = record
-    seen_by_group = {
-        group: {
-            _size_probe_route_key(candidate)
-            for candidate in record[group]
-            if _size_probe_route_key(candidate)
-        }
-        for group in ("two", "three")
-    }
-    for candidate in candidates:
-        group = _size_probe_group(candidate)
-        if not group:
-            continue
-        _append_size_probe_candidate(
-            record[group],
-            seen_by_group[group],
-            candidate,
-        )
+    for group in ("two", "three"):
+        _merge_size_probe_group(record, group, candidates)
 
 
 def _size_matrix_coverage(
