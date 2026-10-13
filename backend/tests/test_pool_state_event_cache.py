@@ -131,7 +131,7 @@ def test_dirty_hot_subgraph_reserves_family_balanced_exploration():
     token_b = "0x" + "bb" * 20
     token_c = "0x" + "cc" * 20
     token_d = "0x" + "dd" * 20
-    hot_pool = "0x" + "01" * 20
+    hot_pool = "0x" + f"{1:040x}"
     hot_edges = [
         Edge(
             "univ3",
