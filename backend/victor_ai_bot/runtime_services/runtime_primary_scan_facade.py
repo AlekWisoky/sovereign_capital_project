@@ -936,6 +936,28 @@ def _size_probe_route_key(candidate: Any) -> str:
     )
 
 
+def _size_probe_group(candidate: Any) -> str:
+    strategy = str(getattr(candidate, "strategy", "") or "")
+    if strategy.startswith("two-leg:"):
+        return "two"
+    if strategy.startswith("tri:"):
+        return "three"
+    return ""
+
+
+def _append_size_probe_candidate(
+    existing: List[Opportunity],
+    seen_route_ids: set[str],
+    candidate: Opportunity,
+) -> None:
+    route_id = _size_probe_route_key(candidate)
+    if route_id and route_id in seen_route_ids:
+        return
+    existing.append(candidate)
+    if route_id:
+        seen_route_ids.add(route_id)
+
+
 def _merge_size_probe_rows(
     records_by_amount: Dict[int, Dict[str, Any]],
     amount_in: int,
@@ -951,27 +973,23 @@ def _merge_size_probe_rows(
             "three_metrics": {},
         }
         records_by_amount[int(amount_in)] = record
-    for group in ("two", "three"):
-        existing = record[group]
-        seen = {
+    seen_by_group = {
+        group: {
             _size_probe_route_key(candidate)
-            for candidate in existing
+            for candidate in record[group]
             if _size_probe_route_key(candidate)
         }
-        for candidate in candidates:
-            strategy = str(getattr(candidate, "strategy", "") or "")
-            matches_group = (
-                strategy.startswith("two-leg:")
-                if group == "two"
-                else strategy.startswith("tri:")
-            )
-            if not matches_group:
-                continue
-            route_id = _size_probe_route_key(candidate)
-            if not route_id or route_id not in seen:
-                existing.append(candidate)
-                if route_id:
-                    seen.add(route_id)
+        for group in ("two", "three")
+    }
+    for candidate in candidates:
+        group = _size_probe_group(candidate)
+        if not group:
+            continue
+        _append_size_probe_candidate(
+            record[group],
+            seen_by_group[group],
+            candidate,
+        )
 
 
 def _size_matrix_coverage(
