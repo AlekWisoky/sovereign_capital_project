@@ -927,6 +927,134 @@ def _attach_quote_economic_size_curves(
         ]
 
 
+
+def _size_probe_route_key(candidate: Any) -> str:
+    return str(
+        getattr(candidate, "route_id", "")
+        or getattr(candidate, "id", "")
+        or ""
+    )
+
+
+def _merge_size_probe_rows(
+    records_by_amount: Dict[int, Dict[str, Any]],
+    amount_in: int,
+    candidates: List[Opportunity],
+) -> None:
+    record = records_by_amount.get(int(amount_in))
+    if record is None:
+        record = {
+            "amount_in": int(amount_in),
+            "two": [],
+            "three": [],
+            "two_metrics": {},
+            "three_metrics": {},
+        }
+        records_by_amount[int(amount_in)] = record
+    for group in ("two", "three"):
+        existing = record[group]
+        seen = {
+            _size_probe_route_key(candidate)
+            for candidate in existing
+            if _size_probe_route_key(candidate)
+        }
+        for candidate in candidates:
+            strategy = str(getattr(candidate, "strategy", "") or "")
+            matches_group = (
+                strategy.startswith("two-leg:")
+                if group == "two"
+                else strategy.startswith("tri:")
+            )
+            if not matches_group:
+                continue
+            route_id = _size_probe_route_key(candidate)
+            if not route_id or route_id not in seen:
+                existing.append(candidate)
+                if route_id:
+                    seen.add(route_id)
+
+
+def _size_matrix_coverage(
+    adaptive_amounts: List[int],
+    matrix: List[Dict[str, Any]],
+    selected_route_ids: set[str],
+    quote_failures: int,
+) -> Dict[str, Any]:
+    expected_amounts = {
+        str(int(amount)) for amount in adaptive_amounts if int(amount) > 0
+    }
+    rows_by_amount = {
+        str(row.get("amount_in") or ""): row
+        for row in matrix
+        if row.get("amount_in") not in (None, "")
+    }
+    missing_amounts = sorted(expected_amounts - set(rows_by_amount))
+    missing_routes_by_amount: Dict[str, List[str]] = {}
+    for amount in sorted(expected_amounts):
+        row = rows_by_amount.get(amount) or {}
+        available = {
+            str(route_id) for route_id in row.get("route_ids", []) if route_id
+        }
+        missing = sorted(selected_route_ids - available)
+        if missing:
+            missing_routes_by_amount[amount] = missing
+    complete = bool(
+        not missing_amounts
+        and not missing_routes_by_amount
+        and int(quote_failures) == 0
+    )
+    return {
+        "economic_matrix_complete": complete,
+        "matrix_missing_amounts": missing_amounts,
+        "matrix_missing_routes_by_amount": missing_routes_by_amount,
+    }
+
+
+def _size_probe_amounts_scanned(
+    records: List[Dict[str, Any]],
+    probe_amounts: List[int],
+) -> List[str]:
+    amounts = {
+        int(record.get("amount_in") or 0)
+        for record in records
+        if int(record.get("amount_in") or 0) > 0
+    }
+    amounts.update(int(amount) for amount in probe_amounts if int(amount) > 0)
+    return [str(amount) for amount in sorted(amounts)]
+
+
+def _size_probe_best_variants(
+    candidates: List[Opportunity],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for candidate in sorted(
+        candidates,
+        key=_candidate_sizing_sort_key,
+        reverse=True,
+    )[:32]:
+        route = getattr(candidate, "route", None)
+        legs = list(getattr(route, "legs", []) or [])
+        amount = getattr(legs[0], "amount_in", "") if legs else ""
+        meta = getattr(candidate, "meta", {}) or {}
+        state = meta.get("profitability") if isinstance(meta, dict) else {}
+        state = state if isinstance(state, dict) else {}
+        economic = _candidate_economic_after_cost_for_sizing(candidate)
+        rows.append({
+            "route_id": _size_probe_route_key(candidate),
+            "amount_in": str(amount),
+            "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
+            "after_cost_profit_wei": str(state.get("profit_after_costs_wei", "")),
+            "economic_after_cost_profit_wei": str(economic) if economic is not None else "",
+            "sizing_selection_basis": (
+                "signed_economic_after_cost"
+                if economic is not None
+                else "gross_diagnostic_fallback"
+            ),
+            "revalidated": bool(state.get("revalidated")),
+        })
+    return rows
+
+
 def _build_size_economic_matrix(size_scan_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     matrix: List[Dict[str, Any]] = []
     for record in size_scan_records:
@@ -3070,34 +3198,11 @@ class RuntimePrimaryScanFacade:
             attempt_row["quoted_routes"] = int(len(probe_rows))
             attempt_row["failed_routes"] = int(len(tasks) - len(probe_rows))
 
-            size_record = size_scan_records_by_amount.get(int(probe_amount))
-            if size_record is None:
-                size_record = {
-                    "amount_in": int(probe_amount),
-                    "two": [],
-                    "three": [],
-                    "two_metrics": {},
-                    "three_metrics": {},
-                }
-                size_scan_records_by_amount[int(probe_amount)] = size_record
-            for leg_group, predicate in (
-                ("two", lambda row: str(getattr(row, "strategy", "") or "").startswith("two-leg:")),
-                ("three", lambda row: str(getattr(row, "strategy", "") or "").startswith("tri:")),
-            ):
-                existing = size_record[leg_group]
-                seen = {
-                    _route_key(candidate)
-                    for candidate in existing
-                    if _route_key(candidate)
-                }
-                for row in probe_rows:
-                    if not predicate(row):
-                        continue
-                    key = _route_key(row)
-                    if not key or key not in seen:
-                        existing.append(row)
-                        if key:
-                            seen.add(key)
+            _merge_size_probe_rows(
+                size_scan_records_by_amount,
+                int(probe_amount),
+                probe_rows,
+            )
 
         size_scan_records = [
             size_record
@@ -3128,31 +3233,11 @@ class RuntimePrimaryScanFacade:
             )
 
         matrix = _build_size_economic_matrix(size_scan_records)
-        expected_size_amounts = {
-            str(int(amount)) for amount in adaptive_amounts if int(amount) > 0
-        }
-        matrix_by_amount = {
-            str(row.get("amount_in") or ""): row
-            for row in matrix
-            if row.get("amount_in") not in (None, "")
-        }
-        selected_route_ids = {
-            _route_key(candidate) for candidate in selected if _route_key(candidate)
-        }
-        matrix_missing_amounts = sorted(expected_size_amounts - set(matrix_by_amount))
-        matrix_missing_routes_by_amount: Dict[str, List[str]] = {}
-        for expected_amount in sorted(expected_size_amounts):
-            row = matrix_by_amount.get(expected_amount)
-            available_route_ids = {
-                str(route_id) for route_id in (row or {}).get("route_ids", []) if route_id
-            }
-            missing_routes = sorted(selected_route_ids - available_route_ids)
-            if missing_routes:
-                matrix_missing_routes_by_amount[expected_amount] = missing_routes
-        economic_matrix_complete = bool(
-            not matrix_missing_amounts
-            and not matrix_missing_routes_by_amount
-            and int(telemetry["adaptive_size_discovery"].get("probe_quote_failures", 0) or 0) == 0
+        coverage = _size_matrix_coverage(
+            list(adaptive_amounts),
+            matrix,
+            {_route_key(candidate) for candidate in selected if _route_key(candidate)},
+            int(telemetry["adaptive_size_discovery"].get("probe_quote_failures", 0) or 0),
         )
         _attach_quote_economic_size_curves([*selected, *sized], matrix)
         telemetry["size_economic_matrix"] = matrix
@@ -3163,56 +3248,17 @@ class RuntimePrimaryScanFacade:
         telemetry["adaptive_size_discovery"].update({
             "configured_size_ladder": [str(int(amount)) for amount in adaptive_amounts],
             "configured_size_point_count": int(len(adaptive_amounts)),
-            "amounts_scanned": [
-                str(int(amount))
-                for amount in sorted({
-                    int(record.get("amount_in") or 0)
-                    for record in size_scan_records
-                    if int(record.get("amount_in") or 0) > 0
-                } | {int(amount) for amount in probe_amounts if int(amount) > 0})
-            ],
+            "amounts_scanned": _size_probe_amounts_scanned(
+                size_scan_records,
+                probe_amounts,
+            ),
             "probe_attempts_by_amount": list(probe_attempts_by_amount),
             "probe_route_attempts": int(sum(row["route_requotes"] for row in probe_attempts_by_amount)),
             "probe_quote_failures": int(telemetry["adaptive_size_discovery"].get("probe_quote_failures", 0) or 0),
             "probe_triggered": bool(any(row["route_requotes"] > 0 for row in probe_attempts_by_amount)),
             "probe_candidate_delta": int(len(sized)),
-            "economic_matrix_complete": bool(economic_matrix_complete),
-            "matrix_missing_amounts": matrix_missing_amounts,
-            "matrix_missing_routes_by_amount": matrix_missing_routes_by_amount,
-            "best_sizing_variants": [
-                {
-                    "route_id": _route_key(candidate),
-                    "amount_in": str(getattr(getattr(candidate.route, "legs", [])[0], "amount_in", "")),
-                    "expected_profit_raw": str(getattr(candidate, "expected_profit_raw", "0") or "0"),
-                    "after_cost_profit_wei": str(
-                        (
-                            (getattr(candidate, "meta", {}) or {}).get("profitability")
-                            or {}
-                        ).get("profit_after_costs_wei", "")
-                    ),
-                    "economic_after_cost_profit_wei": (
-                        str(_candidate_economic_after_cost_for_sizing(candidate))
-                        if _candidate_economic_after_cost_for_sizing(candidate) is not None
-                        else ""
-                    ),
-                    "sizing_selection_basis": (
-                        "signed_economic_after_cost"
-                        if _candidate_economic_after_cost_for_sizing(candidate) is not None
-                        else "gross_diagnostic_fallback"
-                    ),
-                    "revalidated": bool(
-                        (
-                            (getattr(candidate, "meta", {}) or {}).get("profitability")
-                            or {}
-                        ).get("revalidated")
-                    ),
-                }
-                for candidate in sorted(
-                    sized,
-                    key=_candidate_sizing_sort_key,
-                    reverse=True,
-                )[:32]
-            ],
+            **coverage,
+            "best_sizing_variants": _size_probe_best_variants(sized),
         })
         return [*base_opps, *sized], telemetry
 
