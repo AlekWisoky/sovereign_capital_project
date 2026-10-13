@@ -135,7 +135,9 @@ def _safe_discovery_stage(raw: Dict[str, Any]) -> Dict[str, Any]:
         "pools_returned": _safe_discovery_pool_count(raw.get("pools_returned")),
     }
     row.update(_safe_discovery_stage_timing(raw))
-    row["error_type"] = _safe_discovery_error_type(raw) or None
+    error_type = _safe_discovery_error_type(raw)
+    if error_type:
+        row["error_type"] = error_type
     return row
 
 

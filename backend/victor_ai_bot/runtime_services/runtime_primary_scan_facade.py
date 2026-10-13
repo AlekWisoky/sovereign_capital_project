@@ -2020,7 +2020,8 @@ class RuntimePrimaryScanFacade:
                 "aerodrome_pools": len(extra_aerodrome_pools),
                 "slipstream_pools": len(extra_slipstream_pools),
                 "camelot_algebra_pools": len(extra_camelot_algebra_pools),
-            "constant_product_pools": len(extra_constant_product_pools),
+                "camelot_v2_pools": len(extra_camelot_v2_pools),
+                "constant_product_pools": len(extra_constant_product_pools),
             },
             "candidate_token_discovery": candidate_token_telemetry,
         }
@@ -2617,6 +2618,9 @@ class RuntimePrimaryScanFacade:
             }
             telemetry["discovery"]["pools_seen"] = _discovered_pool_count(
                 discovery_context
+            )
+            telemetry["discovery"]["runtime"] = dict(
+                discovery_context.get("runtime") or {}
             )
             telemetry["routes_considered"] = int(
                 two_leg_telemetry.get("routes_considered", 0)
