@@ -577,6 +577,7 @@ def _route_universe_snapshot(
     adjacency: Optional[Dict[str, List[Edge]]] = None,
     max_edges_per_token: Optional[int] = None,
     pruned_edges: Optional[List[Edge]] = None,
+    edge_build_diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Describe the candidate graph before quote/economic filtering."""
     by_dex: Dict[str, int] = {}
@@ -610,6 +611,7 @@ def _route_universe_snapshot(
         "active_tokens": sorted(tokens),
         "edges_by_dex": dict(sorted(by_dex.items())),
         "edges_by_family": dict(sorted(by_family.items())),
+        "edge_build_diagnostics": dict(edge_build_diagnostics or {}),
         "unique_directed_pairs": len(directed_pairs),
         "directed_pairs_with_reverse": int(reverse_pairs),
         "reverse_pair_coverage_ratio": float(reverse_pairs) / float(len(directed_pairs)) if directed_pairs else 0.0,
@@ -670,6 +672,20 @@ async def quote_edges_batch(
     quote_diagnostics: Dict[str, Any] = {}
     batch_successes = 0
     metrics.setdefault("quote_failure_reasons", {})
+    for metric_name in (
+        "quote_attempts_by_family",
+        "quote_network_requests_by_family",
+        "quote_successes_by_family",
+        "quote_failures_by_family",
+        "quote_adapter_unavailable_by_family",
+    ):
+        metrics.setdefault(metric_name, {})
+    adapter_unavailable_count = 0
+
+    def _increment_family_metric(metric_name: str, edge: Edge) -> None:
+        family = _scan_edge_family(edge)
+        values = metrics.setdefault(metric_name, {})
+        values[family] = int(values.get(family, 0) or 0) + 1
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
     missing_bal: List[Tuple[int, Edge]] = []
@@ -717,6 +733,7 @@ async def quote_edges_batch(
     def _record_success_edge(edge: Edge) -> None:
         nonlocal batch_successes
         batch_successes += 1
+        _increment_family_metric("quote_successes_by_family", edge)
         if isinstance(successful_edges, set):
             successful_edges.add(edge_key(edge))
         if isinstance(successful_pools, set):
@@ -726,9 +743,34 @@ async def quote_edges_batch(
             successful_pairs.add(f"{edge.token_in.lower()}:{edge.token_out.lower()}")
 
     def _record_failed_edge(edge: Edge) -> None:
+        _increment_family_metric("quote_failures_by_family", edge)
         samples = metrics["failed_quote_edge_samples"]
         if len(samples) < 256:
             samples.append(edge_key(edge))
+
+    adapter_groups = (
+        (missing_univ3, bool(getattr(cfg.chain, "univ3_quoter_v2", ""))),
+        (missing_curve, True),
+        (missing_bal, bool(getattr(cfg.chain, "balancer_vault", ""))),
+        (missing_aero, bool(getattr(cfg.chain, "aerodrome_router", ""))),
+        (missing_slipstream, bool(getattr(cfg.chain, "slipstream_quoter_v2", ""))),
+        (missing_camelot_algebra, bool(getattr(cfg.chain, "camelot_algebra_quoter_v2", ""))),
+        (missing_camelot_v2, bool(getattr(cfg.chain, "camelot_v2_router", ""))),
+        (missing_constant_product, True),
+    )
+    for group, adapter_available in adapter_groups:
+        for _, edge in group:
+            _increment_family_metric("quote_attempts_by_family", edge)
+            available = bool(adapter_available)
+            if edge.dex == "constant_product":
+                available = available and bool(edge.venue)
+            if available:
+                _increment_family_metric("quote_network_requests_by_family", edge)
+            else:
+                adapter_unavailable_count += 1
+                _increment_family_metric("quote_adapter_unavailable_by_family", edge)
+                _record_failed_edge(edge)
+                out[edge_key(edge)] = None
 
     # UniV3 batch
     if missing_univ3 and getattr(cfg.chain, "univ3_quoter_v2", ""):
@@ -933,6 +975,11 @@ async def quote_edges_batch(
         str(k): int(v)
         for k, v in dict(quote_diagnostics.get("failure_reasons") or {}).items()
     }
+    if adapter_unavailable_count:
+        failure_counts["quote_adapter_unavailable"] = (
+            int(failure_counts.get("quote_adapter_unavailable", 0) or 0)
+            + int(adapter_unavailable_count)
+        )
     # A failed edge without a lower-layer classification is still a concrete
     # observation. Attribute the residual instead of silently losing it from
     # the quote failure denominator; never convert it into a successful quote.
@@ -1062,8 +1109,55 @@ def build_edges(
     extra_camelot_algebra_pools: Optional[List[dict]] = None,
     extra_camelot_v2_pools: Optional[List[dict]] = None,
     extra_constant_product_pools: Optional[List[dict]] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> List[Edge]:
     edges: List[Edge] = []
+    chain = cfg.chain
+    flags = getattr(cfg, "flags", None)
+    pool_inputs = {
+        "univ3": list(getattr(chain, "v3_pairs", []) or []) + list(extra_v3_pairs or []),
+        "curve": list(getattr(chain, "curve_pools", []) or []) + list(extra_curve_pools or []),
+        "balancer": list(getattr(chain, "balancer_pools", []) or []) + list(extra_balancer_pools or []),
+        "aerodrome": list(getattr(chain, "aerodrome_pools", []) or []) + list(extra_aerodrome_pools or []),
+        "slipstream": list(getattr(chain, "slipstream_pools", []) or []) + list(extra_slipstream_pools or []),
+        "camelot_algebra": list(getattr(chain, "camelot_algebra_pools", []) or []) + list(extra_camelot_algebra_pools or []),
+        "camelot_v2": list(getattr(chain, "camelot_v2_pools", []) or []) + list(extra_camelot_v2_pools or []),
+        "constant_product": list(getattr(chain, "constant_product_pools", []) or []) + list(extra_constant_product_pools or []),
+    }
+    configured_cp = {
+        (str(v.get("name") or "").lower(), str(v.get("router") or "").lower())
+        for v in (getattr(chain, "constant_product_venues", []) or [])
+        if isinstance(v, dict)
+    }
+    family_prerequisites = {
+        "univ3": {"enabled": bool(getattr(chain, "univ3_quoter_v2", "")), "required": "univ3_quoter_v2"},
+        "curve": {"enabled": bool(getattr(flags, "enable_curve_autogen", True)), "required": "enable_curve_autogen"},
+        "balancer": {
+            "enabled": bool(getattr(flags, "enable_balancer_autogen", True)) and bool(getattr(chain, "balancer_vault", "")),
+            "feature_enabled": bool(getattr(flags, "enable_balancer_autogen", True)),
+            "vault_configured": bool(getattr(chain, "balancer_vault", "")),
+            "required": "enable_balancer_autogen + balancer_vault",
+        },
+        "aerodrome": {"enabled": bool(getattr(chain, "aerodrome_router", "")), "required": "aerodrome_router"},
+        "slipstream": {"enabled": bool(getattr(chain, "slipstream_quoter_v2", "")), "required": "slipstream_quoter_v2"},
+        "camelot_algebra": {"enabled": bool(getattr(chain, "camelot_algebra_quoter_v2", "")), "required": "camelot_algebra_quoter_v2"},
+        "camelot_v2": {"enabled": bool(getattr(chain, "camelot_v2_router", "")), "required": "camelot_v2_router"},
+        "constant_product": {
+            "enabled": True,
+            "configured_venue_count": len(configured_cp),
+            "venue_filter_enabled": bool(configured_cp),
+        },
+    }
+    blocked_by_configuration = {}
+    for family, rows in pool_inputs.items():
+        prerequisite = family_prerequisites[family]
+        if rows and not prerequisite["enabled"]:
+            blocked_by_configuration[family] = (
+                "family_disabled" if family == "curve" and not prerequisite["enabled"]
+                else "balancer_feature_disabled" if family == "balancer" and not prerequisite["feature_enabled"]
+                else "balancer_vault_missing" if family == "balancer" and not prerequisite["vault_configured"]
+                else str(prerequisite.get("required") or "required_configuration_missing")
+            )
     if cfg.chain.univ3_quoter_v2:
         # For execution we prefer SwapRouter; for quoting we use QuoterV2.
         # Safe default: if swap router is missing, we keep venue as quoter and
@@ -1219,11 +1313,6 @@ def build_edges(
     constant_product_pools = list(getattr(cfg.chain, "constant_product_pools", []) or [])
     if extra_constant_product_pools:
         constant_product_pools.extend(list(extra_constant_product_pools))
-    configured_cp = {
-        (str(v.get("name") or "").lower(), str(v.get("router") or "").lower())
-        for v in (getattr(cfg.chain, "constant_product_venues", []) or [])
-        if isinstance(v, dict)
-    }
     for p in constant_product_pools:
         name = str(p.get("venue_name") or p.get("name") or "").lower()
         router = str(p.get("router") or "")
@@ -1236,8 +1325,10 @@ def build_edges(
         edges.append(Edge("constant_product", router, p["token_in"], p["token_out"], params))
         edges.append(Edge("constant_product", router, p["token_out"], p["token_in"], params))
 
+    generated_edge_count = len(edges)
     # remove empty-token curve edges if unspecified
     edges = [e for e in edges if e.token_in and e.token_out]
+    token_valid_edge_count = len(edges)
     # de-dupe
     seen = set()
     out = []
@@ -1247,6 +1338,51 @@ def build_edges(
             continue
         seen.add(k)
         out.append(e)
+    if diagnostics is not None:
+        by_family: Dict[str, int] = {}
+        for edge in out:
+            family = _scan_edge_family(edge)
+            by_family[family] = int(by_family.get(family, 0)) + 1
+        cp_rejections: Dict[str, int] = {}
+        for pool in pool_inputs["constant_product"]:
+            name = str(pool.get("venue_name") or pool.get("name") or "").lower()
+            router = str(pool.get("router") or "")
+            factory = str(pool.get("factory") or "")
+            if not name or not router or not factory:
+                reason = "missing_name_router_or_factory"
+            elif configured_cp and (name, router.lower()) not in configured_cp:
+                reason = "venue_not_configured"
+            elif not pool.get("token_in") or not pool.get("token_out"):
+                reason = "missing_token_pair"
+            else:
+                continue
+            cp_rejections[reason] = int(cp_rejections.get(reason, 0)) + 1
+        balancer_rejections: Dict[str, int] = {}
+        for pool in pool_inputs["balancer"]:
+            if not family_prerequisites["balancer"]["enabled"]:
+                continue
+            if not pool.get("pool_id") or not pool.get("token_in") or not pool.get("token_out"):
+                balancer_rejections["missing_pool_id_or_token_pair"] = int(
+                    balancer_rejections.get("missing_pool_id_or_token_pair", 0)
+                ) + 1
+        diagnostics.clear()
+        diagnostics.update({
+            "input_pool_counts_by_family": {
+                family: len(rows) for family, rows in pool_inputs.items()
+            },
+            "family_prerequisites": family_prerequisites,
+            "blocked_by_configuration": blocked_by_configuration,
+            "pool_validation_rejections_by_family": {
+                key: value for key, value in {
+                    "constant_product": cp_rejections,
+                    "balancer": balancer_rejections,
+                }.items() if value
+            },
+            "generated_edge_count_before_token_validation": int(generated_edge_count),
+            "edge_count_after_token_validation": int(token_valid_edge_count),
+            "edge_count_after_deduplication": int(len(out)),
+            "edges_by_family_after_build": dict(sorted(by_family.items())),
+        })
     return out
 
 
@@ -1988,6 +2124,7 @@ async def find_two_leg_opportunities(
         route_deadline, t_start + first_leg_quote_budget_ms / 1000.0
     )
     metrics: Dict[str, int] = {}
+    edge_build_diagnostics: Dict[str, Any] = {}
     edges = build_edges(
         cfg,
         extra_v3_pairs=extra_v3_pairs,
@@ -1998,6 +2135,7 @@ async def find_two_leg_opportunities(
         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
         extra_camelot_v2_pools=extra_camelot_v2_pools,
         extra_constant_product_pools=extra_constant_product_pools,
+        diagnostics=edge_build_diagnostics,
     )
     pool_event_metrics: Dict[str, Any] = {}
     if pool_event_cache is not None:
@@ -2035,7 +2173,9 @@ async def find_two_leg_opportunities(
         except (AttributeError, TypeError, ValueError):
             route_edges = list(edges)
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
-    route_universe = _route_universe_snapshot(cfg, route_edges)
+    route_universe = _route_universe_snapshot(
+        cfg, route_edges, edge_build_diagnostics=edge_build_diagnostics
+    )
     for e in route_edges:
         by_pair.setdefault((e.token_in, e.token_out), []).append(e)
 
@@ -2642,6 +2782,7 @@ async def find_three_leg_opportunities(
         route_deadline, t_start + first_leg_quote_budget_ms / 1000.0
     )
     metrics: Dict[str, int] = {}
+    edge_build_diagnostics: Dict[str, Any] = {}
     edges = build_edges(
         cfg,
         extra_v3_pairs=extra_v3_pairs,
@@ -2652,6 +2793,7 @@ async def find_three_leg_opportunities(
         extra_camelot_algebra_pools=extra_camelot_algebra_pools,
         extra_camelot_v2_pools=extra_camelot_v2_pools,
         extra_constant_product_pools=extra_constant_product_pools,
+        diagnostics=edge_build_diagnostics,
     )
     pool_event_metrics: Dict[str, Any] = {}
     if pool_event_cache is not None:
@@ -2693,6 +2835,7 @@ async def find_three_leg_opportunities(
         adjacency=adj,
         max_edges_per_token=max_edges_per_token,
         pruned_edges=pruned_edges,
+        edge_build_diagnostics=edge_build_diagnostics,
     )
 
     opps: List[Opportunity] = []

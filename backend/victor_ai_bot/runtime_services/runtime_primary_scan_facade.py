@@ -2890,10 +2890,24 @@ class RuntimePrimaryScanFacade:
                 failed_quote_edge_samples.extend(
                     list(source.get("failed_quote_edge_samples") or [])
                 )
+            family_quote_metrics: Dict[str, Dict[str, int]] = {}
+            for metric_name in (
+                "quote_attempts_by_family",
+                "quote_network_requests_by_family",
+                "quote_successes_by_family",
+                "quote_failures_by_family",
+                "quote_adapter_unavailable_by_family",
+            ):
+                combined: Dict[str, int] = {}
+                for source in (two_leg_telemetry, three_leg_telemetry):
+                    for family, count in dict(source.get(metric_name) or {}).items():
+                        combined[str(family)] = int(combined.get(str(family), 0)) + max(0, int(count or 0))
+                family_quote_metrics[metric_name] = combined
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
                 "failure_reasons": quote_failure_reasons,
+                **family_quote_metrics,
             }
             telemetry["discovery"]["pools_seen"] = _discovered_pool_count(
                 discovery_context

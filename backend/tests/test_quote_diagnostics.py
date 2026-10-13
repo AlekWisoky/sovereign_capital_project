@@ -66,6 +66,9 @@ async def test_quote_batch_accumulates_failure_reasons_across_batches(monkeypatc
     assert metrics["quote_requests"] == 2
     assert metrics.get("quote_successes", 0) == 0
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 2
+    assert metrics["quote_attempts_by_family"]["univ3"] == 2
+    assert metrics["quote_network_requests_by_family"]["univ3"] == 2
+    assert metrics["quote_failures_by_family"]["univ3"] == 2
 
 
 @pytest.mark.asyncio
@@ -95,6 +98,27 @@ async def test_quote_batch_attributes_constant_product_failures(monkeypatch):
     assert out[arb.edge_key(edge)] is None
     assert metrics["quote_requests"] == 1
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 1
+    assert metrics["quote_attempts_by_family"]["uniswap_v2"] == 1
+    assert metrics["quote_network_requests_by_family"]["uniswap_v2"] == 1
+    assert metrics["quote_failures_by_family"]["uniswap_v2"] == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_quote_adapter_is_counted_as_failure_not_network_request():
+    metrics = {}
+    edge = _univ3_edge()
+    cfg = SimpleNamespace(chain=SimpleNamespace())
+    out = await arb.quote_edges_batch(
+        object(), cfg, _NoCache(), [edge], 100, metrics=metrics
+    )
+
+    assert out[arb.edge_key(edge)] is None
+    assert metrics["quote_requests"] == 1
+    assert metrics["quote_attempts_by_family"]["univ3"] == 1
+    assert metrics.get("quote_network_requests_by_family", {}) == {}
+    assert metrics["quote_failures_by_family"]["univ3"] == 1
+    assert metrics["quote_adapter_unavailable_by_family"]["univ3"] == 1
+    assert metrics["quote_failure_reasons"]["quote_adapter_unavailable"] == 1
 
 
 @pytest.mark.asyncio
@@ -121,3 +145,5 @@ async def test_concurrent_quote_batches_attribute_failures_using_local_success_c
     assert metrics["quote_requests"] == 2
     assert metrics["quote_successes"] == 1
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 1
+    assert metrics["quote_successes_by_family"]["univ3"] == 1
+    assert metrics["quote_failures_by_family"]["univ3"] == 1

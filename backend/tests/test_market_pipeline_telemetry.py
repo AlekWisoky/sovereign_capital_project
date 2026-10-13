@@ -186,6 +186,11 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "failures": 2,
         "success_rate": 0.8,
         "failure_reasons": {},
+        "quote_attempts_by_family": {},
+        "quote_network_requests_by_family": {},
+        "quote_successes_by_family": {},
+        "quote_failures_by_family": {},
+        "quote_adapter_unavailable_by_family": {},
     }
     assert out["rpc"] == {
         "endpoint": "rpc.example",

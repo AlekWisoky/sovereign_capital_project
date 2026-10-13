@@ -124,3 +124,88 @@ def test_route_universe_reports_uniswap_v2_and_sushiswap_v2_separately():
     assert snapshot["edges_by_dex"]["constant_product"] == 4
     assert snapshot["edges_by_family"]["uniswap_v2"] == 2
     assert snapshot["edges_by_family"]["sushiswap_v2"] == 2
+
+
+
+def test_balancer_edge_builder_diagnostics_identify_missing_vault_gate():
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            univ3_quoter_v2="",
+            v3_pairs=[],
+            curve_pools=[],
+            balancer_vault="",
+            balancer_pools=[],
+            aerodrome_router="",
+            aerodrome_pools=[],
+            slipstream_quoter_v2="",
+            slipstream_pools=[],
+            camelot_algebra_quoter_v2="",
+            camelot_algebra_pools=[],
+            camelot_v2_router="",
+            camelot_v2_pools=[],
+            constant_product_venues=[],
+            constant_product_pools=[],
+        ),
+        flags=SimpleNamespace(enable_curve_autogen=True, enable_balancer_autogen=True),
+    )
+    diagnostics = {}
+    discovered = [{
+        "pool_id": "0x" + "ab" * 32,
+        "token_in": "0x" + "01" * 20,
+        "token_out": "0x" + "02" * 20,
+        "pool": "0x" + "03" * 20,
+    }]
+
+    edges = build_edges(cfg, extra_balancer_pools=discovered, diagnostics=diagnostics)
+
+    assert edges == []
+    assert diagnostics["input_pool_counts_by_family"]["balancer"] == 1
+    assert diagnostics["blocked_by_configuration"]["balancer"] == "balancer_vault_missing"
+    assert diagnostics["family_prerequisites"]["balancer"]["feature_enabled"] is True
+    assert diagnostics["family_prerequisites"]["balancer"]["vault_configured"] is False
+
+
+def test_constant_product_edge_builder_diagnostics_identify_configured_venue_mismatch():
+    configured_router = "0x" + "aa" * 20
+    discovered_router = "0x" + "bb" * 20
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            name="ethereum",
+            token_universe=[],
+            univ3_quoter_v2="",
+            v3_pairs=[],
+            curve_pools=[],
+            balancer_vault="",
+            balancer_pools=[],
+            aerodrome_router="",
+            aerodrome_pools=[],
+            slipstream_quoter_v2="",
+            slipstream_pools=[],
+            camelot_algebra_quoter_v2="",
+            camelot_algebra_pools=[],
+            camelot_v2_router="",
+            camelot_v2_pools=[],
+            constant_product_venues=[{"name": "uniswap_v2", "router": configured_router}],
+            constant_product_pools=[],
+        ),
+        flags=SimpleNamespace(enable_curve_autogen=False, enable_balancer_autogen=False),
+    )
+    discovered = [{
+        "venue_name": "uniswap_v2",
+        "router": discovered_router,
+        "factory": "0x" + "cc" * 20,
+        "pool": "0x" + "dd" * 20,
+        "token_in": "0x" + "01" * 20,
+        "token_out": "0x" + "02" * 20,
+    }]
+    diagnostics = {}
+
+    edges = build_edges(
+        cfg, extra_constant_product_pools=discovered, diagnostics=diagnostics
+    )
+
+    assert edges == []
+    assert diagnostics["input_pool_counts_by_family"]["constant_product"] == 1
+    assert diagnostics["pool_validation_rejections_by_family"]["constant_product"] == {
+        "venue_not_configured": 1
+    }
