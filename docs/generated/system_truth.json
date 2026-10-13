@@ -1913,8 +1913,8 @@
   "runtime_bundle_definition_count": 1,
   "runtime_legacy_broad_except_count": 0,
   "runtime_legacy_lines": 203,
-  "runtime_service_count": 108,
-  "runtime_service_module_count": 108,
+  "runtime_service_count": 109,
+  "runtime_service_module_count": 109,
   "runtime_services": [
     "admission_service",
     "agent_service",
@@ -1959,6 +1959,7 @@
     "operator_summary_service",
     "opportunity_service",
     "pool_state_event_cache",
+    "pool_state_event_selection",
     "profitability_truth",
     "receipt_service",
     "replay_service",
@@ -2057,8 +2058,8 @@
       "withdraw_all_routes",
       "withdraw_routes"
     ],
-    "runtime_service_count": 108,
-    "runtime_service_module_count": 108,
+    "runtime_service_count": 109,
+    "runtime_service_module_count": 109,
     "runtime_services": [
       "admission_service",
       "agent_service",
@@ -2101,6 +2102,7 @@
       "operator_summary_service",
       "opportunity_service",
       "pool_state_event_cache",
+      "pool_state_event_selection",
       "profitability_truth",
       "receipt_service",
       "replay_service",
