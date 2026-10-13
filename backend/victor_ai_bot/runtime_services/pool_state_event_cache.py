@@ -23,6 +23,51 @@ _SAFE_POOL_EVENT_EXCEPTIONS = (
 )
 
 
+def _edge_family_key(edge: Any) -> str:
+    """Return venue-family identity for balanced bounded exploration."""
+    dex = str(getattr(edge, "dex", "unknown") or "unknown").strip().lower()
+    params = getattr(edge, "params", {}) or {}
+    if dex == "constant_product":
+        venue_name = str(params.get("venue_name") or "").strip().lower()
+        if venue_name:
+            return venue_name
+    return dex
+
+
+def _sample_exploration_by_family(
+    edges: List[Any],
+    *,
+    limit: int,
+    current_block: int,
+) -> List[Any]:
+    """Round-robin across venue families instead of sampling the graph prefix."""
+    buckets: Dict[str, List[Any]] = {}
+    for edge in list(edges or []):
+        buckets.setdefault(_edge_family_key(edge), []).append(edge)
+    families = sorted(buckets)
+    if not families or int(limit) <= 0:
+        return []
+    offset = max(0, int(current_block)) % len(families)
+    families = families[offset:] + families[:offset]
+    positions = {family: 0 for family in families}
+    selected: List[Any] = []
+    while len(selected) < int(limit):
+        advanced = False
+        for family in families:
+            position = positions[family]
+            bucket = buckets[family]
+            if position >= len(bucket):
+                continue
+            selected.append(bucket[position])
+            positions[family] = position + 1
+            advanced = True
+            if len(selected) >= int(limit):
+                break
+        if not advanced:
+            break
+    return selected
+
+
 def _topic(signature: str) -> str:
     return "0x" + keccak(signature.encode("utf-8")).hex()
 
@@ -331,25 +376,28 @@ class PoolStateEventCache:
             len(cold),
             max(8, int(round(len(full) * ratio))),
         )
-        exploration: List[Any] = []
-        if cold and exploration_count:
-            stride = max(1, len(cold) // exploration_count)
-            start = int(current_block) % len(cold)
-            idx = start
-            visited = 0
-            while len(exploration) < exploration_count and visited < len(cold) * 2:
-                exploration.append(cold[idx % len(cold)])
-                idx += stride
-                visited += 1
-                if visited >= len(cold) and len(exploration) < exploration_count:
-                    exploration.append(cold[visited % len(cold)])
+        exploration = _sample_exploration_by_family(
+            cold,
+            limit=exploration_count,
+            current_block=int(current_block),
+        )
 
+        # Always retain a bounded exploration reserve when a hot subgraph would
+        # otherwise consume the whole cap. The old hot-first concatenation could
+        # truncate every other venue when graph construction grouped UniV3 first.
+        reserve = (
+            min(len(exploration), max(8, cap // 4))
+            if len(hot) + len(exploration) > cap and cold
+            else 0
+        )
+        hot_budget = max(0, cap - reserve)
+        selected_hot = hot[:hot_budget]
+        exploration_budget = max(0, cap - len(selected_hot))
         combined: List[Any] = []
-        for edge in [*hot, *exploration]:
+        for edge in [*selected_hot, *exploration[:exploration_budget]]:
             if edge not in combined:
                 combined.append(edge)
 
-        # Hot state wins the cap; exploration fills the remainder.
         combined = combined[:cap]
         if not combined and full:
             combined = full[:cap]
