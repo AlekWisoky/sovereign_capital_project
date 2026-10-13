@@ -772,3 +772,4 @@ def test_provider_comparison_edge_cap_samples_all_venue_families():
         family = arb._scan_edge_family(edge)
         counts[family] = counts.get(family, 0) + 1
     assert set(counts.values()) == {2}
+
