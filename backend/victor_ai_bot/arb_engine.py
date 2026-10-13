@@ -966,6 +966,41 @@ def _finalize_quote_coverage(metrics: Dict[str, Any]) -> None:
         metrics.pop(internal_name, None)
 
 
+def _scan_edge_family(edge: Edge) -> str:
+    """Identify a venue family for bounded provider-comparison sampling."""
+    family = str(getattr(edge, "dex", "") or "unknown").strip().lower()
+    if family == "constant_product":
+        params = getattr(edge, "params", {}) or {}
+        venue_name = str(params.get("venue_name") or "").strip().lower()
+        if venue_name:
+            return venue_name
+    return family
+
+
+def _representative_scan_edge_subset(edges: List[Edge], cap: int) -> List[Edge]:
+    """Take a family-balanced subset while preserving order within each family."""
+    buckets: Dict[str, List[Edge]] = {}
+    for edge in list(edges or []):
+        buckets.setdefault(_scan_edge_family(edge), []).append(edge)
+    families = list(buckets)
+    selected: List[Edge] = []
+    row_index = 0
+    limit = max(0, int(cap))
+    while len(selected) < limit:
+        advanced = False
+        for family in families:
+            bucket = buckets[family]
+            if row_index < len(bucket):
+                selected.append(bucket[row_index])
+                advanced = True
+                if len(selected) >= limit:
+                    break
+        if not advanced:
+            break
+        row_index += 1
+    return selected
+
+
 def _apply_scan_edge_cap(
     edges: List[Edge],
     max_scan_edges: Optional[int],
@@ -988,7 +1023,8 @@ def _apply_scan_edge_cap(
         cap = len(selected)
     metrics["scan_edge_cap"] = int(cap)
     if len(selected) > cap:
-        selected = selected[:cap]
+        selected = _representative_scan_edge_subset(selected, cap)
+        metrics["scan_edge_selection_policy"] = "round_robin_by_venue_family"
     metrics["scan_edges_selected"] = int(len(selected))
     metrics["scan_edges_capped"] = int(max(0, len(edges) - len(selected)))
     return selected
