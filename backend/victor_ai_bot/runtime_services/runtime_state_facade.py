@@ -96,13 +96,19 @@ def _safe_discovery_number(value: Any) -> float | None:
 
 def _safe_discovery_error_type(raw: Dict[str, Any]) -> str:
     error_type = str(raw.get("error_type") or "").strip()
-    if error_type.endswith(("Error", "Exception")) and len(error_type) <= 64:
-        if error_type.replace("_", "").isalnum():
-            return error_type
+    if (
+        error_type.endswith(("Error", "Exception"))
+        and len(error_type) <= 64
+        and error_type.replace("_", "").isalnum()
+    ):
+        return error_type
     candidate = str(raw.get("error") or "").split(":", 1)[0].strip()
-    if candidate.endswith(("Error", "Exception")) and len(candidate) <= 64:
-        if candidate.replace("_", "").isalnum():
-            return candidate
+    if (
+        candidate.endswith(("Error", "Exception"))
+        and len(candidate) <= 64
+        and candidate.replace("_", "").isalnum()
+    ):
+        return candidate
     return ""
 
 
