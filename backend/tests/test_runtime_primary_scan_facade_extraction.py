@@ -138,8 +138,6 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     monkeypatch.setattr(scan_mod, 'find_three_leg_opportunities', fake_three)
     runtime.cfg.flags.enable_three_leg_loops = True
 
-    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=10)
-
     runtime._discovery._last_venue_discovery_telemetry = {
         'stages': [{
             'stage': 'camelot_v2',
@@ -152,6 +150,8 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         'budget_timeout_s': 2.0,
         'used_persisted_fallback': False,
     }
+
+    opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=10)
 
     assert runtime._discovery.calls[0]['block_number'] == 321
     assert calls['two']['amount_in'] == 10
