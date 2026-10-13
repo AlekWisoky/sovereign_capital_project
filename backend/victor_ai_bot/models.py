@@ -2,7 +2,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import List, Literal, Dict, Any
 
-DexType = Literal["univ3", "curve", "balancer"]
+DexType = Literal["univ3", "curve", "balancer", "aerodrome", "slipstream", "camelot_algebra", "camelot_v2", "constant_product"]
 
 
 class RouteLeg(BaseModel):
