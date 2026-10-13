@@ -147,3 +147,69 @@ async def test_concurrent_quote_batches_attribute_failures_using_local_success_c
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 1
     assert metrics["quote_successes_by_family"]["univ3"] == 1
     assert metrics["quote_failures_by_family"]["univ3"] == 1
+
+
+@pytest.mark.asyncio
+async def test_one_venue_batch_failure_does_not_abort_later_families(monkeypatch):
+    aerodrome = arb.Edge(
+        "aerodrome",
+        "0x" + "11" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"stable": False, "factory": "0x" + "44" * 20},
+    )
+    slipstream = arb.Edge(
+        "slipstream",
+        "0x" + "55" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"tick_spacing": 60, "factory": "0x" + "66" * 20},
+    )
+    balancer = arb.Edge(
+        "balancer",
+        "0x" + "77" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"pool_id": "0x" + "88" * 32},
+    )
+    later_family_called = {"balancer": False}
+
+    async def broken_aerodrome(*args, **kwargs):
+        raise RuntimeError("provider batch failed")
+
+    async def short_slipstream_batch(*args, **kwargs):
+        return []
+
+    async def successful_balancer(*args, **kwargs):
+        later_family_called["balancer"] = True
+        return [SimpleNamespace(amount_out=120)]
+
+    monkeypatch.setattr(arb, "quote_aerodrome_many", broken_aerodrome)
+    monkeypatch.setattr(arb, "quote_slipstream_many", short_slipstream_batch)
+    monkeypatch.setattr(arb, "quote_balancer_given_in_many", successful_balancer)
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            aerodrome_router="0x" + "99" * 20,
+            slipstream_quoter_v2="0x" + "aa" * 20,
+            balancer_vault="0x" + "bb" * 20,
+        )
+    )
+    metrics = {}
+    out = await arb.quote_edges_batch(
+        object(), cfg, _NoCache(), [aerodrome, slipstream, balancer], 100,
+        metrics=metrics,
+    )
+
+    assert out[arb.edge_key(aerodrome)] is None
+    assert out[arb.edge_key(slipstream)] is None
+    assert out[arb.edge_key(balancer)][0] == 120
+    assert later_family_called["balancer"] is True
+    assert metrics["quote_attempts_by_family"] == {
+        "aerodrome": 1, "slipstream": 1, "balancer": 1,
+    }
+    assert metrics["quote_successes_by_family"] == {"balancer": 1}
+    assert metrics["quote_failures_by_family"] == {
+        "aerodrome": 1, "slipstream": 1,
+    }
+    assert metrics["quote_failure_reasons"]["quote_batch_exception_aerodrome"] == 1
+    assert metrics["quote_failure_reasons"]["quote_batch_missing_results_slipstream"] == 1
