@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from victor_ai_bot.quote_constant_product import _calldata, _parse
 from victor_ai_bot.route_encoding import EncLeg, DEX_ID, route_id_hex
-from victor_ai_bot.arb_engine import build_edges
+from victor_ai_bot.arb_engine import build_edges, _route_universe_snapshot
 
 
 def test_constant_product_quote_uses_canonical_get_amounts_out_abi():
@@ -76,3 +76,51 @@ def test_constant_product_has_distinct_route_encoding_id():
     ]
     assert DEX_ID["constant_product"] == 8
     assert route_id_hex(legs).startswith("0x")
+
+
+
+def test_route_universe_reports_uniswap_v2_and_sushiswap_v2_separately():
+    token_a = "0x" + "01" * 20
+    token_b = "0x" + "02" * 20
+    uni_router = "0x" + "aa" * 20
+    sushi_router = "0x" + "bb" * 20
+    uni_factory = "0x" + "cc" * 20
+    sushi_factory = "0x" + "dd" * 20
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            name="ethereum",
+            token_universe=[token_a, token_b],
+            univ3_quoter_v2="",
+            v3_pairs=[],
+            curve_pools=[],
+            balancer_vault="",
+            balancer_pools=[],
+            aerodrome_router="",
+            aerodrome_pools=[],
+            slipstream_quoter_v2="",
+            slipstream_pools=[],
+            camelot_algebra_quoter_v2="",
+            camelot_algebra_pools=[],
+            camelot_v2_router="",
+            camelot_v2_pools=[],
+            constant_product_venues=[
+                {"name": "uniswap_v2", "router": uni_router},
+                {"name": "sushiswap_v2", "router": sushi_router},
+            ],
+            constant_product_pools=[
+                {"venue_name": "uniswap_v2", "router": uni_router,
+                 "factory": uni_factory, "pool": "0x" + "11" * 20,
+                 "token_in": token_a, "token_out": token_b},
+                {"venue_name": "sushiswap_v2", "router": sushi_router,
+                 "factory": sushi_factory, "pool": "0x" + "22" * 20,
+                 "token_in": token_a, "token_out": token_b},
+            ],
+        ),
+        flags=SimpleNamespace(enable_curve_autogen=False, enable_balancer_autogen=False),
+    )
+
+    snapshot = _route_universe_snapshot(cfg, build_edges(cfg))
+
+    assert snapshot["edges_by_dex"]["constant_product"] == 4
+    assert snapshot["edges_by_family"]["uniswap_v2"] == 2
+    assert snapshot["edges_by_family"]["sushiswap_v2"] == 2
