@@ -22,8 +22,12 @@ from .opportunity_density import scan_efficiency_snapshot
 
 _SAFE_EDGE_QUOTE_EXCEPTIONS = (
     AttributeError,
+    IndexError,
     KeyError,
+    OSError,
     OverflowError,
+    RuntimeError,
+    TimeoutError,
     TypeError,
     ValueError,
 )
@@ -684,7 +688,7 @@ async def _safe_venue_quote_batch(
         raw_results = await quote_call
     except asyncio.CancelledError:
         raise
-    except Exception as exc:
+    except _SAFE_EDGE_QUOTE_EXCEPTIONS as exc:
         # If an adapter records failures before raising, only classify the
         # unaccounted remainder; the abandoned batch has no usable result map.
         newly_classified = max(0, _failure_count() - _failure_count_before)
