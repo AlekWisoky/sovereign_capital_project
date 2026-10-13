@@ -166,7 +166,16 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         'token_out': 'b',
         'factory': 'factory-v2',
     }]
-    assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12, 'failure_reasons': {}}
+    assert runtime._market_pipeline_telemetry['quotes'] == {
+        'requests': 14,
+        'successes': 12,
+        'failure_reasons': {},
+        'quote_attempts_by_family': {},
+        'quote_network_requests_by_family': {},
+        'quote_successes_by_family': {},
+        'quote_failures_by_family': {},
+        'quote_adapter_unavailable_by_family': {},
+    }
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
     discovery_telemetry = runtime._market_pipeline_telemetry['discovery']
