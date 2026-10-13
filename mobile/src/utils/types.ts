@@ -1,6 +1,6 @@
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-export type DexType = "univ2" | "univ3" | "curve" | "balancer";
+export type DexType = "univ2" | "univ3" | "curve" | "balancer" | "aerodrome" | "slipstream" | "camelot_algebra" | "camelot_v2" | "constant_product";
 
 export type RouteLeg = {
   dex: DexType;

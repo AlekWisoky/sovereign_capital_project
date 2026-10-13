@@ -6,6 +6,22 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb
+from victor_ai_bot.models import RouteLeg
+from victor_ai_bot.route_encoding import DEX_ID
+
+
+
+@pytest.mark.parametrize("dex", sorted(DEX_ID))
+def test_route_leg_schema_accepts_every_canonical_encoder_family(dex):
+    leg = RouteLeg(
+        dex=dex,
+        venue="0x" + "11" * 20,
+        token_in="0x" + "22" * 20,
+        token_out="0x" + "33" * 20,
+        amount_in="1",
+        min_out="1",
+    )
+    assert leg.dex == dex
 
 
 @pytest.mark.asyncio
@@ -72,6 +88,105 @@ async def test_two_leg_route_evaluation_survives_slow_first_quote_phase(monkeypa
     assert telemetry["route_universe"]["edges_by_dex"] == {"univ3": 2}
     assert telemetry["route_universe"]["unique_directed_pairs"] == 2
     assert telemetry["route_universe"]["directed_pairs_with_reverse"] == 2
+
+
+
+@pytest.mark.asyncio
+async def test_quote_family_counters_are_published_by_route_scanner(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    edges = [
+        arb.Edge("univ3", "0x" + "aa" * 20, token_a, token_b, {"fee": 3000}),
+        arb.Edge(
+            "aerodrome",
+            "0x" + "bb" * 20,
+            token_b,
+            token_a,
+            {"factory": "0x" + "bb" * 20, "stable": False},
+        ),
+        arb.Edge(
+            "slipstream",
+            "0x" + "cc" * 20,
+            token_a,
+            token_c,
+            {"tick_spacing": 1, "factory": "0x" + "cc" * 20},
+        ),
+    ]
+    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: list(edges))
+
+    def bump(metrics, name, family):
+        counters = metrics.setdefault(name, {})
+        counters[family] = int(counters.get(family, 0)) + 1
+
+    async def fake_quotes(rpc, cfg, cache, requested_edges, amount_in, metrics=None):
+        result = {}
+        if metrics is None:
+            return result
+        metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
+        for edge in requested_edges:
+            family = arb._scan_edge_family(edge)
+            bump(metrics, "quote_attempts_by_family", family)
+            if edge.dex == "slipstream":
+                bump(metrics, "quote_failures_by_family", family)
+                bump(metrics, "quote_adapter_unavailable_by_family", family)
+                continue
+            bump(metrics, "quote_network_requests_by_family", family)
+            amount_out = 110 if edge.dex == "univ3" else 120
+            result[arb.edge_key(edge)] = (
+                amount_out,
+                {"gas_estimate": 1, "fee": 3000},
+            )
+            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
+            bump(metrics, "quote_successes_by_family", family)
+        return result
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
+    monkeypatch.setattr(
+        arb,
+        "scan_efficiency_snapshot",
+        lambda **kwargs: {
+            "elapsed_ms": float(kwargs["elapsed_ms"]),
+            "candidate_count": int(kwargs["candidate_count"]),
+            "quote_requests": int(kwargs["quote_requests"]),
+            "quote_successes": int(kwargs["quote_successes"]),
+            "quote_success_rate": (
+                float(kwargs["quote_successes"]) / float(kwargs["quote_requests"])
+                if kwargs["quote_requests"] else 0.0
+            ),
+            "cache_hits": 0,
+            "network_batches": 1,
+        },
+    )
+
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="ethereum"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    telemetry = {}
+    opportunities = await arb.find_two_leg_opportunities(
+        object(),
+        cfg,
+        object(),
+        123,
+        amount_in=100,
+        slippage_bps=50,
+        time_budget_ms=200,
+        telemetry=telemetry,
+    )
+
+    assert any(item.expected_profit_raw == "20" for item in opportunities)
+    quotes = telemetry
+    assert quotes["quote_attempts_by_family"]["univ3"] > 0
+    assert quotes["quote_attempts_by_family"]["aerodrome"] > 0
+    assert quotes["quote_attempts_by_family"]["slipstream"] > 0
+    assert quotes["quote_network_requests_by_family"]["univ3"] > 0
+    assert quotes["quote_network_requests_by_family"]["aerodrome"] > 0
+    assert "slipstream" not in quotes["quote_network_requests_by_family"]
+    assert quotes["quote_successes_by_family"]["univ3"] > 0
+    assert quotes["quote_successes_by_family"]["aerodrome"] > 0
+    assert quotes["quote_failures_by_family"]["slipstream"] > 0
+    assert quotes["quote_adapter_unavailable_by_family"]["slipstream"] > 0
 
 
 @pytest.mark.asyncio

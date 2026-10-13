@@ -1028,6 +1028,33 @@ async def quote_edges_batch(
     return out
 
 
+def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[str, int]]:
+    """Publish bounded venue-family quote counters from one scan's accumulator."""
+    metric_names = (
+        "quote_attempts_by_family",
+        "quote_network_requests_by_family",
+        "quote_successes_by_family",
+        "quote_failures_by_family",
+        "quote_adapter_unavailable_by_family",
+    )
+    snapshot: Dict[str, Dict[str, int]] = {}
+    for metric_name in metric_names:
+        raw = metrics.get(metric_name)
+        counters = raw if isinstance(raw, Mapping) else {}
+        normalized: Dict[str, int] = {}
+        for family, count in counters.items():
+            name = str(family or "").strip().lower()[:64]
+            if not name:
+                continue
+            try:
+                value = max(0, int(count or 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            normalized[name] = normalized.get(name, 0) + value
+        snapshot[metric_name] = normalized
+    return snapshot
+
+
 def _finalize_quote_coverage(metrics: Dict[str, Any]) -> None:
     for public_name, internal_name in (
         ("successful_quote_edge_count", "_successful_quote_edge_keys"),
@@ -2397,6 +2424,7 @@ async def find_two_leg_opportunities(
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
             "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
+            **_quote_family_metric_snapshot(metrics),
             "quote_fallback_attempts": int(metrics.get("quote_fallback_attempts", 0)),
             "quote_fallback_successes": int(metrics.get("quote_fallback_successes", 0)),
             "route_rejections": {
@@ -3291,6 +3319,7 @@ async def find_three_leg_opportunities(
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
             "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
+            **_quote_family_metric_snapshot(metrics),
             "quote_fallback_attempts": int(metrics.get("quote_fallback_attempts", 0)),
             "quote_fallback_successes": int(metrics.get("quote_fallback_successes", 0)),
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
