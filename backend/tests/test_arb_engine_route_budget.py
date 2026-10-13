@@ -6,6 +6,22 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb
+from victor_ai_bot.models import RouteLeg
+from victor_ai_bot.route_encoding import DEX_ID
+
+
+
+@pytest.mark.parametrize("dex", sorted(DEX_ID))
+def test_route_leg_schema_accepts_every_canonical_encoder_family(dex):
+    leg = RouteLeg(
+        dex=dex,
+        venue="0x" + "11" * 20,
+        token_in="0x" + "22" * 20,
+        token_out="0x" + "33" * 20,
+        amount_in="1",
+        min_out="1",
+    )
+    assert leg.dex == dex
 
 
 @pytest.mark.asyncio
