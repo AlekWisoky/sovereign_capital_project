@@ -939,7 +939,9 @@ async def test_selected_provider_sizing_models_every_bounded_ladder_point(monkey
 
     adaptive = telemetry["adaptive_size_discovery"]
     assert seen == ladder[1:]
-    assert len(sized) == len(ladder) - 1
+    # The returned set retains the original base candidate plus every size variant.
+    assert len(sized) == len(ladder)
+    assert adaptive["probe_candidate_delta"] == len(ladder) - 1
     assert adaptive["configured_size_ladder"] == [str(amount) for amount in ladder]
     assert adaptive["amounts_scanned"] == [str(amount) for amount in sorted(ladder)]
     assert adaptive["probe_route_attempts"] == len(ladder) - 1
