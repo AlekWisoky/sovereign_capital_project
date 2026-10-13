@@ -74,6 +74,7 @@
 - operator_summary_service
 - opportunity_service
 - pool_state_event_cache
+- pool_state_event_selection
 - profitability_truth
 - receipt_service
 - replay_service
