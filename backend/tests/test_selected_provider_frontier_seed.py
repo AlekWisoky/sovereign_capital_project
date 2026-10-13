@@ -509,7 +509,7 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
     adaptive = telemetry["adaptive_size_discovery"]
     assert adaptive["amounts_scanned"] == ["500", "1000", "1500", "2000"]
     assert adaptive["economic_matrix_complete"] is True
-    assert sorted(row["amount_in"] for row in telemetry["size_economic_matrix"], key=int) == [
+    assert sorted((row["amount_in"] for row in telemetry["size_economic_matrix"]), key=int) == [
         "500", "1000", "1500", "2000"
     ]
     assert len(sized) == 4
