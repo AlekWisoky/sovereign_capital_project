@@ -15,6 +15,7 @@ class _Runtime(RuntimeStateFacade):
         self._market_pipeline_telemetry = {
             "last_scan": 1234567890,
             "last_block": 200,
+            "scan_status": "completed",
             "scan_latency_ms": 42.5,
             "scan_error": "",
             "discovery": {
@@ -151,6 +152,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     runtime._opps = []
     out = runtime.market_pipeline_telemetry_state()
     assert out["scanner"]["alive"] is True
+    assert out["scanner"]["scan_status"] == "completed"
     assert out["scanner"]["last_block"] == 200
     assert out["discovery"]["pools_seen"] == 7
     assert out["discovery"]["aerodrome_pools"] == 3
