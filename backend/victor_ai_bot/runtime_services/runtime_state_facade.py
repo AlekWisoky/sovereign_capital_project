@@ -323,6 +323,7 @@ class RuntimeStateFacade:
             "chain": str(getattr(getattr(self, "cfg", None), "chain", None) and getattr(self.cfg.chain, "name", "") or ""),
             "scanner": {
                 "alive": bool(telemetry.get("last_scan")),
+                "scan_status": str(telemetry.get("scan_status") or "unknown"),
                 "last_scan": telemetry.get("last_scan"),
                 "last_block": telemetry.get("last_block"),
                 "scan_latency_ms": telemetry.get("scan_latency_ms"),
