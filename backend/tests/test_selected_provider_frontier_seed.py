@@ -503,16 +503,16 @@ async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypat
         cache=object(),
     )
 
-    # The seed notional was already quoted; only genuinely different sizes
-    # consume additional RPC budget.
-    assert seen == [500, 2000]
+    # The seed notional is retained, but the route is requoted at the base
+    # notional too so its economic frontier compares every ladder point.
+    assert seen == [1000, 500, 2000]
     adaptive = telemetry["adaptive_size_discovery"]
-    assert adaptive["amounts_scanned"] == ["500", "1500", "2000"]
+    assert adaptive["amounts_scanned"] == ["500", "1000", "1500", "2000"]
     assert adaptive["economic_matrix_complete"] is True
-    assert sorted(row["amount_in"] for row in telemetry["size_economic_matrix"]) == [
-        "1500", "2000", "500"
+    assert sorted((row["amount_in"] for row in telemetry["size_economic_matrix"]), key=int) == [
+        "500", "1000", "1500", "2000"
     ]
-    assert len(sized) == 3
+    assert len(sized) == 4
 
 
 @pytest.mark.asyncio

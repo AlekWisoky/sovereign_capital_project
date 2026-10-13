@@ -869,3 +869,144 @@ def test_best_read_excludes_quote_quarantined_provider():
     assert manager.best_read() == "https://rpc-b.example"
     manager._read["https://rpc-b.example"].quote_unhealthy_until = 9_999_999_999.0
     assert manager.best_read() == ""
+
+
+@pytest.mark.asyncio
+async def test_selected_provider_sizing_models_every_bounded_ladder_point(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(safety=SimpleNamespace(slippage_bps=50))
+    ladder = [1000, 500, 1500, 2000, 4000, 8000, 16000, 32000, 64000]
+    monkeypatch.setattr(runtime, "_adaptive_scan_amounts", lambda amount, **kwargs: ladder)
+
+    class _Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = _Manager()
+
+    async def noop_annotate(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "_annotate_canonical_after_fee_usd", noop_annotate)
+
+    class _Candidate:
+        def __init__(self, amount_in="1000"):
+            self.id = "route-full-ladder"
+            self.route_id = "route-full-ladder"
+            self.strategy = "two-leg:univ3->univ3"
+            self.expected_profit_raw = str(int(amount_in) // 10)
+            self.route = SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount_in))]
+            )
+            self.meta = {
+                "profitability": {
+                    "revalidated": True,
+                    "authoritative": False,
+                    "valid": True,
+                    "profit_after_costs_wei": str(int(amount_in) // 10 - 1),
+                },
+            }
+
+        def model_copy(self, *, deep=True):
+            return _Candidate(self.route.legs[0].amount_in)
+
+    seen = []
+
+    async def fake_requote(rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps):
+        seen.append(int(new_amount_in))
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        candidate.expected_profit_raw = str(int(new_amount_in) // 10)
+        candidate.meta["profitability"]["profit_after_costs_wei"] = str(int(new_amount_in) // 10 - 1)
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[_Candidate()],
+        cache=PerBlockCache(),
+    )
+
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert seen == ladder[1:]
+    # The returned set retains the original base candidate plus every size variant.
+    assert len(sized) == len(ladder)
+    assert adaptive["probe_candidate_delta"] == len(ladder) - 1
+    assert adaptive["configured_size_ladder"] == [str(amount) for amount in ladder]
+    assert adaptive["amounts_scanned"] == [str(amount) for amount in sorted(ladder)]
+    assert adaptive["probe_route_attempts"] == len(ladder) - 1
+    assert adaptive["probe_quote_failures"] == 0
+    assert adaptive["economic_matrix_complete"] is True
+    assert adaptive["matrix_missing_amounts"] == []
+    assert adaptive["matrix_missing_routes_by_amount"] == {}
+
+
+@pytest.mark.asyncio
+async def test_selected_provider_sizing_marks_matrix_incomplete_on_failed_size_quote(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(safety=SimpleNamespace(slippage_bps=50))
+    ladder = [1000, 500, 2000]
+    monkeypatch.setattr(runtime, "_adaptive_scan_amounts", lambda amount, **kwargs: ladder)
+
+    class _Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = _Manager()
+
+    async def noop_annotate(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(runtime, "_annotate_canonical_after_fee_usd", noop_annotate)
+
+    class _Candidate:
+        def __init__(self, amount_in="1000"):
+            self.id = "route-failed-point"
+            self.route_id = "route-failed-point"
+            self.strategy = "two-leg:univ3->univ3"
+            self.expected_profit_raw = "100"
+            self.route = SimpleNamespace(
+                legs=[SimpleNamespace(amount_in=str(amount_in))]
+            )
+            self.meta = {"profitability": {"revalidated": True, "authoritative": False}}
+
+        def model_copy(self, *, deep=True):
+            return _Candidate(self.route.legs[0].amount_in)
+
+    async def fake_requote(rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps):
+        if int(new_amount_in) == 500:
+            return None
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    _sized, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[_Candidate()],
+        cache=PerBlockCache(),
+    )
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["probe_quote_failures"] == 1
+    assert adaptive["economic_matrix_complete"] is False
+    assert adaptive["matrix_missing_routes_by_amount"]["500"] == ["route-failed-point"]
