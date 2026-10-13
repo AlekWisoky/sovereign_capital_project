@@ -9,7 +9,13 @@ import aiohttp
 from eth_hash.auto import keccak
 
 from ..rpc import JsonRpcClient
-from .pool_state_event_selection import _sample_exploration_by_family
+from .pool_state_event_selection import (
+    _candidate_edges as _selection_candidate_edges,
+    _edge_identity as _selection_edge_identity,
+    _edge_pool_address as _selection_edge_pool_address,
+    _edge_priority as _selection_edge_priority,
+    _prioritize_edges as _selection_prioritize_edges,
+)
 
 
 _SAFE_POOL_EVENT_EXCEPTIONS = (
@@ -83,6 +89,12 @@ class PoolStateEventCache:
     max_addresses: int = 256
     reconcile_max_blocks: int = 200
     refresh_interval_s: float = 15.0
+
+    prioritize_edges = _selection_prioritize_edges
+    candidate_edges = _selection_candidate_edges
+    edge_priority = _selection_edge_priority
+    _edge_identity = staticmethod(_selection_edge_identity)
+    _edge_pool_address = staticmethod(_selection_edge_pool_address)
 
     def __post_init__(self) -> None:
         self.ws_urls = [
@@ -181,231 +193,6 @@ class PoolStateEventCache:
         if changed:
             self._address_version += 1
             self._wake.set()
-
-    def prioritize_edges(
-        self,
-        edges: List[Any],
-        *,
-        current_block: int,
-    ) -> Tuple[List[Any], Dict[str, Any]]:
-        scored: List[Tuple[int, int, int, Any]] = []
-        dirty_count = 0
-        affected_tokens: set[str] = set()
-        dirty_addresses: set[str] = set()
-        for address, state in self._states.items():
-            age = max(0, int(current_block) - int(state.last_block or 0))
-            if address in self._dirty and int(state.last_block) and age <= 2:
-                dirty_addresses.add(address)
-                if state.token0:
-                    affected_tokens.add(str(state.token0).lower())
-                if state.token1:
-                    affected_tokens.add(str(state.token1).lower())
-
-        affected_subgraph_edges = 0
-        for order, edge in enumerate(list(edges or [])):
-            address = self._edge_pool_address(edge)
-            priority = self.edge_priority(edge, current_block=int(current_block))
-            state = self._states.get(address) if address else None
-            last_block = int(state.last_block) if state is not None else 0
-            edge_tokens = {
-                str(getattr(edge, "token_in", "") or "").lower(),
-                str(getattr(edge, "token_out", "") or "").lower(),
-            }
-            edge_tokens.discard("")
-            if address in dirty_addresses:
-                priority = max(priority, 5)
-                dirty_count += 1
-            elif affected_tokens and edge_tokens & affected_tokens:
-                priority = max(priority, 4)
-                affected_subgraph_edges += 1
-            scored.append((priority, last_block, -order, edge))
-        scored.sort(
-            key=lambda item: (int(item[0]), int(item[1]), int(item[2])),
-            reverse=True,
-        )
-        ordered = [item[3] for item in scored]
-        return ordered, {
-            "enabled": bool(self._tracked),
-            "tracked_pools": int(len(self._tracked)),
-            "tracked_states": int(sum(1 for state in self._states.values() if state.last_block)),
-            "dirty_edges": int(dirty_count),
-            "affected_token_count": int(len(affected_tokens)),
-            "affected_subgraph_edges": int(affected_subgraph_edges),
-            "last_event_block": int(self._last_seen_block),
-            "event_count": int(self._event_count),
-            "connected": bool(self._connected),
-            "subscribed_address_count": int(self._subscribed_address_count),
-            "subscription_truncated": bool(self._truncated),
-            "last_error": str(self._last_error or ""),
-            "candidate_generation_mode": str(
-                self._last_candidate_metrics.get("candidate_generation_mode") or ""
-            ),
-            "candidate_edge_count": int(
-                self._last_candidate_metrics.get("candidate_edge_count", 0) or 0
-            ),
-            "candidate_edges_full": int(
-                self._last_candidate_metrics.get("candidate_edges_full", 0) or 0
-            ),
-            "candidate_edges_pruned": int(
-                self._last_candidate_metrics.get("candidate_edges_pruned", 0) or 0
-            ),
-            "exploration_edge_count": int(
-                self._last_candidate_metrics.get("exploration_edge_count", 0) or 0
-            ),
-            "hot_subgraph_edge_count": int(
-                self._last_candidate_metrics.get("hot_subgraph_edge_count", 0) or 0
-            ),
-            "fresh_dirty_pool_count": int(
-                self._last_candidate_metrics.get("fresh_dirty_pool_count", 0) or 0
-            ),
-            "candidate_affected_token_count": int(
-                self._last_candidate_metrics.get("affected_token_count", 0) or 0
-            ),
-        }
-
-    def candidate_edges(
-        self,
-        edges: List[Any],
-        *,
-        current_block: int,
-        max_candidates: int = 768,
-        exploration_ratio: float = 0.10,
-    ) -> Tuple[List[Any], Dict[str, Any]]:
-        """Return a bounded event-driven hot subgraph plus exploration sample.
-
-        Freshly changed pools define the hot token frontier. Every edge touching
-        an affected token is retained, which preserves direct two-leg reverse
-        pairs and one-hop triangle expansion. A deterministic exploration
-        sample keeps the full graph from becoming permanently invisible when
-        websocket events are incomplete or liquidity changes without an event
-        we decode.
-        """
-        full = list(edges or [])
-        cap = max(32, min(2048, int(max_candidates)))
-        ratio = max(0.02, min(0.50, float(exploration_ratio)))
-
-        fresh_dirty_pools: set[str] = set()
-        affected_tokens: set[str] = set()
-        for address, state in self._states.items():
-            if address not in self._dirty or not int(state.last_block):
-                continue
-            age = max(0, int(current_block) - int(state.last_block))
-            if age > 2:
-                continue
-            fresh_dirty_pools.add(address)
-            if state.token0:
-                affected_tokens.add(str(state.token0).lower())
-            if state.token1:
-                affected_tokens.add(str(state.token1).lower())
-
-        if not fresh_dirty_pools:
-            ordered, priority = self.prioritize_edges(
-                full, current_block=int(current_block)
-            )
-            priority["candidate_generation_mode"] = "full_graph"
-            priority["candidate_edge_count"] = int(len(ordered))
-            priority["candidate_edges_pruned"] = 0
-            priority["exploration_edge_count"] = 0
-            self._last_candidate_metrics = dict(priority)
-            return ordered, priority
-
-        hot: List[Any] = []
-        cold: List[Any] = []
-        seen: set[str] = set()
-        for edge in full:
-            edge_id = self._edge_identity(edge)
-            if edge_id in seen:
-                continue
-            seen.add(edge_id)
-            address = self._edge_pool_address(edge)
-            edge_tokens = {
-                str(getattr(edge, "token_in", "") or "").lower(),
-                str(getattr(edge, "token_out", "") or "").lower(),
-            }
-            edge_tokens.discard("")
-            if address in fresh_dirty_pools or edge_tokens & affected_tokens:
-                hot.append(edge)
-            else:
-                cold.append(edge)
-
-        exploration_count = min(
-            len(cold),
-            max(8, int(round(len(full) * ratio))),
-        )
-        exploration = _sample_exploration_by_family(
-            cold,
-            limit=exploration_count,
-            current_block=int(current_block),
-        )
-
-        # Always retain a bounded exploration reserve when a hot subgraph would
-        # otherwise consume the whole cap. The old hot-first concatenation could
-        # truncate every other venue when graph construction grouped UniV3 first.
-        reserve = (
-            min(len(exploration), max(8, cap // 4))
-            if len(hot) + len(exploration) > cap and cold
-            else 0
-        )
-        hot_budget = max(0, cap - reserve)
-        selected_hot = hot[:hot_budget]
-        exploration_budget = max(0, cap - len(selected_hot))
-        combined: List[Any] = []
-        for edge in [*selected_hot, *exploration[:exploration_budget]]:
-            if edge not in combined:
-                combined.append(edge)
-
-        combined = combined[:cap]
-        if not combined and full:
-            combined = full[:cap]
-        combined, priority = self.prioritize_edges(
-            combined, current_block=int(current_block)
-        )
-        priority.update(
-            {
-                "candidate_generation_mode": "dirty_subgraph",
-                "candidate_edge_count": int(len(combined)),
-                "candidate_edges_full": int(len(full)),
-                "candidate_edges_pruned": int(max(0, len(full) - len(combined))),
-                "exploration_edge_count": int(
-                    sum(1 for edge in exploration if edge in combined)
-                ),
-                "hot_subgraph_edge_count": int(len(hot)),
-                "fresh_dirty_pool_count": int(len(fresh_dirty_pools)),
-                "affected_token_count": int(len(affected_tokens)),
-                "max_candidates": int(cap),
-                "exploration_ratio": float(ratio),
-            }
-        )
-        self._last_candidate_metrics = dict(priority)
-        return combined, priority
-
-    @staticmethod
-    def _edge_identity(edge: Any) -> str:
-        params = getattr(edge, "params", {}) or {}
-        parts = (
-            str(getattr(edge, "dex", "") or ""),
-            str(getattr(edge, "venue", "") or ""),
-            str(getattr(edge, "token_in", "") or ""),
-            str(getattr(edge, "token_out", "") or ""),
-            repr(sorted((str(k), str(v)) for k, v in dict(params).items())),
-        )
-        return "|".join(parts)
-
-    def edge_priority(self, edge: Any, *, current_block: int) -> int:
-        address = self._edge_pool_address(edge)
-        if not address:
-            return 1
-        state = self._states.get(address)
-        if state is None or not int(state.last_block):
-            return 1
-        age = max(0, int(current_block) - int(state.last_block))
-        if address in self._dirty and age <= 2:
-            return 4
-        if age <= 2:
-            return 3
-        if age <= 5:
-            return 2
-        return 1
 
     def snapshot(self) -> Dict[str, Any]:
         return {
@@ -671,18 +458,3 @@ class PoolStateEventCache:
     def _signed_int24(value: int) -> int:
         value = int(value) & ((1 << 24) - 1)
         return value - (1 << 24) if value >= (1 << 23) else value
-
-    @staticmethod
-    def _edge_pool_address(edge: Any) -> str:
-        dex = str(getattr(edge, "dex", "") or "").lower()
-        params = getattr(edge, "params", {}) or {}
-        if dex == "curve":
-            address = str(getattr(edge, "venue", "") or params.get("pool") or "")
-        elif dex == "balancer":
-            address = str(params.get("pool_address") or "")
-        else:
-            address = str(params.get("pool") or "")
-        address = address.strip().lower()
-        if address.startswith("0x") and len(address) == 42:
-            return address
-        return ""
