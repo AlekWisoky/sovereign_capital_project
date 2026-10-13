@@ -580,12 +580,19 @@ def _route_universe_snapshot(
 ) -> Dict[str, Any]:
     """Describe the candidate graph before quote/economic filtering."""
     by_dex: Dict[str, int] = {}
+    by_family: Dict[str, int] = {}
     undirected_v3: set[tuple[str, str, int]] = set()
     directed_pairs: set[tuple[str, str]] = set()
     tokens: set[str] = set()
     for edge in edges:
         dex = str(edge.dex)
         by_dex[dex] = int(by_dex.get(dex, 0)) + 1
+        family = (
+            str(edge.params.get("venue_name") or "").strip().lower()
+            if dex == "constant_product"
+            else dex
+        ) or dex
+        by_family[family] = int(by_family.get(family, 0)) + 1
         a = str(edge.token_in).lower()
         b = str(edge.token_out).lower()
         tokens.update((a, b))
@@ -602,6 +609,7 @@ def _route_universe_snapshot(
         "active_token_count": len(tokens),
         "active_tokens": sorted(tokens),
         "edges_by_dex": dict(sorted(by_dex.items())),
+        "edges_by_family": dict(sorted(by_family.items())),
         "unique_directed_pairs": len(directed_pairs),
         "directed_pairs_with_reverse": int(reverse_pairs),
         "reverse_pair_coverage_ratio": float(reverse_pairs) / float(len(directed_pairs)) if directed_pairs else 0.0,
