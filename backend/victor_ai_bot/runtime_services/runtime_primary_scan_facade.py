@@ -2930,7 +2930,10 @@ class RuntimePrimaryScanFacade:
         telemetry["adaptive_size_discovery"] = {
             "enabled": bool(len(adaptive_amounts) > 1),
             "base_amount_in": str(int(base_amount_in)),
+            "configured_size_ladder": [str(int(amount)) for amount in adaptive_amounts],
+            "configured_size_point_count": int(len(adaptive_amounts)),
             "amounts_scanned": [str(int(base_amount_in))],
+            "probe_attempts_by_amount": [],
             "probe_triggered": False,
             "minimum_opportunities": int(min_opportunities),
             "candidates_before_probe": int(len(base_opps)),
@@ -2945,14 +2948,14 @@ class RuntimePrimaryScanFacade:
         if not should_probe:
             return list(base_opps), telemetry
 
+        # Cover every bounded ladder point, including the base amount when a
+        # candidate originated from a frontier seed at another notional. The
+        # selected-route cap and 9-point ladder bound total re-quote cells.
         probe_amounts: List[int] = []
-        for amount in list(adaptive_amounts[1:5]):
-            if int(amount) not in probe_amounts:
-                probe_amounts.append(int(amount))
-        if len(adaptive_amounts) > 1:
-            terminal = int(adaptive_amounts[-1])
-            if terminal not in probe_amounts:
-                probe_amounts.append(terminal)
+        for amount in adaptive_amounts:
+            normalized_amount = max(1, int(amount))
+            if normalized_amount not in probe_amounts:
+                probe_amounts.append(normalized_amount)
 
         # Frontier-discovered candidates can originate at an alternate size.
         # Keep the economic row aligned to the notional actually quoted rather
@@ -2990,6 +2993,11 @@ class RuntimePrimaryScanFacade:
                 "two_metrics": {},
                 "three_metrics": {},
             })
+        size_scan_records_by_amount: Dict[int, Dict[str, Any]] = {
+            int(record.get("amount_in") or 0): record
+            for record in size_scan_records
+        }
+        probe_attempts_by_amount: List[Dict[str, Any]] = []
         sized: List[Opportunity] = []
 
         for probe_amount in probe_amounts:
@@ -3040,6 +3048,13 @@ class RuntimePrimaryScanFacade:
                         slippage_bps=int(self.cfg.safety.slippage_bps),
                     )
                 )
+            attempt_row = {
+                "amount_in": str(int(probe_amount)),
+                "route_requotes": int(len(tasks)),
+                "quoted_routes": 0,
+                "failed_routes": 0,
+            }
+            probe_attempts_by_amount.append(attempt_row)
             if not tasks:
                 continue
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -3052,20 +3067,42 @@ class RuntimePrimaryScanFacade:
                     continue
                 probe_rows.append(result)
                 sized.append(result)
-            size_scan_records.append({
-                "amount_in": int(probe_amount),
-                "two": [
-                    row for row in probe_rows
-                    if str(getattr(row, "strategy", "") or "").startswith("two-leg:")
-                ],
-                "three": [
-                    row for row in probe_rows
-                    if str(getattr(row, "strategy", "") or "").startswith("tri:")
-                ],
-                "two_metrics": {},
-                "three_metrics": {},
-            })
+            attempt_row["quoted_routes"] = int(len(probe_rows))
+            attempt_row["failed_routes"] = int(len(tasks) - len(probe_rows))
 
+            size_record = size_scan_records_by_amount.get(int(probe_amount))
+            if size_record is None:
+                size_record = {
+                    "amount_in": int(probe_amount),
+                    "two": [],
+                    "three": [],
+                    "two_metrics": {},
+                    "three_metrics": {},
+                }
+                size_scan_records_by_amount[int(probe_amount)] = size_record
+            for leg_group, predicate in (
+                ("two", lambda row: str(getattr(row, "strategy", "") or "").startswith("two-leg:")),
+                ("three", lambda row: str(getattr(row, "strategy", "") or "").startswith("tri:")),
+            ):
+                existing = size_record[leg_group]
+                seen = {
+                    _route_key(candidate)
+                    for candidate in existing
+                    if _route_key(candidate)
+                }
+                for row in probe_rows:
+                    if not predicate(row):
+                        continue
+                    key = _route_key(row)
+                    if not key or key not in seen:
+                        existing.append(row)
+                        if key:
+                            seen.add(key)
+
+        size_scan_records = [
+            size_record
+            for _amount, size_record in sorted(size_scan_records_by_amount.items())
+        ]
         gas_price_consensus = await _resolve_gas_price_consensus(
             self.rpc_manager,
             shared_gas_price_consensus,
@@ -3091,6 +3128,32 @@ class RuntimePrimaryScanFacade:
             )
 
         matrix = _build_size_economic_matrix(size_scan_records)
+        expected_size_amounts = {
+            str(int(amount)) for amount in adaptive_amounts if int(amount) > 0
+        }
+        matrix_by_amount = {
+            str(row.get("amount_in") or ""): row
+            for row in matrix
+            if row.get("amount_in") not in (None, "")
+        }
+        selected_route_ids = {
+            _route_key(candidate) for candidate in selected if _route_key(candidate)
+        }
+        matrix_missing_amounts = sorted(expected_size_amounts - set(matrix_by_amount))
+        matrix_missing_routes_by_amount: Dict[str, List[str]] = {}
+        for expected_amount in sorted(expected_size_amounts):
+            row = matrix_by_amount.get(expected_amount)
+            available_route_ids = {
+                str(route_id) for route_id in (row or {}).get("route_ids", []) if route_id
+            }
+            missing_routes = sorted(selected_route_ids - available_route_ids)
+            if missing_routes:
+                matrix_missing_routes_by_amount[expected_amount] = missing_routes
+        economic_matrix_complete = bool(
+            not matrix_missing_amounts
+            and not matrix_missing_routes_by_amount
+            and int(telemetry["adaptive_size_discovery"].get("probe_quote_failures", 0) or 0) == 0
+        )
         _attach_quote_economic_size_curves([*selected, *sized], matrix)
         telemetry["size_economic_matrix"] = matrix
         telemetry["size_economic_evidence"] = [
@@ -3098,6 +3161,8 @@ class RuntimePrimaryScanFacade:
             for candidate in sized
         ]
         telemetry["adaptive_size_discovery"].update({
+            "configured_size_ladder": [str(int(amount)) for amount in adaptive_amounts],
+            "configured_size_point_count": int(len(adaptive_amounts)),
             "amounts_scanned": [
                 str(int(amount))
                 for amount in sorted({
@@ -3106,20 +3171,14 @@ class RuntimePrimaryScanFacade:
                     if int(record.get("amount_in") or 0) > 0
                 } | {int(amount) for amount in probe_amounts if int(amount) > 0})
             ],
-            "probe_triggered": bool(sized),
+            "probe_attempts_by_amount": list(probe_attempts_by_amount),
+            "probe_route_attempts": int(sum(row["route_requotes"] for row in probe_attempts_by_amount)),
+            "probe_quote_failures": int(telemetry["adaptive_size_discovery"].get("probe_quote_failures", 0) or 0),
+            "probe_triggered": bool(any(row["route_requotes"] > 0 for row in probe_attempts_by_amount)),
             "probe_candidate_delta": int(len(sized)),
-            "economic_matrix_complete": bool(
-                {str(row.get("amount_in")) for row in matrix}.issuperset(
-                    {
-                        str(int(amount))
-                        for amount in sorted({
-                            int(record.get("amount_in") or 0)
-                            for record in size_scan_records
-                            if int(record.get("amount_in") or 0) > 0
-                        } | {int(amount) for amount in probe_amounts if int(amount) > 0})
-                    }
-                )
-            ),
+            "economic_matrix_complete": bool(economic_matrix_complete),
+            "matrix_missing_amounts": matrix_missing_amounts,
+            "matrix_missing_routes_by_amount": matrix_missing_routes_by_amount,
             "best_sizing_variants": [
                 {
                     "route_id": _route_key(candidate),
