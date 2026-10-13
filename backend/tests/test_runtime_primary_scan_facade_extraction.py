@@ -138,6 +138,19 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     monkeypatch.setattr(scan_mod, 'find_three_leg_opportunities', fake_three)
     runtime.cfg.flags.enable_three_leg_loops = True
 
+    runtime._discovery._last_venue_discovery_telemetry = {
+        'stages': [{
+            'stage': 'camelot_v2',
+            'status': 'completed',
+            'elapsed_ms': 12.0,
+            'timeout_s': 2.0,
+            'changed': True,
+            'pools_returned': 1,
+        }],
+        'budget_timeout_s': 2.0,
+        'used_persisted_fallback': False,
+    }
+
     opps = await runtime._scan_primary_opportunities(object(), current_block=321, amount_in=10)
 
     assert runtime._discovery.calls[0]['block_number'] == 321
@@ -156,6 +169,15 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert runtime._market_pipeline_telemetry['quotes'] == {'requests': 14, 'successes': 12, 'failure_reasons': {}}
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
     assert runtime._market_pipeline_telemetry['edges_generated'] == 9
+    discovery_telemetry = runtime._market_pipeline_telemetry['discovery']
+    assert discovery_telemetry['camelot_v2_pools'] == 1
+    assert discovery_telemetry['runtime']['used_persisted_fallback'] is False
+    assert any(
+        stage['stage'] == 'venue:camelot_v2'
+        and stage['status'] == 'completed'
+        and stage['pools_returned'] == 1
+        for stage in discovery_telemetry['runtime']['stages']
+    )
     assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True, 'two_leg_budget_ms': 4000, 'three_leg_budget_ms': 5000, 'configured_total_budget_ms': 9000}
     assert runtime._market_pipeline_telemetry['gross_candidates'] == 4
     adaptive = runtime._market_pipeline_telemetry['adaptive_size_discovery']

@@ -85,6 +85,84 @@ def _sanitize_rpc_telemetry(value: Any, key: str = "") -> Any:
     return value
 
 
+
+def _safe_discovery_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if 0 <= number < 1_000_000_000 else None
+
+
+def _safe_discovery_pool_count(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _safe_discovery_error_type(raw: Dict[str, Any]) -> str:
+    error_type = str(raw.get("error_type") or "").strip()
+    if (
+        error_type.endswith(("Error", "Exception"))
+        and len(error_type) <= 64
+        and error_type.replace("_", "").isalnum()
+    ):
+        return error_type
+    candidate = str(raw.get("error") or "").split(":", 1)[0].strip()
+    if (
+        candidate.endswith(("Error", "Exception"))
+        and len(candidate) <= 64
+        and candidate.replace("_", "").isalnum()
+    ):
+        return candidate
+    return ""
+
+
+def _safe_discovery_stage_timing(raw: Dict[str, Any]) -> Dict[str, float]:
+    return {
+        key: number
+        for key in ("elapsed_ms", "timeout_s")
+        if (number := _safe_discovery_number(raw.get(key))) is not None
+    }
+
+
+def _safe_discovery_stage(raw: Dict[str, Any]) -> Dict[str, Any]:
+    row: Dict[str, Any] = {
+        "stage": str(raw.get("stage") or "unknown")[:80],
+        "status": str(raw.get("status") or "unknown")[:32],
+        "changed": bool(raw.get("changed")),
+        "pools_returned": _safe_discovery_pool_count(raw.get("pools_returned")),
+    }
+    row.update(_safe_discovery_stage_timing(raw))
+    error_type = _safe_discovery_error_type(raw)
+    if error_type:
+        row["error_type"] = error_type
+    return row
+
+
+def _safe_discovery_runtime(value: Any) -> Dict[str, Any]:
+    """Expose bounded per-adapter outcomes without leaking raw provider errors."""
+    if not isinstance(value, dict):
+        return {}
+    raw_stages = value.get("stages")
+    rows = raw_stages[:16] if isinstance(raw_stages, list) else []
+    stages = [
+        _safe_discovery_stage(raw)
+        for raw in rows
+        if isinstance(raw, dict)
+    ]
+    timeout_s = _safe_discovery_number(value.get("budget_timeout_s"))
+    return {
+        "budget_timeout_s": timeout_s if timeout_s is not None else 0.0,
+        "used_persisted_fallback": bool(value.get("used_persisted_fallback")),
+        "stages": stages,
+        "stage_count": len(stages),
+        "timed_out_count": sum(row["status"] == "timed_out" for row in stages),
+        "failed_count": sum(row["status"] == "failed" for row in stages),
+    }
+
+
 def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
     """Expose useful gas-consensus diagnostics without leaking RPC URLs or credentials."""
     if not isinstance(value, dict):
@@ -250,6 +328,7 @@ class RuntimeStateFacade:
             "chain": str(getattr(getattr(self, "cfg", None), "chain", None) and getattr(self.cfg.chain, "name", "") or ""),
             "scanner": {
                 "alive": bool(telemetry.get("last_scan")),
+                "scan_status": str(telemetry.get("scan_status") or "unknown"),
                 "last_scan": telemetry.get("last_scan"),
                 "last_block": telemetry.get("last_block"),
                 "scan_latency_ms": telemetry.get("scan_latency_ms"),
@@ -270,7 +349,12 @@ class RuntimeStateFacade:
                 "v3_pairs": int(discovery.get("v3_pairs") or 0),
                 "curve_pools": int(discovery.get("curve_pools") or 0),
                 "balancer_pools": int(discovery.get("balancer_pools") or 0),
+                "aerodrome_pools": int(discovery.get("aerodrome_pools") or 0),
+                "slipstream_pools": int(discovery.get("slipstream_pools") or 0),
+                "camelot_algebra_pools": int(discovery.get("camelot_algebra_pools") or 0),
+                "camelot_v2_pools": int(discovery.get("camelot_v2_pools") or 0),
                 "constant_product_pools": int(discovery.get("constant_product_pools") or 0),
+                "venue_discovery_runtime": _safe_discovery_runtime(discovery.get("runtime")),
             },
             "candidate_token_discovery": dict(
                 telemetry.get("candidate_token_discovery") or {}

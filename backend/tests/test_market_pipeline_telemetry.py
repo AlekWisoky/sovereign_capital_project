@@ -15,6 +15,7 @@ class _Runtime(RuntimeStateFacade):
         self._market_pipeline_telemetry = {
             "last_scan": 1234567890,
             "last_block": 200,
+            "scan_status": "completed",
             "scan_latency_ms": 42.5,
             "scan_error": "",
             "discovery": {
@@ -22,6 +23,26 @@ class _Runtime(RuntimeStateFacade):
                 "v3_pairs": 4,
                 "curve_pools": 2,
                 "balancer_pools": 1,
+                "aerodrome_pools": 3,
+                "slipstream_pools": 5,
+                "camelot_algebra_pools": 6,
+                "camelot_v2_pools": 7,
+                "constant_product_pools": 8,
+                "runtime": {
+                    "budget_timeout_s": 2.0,
+                    "used_persisted_fallback": True,
+                    "stages": [
+                        {"stage": "venue:aerodrome", "status": "timed_out",
+                         "elapsed_ms": 2000.0, "timeout_s": 2.0,
+                         "pools_returned": 3, "error": "https://private-rpc.example/key"},
+                        {"stage": "venue:slipstream", "status": "completed",
+                         "elapsed_ms": 120.0, "timeout_s": 2.0,
+                         "pools_returned": 5, "changed": True},
+                        {"stage": "venue:camelot_algebra", "status": "failed",
+                         "elapsed_ms": 80.0, "timeout_s": 2.0,
+                         "error_type": "RuntimeError"},
+                    ],
+                },
             },
             "quotes": {"requests": 10, "successes": 8},
             "selected_provider_adaptive": {
@@ -50,7 +71,8 @@ class _Runtime(RuntimeStateFacade):
             "route_universe": {
                 "configured_token_count": 3,
                 "active_token_count": 3,
-                "edges_by_dex": {"univ3": 20},
+                "edges_by_dex": {"univ3": 20, "constant_product": 4},
+                "edges_by_family": {"sushiswap_v2": 2, "uniswap_v2": 2, "univ3": 20},
                 "unique_directed_pairs": 6,
                 "directed_pairs_with_reverse": 6,
                 "reverse_pair_coverage_ratio": 1.0,
@@ -130,8 +152,25 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     runtime._opps = []
     out = runtime.market_pipeline_telemetry_state()
     assert out["scanner"]["alive"] is True
+    assert out["scanner"]["scan_status"] == "completed"
     assert out["scanner"]["last_block"] == 200
     assert out["discovery"]["pools_seen"] == 7
+    assert out["discovery"]["aerodrome_pools"] == 3
+    assert out["discovery"]["slipstream_pools"] == 5
+    assert out["discovery"]["camelot_algebra_pools"] == 6
+    assert out["discovery"]["camelot_v2_pools"] == 7
+    assert out["discovery"]["constant_product_pools"] == 8
+    venue_runtime = out["discovery"]["venue_discovery_runtime"]
+    assert venue_runtime["used_persisted_fallback"] is True
+    assert venue_runtime["timed_out_count"] == 1
+    assert venue_runtime["failed_count"] == 1
+    assert venue_runtime["stages"][0]["pools_returned"] == 3
+    assert "error" not in venue_runtime["stages"][0]
+    assert "error_type" not in venue_runtime["stages"][0]
+    assert venue_runtime["stages"][2]["error_type"] == "RuntimeError"
+    assert "private-rpc" not in str(venue_runtime)
+    assert out["route_universe"]["edges_by_family"]["uniswap_v2"] == 2
+    assert out["route_universe"]["edges_by_family"]["sushiswap_v2"] == 2
     assert out["scan_sizing"] == {
         "configured_tokens": 5,
         "research_tokens_considered": 2,
