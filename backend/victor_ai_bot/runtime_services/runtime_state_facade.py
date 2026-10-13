@@ -127,9 +127,7 @@ def _safe_discovery_stage_timing(raw: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
-def _safe_discovery_stage(raw: Any) -> Dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
+def _safe_discovery_stage(raw: Dict[str, Any]) -> Dict[str, Any]:
     row: Dict[str, Any] = {
         "stage": str(raw.get("stage") or "unknown")[:80],
         "status": str(raw.get("status") or "unknown")[:32],
@@ -137,8 +135,7 @@ def _safe_discovery_stage(raw: Any) -> Dict[str, Any] | None:
         "pools_returned": _safe_discovery_pool_count(raw.get("pools_returned")),
     }
     row.update(_safe_discovery_stage_timing(raw))
-    error_type = _safe_discovery_error_type(raw)
-    row["error_type"] = error_type or None
+    row["error_type"] = _safe_discovery_error_type(raw) or None
     return row
 
 
@@ -149,9 +146,9 @@ def _safe_discovery_runtime(value: Any) -> Dict[str, Any]:
     raw_stages = value.get("stages")
     rows = raw_stages[:16] if isinstance(raw_stages, list) else []
     stages = [
-        safe_row
+        _safe_discovery_stage(raw)
         for raw in rows
-        if (safe_row := _safe_discovery_stage(raw)) is not None
+        if isinstance(raw, dict)
     ]
     timeout_s = _safe_discovery_number(value.get("budget_timeout_s"))
     return {
