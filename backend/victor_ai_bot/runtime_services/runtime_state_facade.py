@@ -124,10 +124,14 @@ def _safe_discovery_runtime(value: Any) -> Dict[str, Any]:
             ):
                 row["error_type"] = error_type
             elif raw.get("error"):
-                # Outer discovery stages only record "TypeName: detail"; publish
-                # the type token, never the detail which may contain RPC URLs.
+                # Accept only exception-class tokens from "TypeName: detail".
+                # A URL or provider message must never become an error label.
                 candidate = str(raw.get("error")).split(":", 1)[0].strip()
-                if candidate and len(candidate) <= 64 and candidate.replace("_", "").isalnum():
+                if (
+                    candidate.endswith(("Error", "Exception"))
+                    and len(candidate) <= 64
+                    and candidate.replace("_", "").isalnum()
+                ):
                     row["error_type"] = candidate
             stages.append(row)
 
