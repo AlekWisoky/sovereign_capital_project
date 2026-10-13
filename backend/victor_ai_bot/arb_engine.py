@@ -668,7 +668,7 @@ async def quote_edges_batch(
     if metrics is None:
         metrics = {}
     quote_diagnostics: Dict[str, Any] = {}
-    quote_successes_before = int(metrics.get("quote_successes", 0) or 0)
+    batch_successes = 0
     metrics.setdefault("quote_failure_reasons", {})
     missing_univ3: List[Tuple[int, Edge]] = []
     missing_curve: List[Tuple[int, Edge]] = []
@@ -715,6 +715,8 @@ async def quote_edges_batch(
     successful_pairs = metrics.setdefault("_successful_quote_pair_keys", set())
 
     def _record_success_edge(edge: Edge) -> None:
+        nonlocal batch_successes
+        batch_successes += 1
         if isinstance(successful_edges, set):
             successful_edges.add(edge_key(edge))
         if isinstance(successful_pools, set):
@@ -935,7 +937,6 @@ async def quote_edges_batch(
     # observation. Attribute the residual instead of silently losing it from
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
-    batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
     requested_edge_count = sum(
         len(group)
         for group in (
@@ -1028,7 +1029,7 @@ def _apply_scan_edge_cap(
 ) -> List[Edge]:
     """Bound a caller's scan graph without changing canonical route construction.
 
-    Provider comparison uses a representative, event-prioritized prefix so the
+    Provider comparison uses a bounded, venue-family-balanced sample so the
     provider race cannot monopolize the chain scan. The selected provider later
     runs without this cap and performs the full economic frontier.
     """
@@ -3146,6 +3147,9 @@ async def find_three_leg_opportunities(
             "route_universe": dict(route_universe),
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
+            "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
+            "quote_fallback_attempts": int(metrics.get("quote_fallback_attempts", 0)),
+            "quote_fallback_successes": int(metrics.get("quote_fallback_successes", 0)),
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
             "pool_event_state": dict(pool_event_metrics or {}),
             "scan_edges_before_cap": int(metrics.get("scan_edges_before_cap", len(edges))),
