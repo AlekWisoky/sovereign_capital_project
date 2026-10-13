@@ -45,6 +45,38 @@ _EVENT_TOPICS = (
 )
 
 
+def _edge_venue_family(edge: Any) -> str:
+    """Return the effective venue family used for fair bounded graph sampling."""
+    dex = str(getattr(edge, "dex", "") or "unknown").strip().lower()
+    if dex == "constant_product":
+        params = getattr(edge, "params", {}) or {}
+        name = str(params.get("venue_name") or params.get("name") or "").strip().lower()
+        if name:
+            return name
+    return dex
+
+
+def _family_balanced_edge_subset(edges: List[Any], limit: int) -> List[Any]:
+    """Select a deterministic round-robin slice while preserving each family's order."""
+    cap = max(0, int(limit))
+    if cap == 0:
+        return []
+    buckets: Dict[str, List[Any]] = {}
+    for edge in list(edges or []):
+        buckets.setdefault(_edge_venue_family(edge), []).append(edge)
+    families = list(buckets)
+    selected: List[Any] = []
+    row_count = max((len(bucket) for bucket in buckets.values()), default=0)
+    for row_index in range(row_count):
+        for family in families:
+            bucket = buckets[family]
+            if row_index < len(bucket):
+                selected.append(bucket[row_index])
+            if len(selected) >= cap:
+                return selected
+    return selected
+
+
 @dataclass
 class PoolEventState:
     address: str
@@ -341,22 +373,19 @@ class PoolStateEventCache:
 
         exploration: List[Any] = []
         if cold and exploration_count:
-            stride = max(1, len(cold) // exploration_count)
-            start = int(current_block) % len(cold)
-            idx = start
-            visited = 0
-            while len(exploration) < exploration_count and visited < len(cold) * 2:
-                exploration.append(cold[idx % len(cold)])
-                idx += stride
-                visited += 1
-                if visited >= len(cold) and len(exploration) < exploration_count:
-                    exploration.append(cold[visited % len(cold)])
+            exploration = _family_balanced_edge_subset(cold, exploration_count)
 
         hot_budget = max(0, cap - exploration_reserve)
         exploration_budget = max(0, cap - min(len(hot), hot_budget))
+        hot_selection_policy = (
+            "round_robin_by_venue_family"
+            if len(hot) > hot_budget
+            else "full_hot_subgraph"
+        )
+        hot_selected = _family_balanced_edge_subset(hot, hot_budget)
         combined: List[Any] = []
         for edge in [
-            *hot[:hot_budget],
+            *hot_selected,
             *exploration[:exploration_budget],
         ]:
             if edge not in combined:
@@ -382,6 +411,8 @@ class PoolStateEventCache:
                 "affected_token_count": int(len(affected_tokens)),
                 "max_candidates": int(cap),
                 "exploration_ratio": float(ratio),
+                "hot_edge_selection_policy": hot_selection_policy,
+                "exploration_edge_selection_policy": "round_robin_by_venue_family",
             }
         )
         self._last_candidate_metrics = dict(priority)
@@ -446,6 +477,12 @@ class PoolStateEventCache:
             ),
             "exploration_edge_count": int(
                 self._last_candidate_metrics.get("exploration_edge_count", 0) or 0
+            ),
+            "hot_edge_selection_policy": str(
+                self._last_candidate_metrics.get("hot_edge_selection_policy") or ""
+            ),
+            "exploration_edge_selection_policy": str(
+                self._last_candidate_metrics.get("exploration_edge_selection_policy") or ""
             ),
             "hot_subgraph_edge_count": int(
                 self._last_candidate_metrics.get("hot_subgraph_edge_count", 0) or 0
