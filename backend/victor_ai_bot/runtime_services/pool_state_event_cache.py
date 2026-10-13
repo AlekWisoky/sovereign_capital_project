@@ -331,6 +331,14 @@ class PoolStateEventCache:
             len(cold),
             max(8, int(round(len(full) * ratio))),
         )
+        exploration_reserve = 0
+        if cold and len(hot) + exploration_count > cap:
+            # Reserve a bounded exploration slice before hot edges fill the cap.
+            # Use the reserve as the sample size so the stride spans all graph
+            # regions instead of sampling a larger list and truncating its tail.
+            exploration_reserve = min(len(cold), max(8, cap // 4))
+            exploration_count = exploration_reserve
+
         exploration: List[Any] = []
         if cold and exploration_count:
             stride = max(1, len(cold) // exploration_count)
@@ -344,12 +352,16 @@ class PoolStateEventCache:
                 if visited >= len(cold) and len(exploration) < exploration_count:
                     exploration.append(cold[visited % len(cold)])
 
+        hot_budget = max(0, cap - exploration_reserve)
+        exploration_budget = max(0, cap - min(len(hot), hot_budget))
         combined: List[Any] = []
-        for edge in [*hot, *exploration]:
+        for edge in [
+            *hot[:hot_budget],
+            *exploration[:exploration_budget],
+        ]:
             if edge not in combined:
                 combined.append(edge)
 
-        # Hot state wins the cap; exploration fills the remainder.
         combined = combined[:cap]
         if not combined and full:
             combined = full[:cap]
