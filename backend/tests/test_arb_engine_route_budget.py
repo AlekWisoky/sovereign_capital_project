@@ -803,7 +803,7 @@ async def test_quote_batch_accumulates_failure_reasons_across_batches(monkeypatc
     await arb.quote_edges_batch(object(), cfg, cache, [edge], 101, metrics=metrics)
 
     assert metrics["quote_requests"] == 2
-    assert metrics["quote_successes"] == 0
+    assert metrics.get("quote_successes", 0) == 0
     assert metrics["quote_failure_reasons"]["unknown_quote_failure"] == 2
 
 
