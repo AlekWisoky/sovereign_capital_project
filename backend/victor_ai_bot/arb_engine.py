@@ -984,20 +984,15 @@ def _representative_scan_edge_subset(edges: List[Edge], cap: int) -> List[Edge]:
         buckets.setdefault(_scan_edge_family(edge), []).append(edge)
     families = list(buckets)
     selected: List[Edge] = []
-    row_index = 0
     limit = max(0, int(cap))
-    while len(selected) < limit:
-        advanced = False
+    row_count = max((len(bucket) for bucket in buckets.values()), default=0)
+    for row_index in range(row_count):
         for family in families:
             bucket = buckets[family]
             if row_index < len(bucket):
                 selected.append(bucket[row_index])
-                advanced = True
-                if len(selected) >= limit:
-                    break
-        if not advanced:
-            break
-        row_index += 1
+            if len(selected) >= limit:
+                return selected
     return selected
 
 
