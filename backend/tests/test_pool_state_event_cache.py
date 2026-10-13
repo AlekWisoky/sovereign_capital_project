@@ -226,3 +226,89 @@ def test_pool_event_cache_keeps_full_graph_without_fresh_events():
     assert candidates == edges
     assert telemetry["candidate_generation_mode"] == "full_graph"
     assert telemetry["candidate_edges_pruned"] == 0
+
+
+
+def test_dirty_hot_subgraph_family_balances_hot_edges_under_cap():
+    cache = PoolStateEventCache(
+        chain_name="ethereum",
+        chain_id=1,
+        ws_urls=["wss://example"],
+        rpc_urls=["https://example"],
+    )
+    token_a = "0x" + "aa" * 20
+    token_b = "0x" + "bb" * 20
+    families = [
+        ("univ3", "univ3", "univ3"),
+        ("curve", "curve", "curve"),
+        ("balancer", "balancer", "balancer"),
+        ("aerodrome", "aerodrome", "aerodrome"),
+        ("slipstream", "slipstream", "slipstream"),
+        ("camelot_algebra", "camelot_algebra", "camelot_algebra"),
+        ("camelot_v2", "camelot_v2", "camelot_v2"),
+        ("constant_product", "uniswap_v2", "uniswap_v2"),
+        ("constant_product", "sushiswap_v2", "sushiswap_v2"),
+    ]
+    edges = []
+    edge_index = 0
+    for family_index, (dex, venue_name, family_label) in enumerate(families):
+        for local_index in range(8):
+            edge_index += 1
+            pool = "0x" + f"{edge_index:040x}"
+            router = "0x" + f"{family_index + 200:040x}"
+            params = {"pool": pool}
+            venue = router
+            if dex == "univ3":
+                params["fee"] = 3000
+            elif dex == "curve":
+                params.update({"i": 0, "j": 1})
+                venue = pool
+            elif dex == "balancer":
+                params.update({
+                    "pool_id": "0x" + f"{edge_index:064x}",
+                    "pool_address": pool,
+                })
+            elif dex == "aerodrome":
+                params["factory"] = "0x" + "cc" * 20
+            elif dex == "slipstream":
+                params.update({"factory": "0x" + "cc" * 20, "tick_spacing": 60})
+            elif dex == "camelot_algebra":
+                params.update({"factory": "0x" + "cc" * 20, "tick_spacing": 60})
+            elif dex == "camelot_v2":
+                params["factory"] = "0x" + "cc" * 20
+            elif dex == "constant_product":
+                params.update({
+                    "factory": "0x" + "cc" * 20,
+                    "venue_name": venue_name,
+                })
+            edges.append(Edge(dex, venue, token_a, token_b, params))
+
+    cache.refresh_edges(edges)
+    event_pool = edges[0].params["pool"]
+    cache._apply_log({
+        "address": event_pool,
+        "blockNumber": hex(100),
+        "transactionHash": "0xabc",
+        "topics": [_SYNC_TOPIC],
+        "data": _sync_data(1000, 900),
+    })
+
+    candidates, telemetry = cache.candidate_edges(
+        edges,
+        current_block=101,
+        max_candidates=32,
+        exploration_ratio=0.10,
+    )
+    included_families = {
+        str(edge.params.get("venue_name") or "").lower()
+        if edge.dex == "constant_product"
+        else edge.dex
+        for edge in candidates
+    }
+    expected_families = {family_label for _, _, family_label in families}
+
+    assert len(candidates) == 32
+    assert telemetry["hot_subgraph_edge_count"] == len(edges)
+    assert expected_families.issubset(included_families)
+    assert telemetry["hot_edge_selection_policy"] == "round_robin_by_venue_family"
+    assert cache.snapshot()["hot_edge_selection_policy"] == "round_robin_by_venue_family"
