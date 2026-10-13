@@ -10,13 +10,13 @@ from eth_hash.auto import keccak
 
 from ..rpc import JsonRpcClient
 from .pool_state_event_selection import (
+    CandidateEdgeRequest,
     _candidate_edges as _selection_candidate_edges,
     _edge_identity as _selection_edge_identity,
     _edge_pool_address as _selection_edge_pool_address,
     _edge_priority as _selection_edge_priority,
     _prioritize_edges as _selection_prioritize_edges,
 )
-
 
 _SAFE_POOL_EVENT_EXCEPTIONS = (
     AttributeError,
@@ -91,10 +91,25 @@ class PoolStateEventCache:
     refresh_interval_s: float = 15.0
 
     prioritize_edges = _selection_prioritize_edges
-    candidate_edges = _selection_candidate_edges
     edge_priority = _selection_edge_priority
     _edge_identity = staticmethod(_selection_edge_identity)
     _edge_pool_address = staticmethod(_selection_edge_pool_address)
+
+    def candidate_edges(
+        self,
+        edges: List[Any],
+        *,
+        current_block: int,
+        max_candidates: int = 768,
+        exploration_ratio: float = 0.10,
+    ) -> Tuple[List[Any], Dict[str, Any]]:
+        request = CandidateEdgeRequest(
+            edges=list(edges or []),
+            current_block=int(current_block),
+            max_candidates=int(max_candidates),
+            exploration_ratio=float(exploration_ratio),
+        )
+        return _selection_candidate_edges(self, request)
 
     def __post_init__(self) -> None:
         self.ws_urls = [
