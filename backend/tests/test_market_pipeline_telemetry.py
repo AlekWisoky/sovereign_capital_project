@@ -164,6 +164,8 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert venue_runtime["failed_count"] == 1
     assert venue_runtime["stages"][0]["pools_returned"] == 3
     assert "error" not in venue_runtime["stages"][0]
+    assert "error_type" not in venue_runtime["stages"][0]
+    assert venue_runtime["stages"][2]["error_type"] == "RuntimeError"
     assert "private-rpc" not in str(venue_runtime)
     assert out["route_universe"]["edges_by_family"]["uniswap_v2"] == 2
     assert out["route_universe"]["edges_by_family"]["sushiswap_v2"] == 2
