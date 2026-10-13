@@ -85,6 +85,66 @@ def _sanitize_rpc_telemetry(value: Any, key: str = "") -> Any:
     return value
 
 
+
+def _safe_discovery_runtime(value: Any) -> Dict[str, Any]:
+    """Expose bounded per-adapter outcomes without leaking raw provider errors."""
+    if not isinstance(value, dict):
+        return {}
+
+    stages: list[Dict[str, Any]] = []
+    raw_stages = value.get("stages")
+    if isinstance(raw_stages, list):
+        for raw in raw_stages[:16]:
+            if not isinstance(raw, dict):
+                continue
+            row: Dict[str, Any] = {
+                "stage": str(raw.get("stage") or "unknown")[:80],
+                "status": str(raw.get("status") or "unknown")[:32],
+            }
+            for key in ("elapsed_ms", "timeout_s"):
+                try:
+                    number = float(raw.get(key))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if 0 <= number < 1_000_000_000:
+                    row[key] = number
+            for key in ("changed", "pools_returned"):
+                if key in raw:
+                    if key == "changed":
+                        row[key] = bool(raw.get(key))
+                    else:
+                        try:
+                            row[key] = max(0, int(raw.get(key) or 0))
+                        except (TypeError, ValueError, OverflowError):
+                            pass
+            error_type = str(raw.get("error_type") or "").strip()
+            if error_type and len(error_type) <= 64 and all(
+                part.replace("_", "").isalnum()
+                for part in error_type.split(".")
+            ):
+                row["error_type"] = error_type
+            elif raw.get("error"):
+                # Outer discovery stages only record "TypeName: detail"; publish
+                # the type token, never the detail which may contain RPC URLs.
+                candidate = str(raw.get("error")).split(":", 1)[0].strip()
+                if candidate and len(candidate) <= 64 and candidate.replace("_", "").isalnum():
+                    row["error_type"] = candidate
+            stages.append(row)
+
+    try:
+        timeout_s = float(value.get("budget_timeout_s") or 0)
+    except (TypeError, ValueError, OverflowError):
+        timeout_s = 0.0
+    return {
+        "budget_timeout_s": timeout_s if 0 <= timeout_s < 1_000_000_000 else 0.0,
+        "used_persisted_fallback": bool(value.get("used_persisted_fallback")),
+        "stages": stages,
+        "stage_count": len(stages),
+        "timed_out_count": sum(row["status"] == "timed_out" for row in stages),
+        "failed_count": sum(row["status"] == "failed" for row in stages),
+    }
+
+
 def _gas_price_integrity_summary(value: Any) -> Dict[str, Any]:
     """Expose useful gas-consensus diagnostics without leaking RPC URLs or credentials."""
     if not isinstance(value, dict):
@@ -270,7 +330,12 @@ class RuntimeStateFacade:
                 "v3_pairs": int(discovery.get("v3_pairs") or 0),
                 "curve_pools": int(discovery.get("curve_pools") or 0),
                 "balancer_pools": int(discovery.get("balancer_pools") or 0),
+                "aerodrome_pools": int(discovery.get("aerodrome_pools") or 0),
+                "slipstream_pools": int(discovery.get("slipstream_pools") or 0),
+                "camelot_algebra_pools": int(discovery.get("camelot_algebra_pools") or 0),
+                "camelot_v2_pools": int(discovery.get("camelot_v2_pools") or 0),
                 "constant_product_pools": int(discovery.get("constant_product_pools") or 0),
+                "venue_discovery_runtime": _safe_discovery_runtime(discovery.get("runtime")),
             },
             "candidate_token_discovery": dict(
                 telemetry.get("candidate_token_discovery") or {}
