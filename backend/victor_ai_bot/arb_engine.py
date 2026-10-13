@@ -936,13 +936,38 @@ async def quote_edges_batch(
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     batch_successes = max(0, int(metrics.get("quote_successes", 0) or 0) - quote_successes_before)
-    requested_failures = max(0, len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) + len(missing_camelot_v2) - batch_successes)
+    requested_edge_count = sum(
+        len(group)
+        for group in (
+            missing_univ3,
+            missing_curve,
+            missing_bal,
+            missing_aero,
+            missing_slipstream,
+            missing_camelot_algebra,
+            missing_camelot_v2,
+            missing_constant_product,
+        )
+    )
+    requested_failures = max(0, requested_edge_count - batch_successes)
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
             failure_counts.get("unknown_quote_failure", 0) + residual_unknown
         )
-    metrics["quote_failure_reasons"] = failure_counts
+
+    # quote_edges_batch is invoked repeatedly during two-leg and three-leg
+    # evaluation. Preserve classifications from earlier batches instead of
+    # replacing them with only the most recent batch's reasons.
+    accumulated_failure_counts = {
+        str(key): max(0, int(value))
+        for key, value in dict(metrics.get("quote_failure_reasons") or {}).items()
+    }
+    for reason, count in failure_counts.items():
+        accumulated_failure_counts[str(reason)] = (
+            accumulated_failure_counts.get(str(reason), 0) + max(0, int(count))
+        )
+    metrics["quote_failure_reasons"] = accumulated_failure_counts
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
     # Coverage sets intentionally persist across all quote batches for a scan;
     # the caller finalizes them once after both first- and second-leg phases.
