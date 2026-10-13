@@ -86,61 +86,64 @@ def _sanitize_rpc_telemetry(value: Any, key: str = "") -> Any:
 
 
 
+def _safe_discovery_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if 0 <= number < 1_000_000_000 else None
+
+
+def _safe_discovery_error_type(raw: Dict[str, Any]) -> str:
+    error_type = str(raw.get("error_type") or "").strip()
+    if error_type.endswith(("Error", "Exception")) and len(error_type) <= 64:
+        if error_type.replace("_", "").isalnum():
+            return error_type
+    candidate = str(raw.get("error") or "").split(":", 1)[0].strip()
+    if candidate.endswith(("Error", "Exception")) and len(candidate) <= 64:
+        if candidate.replace("_", "").isalnum():
+            return candidate
+    return ""
+
+
+def _safe_discovery_stage(raw: Any) -> Dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    row: Dict[str, Any] = {
+        "stage": str(raw.get("stage") or "unknown")[:80],
+        "status": str(raw.get("status") or "unknown")[:32],
+    }
+    for key in ("elapsed_ms", "timeout_s"):
+        number = _safe_discovery_number(raw.get(key))
+        if number is not None:
+            row[key] = number
+    if "changed" in raw:
+        row["changed"] = bool(raw.get("changed"))
+    if "pools_returned" in raw:
+        try:
+            row["pools_returned"] = max(0, int(raw.get("pools_returned") or 0))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    error_type = _safe_discovery_error_type(raw)
+    if error_type:
+        row["error_type"] = error_type
+    return row
+
+
 def _safe_discovery_runtime(value: Any) -> Dict[str, Any]:
     """Expose bounded per-adapter outcomes without leaking raw provider errors."""
     if not isinstance(value, dict):
         return {}
-
-    stages: list[Dict[str, Any]] = []
     raw_stages = value.get("stages")
-    if isinstance(raw_stages, list):
-        for raw in raw_stages[:16]:
-            if not isinstance(raw, dict):
-                continue
-            row: Dict[str, Any] = {
-                "stage": str(raw.get("stage") or "unknown")[:80],
-                "status": str(raw.get("status") or "unknown")[:32],
-            }
-            for key in ("elapsed_ms", "timeout_s"):
-                try:
-                    number = float(raw.get(key))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if 0 <= number < 1_000_000_000:
-                    row[key] = number
-            for key in ("changed", "pools_returned"):
-                if key in raw:
-                    if key == "changed":
-                        row[key] = bool(raw.get(key))
-                    else:
-                        try:
-                            row[key] = max(0, int(raw.get(key) or 0))
-                        except (TypeError, ValueError, OverflowError):
-                            pass
-            error_type = str(raw.get("error_type") or "").strip()
-            if error_type and len(error_type) <= 64 and all(
-                part.replace("_", "").isalnum()
-                for part in error_type.split(".")
-            ):
-                row["error_type"] = error_type
-            elif raw.get("error"):
-                # Accept only exception-class tokens from "TypeName: detail".
-                # A URL or provider message must never become an error label.
-                candidate = str(raw.get("error")).split(":", 1)[0].strip()
-                if (
-                    candidate.endswith(("Error", "Exception"))
-                    and len(candidate) <= 64
-                    and candidate.replace("_", "").isalnum()
-                ):
-                    row["error_type"] = candidate
-            stages.append(row)
-
-    try:
-        timeout_s = float(value.get("budget_timeout_s") or 0)
-    except (TypeError, ValueError, OverflowError):
-        timeout_s = 0.0
+    rows = raw_stages[:16] if isinstance(raw_stages, list) else []
+    stages = [
+        safe_row
+        for raw in rows
+        if (safe_row := _safe_discovery_stage(raw)) is not None
+    ]
+    timeout_s = _safe_discovery_number(value.get("budget_timeout_s"))
     return {
-        "budget_timeout_s": timeout_s if 0 <= timeout_s < 1_000_000_000 else 0.0,
+        "budget_timeout_s": timeout_s if timeout_s is not None else 0.0,
         "used_persisted_fallback": bool(value.get("used_persisted_fallback")),
         "stages": stages,
         "stage_count": len(stages),
