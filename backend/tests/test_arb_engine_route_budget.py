@@ -723,3 +723,52 @@ def test_three_leg_frontier_recomputes_diversity_after_each_selection():
     # the tie-break by discovery order instead of spending both slots on one DEX.
     assert selected == [slipstream_first, univ3]
     assert by_token[token_in] == [slipstream_first, univ3]
+
+
+def test_provider_comparison_edge_cap_samples_all_venue_families():
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    families = [
+        ("univ3", {}),
+        ("curve", {"i": 0, "j": 1}),
+        ("balancer", {"pool_id": "0x" + "33" * 32}),
+        ("aerodrome", {"stable": False}),
+        ("slipstream", {"tick_spacing": 60}),
+        ("constant_product", {"venue_name": "uniswap_v2"}),
+        ("constant_product", {"venue_name": "sushiswap_v2"}),
+        ("camelot_v2", {}),
+    ]
+    edges = []
+    for family_index, (dex, params) in enumerate(families):
+        for edge_index in range(8):
+            local_params = dict(params)
+            local_params["pool"] = "0x" + f"{100 + family_index * 10 + edge_index:040x}"
+            edges.append(arb.Edge(
+                dex,
+                "0x" + f"{200 + family_index:040x}",
+                token_a if edge_index % 2 == 0 else token_b,
+                token_b if edge_index % 2 == 0 else token_a,
+                local_params,
+            ))
+
+    metrics = {}
+    selected = arb._apply_scan_edge_cap(edges, 16, metrics)
+
+    selected_families = {
+        arb._scan_edge_family(edge) for edge in selected
+    }
+    assert len(selected) == 16
+    assert selected_families == {
+        "univ3", "curve", "balancer", "aerodrome",
+        "slipstream", "uniswap_v2", "sushiswap_v2", "camelot_v2",
+    }
+    assert metrics["scan_edges_before_cap"] == 64
+    assert metrics["scan_edge_cap"] == 16
+    assert metrics["scan_edges_selected"] == 16
+    assert metrics["scan_edges_capped"] == 48
+    assert metrics["scan_edge_selection_policy"] == "round_robin_by_venue_family"
+    counts = {}
+    for edge in selected:
+        family = arb._scan_edge_family(edge)
+        counts[family] = counts.get(family, 0) + 1
+    assert set(counts.values()) == {2}
