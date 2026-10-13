@@ -118,6 +118,23 @@ def _sample_exploration_by_family(
     )
 
 
+def _edge_priority(cache: Any, edge: Any, *, current_block: int) -> int:
+    address = cache._edge_pool_address(edge)
+    if not address:
+        return 1
+    state = cache._states.get(address)
+    if state is None or not int(state.last_block):
+        return 1
+    age = max(0, int(current_block) - int(state.last_block))
+    if address in cache._dirty and age <= 2:
+        return 4
+    if age <= 2:
+        return 3
+    if age <= 5:
+        return 2
+    return 1
+
+
 def _active_priority_frontier(
     cache: Any,
     *,
