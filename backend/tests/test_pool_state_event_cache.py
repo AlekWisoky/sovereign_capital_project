@@ -311,3 +311,11 @@ def test_hot_subgraph_cap_round_robins_families_when_all_edges_are_hot():
     assert telemetry["family_fair_selection"] is True
     assert expected_families.issubset(set(telemetry["candidate_edges_by_family"]))
     assert expected_families.issubset(set(telemetry["hot_selected_edges_by_family"]))
+
+    # The public scanner payload reads snapshot(), not the transient return value.
+    # Verify the family-selection evidence is wired through that boundary too.
+    snapshot = cache.snapshot()
+    assert snapshot["family_fair_selection"] is True
+    assert snapshot["candidate_edges_by_family"] == telemetry["candidate_edges_by_family"]
+    assert snapshot["hot_selected_edges_by_family"] == telemetry["hot_selected_edges_by_family"]
+    assert snapshot["exploration_edges_by_family"] == telemetry["exploration_edges_by_family"]
