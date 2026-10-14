@@ -291,10 +291,10 @@ async def test_non_query_balancer_revert_is_not_accepted_as_a_quote():
 
 @pytest.mark.asyncio
 async def test_malformed_balancer_queryerror_payload_fails_closed():
-    # Correct selector, but the declared length requires two values and only
-    # one is present. Never infer missing deltas or turn this into a quote.
+    # Correct selector, but the declared length requires three values and only
+    # two are present. Never infer missing deltas or turn this into a quote.
     malformed = "0xfa61cc12" + (
-        (2).to_bytes(32, "big")
+        (3).to_bytes(32, "big")
         + (100).to_bytes(32, "big")
         + ((1 << 256) - 120).to_bytes(32, "big")
     ).hex()
