@@ -3806,6 +3806,21 @@ class RuntimePrimaryScanFacade:
                 or ""
             )
 
+        try:
+            route_cap = max(
+                4,
+                min(24, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_ROUTE_CAP", "12") or 12)),
+            )
+        except (TypeError, ValueError):
+            route_cap = 12
+        try:
+            triangle_cap = max(
+                0,
+                min(route_cap, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_TRIANGLE_CAP", "4") or 4)),
+            )
+        except (TypeError, ValueError):
+            triangle_cap = 4
+
         selected, selected_diagnostic_route_ids, diagnostic_source_rows = (
             _select_bounded_size_probe_candidates(
                 list(base_opps or []),
@@ -3815,6 +3830,7 @@ class RuntimePrimaryScanFacade:
                 triangle_cap=triangle_cap,
             )
         )
+        selected_diagnostic_count = len(selected_diagnostic_route_ids)
 
         # Profitability at the current notional does not prove that the notional
         # is optimal. Whenever routes are available and the authorized ladder has
@@ -3839,7 +3855,7 @@ class RuntimePrimaryScanFacade:
             "authoritative_positive_candidates_before_probe": int(positive_base),
             "probe_basis": "bounded_selected_route_requote",
             "selected_route_count": int(len(selected)),
-            "selected_diagnostic_route_count": int(len(selected_diagnostic_candidates)),
+            "selected_diagnostic_route_count": int(selected_diagnostic_count),
             "diagnostic_probe_route_ids": sorted(selected_diagnostic_route_ids),
             "diagnostic_probe_source_rows": int(diagnostic_source_rows),
             "route_cap": int(route_cap),
@@ -3863,8 +3879,16 @@ class RuntimePrimaryScanFacade:
         # Keep the economic row aligned to the notional actually quoted rather
         # than relabeling every seed route as the base-size result.
         candidates_by_source_size: Dict[int, Dict[str, List[Opportunity]]] = {}
-        for candidate in [*direct, *triangles]:
+        for candidate in list(base_opps or []):
             meta = getattr(candidate, "meta", {}) or {}
+            if isinstance(meta, dict) and meta.get("size_probe_diagnostic_only") is True:
+                continue
+            strategy = str(getattr(candidate, "strategy", "") or "")
+            if not (
+                strategy.startswith("two-leg:")
+                or strategy.startswith("tri:")
+            ):
+                continue
             try:
                 source_amount = max(
                     1, int(meta.get("adaptive_seed_amount_in") or base_amount_in)
@@ -3874,7 +3898,6 @@ class RuntimePrimaryScanFacade:
             group = candidates_by_source_size.setdefault(
                 source_amount, {"two": [], "three": []}
             )
-            strategy = str(getattr(candidate, "strategy", "") or "")
             group["two" if strategy.startswith("two-leg:") else "three"].append(candidate)
 
         size_scan_records: List[Dict[str, Any]] = [
