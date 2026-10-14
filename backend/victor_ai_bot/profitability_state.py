@@ -450,6 +450,8 @@ def revalidate_profitability_state(
     inherited_conversion_valid = False
     if (
         existing_profitability.get("gas_cost_conversion_available") is True
+        and str(existing_profitability.get("gas_cost_profit_token_address") or "").strip().lower()
+        == profit_token
         and inherited_profit_token_gas is not None
         and inherited_profit_token_gas >= 0
     ):
@@ -669,6 +671,7 @@ def revalidate_profitability_state(
     state["gas_cost_conversion_available"] = bool(
         explicit_conversion_valid or inherited_conversion_valid or native_gas_units_match
     )
+    state["gas_cost_profit_token_address"] = profit_token
     try:
         state_fee = int(state.get("flashloan_fee_wei") or 0)
     except (TypeError, ValueError, OverflowError):
