@@ -963,6 +963,7 @@ def test_size_economic_matrix_merges_frontier_and_requote_evidence():
         "rotation_index": 3,
     }]
     assert row["execution_authority_granted"] is False
+    assert row["economic_optimum_executable"] is False
 
 
 def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():
