@@ -397,7 +397,7 @@ async def test_three_leg_route_evaluation_consumes_quotes_returned_after_budget(
         123,
         amount_in=100,
         slippage_bps=50,
-        time_budget_ms=1,
+        time_budget_ms=1000,
         telemetry=telemetry,
     )
 
@@ -410,7 +410,17 @@ async def test_three_leg_route_evaluation_consumes_quotes_returned_after_budget(
     if slow_phase == "first":
         assert out == []
         assert telemetry["route_groups_evaluated"] == 0
+    elif slow_phase == "second":
+        # A completed second-leg result earns at most one bounded final-leg
+        # quote batch even when it returns just after the shared deadline.
+        # Later groups remain skipped; the global deadline is not extended.
+        assert len(out) >= 1
+        assert any(item.expected_profit_raw == "20" for item in out)
+        assert telemetry["route_groups_evaluated"] >= 1
+        assert telemetry["route_group_schedule"]["third_leg_quote_batches_completed"] >= 1
     else:
+        # A final-leg quote already dispatched before the deadline is retained
+        # even if it returns after the logical clock has crossed the deadline.
         assert len(out) >= 1
         assert any(item.expected_profit_raw == "20" for item in out)
         assert telemetry["route_groups_evaluated"] >= 1
@@ -981,4 +991,11 @@ async def test_three_leg_selected_chunk_uses_full_route_universe_for_cross_chunk
     assert telemetry["route_universe_edge_count"] == 3
     assert telemetry["route_universe"]["edges_by_dex"] == {"aerodrome": 1, "univ3": 2}
     assert telemetry["route_groups_evaluated"] >= 1
+    schedule = telemetry["route_group_schedule"]
+    assert schedule["third_leg_quote_batches_total"] >= 1
+    assert schedule["third_leg_quote_batches_unique"] >= 1
+    assert schedule["third_leg_quote_batches_completed"] >= 1
+    assert schedule["third_leg_quote_batches_cancelled"] == 0
+    assert schedule["third_leg_quote_batches_skipped_budget"] == 0
+    assert schedule["third_leg_quote_parallelism_limit"] <= 4
     assert any(item.expected_profit_raw == "40" for item in opportunities)
