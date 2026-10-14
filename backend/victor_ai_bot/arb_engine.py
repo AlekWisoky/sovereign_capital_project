@@ -3455,26 +3455,21 @@ async def find_three_leg_opportunities(
         triangle_quote_waves_started += 1
         triangle_second_leg_quote_batches_completed += int(physical_batches)
         triangle_coalesced_quote_batches += int(coalesced_batches)
+
+        # Discover all viable third-leg quote batches for this bounded group
+        # wave before awaiting them. The old nested loop awaited every third-leg
+        # batch serially, so one slow venue could consume the remaining deadline
+        # while independent cycles sat unquoted.
+        third_leg_jobs: List[Dict[str, Any]] = []
+        third_leg_requests: List[Tuple[int, List[Edge]]] = []
         for group, qmap2_3 in zip(wave, qmaps2):
-            e1 = group["e1"]
-            effective_amount_in = int(group["effective_amount_in"])
-            out1 = int(group["out1"])
-            meta1 = group["meta1"]
-            e2_cands = group["revs"]
             route_groups_evaluated += 1
-            final_leg_quote_batches = 0
-            for e2 in e2_cands:
-                # A delayed second-leg batch is already paid for. Let one
-                # viable cycle reach its final-leg quote, then stop starting
-                # further final-leg batches once the route budget is spent.
-                if final_leg_quote_batches > 0 and time.perf_counter() >= route_deadline:
-                    route_budget_exhausted = True
-                    break
+            e1 = group["e1"]
+            for e2 in group["revs"]:
                 q2 = qmap2_3.get(edge_key(e2))
                 if not q2:
                     continue
                 out2, meta2 = q2
-                # final leg must return to start
                 revs = by_pair.get((e2.token_out, e1.token_in), [])
                 if not revs:
                     continue
@@ -3483,18 +3478,56 @@ async def find_three_leg_opportunities(
                     if max_reverse_candidates not in (None, "")
                     else int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8)
                 )
-                max_reverse_candidates = max(
-                    3,
-                    min(12, int(configured_reverse_candidates)),
-                )
+                max_reverse_candidates = max(3, min(12, int(configured_reverse_candidates)))
                 e3_cands = list(revs[:max_reverse_candidates])
+                if not e3_cands:
+                    continue
                 metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
-                qmap3_3 = await quote_edges_batch(rpc, cfg, cache, e3_cands, out2, metrics=metrics)
-                triangle_third_leg_quote_batches_completed += 1
-                final_leg_quote_batches += 1
-                # Consume the complete returned batch. Do not discard an
-                # already-returned quote merely because the RPC crossed the
-                # budget while in flight; budget checks gate the next batch.
+                third_leg_jobs.append({
+                    "group": group,
+                    "e1": e1,
+                    "effective_amount_in": int(group["effective_amount_in"]),
+                    "out1": int(group["out1"]),
+                    "meta1": group["meta1"],
+                    "e2": e2,
+                    "out2": int(out2),
+                    "meta2": meta2,
+                    "e3_cands": e3_cands,
+                })
+                third_leg_requests.append((int(out2), e3_cands))
+
+        third_leg_quote_maps, third_leg_schedule = await _quote_edge_request_wave(
+            rpc,
+            cfg,
+            cache,
+            third_leg_requests,
+            deadline=route_deadline,
+            parallelism=triangle_route_parallelism,
+            metrics=metrics,
+        )
+        triangle_third_leg_quote_batches_completed += int(
+            third_leg_schedule["batches_completed"]
+        )
+        triangle_coalesced_quote_batches += int(third_leg_schedule["batches_coalesced"])
+        if (
+            third_leg_schedule["batches_cancelled"]
+            or third_leg_schedule["batches_skipped_budget"]
+            or time.perf_counter() >= route_deadline
+        ):
+            route_budget_exhausted = True
+
+        # Consume every completed or cache-recovered third-leg quote before
+        # stopping. Unfinished and uncached results remain absent.
+        for context, qmap3_3 in zip(third_leg_jobs, third_leg_quote_maps):
+            group = context["group"]
+            e1 = context["e1"]
+            effective_amount_in = context["effective_amount_in"]
+            out1 = context["out1"]
+            meta1 = context["meta1"]
+            e2 = context["e2"]
+            out2 = context["out2"]
+            meta2 = context["meta2"]
+            e3_cands = context["e3_cands"]
                 for e3 in e3_cands:
                     q3 = qmap3_3.get(edge_key(e3))
                     if not q3:
@@ -3720,8 +3753,6 @@ async def find_three_leg_opportunities(
                             },
                         )
                     )
-            if route_budget_exhausted:
-                break
         if route_budget_exhausted:
             break
         if (
