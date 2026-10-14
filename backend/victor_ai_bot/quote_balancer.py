@@ -30,14 +30,20 @@ def _is_hex_payload(value: str) -> bool:
     return len(value) >= 10 and all(ch in "0123456789abcdefABCDEF" for ch in value[2:])
 
 
+def _leading_hex_payload(stripped: str) -> str | None:
+    if not stripped.startswith("0x"):
+        return None
+    candidate = stripped.split()[0].rstrip(",;")
+    return candidate if _is_hex_payload(candidate) else None
+
+
 def _iter_text_hex_payloads(value: str) -> Iterator[str]:
     """Extract bounded hex candidates from a provider message or raw string."""
     text = value[:8192]
     stripped = text.strip().strip("\\'\" ,;")
-    if stripped.startswith("0x"):
-        candidate = stripped.split()[0].rstrip(",;")
-        if _is_hex_payload(candidate):
-            yield candidate
+    candidate = _leading_hex_payload(stripped)
+    if candidate is not None:
+        yield candidate
     yielded = 0
     for match in re.finditer(r"0x[0-9a-fA-F]{8,}", text):
         candidate = match.group(0)
