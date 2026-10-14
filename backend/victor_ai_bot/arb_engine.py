@@ -2201,6 +2201,138 @@ async def _quote_edge_groups_in_bounded_waves(
         "ordering": "route_potential_priority_then_block_rotated",
     }
 
+async def _quote_edge_request_wave(
+    rpc: Any,
+    cfg: Any,
+    cache: PerBlockCache,
+    requests: Sequence[Tuple[int, List[Edge]]],
+    *,
+    deadline: float,
+    parallelism: int,
+    metrics: Dict[str, Any],
+) -> tuple[List[Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, int]]:
+    """Run distinct quote batches under one absolute deadline and retain completed evidence."""
+    normalized = [(int(amount), list(edges)) for amount, edges in requests]
+    signatures: List[Tuple[int, Tuple[str, ...]]] = []
+    unique_requests: Dict[Tuple[int, Tuple[str, ...]], Tuple[int, List[Edge]]] = {}
+    for amount, edges in normalized:
+        signature = (amount, tuple(sorted(edge_key(edge) for edge in edges)))
+        signatures.append(signature)
+        unique_requests.setdefault(signature, (amount, edges))
+
+    unique_signatures = list(unique_requests)
+    unique_results: Dict[
+        Tuple[int, Tuple[str, ...]],
+        Dict[str, Optional[Tuple[int, Dict[str, Any]]]],
+    ] = {}
+    limit = max(1, min(4, int(parallelism)))
+    completed = failed = cancelled = skipped = waves = 0
+    recovered_cancelled = recovered_skipped = 0
+
+    def recover_cached(amount: int, edges: Sequence[Edge]) -> Dict[str, Optional[Tuple[int, Dict[str, Any]]]]:
+        recovered: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+        for edge in edges:
+            try:
+                value = cache.get(_edge_quote_cache_key(edge, amount))
+            except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                value = None
+            if value is not None:
+                recovered[edge_key(edge)] = value
+        return recovered
+
+    def add_metric(key: str, count: int) -> None:
+        metrics[key] = max(0, int(metrics.get(key, 0) or 0)) + max(0, int(count))
+
+    cursor = 0
+    while cursor < len(unique_signatures):
+        if time.perf_counter() >= deadline:
+            remaining = unique_signatures[cursor:]
+            skipped += len(remaining)
+            for signature in remaining:
+                amount, edges = unique_requests[signature]
+                result = recover_cached(amount, edges)
+                unique_results[signature] = result
+                recovered_skipped += len(result)
+            break
+
+        wave_signatures = unique_signatures[cursor:cursor + limit]
+        tasks: List[asyncio.Task] = []
+        task_context: Dict[asyncio.Task, Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]] = {}
+        for signature in wave_signatures:
+            amount, edges = unique_requests[signature]
+            task = asyncio.create_task(
+                quote_edges_batch(rpc, cfg, cache, edges, amount, metrics=metrics)
+            )
+            tasks.append(task)
+            task_context[task] = (signature, amount, edges)
+
+        done, pending = await _wait_for_quote_tasks_until_deadline(tasks, deadline=deadline)
+        waves += 1
+        for task in tasks:
+            if task not in done:
+                continue
+            signature, amount, edges = task_context[task]
+            if task.cancelled():
+                cancelled += 1
+                result = recover_cached(amount, edges)
+                unique_results[signature] = result
+                recovered_cancelled += len(result)
+                continue
+            error = task.exception()
+            if error is not None:
+                if isinstance(error, Exception):
+                    failed += 1
+                    unique_results[signature] = {}
+                    continue
+                raise error
+            unique_results[signature] = dict(task.result() or {})
+            completed += 1
+
+        for task in pending:
+            signature, amount, edges = task_context[task]
+            cancelled += 1
+            result = recover_cached(amount, edges)
+            unique_results[signature] = result
+            recovered_cancelled += len(result)
+
+        cursor += len(wave_signatures)
+        if pending:
+            remaining = unique_signatures[cursor:]
+            skipped += len(remaining)
+            for signature in remaining:
+                amount, edges = unique_requests[signature]
+                result = recover_cached(amount, edges)
+                unique_results[signature] = result
+                recovered_skipped += len(result)
+            break
+
+    coalesced = max(0, len(normalized) - len(unique_requests))
+    counters = {
+        "unique_batches": len(unique_requests),
+        "batches_completed": completed,
+        "batches_failed": failed,
+        "batches_cancelled": cancelled,
+        "batches_skipped_budget": skipped,
+        "batches_coalesced": coalesced,
+        "waves_started": waves,
+        "parallelism_limit": limit,
+        "edges_recovered_after_cancellation": recovered_cancelled,
+        "edges_recovered_from_cache_when_skipped": recovered_skipped,
+    }
+    for key, value in (
+        ("route_group_quote_batches_completed", completed),
+        ("route_group_quote_batches_failed", failed),
+        ("route_group_quote_batches_cancelled", cancelled),
+        ("route_group_quote_batches_skipped_budget", skipped),
+        ("route_group_quote_batches_coalesced", coalesced),
+        ("route_group_quote_waves_started", waves),
+        ("route_group_quote_edges_recovered_after_cancellation", recovered_cancelled),
+        ("route_group_quote_edges_recovered_from_cache_when_skipped", recovered_skipped),
+    ):
+        add_metric(key, value)
+    return [unique_results.get(signature, {}) for signature in signatures], counters
+
+
 async def _quote_two_leg_route_group_wave(
     rpc: Any,
     cfg: Any,
@@ -2208,31 +2340,35 @@ async def _quote_two_leg_route_group_wave(
     groups: Sequence[Mapping[str, Any]],
     *,
     metrics: Dict[str, Any],
+    deadline: float | None = None,
 ) -> tuple[List[Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], int, int]:
-    """Quote a bounded wave once per distinct amount/edge-set signature."""
-    unique_by_signature: Dict[Tuple[int, Tuple[str, ...]], Mapping[str, Any]] = {}
-    signatures: List[Tuple[int, Tuple[str, ...]]] = []
-    for group in groups:
-        signature = (
-            int(group["out1"]),
-            tuple(sorted(edge_key(edge) for edge in group["revs"])),
+    """Quote a bounded group wave, coalescing duplicates and honoring a route deadline."""
+    requests = [(int(group["out1"]), list(group["revs"])) for group in groups]
+    if deadline is None:
+        unique_by_signature: Dict[Tuple[int, Tuple[str, ...]], Tuple[int, List[Edge]]] = {}
+        signatures: List[Tuple[int, Tuple[str, ...]]] = []
+        for amount, edges in requests:
+            signature = (amount, tuple(sorted(edge_key(edge) for edge in edges)))
+            signatures.append(signature)
+            unique_by_signature.setdefault(signature, (amount, edges))
+        unique_results = await asyncio.gather(*(
+            quote_edges_batch(rpc, cfg, cache, edges, amount, metrics=metrics)
+            for amount, edges in unique_by_signature.values()
+        ))
+        result_by_signature = dict(zip(unique_by_signature.keys(), unique_results))
+        return (
+            [result_by_signature[signature] for signature in signatures],
+            len(unique_by_signature),
+            len(requests) - len(unique_by_signature),
         )
-        signatures.append(signature)
-        unique_by_signature.setdefault(signature, group)
 
-    unique_groups = list(unique_by_signature.values())
-    unique_results = await asyncio.gather(*(
-        quote_edges_batch(
-            rpc, cfg, cache, group["revs"], int(group["out1"]), metrics=metrics
-        )
-        for group in unique_groups
-    ))
-    result_by_signature = dict(zip(unique_by_signature.keys(), unique_results))
-    return (
-        [result_by_signature[signature] for signature in signatures],
-        len(unique_groups),
-        len(groups) - len(unique_groups),
+    quote_maps, schedule = await _quote_edge_request_wave(
+        rpc, cfg, cache, requests,
+        deadline=float(deadline),
+        parallelism=_route_group_parallelism(),
+        metrics=metrics,
     )
+    return quote_maps, int(schedule["batches_completed"]), int(schedule["batches_coalesced"])
 
 
 @dataclass
