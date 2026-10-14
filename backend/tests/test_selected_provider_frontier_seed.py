@@ -18,6 +18,33 @@ from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
 )
 
 
+def test_frontier_seed_timeout_covers_inner_route_budget():
+    resolver = RuntimePrimaryScanFacade._selected_provider_frontier_seed_timeout_s
+
+    # The default 8s override was below the 9s route scan budget; with a bounded
+    # 10s seed budget the effective timeout must cover the inner pass plus cushion.
+    assert resolver(
+        selection_timeout_s=35.0,
+        seed_budget_s=10.0,
+        configured_timeout_s=8.0,
+        route_budget_ms=9_000,
+    ) == 9.25
+
+    # Global selection and seed deadlines remain hard caps.
+    assert resolver(
+        selection_timeout_s=7.0,
+        seed_budget_s=10.0,
+        configured_timeout_s=8.0,
+        route_budget_ms=9_000,
+    ) == 7.0
+    assert resolver(
+        selection_timeout_s=35.0,
+        seed_budget_s=8.0,
+        configured_timeout_s=8.0,
+        route_budget_ms=9_000,
+    ) == 8.0
+
+
 def test_route_evaluation_budget_is_bounded_configurable_and_split(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     name = "VICTOR_ROUTE_EVALUATION_BUDGET_MS"
