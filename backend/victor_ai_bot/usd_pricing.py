@@ -213,30 +213,49 @@ async def gas_wei_to_token_wei(
     block_number: int,
     cache: PerBlockCache | None = None,
 ) -> Optional[int]:
-    """Convert native gas cost (wei) -> token_out units via WETH->token_out quote.
-
-    This is used to compute realized profit-after-gas in *profit token units*.
-    """
-
+    """Convert gas cost to profit-token units using same-block quote evidence."""
     weth = _norm_addr(getattr(chain, "weth", "") or "")
     out_tok = _norm_addr(token_out)
     if not weth or not out_tok:
         return None
+    try:
+        gas_amount = int(gas_cost_wei)
+        block_number = int(block_number)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if gas_amount <= 0 or block_number < 0:
+        return None
     if out_tok == weth:
-        return int(gas_cost_wei)
+        return gas_amount
 
     quoter_v2 = getattr(chain, "univ3_quoter_v2", "") or ""
     if not quoter_v2:
         return None
-
-    block_tag = hex(int(block_number))
-    out = await _quote_best_univ3_out(
-        rpc,
-        quoter_v2=str(quoter_v2),
-        token_in=weth,
-        token_out=out_tok,
-        amount_in=int(gas_cost_wei),
-        block_tag=block_tag,
-        cache=cache,
+    block_tag = hex(block_number)
+    direct = await _quote_best_univ3_out(
+        rpc, quoter_v2=str(quoter_v2), token_in=weth, token_out=out_tok,
+        amount_in=gas_amount, block_tag=block_tag, cache=cache,
     )
-    return int(out) if out is not None else None
+    if direct is not None and int(direct) > 0:
+        return int(direct)
+
+    # Bound the fallback to two configured stable bridges; require both quotes.
+    bridges: list[str] = []
+    for key in ("usdc", "usdt"):
+        stable = _norm_addr(getattr(chain, key, "") or "")
+        if stable and stable not in bridges and stable not in {weth, out_tok}:
+            bridges.append(stable)
+    for stable in bridges:
+        stable_amount = await _quote_best_univ3_out(
+            rpc, quoter_v2=str(quoter_v2), token_in=weth, token_out=stable,
+            amount_in=gas_amount, block_tag=block_tag, cache=cache,
+        )
+        if stable_amount is None or int(stable_amount) <= 0:
+            continue
+        converted = await _quote_best_univ3_out(
+            rpc, quoter_v2=str(quoter_v2), token_in=stable, token_out=out_tok,
+            amount_in=int(stable_amount), block_tag=block_tag, cache=cache,
+        )
+        if converted is not None and int(converted) > 0:
+            return int(converted)
+    return None
