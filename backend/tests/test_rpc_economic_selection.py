@@ -716,6 +716,8 @@ async def test_canonical_after_fee_usd_preserves_negative_observed_economics(mon
                 "profit_after_costs_wei": "-250",
                 "gas_cost_wei": "0",
                 "gas_cost_profit_token_wei": "0",
+                "gas_cost_conversion_available": True,
+                "gas_cost_profit_token_address": "0xprofit",
                 "flashloan_fee_wei": "0",
             },
             "venues": ["univ3"],
