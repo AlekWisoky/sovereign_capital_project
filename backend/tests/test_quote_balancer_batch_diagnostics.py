@@ -6,6 +6,7 @@ from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_balancer import (
     BalancerQuote,
     build_balancer_query_batchswap_calldata,
+    classify_balancer_quote_error,
     quote_balancer_given_in,
     quote_balancer_given_in_many,
 )
@@ -198,3 +199,54 @@ async def test_single_balancer_quote_invalid_request_is_local_failure():
 
     assert quote is None
     assert diagnostics["failure_reasons"] == {"invalid_balancer_request": 1}
+
+
+def _error_string_revert(reason: str) -> str:
+    raw = reason.encode("utf-8")
+    padded = raw + (b"\x00" * ((32 - len(raw) % 32) % 32))
+    payload = (
+        (32).to_bytes(32, "big")
+        + len(raw).to_bytes(32, "big")
+        + padded
+    )
+    return "0x08c379a0" + payload.hex()
+
+
+def test_balancer_revert_classifier_extracts_nested_balancer_codes():
+    assert classify_balancer_quote_error({
+        "code": -32000,
+        "message": "execution reverted: BAL#520",
+    }) == "balancer_tokens_mismatch"
+
+    # Some providers put only the Solidity Error(string) bytes in error.data.
+    assert classify_balancer_quote_error({
+        "code": -32000,
+        "message": "execution reverted",
+        "data": _error_string_revert("BAL#500"),
+    }) == "balancer_invalid_pool_id"
+
+    assert classify_balancer_quote_error({
+        "code": -32000,
+        "message": "execution reverted: an unknown pool error",
+    }) == "rpc_revert"
+
+
+@pytest.mark.asyncio
+async def test_balancer_batch_quote_publishes_specific_revert_reason():
+    rpc = _BatchRpc([
+        RpcResult(False, error={
+            "code": -32000,
+            "message": "execution reverted: BAL#521",
+        })
+    ])
+    diagnostics = {}
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {"balancer_token_not_registered": 1}
