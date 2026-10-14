@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
+import re
+from typing import Any, Optional
 from .rpc import JsonRpcClient
 from .quote_diagnostics import classify_quote_error, record_quote_failure, record_quote_parse_failure
 from .ethabi import (
@@ -18,6 +19,71 @@ _SIG = "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[]
 @dataclass
 class BalancerQuote:
     amount_out: int
+
+
+_BALANCER_REVERT_LABELS = {
+    500: "balancer_invalid_pool_id",
+    520: "balancer_tokens_mismatch",
+    521: "balancer_token_not_registered",
+    527: "balancer_pool_no_tokens",
+}
+
+
+def _decode_balancer_error_string(value: str) -> str:
+    """Decode a bounded Solidity Error(string) payload; ignore other selectors."""
+    if not isinstance(value, str):
+        return ""
+    payload = value[2:] if value.startswith("0x") else value
+    if len(payload) < 8 + 64 or len(payload) % 2:
+        return ""
+    try:
+        raw = bytes.fromhex(payload)
+    except ValueError:
+        return ""
+    if raw[:4] != bytes.fromhex("08c379a0") or len(raw) < 4 + 64:
+        return ""
+    body = raw[4:]
+    offset = int.from_bytes(body[:32], "big")
+    if offset != 32 or len(body) < offset + 32:
+        return ""
+    size = int.from_bytes(body[offset:offset + 32], "big")
+    if size > 512 or len(body) < offset + 32 + size:
+        return ""
+    return body[offset + 32:offset + 32 + size].decode("utf-8", errors="replace")
+
+
+def _balancer_error_text(error: Any, *, depth: int = 0) -> str:
+    """Extract bounded message/revert text from a JSON-RPC error object."""
+    if depth > 3:
+        return ""
+    if isinstance(error, str):
+        decoded = _decode_balancer_error_string(error)
+        return " ".join((error[:512], decoded[:512])).strip()
+    if isinstance(error, dict):
+        fragments = []
+        for key in ("message", "data", "originalError", "error", "cause"):
+            value = error.get(key)
+            if isinstance(value, (str, dict)):
+                fragment = _balancer_error_text(value, depth=depth + 1)
+                if fragment:
+                    fragments.append(fragment)
+        return " ".join(fragments)[:2048]
+    if isinstance(error, (list, tuple)):
+        return " ".join(
+            _balancer_error_text(item, depth=depth + 1)
+            for item in list(error)[:3]
+        )[:2048]
+    return ""
+
+
+def classify_balancer_quote_error(error: Any) -> str:
+    """Classify known Vault reverts without publishing raw provider payloads."""
+    text = _balancer_error_text(error)
+    match = re.search(r"\bBAL#([0-9]{3})\b", text, flags=re.IGNORECASE)
+    if match:
+        code = int(match.group(1))
+        return _BALANCER_REVERT_LABELS.get(code, f"balancer_revert_code_{code:03d}")
+    return classify_quote_error(error)
 
 
 def _decode_balancer_swap_deltas(hex_result: str) -> list[int]:
@@ -71,7 +137,7 @@ async def quote_balancer_given_in(
         return None
     r = await rpc.eth_call(vault, data)
     if not r.ok:
-        record_quote_failure(diagnostics, classify_quote_error(r.error))
+        record_quote_failure(diagnostics, classify_balancer_quote_error(r.error))
         return None
     if not isinstance(r.result, str):
         record_quote_parse_failure(diagnostics, "invalid_rpc_result")
@@ -197,7 +263,7 @@ async def quote_balancer_given_in_many(
             continue
         rr = results[position]
         if not rr.ok:
-            record_quote_failure(diagnostics, classify_quote_error(rr.error))
+            record_quote_failure(diagnostics, classify_balancer_quote_error(rr.error))
             continue
         if not isinstance(rr.result, str):
             record_quote_parse_failure(diagnostics, "invalid_rpc_result")
