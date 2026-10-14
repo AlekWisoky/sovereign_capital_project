@@ -172,6 +172,7 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         'cancelled': 0,
         'failure_reasons': {},
         'quote_failure_reasons_by_adapter': {},
+        'quote_query_revert_decoded': 0,
         'quote_attempts_by_family': {},
         'quote_network_requests_by_family': {},
         'quote_successes_by_family': {},
