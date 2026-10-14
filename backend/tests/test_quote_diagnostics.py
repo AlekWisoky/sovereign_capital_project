@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb
+from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_diagnostics import classify_quote_error, record_quote_failure
 
 
