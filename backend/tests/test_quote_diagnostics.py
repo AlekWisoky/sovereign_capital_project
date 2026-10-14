@@ -213,6 +213,10 @@ async def test_one_venue_batch_failure_does_not_abort_later_families(monkeypatch
     }
     assert metrics["quote_failure_reasons"]["quote_batch_exception_aerodrome"] == 1
     assert metrics["quote_failure_reasons"]["quote_batch_missing_results_slipstream"] == 1
+    assert metrics["quote_failure_reasons_by_adapter"] == {
+        "aerodrome": {"quote_batch_exception_aerodrome": 1},
+        "slipstream": {"quote_batch_missing_results_slipstream": 1},
+    }
 
 
 @pytest.mark.asyncio
