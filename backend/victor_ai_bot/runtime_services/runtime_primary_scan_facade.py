@@ -772,6 +772,7 @@ def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]
         and state.get("valid") is True
         and state.get("repayment_valid") is True
         and state.get("gas_cost_conversion_available") is True
+        and state.get("gas_cost_conversion_available") is True
         and state.get("gas_cost_profit_token_wei") not in (None, "")
         and canonical_after_cost > 0
     )
@@ -883,7 +884,8 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     legs, amount_in_value = _candidate_route_snapshot(candidate)
     fields = _candidate_economic_fields(candidate, meta, profitability, amount_in_value)
     gas_conversion_available = bool(
-        profitability.get("gas_cost_profit_token_wei") not in (None, "")
+        profitability.get("gas_cost_conversion_available") is True
+        and profitability.get("gas_cost_profit_token_wei") not in (None, "")
         and int(fields["gas_cost_profit_token_wei"]) > 0
     )
     economic_unknown = not gas_conversion_available
