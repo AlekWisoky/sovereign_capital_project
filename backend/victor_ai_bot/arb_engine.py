@@ -2235,6 +2235,110 @@ async def _quote_two_leg_route_group_wave(
     )
 
 
+async def _quote_edge_jobs_in_bounded_waves(
+    rpc: Any,
+    cfg: Any,
+    cache: PerBlockCache,
+    jobs: Sequence[Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]],
+    *,
+    deadline: float,
+    parallelism: int,
+    metrics: Dict[str, Any],
+) -> tuple[Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, Any]]:
+    """Run distinct amount/edge-set quote jobs in bounded waves under one deadline.
+
+    Completed maps are retained. If a job is cancelled mid-adapter-batch, only
+    successful cache entries for its exact edge+amount pairs are recovered;
+    missing/in-flight quotes remain absent. The signature lets callers safely
+    coalesce identical requests without conflating different input notionals.
+    """
+    ordered = list(jobs)
+    limit = max(1, min(4, int(parallelism)))
+    results: Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]] = {}
+    completed = failed = cancelled = skipped = waves = recovered = 0
+    cursor = 0
+
+    while cursor < len(ordered):
+        if time.perf_counter() >= deadline:
+            skipped += len(ordered) - cursor
+            break
+        wave = ordered[cursor:cursor + limit]
+        tasks: List[asyncio.Task] = []
+        task_jobs: Dict[asyncio.Task, Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]] = {}
+        for job in wave:
+            signature, amount_in, edges = job
+            task = asyncio.create_task(
+                quote_edges_batch(
+                    rpc, cfg, cache, edges, int(amount_in), metrics=metrics
+                )
+            )
+            tasks.append(task)
+            task_jobs[task] = job
+
+        done, pending = await _wait_for_quote_tasks_until_deadline(
+            tasks,
+            deadline=deadline,
+        )
+        waves += 1
+        for task in tasks:
+            if task not in done:
+                continue
+            if task.cancelled():
+                failed += 1
+                continue
+            error = task.exception()
+            if error is not None:
+                failed += 1
+                continue
+            signature, _amount_in, _edges = task_jobs[task]
+            results[signature] = dict(task.result() or {})
+            completed += 1
+
+        if pending:
+            cancelled += len(pending)
+            for task in pending:
+                signature, amount_in, edges = task_jobs[task]
+                partial: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+                for edge in edges:
+                    try:
+                        cached = cache.get(_edge_quote_cache_key(edge, int(amount_in)))
+                    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                        cached = None
+                    if (
+                        isinstance(cached, tuple)
+                        and len(cached) >= 2
+                        and isinstance(cached[1], dict)
+                    ):
+                        try:
+                            positive_output = int(cached[0]) > 0
+                        except (TypeError, ValueError, OverflowError):
+                            positive_output = False
+                        if positive_output:
+                            partial[edge_key(edge)] = (int(cached[0]), dict(cached[1]))
+                if partial:
+                    results[signature] = partial
+                    recovered += len(partial)
+        cursor += len(wave)
+        if pending:
+            skipped += len(ordered) - cursor
+            break
+
+    deadline_exceeded = bool(
+        ordered and (cancelled > 0 or skipped > 0 or time.perf_counter() >= deadline)
+    )
+    return results, {
+        "batches_total": int(len(ordered)),
+        "batches_completed": int(completed),
+        "batches_failed": int(failed),
+        "batches_cancelled": int(cancelled),
+        "batches_skipped_budget": int(skipped),
+        "waves_started": int(waves),
+        "parallelism_limit": int(limit),
+        "partial_quote_edges_recovered_after_cancellation": int(recovered),
+        "deadline_exceeded": deadline_exceeded,
+    }
+
+
 @dataclass
 class _TwoLegRouteProcessingContext:
     cfg: Any
