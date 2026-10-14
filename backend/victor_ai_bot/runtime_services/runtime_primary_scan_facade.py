@@ -3062,8 +3062,10 @@ class RuntimePrimaryScanFacade:
                 (time.perf_counter() - scan_started) * 1000.0
             )
             telemetry["scan_status"] = "completed"
+            completed_quote_requests = max(0, requests - cancelled)
             telemetry["quote_success_rate"] = (
-                float(successes) / float(requests) if requests else 0.0
+                float(successes) / float(completed_quote_requests)
+                if completed_quote_requests else 0.0
             )
             rpc_url = str(getattr(rpc, "url", "") or "")
             rpc_host = str(urlsplit(rpc_url).hostname or "") if rpc_url else ""
