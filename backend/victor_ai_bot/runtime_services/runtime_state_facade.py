@@ -378,6 +378,9 @@ class RuntimeStateFacade:
                     if completed_requests else 0.0
                 ),
                 "failure_reasons": dict(quotes.get("failure_reasons") or {}),
+                "failure_reasons_by_adapter": dict(
+                    quotes.get("quote_failure_reasons_by_adapter") or {}
+                ),
                 "quote_attempts_by_family": dict(quotes.get("quote_attempts_by_family") or {}),
                 "quote_network_requests_by_family": dict(quotes.get("quote_network_requests_by_family") or {}),
                 "quote_successes_by_family": dict(quotes.get("quote_successes_by_family") or {}),

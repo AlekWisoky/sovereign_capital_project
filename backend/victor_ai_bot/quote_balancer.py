@@ -30,42 +30,13 @@ async def quote_balancer_given_in(
     amount_in: int,
     diagnostics: dict | None = None,
 ) -> Optional[BalancerQuote]:
-    kind = 0  # GIVEN_IN
-    pool_id = bytes.fromhex(pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32)
-    pool_id = pool_id.ljust(32, b"\x00")[:32]
-
-    step_head = b"".join(
-        [
-            enc_bytes32(pool_id),
-            enc_uint(0),
-            enc_uint(1),
-            enc_uint(amount_in),
-            enc_uint(32 * 5),
-        ]
+    data = build_balancer_query_batchswap_calldata(
+        pool_id_hex32,
+        token_in,
+        token_out,
+        int(amount_in),
     )
-    user_data = enc_bytes_dyn(b"")
-    step = step_head + user_data
-    swaps = enc_uint(1) + step
-
-    assets = enc_uint(2) + enc_address(token_in) + enc_address(token_out)
-    funds = (
-        enc_address("0x0000000000000000000000000000000000000000")
-        + enc_bool(False)
-        + enc_address("0x0000000000000000000000000000000000000000")
-        + enc_bool(False)
-    )
-
-    head = b"".join(
-        [
-            enc_uint(kind),
-            enc_uint(32 * 4),
-            enc_uint(32 * 4 + len(swaps)),
-            enc_uint(32 * 4 + len(swaps) + len(assets)),
-        ]
-    )
-    data = selector(_SIG) + head + swaps + assets + funds
-
-    r = await rpc.eth_call(vault, "0x" + data.hex())
+    r = await rpc.eth_call(vault, data)
     if not r.ok:
         record_quote_failure(diagnostics, classify_quote_error(r.error))
         return None
@@ -90,13 +61,25 @@ async def quote_balancer_given_in(
 def build_balancer_query_batchswap_calldata(
     pool_id_hex32: str, token_in: str, token_out: str, amount_in: int
 ) -> str:
+    """ABI-encode a one-step queryBatchSwap(GIVEN_IN) call.
+
+    BatchSwapStep[] contains a tuple with dynamic bytes, so the array needs an
+    element-offset word before the tuple body. FundManagement is a static tuple,
+    so its four words belong inline in the top-level head, not in a dynamic tail.
+    ABI offsets are relative to the start of the argument block (after selector).
+    """
     kind = 0  # GIVEN_IN
-    pool_id = bytes.fromhex(pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32)
-    pool_id = pool_id.ljust(32, b"\x00")[:32]
+    raw_pool_id = bytes.fromhex(
+        pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32
+    )
+    if len(raw_pool_id) != 32:
+        raise ValueError("Balancer pool id must be exactly 32 bytes")
+    if int(amount_in) <= 0:
+        raise ValueError("Balancer quote amount must be positive")
 
     step_head = b"".join(
         [
-            enc_bytes32(pool_id),
+            enc_bytes32(raw_pool_id),
             enc_uint(0),
             enc_uint(1),
             enc_uint(int(amount_in)),
@@ -105,25 +88,33 @@ def build_balancer_query_batchswap_calldata(
     )
     user_data = enc_bytes_dyn(b"")
     step = step_head + user_data
-    swaps = enc_uint(1) + step
 
+    # A dynamic array of dynamic tuple elements encodes the length, an array
+    # of offsets (relative to the element-head area after the length), then
+    # the tuple bodies. The one tuple starts 32 bytes after that area.
+    swaps = enc_uint(1) + enc_uint(32) + step
     assets = enc_uint(2) + enc_address(token_in) + enc_address(token_out)
+
+    zero_address = "0x0000000000000000000000000000000000000000"
     funds = (
-        enc_address("0x0000000000000000000000000000000000000000")
+        enc_address(zero_address)
         + enc_bool(False)
-        + enc_address("0x0000000000000000000000000000000000000000")
+        + enc_address(zero_address)
         + enc_bool(False)
     )
 
-    head = b"".join(
-        [
-            enc_uint(kind),
-            enc_uint(32 * 4),
-            enc_uint(32 * 4 + len(swaps)),
-            enc_uint(32 * 4 + len(swaps) + len(assets)),
-        ]
+    # The static FundManagement tuple expands to four head words. The full
+    # top-level head is 7 words: kind, swaps offset, assets offset, and funds.
+    head_size = 32 * 7
+    swaps_offset = head_size
+    assets_offset = swaps_offset + len(swaps)
+    head = (
+        enc_uint(kind)
+        + enc_uint(swaps_offset)
+        + enc_uint(assets_offset)
+        + funds
     )
-    data = selector(_SIG) + head + swaps + assets + funds
+    data = selector(_SIG) + head + swaps + assets
     return "0x" + data.hex()
 
 
@@ -150,30 +141,39 @@ async def quote_balancer_given_in_many(
 ) -> list[Optional[BalancerQuote]]:
     """Batch Balancer queryBatchSwap GIVEN_IN quotes.
 
-    Each req: (pool_id_hex32, token_in, token_out, amount_in)
+    Each req: (pool_id_hex32, token_in, token_out, amount_in). A malformed
+    request fails locally in its own slot and does not abort valid siblings.
     """
     if not reqs:
         return []
+    out: list[Optional[BalancerQuote]] = [None] * len(reqs)
     calls = []
-    for pool_id, token_in, token_out, amount_in in reqs:
-        calls.append(
-            {
-                "to": vault,
-                "data": build_balancer_query_batchswap_calldata(
-                    pool_id, token_in, token_out, int(amount_in)
-                ),
-            }
-        )
+    valid_indices: list[int] = []
+    for index, (pool_id, token_in, token_out, amount_in) in enumerate(reqs):
+        try:
+            data = build_balancer_query_batchswap_calldata(
+                pool_id, token_in, token_out, int(amount_in)
+            )
+        except (TypeError, ValueError, OverflowError):
+            record_quote_parse_failure(diagnostics, "invalid_balancer_request")
+            continue
+        calls.append({"to": vault, "data": data})
+        valid_indices.append(index)
+
+    if not calls:
+        return out
+
     results = await rpc.eth_call_batch(calls)
-    out: list[Optional[BalancerQuote]] = []
-    for rr in results:
+    for position, request_index in enumerate(valid_indices):
+        if position >= len(results):
+            record_quote_parse_failure(diagnostics, "missing_rpc_batch_result")
+            continue
+        rr = results[position]
         if not rr.ok:
             record_quote_failure(diagnostics, classify_quote_error(rr.error))
-            out.append(None)
             continue
         if not isinstance(rr.result, str):
             record_quote_parse_failure(diagnostics, "invalid_rpc_result")
-            out.append(None)
             continue
         try:
             amt = parse_balancer_query_result(rr.result)
@@ -181,5 +181,9 @@ async def quote_balancer_given_in_many(
             amt = None
         if amt is None:
             record_quote_parse_failure(diagnostics, "invalid_quote_result")
-        out.append(BalancerQuote(amount_out=amt) if amt is not None else None)
+            continue
+        out[request_index] = BalancerQuote(amount_out=amt)
+
+    if len(results) > len(valid_indices):
+        record_quote_parse_failure(diagnostics, "unexpected_rpc_batch_result")
     return out

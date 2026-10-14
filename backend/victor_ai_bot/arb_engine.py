@@ -9,7 +9,11 @@ from .cache import PerBlockCache
 from .models import Opportunity, Route, RouteLeg
 from .quote_univ3 import quote_exact_input_single, quote_exact_input_single_batch
 from .quote_curve import quote_curve, quote_curve_many
-from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_many
+from .quote_balancer import (
+    build_balancer_query_batchswap_calldata,
+    quote_balancer_given_in,
+    quote_balancer_given_in_many,
+)
 from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
 from .quote_slipstream import quote_slipstream, quote_slipstream_many
 from .quote_camelot_algebra import quote_camelot_algebra, quote_camelot_algebra_many
@@ -758,6 +762,7 @@ async def quote_edges_batch(
     quote_diagnostics: Dict[str, Any] = {}
     batch_successes = 0
     metrics.setdefault("quote_failure_reasons", {})
+    metrics.setdefault("quote_failure_reasons_by_adapter", {})
     for metric_name in (
         "quote_attempts_by_family",
         "quote_network_requests_by_family",
@@ -833,6 +838,39 @@ async def quote_edges_batch(
         if len(samples) < 256:
             samples.append(edge_key(edge))
 
+    # Validate Balancer request payloads before marking the batch as dispatched.
+    # A malformed pool ID/token pair is a local quote failure, not an RPC
+    # network request, and must not abort valid Balancer siblings.
+    local_validation_failures = 0
+    valid_balancer: List[Tuple[int, Edge]] = []
+    for index, edge in missing_bal:
+        try:
+            build_balancer_query_batchswap_calldata(
+                str(edge.params.get("pool_id") or ""),
+                str(edge.token_in),
+                str(edge.token_out),
+                int(amount_in),
+            )
+        except (TypeError, ValueError, OverflowError):
+            local_validation_failures += 1
+            _increment_family_metric("quote_attempts_by_family", edge)
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0) or 0) + 1
+            _record_failed_edge(edge)
+            out[edge_key(edge)] = None
+            quote_diagnostics.setdefault("failure_reasons", {})
+            reasons = quote_diagnostics["failure_reasons"]
+            reasons["invalid_balancer_request"] = int(
+                reasons.get("invalid_balancer_request", 0) or 0
+            ) + 1
+            reasons_by_adapter = metrics.setdefault("quote_failure_reasons_by_adapter", {})
+            adapter_reasons = reasons_by_adapter.setdefault("balancer", {})
+            adapter_reasons["invalid_balancer_request"] = int(
+                adapter_reasons.get("invalid_balancer_request", 0) or 0
+            ) + 1
+            continue
+        valid_balancer.append((index, edge))
+    missing_bal = valid_balancer
+
     def _merge_partial_quote_diagnostics(*, include_adapter_unavailable: bool) -> None:
         accumulated = {
             str(key): max(0, int(value or 0))
@@ -845,6 +883,28 @@ async def quote_edges_batch(
                 accumulated.get("quote_adapter_unavailable", 0) + adapter_unavailable_count
             )
         metrics["quote_failure_reasons"] = accumulated
+
+    def _record_adapter_failure_reasons(
+        adapter: str,
+        before: Mapping[str, Any],
+    ) -> None:
+        current = dict(quote_diagnostics.get("failure_reasons") or {})
+        adapter_name = str(adapter or "unknown").strip().lower()[:64] or "unknown"
+        deltas: Dict[str, int] = {}
+        for reason, raw_count in current.items():
+            try:
+                delta = max(0, int(raw_count or 0) - int(before.get(reason, 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if delta:
+                key = str(reason or "unknown")[:96]
+                deltas[key] = deltas.get(key, 0) + delta
+        if not deltas:
+            return
+        by_adapter = metrics.setdefault("quote_failure_reasons_by_adapter", {})
+        target = by_adapter.setdefault(adapter_name, {})
+        for reason, delta in deltas.items():
+            target[reason] = int(target.get(reason, 0) or 0) + int(delta)
 
     async def _run_quote_family_batch(
         family: str,
@@ -860,9 +920,11 @@ async def quote_edges_batch(
         metrics["quote_requests"] = int(metrics.get("quote_requests", 0) or 0) + len(family_edges)
         if family_edges:
             metrics["network_batches"] = int(metrics.get("network_batches", 0) or 0) + 1
+        before_reasons = dict(quote_diagnostics.get("failure_reasons") or {})
         try:
-            return await quote_call
+            result = await quote_call
         except asyncio.CancelledError:
+            _record_adapter_failure_reasons(family, before_reasons)
             for edge in family_edges:
                 _increment_family_metric("quote_cancelled_by_family", edge)
             metrics["quote_cancelled"] = int(metrics.get("quote_cancelled", 0) or 0) + len(family_edges)
@@ -870,6 +932,8 @@ async def quote_edges_batch(
             # label interrupted quote results as RPC reverts or zero-output failures.
             _merge_partial_quote_diagnostics(include_adapter_unavailable=True)
             raise
+        _record_adapter_failure_reasons(family, before_reasons)
+        return result
 
     adapter_groups = (
         (missing_univ3, bool(getattr(cfg.chain, "univ3_quoter_v2", ""))),
@@ -1183,7 +1247,7 @@ async def quote_edges_batch(
     # observation. Attribute the residual instead of silently losing it from
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
-    requested_edge_count = sum(
+    requested_edge_count = local_validation_failures + sum(
         len(group)
         for group in (
             missing_univ3,
@@ -1259,6 +1323,25 @@ def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[
             normalized[name] = normalized.get(name, 0) + value
         snapshot[metric_name] = normalized
     return snapshot
+
+def _quote_failure_reason_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[str, Dict[str, int]]]:
+    """Publish bounded low-cardinality failure causes grouped by adapter."""
+    raw = metrics.get("quote_failure_reasons_by_adapter")
+    adapters = raw if isinstance(raw, Mapping) else {}
+    normalized: Dict[str, Dict[str, int]] = {}
+    for adapter, reasons in adapters.items():
+        adapter_name = str(adapter or "unknown").strip().lower()[:64] or "unknown"
+        source = reasons if isinstance(reasons, Mapping) else {}
+        target: Dict[str, int] = {}
+        for reason, count in source.items():
+            name = str(reason or "unknown").strip().lower()[:96] or "unknown"
+            try:
+                value = max(0, int(count or 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            target[name] = target.get(name, 0) + value
+        normalized[adapter_name] = target
+    return {"quote_failure_reasons_by_adapter": normalized}
 
 
 def _finalize_quote_coverage(metrics: Dict[str, Any]) -> None:
@@ -2657,6 +2740,7 @@ async def find_two_leg_opportunities(
             "opportunity_count": len(opps),
             "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
             **_quote_family_metric_snapshot(metrics),
+            **_quote_failure_reason_snapshot(metrics),
             "quote_fallback_attempts": int(metrics.get("quote_fallback_attempts", 0)),
             "quote_fallback_successes": int(metrics.get("quote_fallback_successes", 0)),
             "route_rejections": {
@@ -3572,6 +3656,7 @@ async def find_three_leg_opportunities(
             "opportunity_count": len(opps),
             "quote_failure_reasons": dict(metrics.get("quote_failure_reasons") or {}),
             **_quote_family_metric_snapshot(metrics),
+            **_quote_failure_reason_snapshot(metrics),
             "quote_fallback_attempts": int(metrics.get("quote_fallback_attempts", 0)),
             "quote_fallback_successes": int(metrics.get("quote_fallback_successes", 0)),
             "size_economic_diagnostics": list(metrics.get("size_economic_diagnostics") or []),
