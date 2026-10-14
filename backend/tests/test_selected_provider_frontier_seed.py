@@ -477,7 +477,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
                 },
             }
         )
-        if int(amount_in) != 2000:
+        if int(amount_in) != 4000:
             return []
         candidate.route.legs[0].amount_in = str(int(amount_in))
         return [candidate]
@@ -493,6 +493,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         cache,
         shared_gas_price_consensus=None,
         shared_flashloan_fee_observation=None,
+        diagnostic_evidence=None,
     ):
         probe_calls.append(list(base_opps))
         return list(base_opps), {
@@ -518,16 +519,16 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
 
     # One alternate notional is scanned in a tick; size selection rotates
     # across blocks, and the scan budget is no longer split into three 3s timeouts.
-    assert scan_amounts == [1000, 1000, 2000]
+    assert scan_amounts == [1000, 1000, 4000]
     assert provider_comparison_flags == [True, False, False]
     assert full_graph_base_only_flags == [False, True, True]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
     frontier = result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]
-    assert frontier["candidate_amounts"] == ["500", "2000", "8000"]
-    assert frontier["amounts_scanned"] == ["2000"]
-    assert frontier["notional_rotation_index"] == 1
+    assert frontier["candidate_amounts"] == ["500", "2000", "8000", "1500", "4000", "16000"]
+    assert frontier["amounts_scanned"] == ["4000"]
+    assert frontier["notional_rotation_index"] == 4
     assert frontier["candidates_added"] == 1
     progress = result["telemetry"]["rpc_selection_progress"]
     assert progress["phase"] == "complete"
@@ -775,6 +776,9 @@ async def test_size_curve_runs_when_base_routes_are_already_profitable(monkeypat
                     "revalidated": True,
                     "authoritative": True,
                     "valid": True,
+                    "repayment_valid": True,
+                    "gas_cost_conversion_available": True,
+                    "gas_cost_profit_token_wei": "1",
                     "profit_after_costs_wei": "10",
                     "economic_profit_after_costs_wei": "10",
                     "reason": "verified",
