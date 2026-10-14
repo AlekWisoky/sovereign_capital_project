@@ -857,3 +857,55 @@ def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
         "curve": 1, "balancer": 1,
     }
     assert two_leg["quote_attempts_by_family"]["univ3"] == 10
+
+
+@pytest.mark.asyncio
+async def test_base_only_scan_reuses_unused_two_leg_budget_for_triangles(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = True
+    monkeypatch.delenv("VICTOR_ROUTE_EVALUATION_BUDGET_MS", raising=False)
+    monkeypatch.delenv("VICTOR_TWO_LEG_ROUTE_BUDGET_MS", raising=False)
+    monkeypatch.delenv("VICTOR_THREE_LEG_ROUTE_BUDGET_MS", raising=False)
+    observed = {}
+
+    async def quick_two(_rpc, _cfg, _cache, _block, **kwargs):
+        observed["two_ms"] = int(kwargs["time_budget_ms"])
+        kwargs["telemetry"].update({
+            "quote_requests": 0,
+            "quote_successes": 0,
+            "quote_cancelled": 0,
+            "route_groups_evaluated": 0,
+            "budget_exhausted_after_quote": False,
+        })
+        return []
+
+    async def quick_three(_rpc, _cfg, _cache, _block, **kwargs):
+        observed["three_ms"] = int(kwargs["time_budget_ms"])
+        kwargs["telemetry"].update({
+            "quote_requests": 0,
+            "quote_successes": 0,
+            "quote_cancelled": 0,
+            "route_groups_evaluated": 0,
+            "budget_exhausted_after_quote": False,
+            "route_budget_deadline_ms": int(kwargs["time_budget_ms"]),
+        })
+        return []
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", quick_two)
+    monkeypatch.setattr(scan_mod, "find_three_leg_opportunities", quick_three)
+
+    await runtime._scan_primary_opportunities(
+        object(),
+        current_block=321,
+        amount_in=10,
+        discovery_context={"_selected_provider_full_graph_base_only": True},
+    )
+
+    assert 0 < observed["two_ms"] <= 4_000
+    # In a base-only graph rescue, the triangle stage may reuse the unspent
+    # two-leg allocation, but the outer absolute deadline remains 9 seconds.
+    assert 5_000 < observed["three_ms"] <= 9_000
+    route_budget = runtime._market_pipeline_telemetry["route_evaluation"]
+    assert route_budget["configured_total_budget_ms"] == 9_000
+    assert route_budget["three_leg_budget_allocated_ms"] == observed["three_ms"]
+    assert route_budget["three_leg_budget_reallocated_ms"] == observed["three_ms"] - 5_000
