@@ -575,6 +575,8 @@ def test_route_scheduler_aggregates_optional_triangle_third_leg_metrics_without_
     assert "third_leg_quote_batches_cancelled" not in legacy_row
     assert "third_leg_quote_parallelism_limit" not in legacy_row
     assert "third_leg_quote_deadline_exceeded" not in legacy_row
+    assert "route_group_quote_batches_failed" not in legacy_row
+    assert "route_group_quote_edges_recovered_from_cache_when_skipped" not in legacy_row
 
     target = {}
     _merge_route_group_schedule_telemetry(
@@ -597,6 +599,12 @@ def test_route_scheduler_aggregates_optional_triangle_third_leg_metrics_without_
             "third_leg_quote_deadline_exceeded": True,
             "route_group_quote_batches_coalesced_second_leg": 1,
             "route_group_quote_batches_coalesced_third_leg": 1,
+            "route_group_quote_batches_failed": 1,
+            "route_group_quote_batches_cancelled": 2,
+            "route_group_quote_batches_skipped_budget": 3,
+            "route_group_quote_edges_recovered_after_cancellation": 4,
+            "route_group_quote_edges_recovered_from_cache_when_skipped": 5,
+            "route_group_quote_waves_started": 6,
             "parallelism_limit": 3,
             "waves_started": 1,
             "completed_wave_results_consumed_before_budget_stop": True,
@@ -622,6 +630,12 @@ def test_route_scheduler_aggregates_optional_triangle_third_leg_metrics_without_
             "third_leg_quote_deadline_exceeded": False,
             "route_group_quote_batches_coalesced_second_leg": 0,
             "route_group_quote_batches_coalesced_third_leg": 0,
+            "route_group_quote_batches_failed": 0,
+            "route_group_quote_batches_cancelled": 0,
+            "route_group_quote_batches_skipped_budget": 0,
+            "route_group_quote_edges_recovered_after_cancellation": 0,
+            "route_group_quote_edges_recovered_from_cache_when_skipped": 0,
+            "route_group_quote_waves_started": 0,
             "parallelism_limit": 2,
             "waves_started": 1,
             "completed_wave_results_consumed_before_budget_stop": True,
@@ -639,3 +653,9 @@ def test_route_scheduler_aggregates_optional_triangle_third_leg_metrics_without_
     assert row["third_leg_quote_deadline_exceeded"] is True
     assert row["route_group_quote_batches_coalesced_second_leg"] == 1
     assert row["route_group_quote_batches_coalesced_third_leg"] == 1
+    assert row["route_group_quote_batches_failed"] == 1
+    assert row["route_group_quote_batches_cancelled"] == 2
+    assert row["route_group_quote_batches_skipped_budget"] == 3
+    assert row["route_group_quote_edges_recovered_after_cancellation"] == 4
+    assert row["route_group_quote_edges_recovered_from_cache_when_skipped"] == 5
+    assert row["route_group_quote_waves_started"] == 6
