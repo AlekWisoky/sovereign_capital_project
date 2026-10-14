@@ -1550,6 +1550,7 @@ def _merge_route_group_schedule_row(
         "first_leg_quote_batches_failed",
         "first_leg_quote_batches_cancelled",
         "first_leg_quote_batches_skipped_budget",
+        "first_leg_quote_edges_recovered_after_cancellation",
         "first_leg_quote_budget_ms",
         "first_leg_quote_waves_started",
         "route_group_quote_batches_completed_and_consumed",
