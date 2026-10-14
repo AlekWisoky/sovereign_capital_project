@@ -141,30 +141,39 @@ async def quote_balancer_given_in_many(
 ) -> list[Optional[BalancerQuote]]:
     """Batch Balancer queryBatchSwap GIVEN_IN quotes.
 
-    Each req: (pool_id_hex32, token_in, token_out, amount_in)
+    Each req: (pool_id_hex32, token_in, token_out, amount_in). A malformed
+    request fails locally in its own slot and does not abort valid siblings.
     """
     if not reqs:
         return []
+    out: list[Optional[BalancerQuote]] = [None] * len(reqs)
     calls = []
-    for pool_id, token_in, token_out, amount_in in reqs:
-        calls.append(
-            {
-                "to": vault,
-                "data": build_balancer_query_batchswap_calldata(
-                    pool_id, token_in, token_out, int(amount_in)
-                ),
-            }
-        )
+    valid_indices: list[int] = []
+    for index, (pool_id, token_in, token_out, amount_in) in enumerate(reqs):
+        try:
+            data = build_balancer_query_batchswap_calldata(
+                pool_id, token_in, token_out, int(amount_in)
+            )
+        except (TypeError, ValueError, OverflowError):
+            record_quote_parse_failure(diagnostics, "invalid_balancer_request")
+            continue
+        calls.append({"to": vault, "data": data})
+        valid_indices.append(index)
+
+    if not calls:
+        return out
+
     results = await rpc.eth_call_batch(calls)
-    out: list[Optional[BalancerQuote]] = []
-    for rr in results:
+    for position, request_index in enumerate(valid_indices):
+        if position >= len(results):
+            record_quote_parse_failure(diagnostics, "missing_rpc_batch_result")
+            continue
+        rr = results[position]
         if not rr.ok:
             record_quote_failure(diagnostics, classify_quote_error(rr.error))
-            out.append(None)
             continue
         if not isinstance(rr.result, str):
             record_quote_parse_failure(diagnostics, "invalid_rpc_result")
-            out.append(None)
             continue
         try:
             amt = parse_balancer_query_result(rr.result)
@@ -172,5 +181,9 @@ async def quote_balancer_given_in_many(
             amt = None
         if amt is None:
             record_quote_parse_failure(diagnostics, "invalid_quote_result")
-        out.append(BalancerQuote(amount_out=amt) if amt is not None else None)
+            continue
+        out[request_index] = BalancerQuote(amount_out=amt)
+
+    if len(results) > len(valid_indices):
+        record_quote_parse_failure(diagnostics, "unexpected_rpc_batch_result")
     return out
