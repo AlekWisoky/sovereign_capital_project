@@ -555,3 +555,87 @@ def test_aggregate_quote_family_metrics_merges_adapter_failure_causes():
         "univ3": {"rpc_timeout": 2},
         "curve": {"rpc_rate_limited": 1},
     }
+
+
+def test_route_scheduler_aggregates_optional_triangle_third_leg_metrics_without_adding_zeros():
+    legacy = {}
+    _merge_route_group_schedule_telemetry(
+        legacy,
+        {"route_group_schedule": {
+            "block_number": 300,
+            "groups_prepared": 1,
+            "groups_completed": 1,
+            "quote_batches_completed_and_consumed": 2,
+            "parallelism_limit": 3,
+            "waves_started": 1,
+            "completed_wave_results_consumed_before_budget_stop": True,
+        }},
+    )
+    legacy_row = legacy["route_group_schedule"]
+    assert "third_leg_quote_batches_cancelled" not in legacy_row
+    assert "third_leg_quote_parallelism_limit" not in legacy_row
+    assert "third_leg_quote_deadline_exceeded" not in legacy_row
+
+    target = {}
+    _merge_route_group_schedule_telemetry(
+        target,
+        {"route_group_schedule": {
+            "block_number": 300,
+            "groups_prepared": 1,
+            "groups_completed": 1,
+            "quote_batches_completed_and_consumed": 3,
+            "third_leg_quote_batches_total": 4,
+            "third_leg_quote_batches_unique": 3,
+            "third_leg_quote_batches_completed": 2,
+            "third_leg_quote_batches_failed": 0,
+            "third_leg_quote_batches_cancelled": 1,
+            "third_leg_quote_batches_skipped_budget": 1,
+            "third_leg_quote_batches_coalesced": 1,
+            "third_leg_quote_edges_recovered_after_cancellation": 2,
+            "third_leg_quote_waves_started": 2,
+            "third_leg_quote_parallelism_limit": 3,
+            "third_leg_quote_deadline_exceeded": True,
+            "route_group_quote_batches_coalesced_second_leg": 1,
+            "route_group_quote_batches_coalesced_third_leg": 1,
+            "parallelism_limit": 3,
+            "waves_started": 1,
+            "completed_wave_results_consumed_before_budget_stop": True,
+        }},
+    )
+    _merge_route_group_schedule_telemetry(
+        target,
+        {"route_group_schedule": {
+            "block_number": 300,
+            "groups_prepared": 1,
+            "groups_completed": 1,
+            "quote_batches_completed_and_consumed": 2,
+            "third_leg_quote_batches_total": 2,
+            "third_leg_quote_batches_unique": 2,
+            "third_leg_quote_batches_completed": 2,
+            "third_leg_quote_batches_failed": 0,
+            "third_leg_quote_batches_cancelled": 0,
+            "third_leg_quote_batches_skipped_budget": 0,
+            "third_leg_quote_batches_coalesced": 0,
+            "third_leg_quote_edges_recovered_after_cancellation": 0,
+            "third_leg_quote_waves_started": 1,
+            "third_leg_quote_parallelism_limit": 2,
+            "third_leg_quote_deadline_exceeded": False,
+            "route_group_quote_batches_coalesced_second_leg": 0,
+            "route_group_quote_batches_coalesced_third_leg": 0,
+            "parallelism_limit": 2,
+            "waves_started": 1,
+            "completed_wave_results_consumed_before_budget_stop": True,
+        }},
+    )
+    row = target["route_group_schedule"]
+    assert row["third_leg_quote_batches_total"] == 6
+    assert row["third_leg_quote_batches_unique"] == 5
+    assert row["third_leg_quote_batches_completed"] == 4
+    assert row["third_leg_quote_batches_cancelled"] == 1
+    assert row["third_leg_quote_batches_skipped_budget"] == 1
+    assert row["third_leg_quote_batches_coalesced"] == 1
+    assert row["third_leg_quote_edges_recovered_after_cancellation"] == 2
+    assert row["third_leg_quote_parallelism_limit"] == 3
+    assert row["third_leg_quote_deadline_exceeded"] is True
+    assert row["route_group_quote_batches_coalesced_second_leg"] == 1
+    assert row["route_group_quote_batches_coalesced_third_leg"] == 1
