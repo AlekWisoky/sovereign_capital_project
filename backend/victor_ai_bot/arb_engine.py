@@ -2208,30 +2208,51 @@ async def _quote_two_leg_route_group_wave(
     groups: Sequence[Mapping[str, Any]],
     *,
     metrics: Dict[str, Any],
+    deadline: Optional[float] = None,
 ) -> tuple[List[Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], int, int]:
-    """Quote a bounded wave once per distinct amount/edge-set signature."""
-    unique_by_signature: Dict[Tuple[int, Tuple[str, ...]], Mapping[str, Any]] = {}
-    signatures: List[Tuple[int, Tuple[str, ...]]] = []
-    for group in groups:
-        signature = (
-            int(group["out1"]),
-            tuple(sorted(edge_key(edge) for edge in group["revs"])),
-        )
-        signatures.append(signature)
-        unique_by_signature.setdefault(signature, group)
+    """Quote one route-group wave, coalescing identical amount/edge-set requests.
 
-    unique_groups = list(unique_by_signature.values())
-    unique_results = await asyncio.gather(*(
-        quote_edges_batch(
-            rpc, cfg, cache, group["revs"], int(group["out1"]), metrics=metrics
+    When a deadline is supplied, requests use the same bounded scheduler as
+    triangle final-leg work. Completed maps are retained and only exact cached
+    successes are recovered after cancellation; no quote is synthesized.
+    """
+    requests = [(int(group["out1"]), list(group["revs"])) for group in groups]
+    signatures: List[Tuple[int, Tuple[str, ...]]] = []
+    unique_requests: Dict[Tuple[int, Tuple[str, ...]], Tuple[int, List[Edge]]] = {}
+    for amount, edges in requests:
+        signature = (amount, tuple(sorted(edge_key(edge) for edge in edges)))
+        signatures.append(signature)
+        unique_requests.setdefault(signature, (amount, edges))
+
+    if deadline is None:
+        unique_results = await asyncio.gather(*(
+            quote_edges_batch(rpc, cfg, cache, edges, amount, metrics=metrics)
+            for amount, edges in unique_requests.values()
+        ))
+        result_by_signature = dict(zip(unique_requests.keys(), unique_results))
+        return (
+            [result_by_signature[signature] for signature in signatures],
+            len(unique_requests),
+            len(requests) - len(unique_requests),
         )
-        for group in unique_groups
-    ))
-    result_by_signature = dict(zip(unique_by_signature.keys(), unique_results))
+
+    jobs = [
+        (signature, amount, edges)
+        for signature, (amount, edges) in unique_requests.items()
+    ]
+    result_by_signature, schedule = await _quote_edge_jobs_in_bounded_waves(
+        rpc,
+        cfg,
+        cache,
+        jobs,
+        deadline=float(deadline),
+        parallelism=_route_group_parallelism(),
+        metrics=metrics,
+    )
     return (
-        [result_by_signature[signature] for signature in signatures],
-        len(unique_groups),
-        len(groups) - len(unique_groups),
+        [result_by_signature.get(signature, {}) for signature in signatures],
+        int(schedule["batches_completed"]),
+        max(0, len(requests) - len(unique_requests)),
     )
 
 
@@ -2322,6 +2343,21 @@ async def _quote_edge_jobs_in_bounded_waves(
         if pending:
             skipped += len(ordered) - cursor
             break
+
+    # These bounded counters are shared by second- and third-leg route
+    # waves, then surfaced through the public route_group_schedule snapshot.
+    def add_metric(key: str, count: int) -> None:
+        metrics[key] = max(0, int(metrics.get(key, 0) or 0)) + max(0, int(count))
+
+    for key, value in (
+        ("route_group_quote_batches_completed", completed),
+        ("route_group_quote_batches_failed", failed),
+        ("route_group_quote_batches_cancelled", cancelled),
+        ("route_group_quote_batches_skipped_budget", skipped),
+        ("route_group_quote_waves_started", waves),
+        ("route_group_quote_edges_recovered_after_cancellation", recovered),
+    ):
+        add_metric(key, value)
 
     deadline_exceeded = bool(
         ordered and (cancelled > 0 or skipped > 0 or time.perf_counter() >= deadline)
@@ -2771,7 +2807,7 @@ async def find_two_leg_opportunities(
             break
         wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
         qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
-            rpc, cfg, cache, wave, metrics=metrics
+            rpc, cfg, cache, wave, metrics=metrics, deadline=route_deadline
         )
         route_quote_waves_started += 1
         completed_route_quote_batches += int(physical_batches)
@@ -2825,6 +2861,11 @@ async def find_two_leg_opportunities(
             "first_leg_deadline_exceeded": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_ordering": str(first_leg_quote_schedule["ordering"]),
             "route_group_quote_batches_completed_and_consumed": int(completed_route_quote_batches),
+            "route_group_quote_batches_failed": int(metrics.get("route_group_quote_batches_failed", 0) or 0),
+            "route_group_quote_batches_cancelled": int(metrics.get("route_group_quote_batches_cancelled", 0) or 0),
+            "route_group_quote_batches_skipped_budget": int(metrics.get("route_group_quote_batches_skipped_budget", 0) or 0),
+            "route_group_quote_edges_recovered_after_cancellation": int(metrics.get("route_group_quote_edges_recovered_after_cancellation", 0) or 0),
+            "route_group_quote_waves_started": int(metrics.get("route_group_quote_waves_started", 0) or 0),
             "route_group_waves_started": int(route_quote_waves_started),
             "duplicate_quote_batches_coalesced": int(coalesced_route_quote_batches),
             "parallelism_limit": int(route_group_parallelism),
@@ -3434,7 +3475,7 @@ async def find_three_leg_opportunities(
             break
         wave = triangle_route_groups[wave_start:wave_start + triangle_route_parallelism]
         qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
-            rpc, cfg, cache, wave, metrics=metrics
+            rpc, cfg, cache, wave, metrics=metrics, deadline=route_deadline
         )
         triangle_quote_waves_started += 1
         triangle_second_leg_quote_batches_completed += int(physical_batches)
@@ -3461,6 +3502,7 @@ async def find_three_leg_opportunities(
                 e3_cands = list(revs[:max_reverse_candidates])
                 if not e3_cands:
                     continue
+                metrics["candidate_count"] = int(metrics.get("candidate_count", 0)) + len(e3_cands)
                 signature = (
                     int(out2),
                     tuple(sorted(edge_key(edge) for edge in e3_cands)),
@@ -3799,6 +3841,11 @@ async def find_three_leg_opportunities(
             "route_group_quote_batches_coalesced": int(
                 triangle_coalesced_quote_batches + triangle_third_leg_quote_batches_coalesced
             ),
+            "route_group_quote_batches_failed": int(metrics.get("route_group_quote_batches_failed", 0) or 0),
+            "route_group_quote_batches_cancelled": int(metrics.get("route_group_quote_batches_cancelled", 0) or 0),
+            "route_group_quote_batches_skipped_budget": int(metrics.get("route_group_quote_batches_skipped_budget", 0) or 0),
+            "route_group_quote_edges_recovered_after_cancellation": int(metrics.get("route_group_quote_edges_recovered_after_cancellation", 0) or 0),
+            "route_group_quote_waves_started": int(metrics.get("route_group_quote_waves_started", 0) or 0),
             "third_leg_quote_batches_total": int(triangle_third_leg_quote_batches_total),
             "third_leg_quote_batches_unique": int(triangle_third_leg_quote_batches_unique),
             "third_leg_quote_batches_completed": int(triangle_third_leg_quote_batches_completed),
