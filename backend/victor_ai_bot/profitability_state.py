@@ -575,6 +575,33 @@ def revalidate_profitability_state(
             )
         )
     )
+    # Keep unit-conversion and repayment evidence explicit for every consumer.
+    # Never infer a native-wei conversion merely because a numeric gas value exists.
+    inherited_conversion_valid = False
+    if (
+        existing_profitability.get("gas_cost_conversion_available") is True
+        and inherited_profit_token_gas > 0
+    ):
+        try:
+            inherited_conversion_valid = (
+                int(existing_profitability.get("amount_in_wei") or 0) == int(amount_in_wei)
+                and int(existing_profitability.get("amount_out_wei") or 0) == int(amount_out_wei)
+                and int(existing_profitability.get("gas_cost_wei") or 0) == int(resolved_gas_cost_wei)
+            )
+        except (TypeError, ValueError, OverflowError):
+            inherited_conversion_valid = False
+    state["gas_cost_conversion_available"] = bool(
+        gas_cost_in_profit_token_wei is not None or inherited_conversion_valid
+    )
+    try:
+        state_fee = int(state.get("flashloan_fee_wei") or 0)
+    except (TypeError, ValueError, OverflowError):
+        state_fee = 0
+    state["repayment_valid"] = bool(
+        int(amount_in_wei) > 0
+        and int(amount_out_wei) > 0
+        and int(amount_out_wei) >= int(amount_in_wei) + max(0, state_fee)
+    )
     set_profitability_state(opp, state)
     unit_econ = _safe_dict(meta.get("unit_econ"))
     unit_econ["profitability_revalidated"] = bool(state.get("revalidated", False)) and bool(
