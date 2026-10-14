@@ -2496,8 +2496,12 @@ class RuntimePrimaryScanFacade:
                 # still have time to be evaluated.
                 remaining_three_leg_budget_ms = (
                     route_budget_remaining_ms
-                    if selected_full_graph_base_only
-                    else min(int(three_leg_budget_window_ms), route_budget_remaining_ms)
+                    if three_leg_enabled and selected_full_graph_base_only
+                    else (
+                        min(int(three_leg_budget_window_ms), route_budget_remaining_ms)
+                        if three_leg_enabled
+                        else 0
+                    )
                 )
                 if three_leg_enabled and remaining_three_leg_budget_ms > 0:
                     three = await find_three_leg_opportunities(
@@ -2967,14 +2971,14 @@ class RuntimePrimaryScanFacade:
                 "two_leg_budget_ms": int(two_leg_route_budget_ms),
                 "three_leg_budget_ms": int(three_leg_route_budget_ms),
                 "three_leg_budget_allocated_ms": int(
-                    three_leg_telemetry.get("route_budget_allocated_ms")
-                    or three_leg_budget_window_ms
+                    three_leg_telemetry.get("route_budget_allocated_ms", three_leg_budget_window_ms)
+                    or 0
                 ),
                 "three_leg_budget_reallocated_ms": max(
                     0,
                     int(
-                        three_leg_telemetry.get("route_budget_allocated_ms")
-                        or three_leg_budget_window_ms
+                        three_leg_telemetry.get("route_budget_allocated_ms", three_leg_budget_window_ms)
+                        or 0
                     ) - int(three_leg_budget_window_ms),
                 ),
                 "configured_total_budget_ms": int(
@@ -4323,22 +4327,21 @@ class RuntimePrimaryScanFacade:
                 configured_seed_timeout_s = float(
                     os.environ.get(
                         "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S",
-                        "8.0",
+                        "10.0",
                     )
-                    or 8.0
+                    or 10.0
                 )
             except (TypeError, ValueError):
-                configured_seed_timeout_s = 8.0
-            # Previously three sequential probes each had only a 3s timeout.
-            # Production showed 0/3 seed slices completing. Spend the bounded
-            # frontier budget on one rotating notional per block instead.
-            seed_timeout_s = max(
-                1.0,
-                min(
-                    selection_timeout_s,
-                    seed_budget_s,
-                    configured_seed_timeout_s,
-                ),
+                configured_seed_timeout_s = 10.0
+            route_budget_ms = sum(self._route_evaluation_budgets_ms())
+            # A frontier seed invokes the same 9s route evaluator as a normal
+            # scan. The former 8s wrapper could time out before that inner scan
+            # completed on slower chains even with unused seed budget remaining.
+            seed_timeout_s = self._selected_provider_frontier_seed_timeout_s(
+                selection_timeout_s=selection_timeout_s,
+                seed_budget_s=seed_budget_s,
+                configured_timeout_s=configured_seed_timeout_s,
+                route_budget_ms=route_budget_ms,
             )
 
             frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
@@ -5165,6 +5168,28 @@ class RuntimePrimaryScanFacade:
         waves = max(1, (chunks + parallelism - 1) // parallelism)
         adaptive = configured * float(waves) / 4.0
         return min(12.0, max(configured, adaptive))
+
+    @staticmethod
+    def _selected_provider_frontier_seed_timeout_s(
+        *,
+        selection_timeout_s: float,
+        seed_budget_s: float,
+        configured_timeout_s: float,
+        route_budget_ms: int,
+    ) -> float:
+        """Make the seed timeout compatible with its inner route budget."""
+        minimum_complete_scan_s = max(
+            1.0, max(1, int(route_budget_ms)) / 1000.0 + 0.25
+        )
+        effective_requested = max(float(configured_timeout_s), minimum_complete_scan_s)
+        return max(
+            1.0,
+            min(
+                float(selection_timeout_s),
+                float(seed_budget_s),
+                effective_requested,
+            ),
+        )
 
     @staticmethod
     def _selected_provider_frontier_seed_budget_s() -> float:
