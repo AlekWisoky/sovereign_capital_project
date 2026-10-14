@@ -3361,6 +3361,8 @@ async def find_three_leg_opportunities(
     route_groups_evaluated = 0
     route_budget_exhausted = bool(time.perf_counter() >= route_deadline)
     triangle_second_leg_quote_batches_completed = 0
+    triangle_third_leg_quote_batches_total = 0
+    triangle_third_leg_quote_batches_unique = 0
     triangle_third_leg_quote_batches_completed = 0
     triangle_third_leg_quote_batches_failed = 0
     triangle_third_leg_quote_batches_cancelled = 0
@@ -3466,6 +3468,8 @@ async def find_three_leg_opportunities(
             (signature, amount_out, edges)
             for signature, (amount_out, edges) in third_leg_jobs.items()
         ]
+        triangle_third_leg_quote_batches_total += int(third_leg_logical_batches)
+        triangle_third_leg_quote_batches_unique += int(len(third_leg_job_list))
         third_leg_quote_maps, third_leg_schedule = await _quote_edge_jobs_in_bounded_waves(
             rpc,
             cfg,
