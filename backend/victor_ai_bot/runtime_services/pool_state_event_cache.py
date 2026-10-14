@@ -514,6 +514,13 @@ class PoolStateEventCache:
             "candidate_generation_mode": str(
                 self._last_candidate_metrics.get("candidate_generation_mode") or ""
             ),
+            # None is intentional when returning the full graph without applying
+            # the dirty-subgraph cap; do not report a fictitious zero.
+            "max_candidates": (
+                int(self._last_candidate_metrics["max_candidates"])
+                if self._last_candidate_metrics.get("max_candidates") is not None
+                else None
+            ),
             "candidate_edge_count": int(
                 self._last_candidate_metrics.get("candidate_edge_count", 0) or 0
             ),
