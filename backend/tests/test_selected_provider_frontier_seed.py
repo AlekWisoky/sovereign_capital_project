@@ -278,6 +278,31 @@ def test_frontier_seed_defaults_span_low_mid_and_high_authorized_sizes(monkeypat
     ]
 
 
+def test_frontier_seed_default_cycles_through_every_alternative_ladder_point(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    monkeypatch.delenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES", raising=False)
+    monkeypatch.delenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS", raising=False)
+    ladder = [1000, 500, 1500, 2000, 4000, 8000, 16000]
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: list(ladder),
+    )
+
+    candidates = runtime._selected_provider_frontier_seed_amounts(1000)
+
+    # The rotating scan still evaluates one alternate size per block, but its
+    # schedule must include all six alternatives rather than permanently
+    # skipping 1.5x, 4x, and 16x because the preferred list filled a 3-probe cap.
+    assert candidates == [500, 2000, 8000, 1500, 4000, 16000]
+    sampled = [
+        _selected_provider_frontier_seed_for_block(candidates, block)[0][0]
+        for block in range(100, 106)
+    ]
+    assert set(sampled) == set(ladder) - {1000}
+    assert len(set(sampled)) == len(ladder) - 1
+
+
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     monkeypatch.setenv(
