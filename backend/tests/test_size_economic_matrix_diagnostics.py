@@ -182,3 +182,23 @@ def test_missing_gas_conversion_is_upper_bound_not_economic_optimum():
     assert unknown["economic_after_cost_profit_wei"] == ""
     assert unknown["gross_minus_flashloan_fee_upper_bound_wei"] == "-109"
     assert unknown["after_cost_profit_is_upper_bound"] is True
+
+    upper_only_matrix = _build_size_economic_matrix([{
+        "amount_in": 1_000,
+        "two": [],
+        "three": [],
+        "two_metrics": {
+            "size_economic_diagnostics": [
+                metrics["size_economic_diagnostics"][0],
+            ]
+        },
+        "three_metrics": {},
+    }])
+    upper_only = upper_only_matrix[0]
+    assert upper_only["selection_basis"] == "gross_profit_upper_bound_only"
+    assert upper_only["economic_optimum_status"] == "upper_bound_only_gas_conversion_unavailable"
+    assert upper_only["economic_optimum_route_id"] == ""
+    assert upper_only["economic_optimum_after_cost_profit_wei"] == ""
+    assert upper_only["economic_optimum_executable"] is False
+    assert upper_only["economic_upper_bound_route_id"] == "route-unknown-gas"
+    assert upper_only["selected_after_cost_profit_wei"] == ""
