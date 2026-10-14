@@ -535,6 +535,117 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
 
 
 @pytest.mark.asyncio
+async def test_non_positive_diagnostic_routes_get_full_size_curve_but_never_live_opportunity(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="test-chain"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 1500, 2000],
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_annotate_canonical_after_fee_usd",
+        lambda **kwargs: asyncio.sleep(0),
+    )
+
+    class Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = Manager()
+    diagnostic = {
+        "route_id": "diagnostic-route",
+        "amount_in": "1500",
+        "gross_profit_wei": "-10",
+        "flashloan_fee_wei": "1",
+        "gas_cost_wei": "100",
+        "gas_cost_profit_token_wei": "",
+        "gas_cost_conversion_available": False,
+        "after_cost_profit_wei": "",
+        "after_cost_profit_is_upper_bound": True,
+        "revalidated": False,
+        "authoritative": False,
+        "reason": "non_positive_gross_profit",
+        "diagnostic_only": True,
+        "legs": [
+            {
+                "dex": "univ3",
+                "venue": "0x" + "11" * 20,
+                "token_in": "0x" + "22" * 20,
+                "token_out": "0x" + "33" * 20,
+                "amount_in": "1500",
+                "quoted_amount_out": "1400",
+                "min_out": "1390",
+                "edge_params": {"fee": 3000},
+                "data": "0x" + "0" * 64,
+                "quote_meta": {"fee": 3000},
+            },
+            {
+                "dex": "univ3",
+                "venue": "0x" + "11" * 20,
+                "token_in": "0x" + "33" * 20,
+                "token_out": "0x" + "22" * 20,
+                "amount_in": "1400",
+                "quoted_amount_out": "1490",
+                "min_out": "1480",
+                "edge_params": {"fee": 500},
+                "data": "0x" + "0" * 64,
+                "quote_meta": {"fee": 500},
+            },
+        ],
+    }
+
+    seen_amounts = []
+
+    async def fake_requote(
+        rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps
+    ):
+        seen_amounts.append(int(new_amount_in))
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        candidate.expected_profit_raw = "-10"
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    live, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[],
+        cache=object(),
+        diagnostic_evidence=[diagnostic],
+    )
+
+    assert live == []
+    assert seen_amounts == [1000, 500, 2000]
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["selected_diagnostic_route_count"] == 1
+    assert adaptive["amounts_scanned"] == ["500", "1000", "1500", "2000"]
+    assert adaptive["economic_matrix_complete"] is True
+    matrix = telemetry["size_economic_matrix"]
+    assert {row["amount_in"] for row in matrix} == {"500", "1000", "1500", "2000"}
+    for row in matrix:
+        near_misses = [
+            candidate for candidate in row["candidates"]
+            if candidate.get("route_id") == "diagnostic-route"
+        ]
+        assert near_misses
+        assert all(candidate.get("diagnostic_only") is True for candidate in near_misses)
+
+
+@pytest.mark.asyncio
 async def test_frontier_seed_reference_preserves_absolute_size_targets(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     runtime.cfg = SimpleNamespace(
