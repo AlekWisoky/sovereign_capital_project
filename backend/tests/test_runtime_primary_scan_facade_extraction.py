@@ -457,6 +457,8 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
                     "flashloan_fee_wei": "0",
                     "gas_cost_wei": "100000",
                     "gas_cost_profit_token_wei": "100000",
+                    "gas_cost_conversion_available": True,
+                    "repayment_valid": True,
                 }
             },
         )
@@ -637,6 +639,8 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
                     "profit_after_costs_wei": str(net),
                     "flashloan_fee_wei": "90",
                     "gas_cost_wei": str(510 if gross == 500 else 940),
+                    "gas_cost_profit_token_wei": str(420 if gross == 500 else 850),
+                    "gas_cost_conversion_available": True,
                 }
             },
         )
