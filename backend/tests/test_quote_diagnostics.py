@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import victor_ai_bot.arb_engine as arb
+from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_diagnostics import classify_quote_error, record_quote_failure
 
 
@@ -314,3 +315,52 @@ async def test_malformed_balancer_edge_is_local_failure_and_does_not_count_netwo
     assert metrics["quote_failure_reasons_by_adapter"] == {
         "balancer": {"invalid_balancer_request": 1}
     }
+
+
+@pytest.mark.asyncio
+async def test_balancer_queryerror_revert_counts_as_quote_success_at_scanner_boundary():
+    # Balancer V2 deliberately returns queryBatchSwap asset deltas in a
+    # QueryError(int256[]) revert. The quote adapter must recover that result,
+    # and the scanner's normal family counters must treat it as a quote success.
+    deltas = [100, -120]
+    body = len(deltas).to_bytes(32, "big")
+    for value in deltas:
+        body += (value % (1 << 256)).to_bytes(32, "big")
+    error_payload = "0xfa61cc12" + body.hex()
+
+    class _QueryRevertRpc:
+        async def eth_call_batch(self, calls):
+            assert len(calls) == 1
+            return [
+                RpcResult(
+                    False,
+                    error={
+                        "code": -32000,
+                        "message": "execution reverted",
+                        "data": {"originalError": {"data": error_payload}},
+                    },
+                )
+            ]
+
+    edge = arb.Edge(
+        "balancer",
+        "0x" + "77" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"pool_id": "0x" + "88" * 32},
+    )
+    cfg = SimpleNamespace(chain=SimpleNamespace(balancer_vault="0x" + "77" * 20))
+    metrics = {}
+
+    out = await arb.quote_edges_batch(
+        _QueryRevertRpc(), cfg, _NoCache(), [edge], 100, metrics=metrics
+    )
+
+    assert out[arb.edge_key(edge)][0] == 120
+    assert metrics["quote_requests"] == 1
+    assert metrics["quote_attempts_by_family"] == {"balancer": 1}
+    assert metrics["quote_network_requests_by_family"] == {"balancer": 1}
+    assert metrics["quote_successes_by_family"] == {"balancer": 1}
+    assert metrics.get("quote_failures_by_family", {}).get("balancer", 0) == 0
+    assert metrics["quote_query_revert_decoded"] == 1
+    assert "rpc_revert" not in metrics.get("quote_failure_reasons", {})
