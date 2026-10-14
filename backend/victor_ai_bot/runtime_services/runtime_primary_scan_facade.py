@@ -4340,9 +4340,17 @@ class RuntimePrimaryScanFacade:
             except (TypeError, ValueError):
                 configured_seed_timeout_s = 10.0
             route_budget_ms = sum(self._route_evaluation_budgets_ms())
-            # A frontier seed invokes the same 9s route evaluator as a normal
-            # scan. The former 8s wrapper could time out before that inner scan
-            # completed on slower chains even with unused seed budget remaining.
+            # The default wrapper must outlive the inner route evaluator plus
+            # setup, or slow-chain discovery gets cancelled before its own
+            # bounded deadline. An explicit operator override remains a hard cap.
+            explicit_seed_timeout = (
+                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S" in os.environ
+            )
+            if not explicit_seed_timeout:
+                configured_seed_timeout_s = max(
+                    configured_seed_timeout_s,
+                    max(1, int(route_budget_ms)) / 1000.0 + 0.25,
+                )
             seed_timeout_s = self._selected_provider_frontier_seed_timeout_s(
                 selection_timeout_s=selection_timeout_s,
                 seed_budget_s=seed_budget_s,
@@ -5184,16 +5192,14 @@ class RuntimePrimaryScanFacade:
         route_budget_ms: int,
     ) -> float:
         """Make the seed timeout compatible with its inner route budget."""
-        minimum_complete_scan_s = max(
-            1.0, max(1, int(route_budget_ms)) / 1000.0 + 0.25
-        )
-        effective_requested = max(float(configured_timeout_s), minimum_complete_scan_s)
+        # The caller raises the default to the inner route deadline plus
+        # setup cushion. This helper applies only hard outer deadlines.
         return max(
             1.0,
             min(
                 float(selection_timeout_s),
                 float(seed_budget_s),
-                effective_requested,
+                float(configured_timeout_s),
             ),
         )
 
