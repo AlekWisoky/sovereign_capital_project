@@ -828,15 +828,15 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
 def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
     two_leg = {
         "quote_attempts_by_family": {"univ3": 10, "curve": 2},
-        "quote_network_requests_by_family": {"univ3": 10},
+        "quote_network_requests_by_family": {"univ3": 10, "curve": 1},
         "quote_successes_by_family": {"univ3": 7},
-        "quote_failures_by_family": {"univ3": 2},
+        "quote_failures_by_family": {"univ3": 2, "curve": 2},
         "quote_cancelled_by_family": {"univ3": 1},
         "quote_adapter_unavailable_by_family": {"curve": 1},
     }
     three_leg = {
         "quote_attempts_by_family": {"univ3": 3, "balancer": 5},
-        "quote_network_requests_by_family": {"univ3": 3, "balancer": 5},
+        "quote_network_requests_by_family": {"univ3": 3, "balancer": 4},
         "quote_successes_by_family": {"univ3": 2, "balancer": 1},
         "quote_failures_by_family": {"univ3": 1, "balancer": 2},
         "quote_cancelled_by_family": {"balancer": 2},
@@ -849,7 +849,7 @@ def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
         "univ3": 13, "curve": 2, "balancer": 5,
     }
     assert result["quote_network_requests_by_family"] == {
-        "univ3": 13, "balancer": 5,
+        "univ3": 13, "curve": 1, "balancer": 4,
     }
     assert result["quote_successes_by_family"] == {
         "univ3": 9, "balancer": 1,
