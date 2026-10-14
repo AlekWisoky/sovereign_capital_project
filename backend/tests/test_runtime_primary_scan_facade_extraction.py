@@ -80,6 +80,18 @@ def _install_known_test_gas_conversion(monkeypatch, runtime):
             }
 
     runtime.rpc_manager = _GasManager()
+    runtime.cfg.chain = SimpleNamespace(
+        name="ethereum",
+        chain_id=1,
+        weth="0xweth",
+        usdc="0xusdc",
+        usdt="",
+        univ3_quoter_v2="0xquoter",
+    )
+    if not hasattr(runtime.cfg, "execution"):
+        runtime.cfg.execution = SimpleNamespace(
+            usd_accounting_enabled=False, flashloan_fee_bps=9
+        )
     monkeypatch.setattr(scan_mod, "estimate_route_gas_units", lambda _meta: 1)
     monkeypatch.setattr(
         scan_mod,
@@ -565,7 +577,15 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
     assert matrix[0]["economic_optimum_after_cost_profit_wei"] == ""
     assert matrix[0]["economic_optimum_status"] == "upper_bound_only_gas_conversion_unavailable"
     assert matrix[0]["economic_upper_bound_route_id"] == "route-a"
-    assert all(row["selection_basis"] in {"economic_optimum_diagnostic", "no_economic_evidence", "verified_after_cost_profit"} for row in matrix)
+    assert all(
+        row["selection_basis"] in {
+            "economic_optimum_diagnostic",
+            "no_economic_evidence",
+            "verified_after_cost_profit",
+            "gross_profit_upper_bound_only",
+        }
+        for row in matrix
+    )
 
 
 def test_adaptive_scan_amounts_respects_borrow_cap(monkeypatch):
@@ -746,7 +766,7 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
     assert rows["route-a"]["after_cost_profit_wei"] == "-10"
     assert rows["route-a"]["revalidated"] is True
     assert rows["route-a"]["authoritative"] is False
-    assert rows["route-a"]["reason"] == "profit_after_costs_not_positive"
+    assert rows["route-a"]["reason"] == "after_cost_non_positive"
 
 @pytest.mark.asyncio
 async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypatch):
