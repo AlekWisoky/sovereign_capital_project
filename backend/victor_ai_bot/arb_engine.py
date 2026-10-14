@@ -1326,7 +1326,7 @@ def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Any]:
         "quote_cancelled_by_family",
         "quote_adapter_unavailable_by_family",
     )
-    snapshot: Dict[str, Dict[str, int]] = {}
+    snapshot: Dict[str, Any] = {}
     for metric_name in metric_names:
         raw = metrics.get(metric_name)
         counters = raw if isinstance(raw, Mapping) else {}
