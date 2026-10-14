@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
+import re
+from typing import Any, Iterator, Optional
 from .rpc import JsonRpcClient
 from .quote_diagnostics import classify_quote_error, record_quote_failure, record_quote_parse_failure
 from .ethabi import (
@@ -13,11 +14,112 @@ from .ethabi import (
 )
 
 _SIG = "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[],(address,bool,address,bool))"
+# Balancer V2 deliberately reverts with QueryError(int256[]) after simulating a
+# queryBatchSwap. This is not an ordinary failed quote: the error data contains
+# the raw array length and int256 deltas after this selector.
+_QUERY_ERROR_SELECTOR = bytes.fromhex("fa61cc12")
+_MAX_QUERY_ERROR_BYTES = 4096
 
 
 @dataclass
 class BalancerQuote:
     amount_out: int
+
+
+def _iter_error_hex_payloads(value: Any, *, depth: int = 0) -> Iterator[str]:
+    """Yield bounded hex payload candidates from common JSON-RPC error shapes."""
+    if depth > 5:
+        return
+    if isinstance(value, str):
+        text = value[:8192]
+        # Prefer a complete hex value, but also support providers embedding
+        # revert data inside the human-readable error message.
+        stripped = text.strip().strip("\\'\" ,;")
+        if stripped.startswith("0x"):
+            candidate = stripped.split()[0].rstrip(",;")
+            if len(candidate) >= 10 and all(ch in "0123456789abcdefABCDEF" for ch in candidate[2:]):
+                yield candidate
+        yielded = 0
+        for match in re.finditer(r"0x[0-9a-fA-F]{8,}", text):
+            candidate = match.group(0)
+            if candidate != stripped:
+                yield candidate
+                yielded += 1
+                if yielded >= 8:
+                    break
+        return
+    if isinstance(value, dict):
+        # Error payloads commonly nest revert bytes under data/originalError.
+        priority = ("data", "return", "result", "originalError", "error", "cause", "message")
+        visited: set[str] = set()
+        for key in priority:
+            if key in value:
+                visited.add(key)
+                yield from _iter_error_hex_payloads(value[key], depth=depth + 1)
+        for key, item in list(value.items())[:12]:
+            if str(key) not in visited:
+                yield from _iter_error_hex_payloads(item, depth=depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in list(value)[:8]:
+            yield from _iter_error_hex_payloads(item, depth=depth + 1)
+
+
+def _decode_query_batch_swap_error(error: Any) -> tuple[list[int] | None, bool]:
+    """Decode Balancer's documented QueryError(int256[]) revert envelope.
+
+    The error bytes are selector + raw array memory (length + signed values),
+    not a normal ABI-encoded int256[] return (which starts with an offset word).
+    Returns (deltas, recognized_selector); malformed QueryError data is
+    distinguishable from an unrelated EVM revert and always fails closed.
+    """
+    saw_query_error = False
+    for candidate in _iter_error_hex_payloads(error):
+        payload = candidate[2:] if candidate.startswith("0x") else candidate
+        if len(payload) < 8 or len(payload) % 2:
+            continue
+        try:
+            raw = bytes.fromhex(payload)
+        except ValueError:
+            continue
+        if raw[:4] != _QUERY_ERROR_SELECTOR:
+            continue
+        saw_query_error = True
+        body = raw[4:]
+        if len(body) < 32 or len(body) > _MAX_QUERY_ERROR_BYTES or (len(body) - 32) % 32:
+            continue
+        count = int.from_bytes(body[:32], "big")
+        if count < 2 or count > 64 or len(body) != 32 + count * 32:
+            continue
+        deltas: list[int] = []
+        for start in range(32, len(body), 32):
+            value = int.from_bytes(body[start:start + 32], "big")
+            if value >= 2**255:
+                value -= 2**256
+            deltas.append(value)
+        return deltas, True
+    return None, saw_query_error
+
+
+def _quote_from_deltas(
+    deltas: list[int],
+    diagnostics: dict | None = None,
+) -> Optional["BalancerQuote"]:
+    if len(deltas) != 2:
+        record_quote_parse_failure(diagnostics, "unexpected_swap_delta_count")
+        return None
+    amount_out = -int(deltas[1])
+    if amount_out <= 0:
+        record_quote_parse_failure(diagnostics, "non_positive_quote_output")
+        return None
+    return BalancerQuote(amount_out=amount_out)
+
+
+def _record_query_revert_decoded(diagnostics: dict | None) -> None:
+    if diagnostics is not None:
+        diagnostics["query_revert_decoded"] = int(
+            diagnostics.get("query_revert_decoded", 0) or 0
+        ) + 1
 
 
 def _decode_balancer_swap_deltas(hex_result: str) -> list[int]:
@@ -71,7 +173,14 @@ async def quote_balancer_given_in(
         return None
     r = await rpc.eth_call(vault, data)
     if not r.ok:
-        record_quote_failure(diagnostics, classify_quote_error(r.error))
+        deltas, recognized = _decode_query_batch_swap_error(r.error)
+        if deltas is not None:
+            _record_query_revert_decoded(diagnostics)
+            return _quote_from_deltas(deltas, diagnostics)
+        if recognized:
+            record_quote_parse_failure(diagnostics, "invalid_query_batch_swap_revert_data")
+        else:
+            record_quote_failure(diagnostics, classify_quote_error(r.error))
         return None
     if not isinstance(r.result, str):
         record_quote_parse_failure(diagnostics, "invalid_rpc_result")
@@ -81,13 +190,7 @@ async def quote_balancer_given_in(
     except (TypeError, ValueError):
         record_quote_parse_failure(diagnostics, "invalid_quote_result")
         return None
-    if len(deltas) < 2:
-        record_quote_parse_failure(diagnostics, "insufficient_swap_deltas")
-        return None
-    amt_out = -deltas[1]
-    if amt_out <= 0:
-        return None
-    return BalancerQuote(amount_out=amt_out)
+    return _quote_from_deltas(deltas, diagnostics)
 
 
 def build_balancer_query_batchswap_calldata(
@@ -197,7 +300,14 @@ async def quote_balancer_given_in_many(
             continue
         rr = results[position]
         if not rr.ok:
-            record_quote_failure(diagnostics, classify_quote_error(rr.error))
+            deltas, recognized = _decode_query_batch_swap_error(rr.error)
+            if deltas is not None:
+                _record_query_revert_decoded(diagnostics)
+                out[request_index] = _quote_from_deltas(deltas, diagnostics)
+            elif recognized:
+                record_quote_parse_failure(diagnostics, "invalid_query_batch_swap_revert_data")
+            else:
+                record_quote_failure(diagnostics, classify_quote_error(rr.error))
             continue
         if not isinstance(rr.result, str):
             record_quote_parse_failure(diagnostics, "invalid_rpc_result")
