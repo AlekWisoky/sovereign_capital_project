@@ -2803,7 +2803,7 @@ async def find_two_leg_opportunities(
             break
         wave = prepared_route_groups[wave_start:wave_start + route_group_parallelism]
         qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
-            rpc, cfg, cache, wave, metrics=metrics
+            rpc, cfg, cache, wave, metrics=metrics, deadline=route_deadline
         )
         route_quote_waves_started += 1
         completed_route_quote_batches += int(physical_batches)
@@ -3450,7 +3450,7 @@ async def find_three_leg_opportunities(
             break
         wave = triangle_route_groups[wave_start:wave_start + triangle_route_parallelism]
         qmaps2, physical_batches, coalesced_batches = await _quote_two_leg_route_group_wave(
-            rpc, cfg, cache, wave, metrics=metrics
+            rpc, cfg, cache, wave, metrics=metrics, deadline=route_deadline
         )
         triangle_quote_waves_started += 1
         triangle_second_leg_quote_batches_completed += int(physical_batches)
