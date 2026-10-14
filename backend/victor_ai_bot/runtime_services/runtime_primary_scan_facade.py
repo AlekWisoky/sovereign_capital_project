@@ -1679,6 +1679,19 @@ def _merge_route_group_schedule_row(
         "first_leg_quote_edges_recovered_after_cancellation",
         "first_leg_quote_budget_ms",
         "first_leg_quote_waves_started",
+        "route_group_quote_batches_completed_and_consumed",
+        "route_group_quote_batches_coalesced",
+        "route_group_waves_started",
+        "duplicate_quote_batches_coalesced",
+        "waves_started",
+    ):
+        schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
+            incoming.get(count_key, 0) or 0
+        )
+    # Newer triangle scheduler metrics are optional for older/test producers.
+    # Preserve the public telemetry schema by adding these fields only when at
+    # least one side actually emitted them.
+    for count_key in (
         "third_leg_quote_batches_total",
         "third_leg_quote_batches_unique",
         "third_leg_quote_batches_completed",
@@ -1690,31 +1703,33 @@ def _merge_route_group_schedule_row(
         "third_leg_quote_waves_started",
         "route_group_quote_batches_coalesced_second_leg",
         "route_group_quote_batches_coalesced_third_leg",
-        "route_group_quote_batches_completed_and_consumed",
-        "route_group_quote_batches_coalesced",
-        "route_group_waves_started",
-        "duplicate_quote_batches_coalesced",
-        "waves_started",
     ):
+        if count_key not in schedule and count_key not in incoming:
+            continue
         schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
             incoming.get(count_key, 0) or 0
         )
-    for limit_key in (
-        "parallelism_limit",
-        "first_leg_quote_parallelism_limit",
-        "third_leg_quote_parallelism_limit",
-    ):
+    for limit_key in ("parallelism_limit", "first_leg_quote_parallelism_limit"):
         schedule[limit_key] = max(
             int(schedule.get(limit_key, 0) or 0),
             int(incoming.get(limit_key, 0) or 0),
         )
-    for flag_key in (
-        "first_leg_deadline_exceeded",
-        "first_leg_quote_budget_exhausted",
-        "third_leg_quote_deadline_exceeded",
+    if (
+        "third_leg_quote_parallelism_limit" in schedule
+        or "third_leg_quote_parallelism_limit" in incoming
     ):
+        schedule["third_leg_quote_parallelism_limit"] = max(
+            int(schedule.get("third_leg_quote_parallelism_limit", 0) or 0),
+            int(incoming.get("third_leg_quote_parallelism_limit", 0) or 0),
+        )
+    for flag_key in ("first_leg_deadline_exceeded", "first_leg_quote_budget_exhausted"):
         schedule[flag_key] = bool(
             schedule.get(flag_key, False) or incoming.get(flag_key, False)
+        )
+    if "third_leg_quote_deadline_exceeded" in schedule or "third_leg_quote_deadline_exceeded" in incoming:
+        schedule["third_leg_quote_deadline_exceeded"] = bool(
+            schedule.get("third_leg_quote_deadline_exceeded", False)
+            or incoming.get("third_leg_quote_deadline_exceeded", False)
         )
     schedule["completed_wave_results_consumed_before_budget_stop"] = bool(
         schedule.get("completed_wave_results_consumed_before_budget_stop", True)
