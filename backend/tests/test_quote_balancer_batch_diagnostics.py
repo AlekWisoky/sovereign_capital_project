@@ -6,6 +6,7 @@ from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_balancer import (
     BalancerQuote,
     build_balancer_query_batchswap_calldata,
+    quote_balancer_given_in,
     quote_balancer_given_in_many,
 )
 
@@ -134,4 +135,66 @@ async def test_malformed_balancer_request_does_not_abort_valid_batch_sibling():
     assert rpc.calls[0]["data"] == build_balancer_query_batchswap_calldata(
         valid_pool_id, token_in, token_out, 100
     )
+    assert diagnostics["failure_reasons"] == {"invalid_balancer_request": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed_result",
+    [
+        # Declares three deltas but only returns two. The old permissive
+        # decoder treated the missing third word as zero and could accept the
+        # otherwise plausible second delta as an amountOut.
+        "0x" + (
+            (32).to_bytes(32, "big")
+            + (3).to_bytes(32, "big")
+            + (0).to_bytes(32, "big")
+            + ((1 << 256) - 120).to_bytes(32, "big")
+        ).hex(),
+        # Canonical ABI output for a single int256[] return has no trailing
+        # words outside the declared array.
+        "0x" + (
+            (32).to_bytes(32, "big")
+            + (2).to_bytes(32, "big")
+            + (0).to_bytes(32, "big")
+            + ((1 << 256) - 120).to_bytes(32, "big")
+            + (999).to_bytes(32, "big")
+        ).hex(),
+    ],
+)
+async def test_balancer_batch_rejects_truncated_or_noncanonical_return(
+    malformed_result,
+):
+    rpc = _BatchRpc([RpcResult(True, result=malformed_result)])
+    diagnostics = {}
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {"invalid_quote_result": 1}
+
+
+@pytest.mark.asyncio
+async def test_single_balancer_quote_invalid_request_is_local_failure():
+    class _NoCallRpc:
+        async def eth_call(self, *_args, **_kwargs):
+            raise AssertionError("malformed request must not reach RPC")
+
+    diagnostics = {}
+    quote = await quote_balancer_given_in(
+        _NoCallRpc(),
+        "0x" + "11" * 20,
+        "0x1234",
+        "0x" + "33" * 20,
+        "0x" + "44" * 20,
+        100,
+        diagnostics=diagnostics,
+    )
+
+    assert quote is None
     assert diagnostics["failure_reasons"] == {"invalid_balancer_request": 1}
