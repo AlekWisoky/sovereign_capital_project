@@ -669,7 +669,11 @@ def revalidate_profitability_state(
     # Keep unit-conversion and repayment evidence explicit for every consumer.
     # Native gas is same-unit only for an exact wrapped-native borrowed token.
     state["gas_cost_conversion_available"] = bool(
-        explicit_conversion_valid or inherited_conversion_valid or native_gas_units_match
+        explicit_conversion_valid
+        or (
+            gas_cost_in_profit_token_wei is None
+            and (inherited_conversion_valid or native_gas_units_match)
+        )
     )
     state["gas_cost_profit_token_address"] = profit_token
     try:
