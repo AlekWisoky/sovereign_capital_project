@@ -59,12 +59,16 @@ async def quote_balancer_given_in(
     amount_in: int,
     diagnostics: dict | None = None,
 ) -> Optional[BalancerQuote]:
-    data = build_balancer_query_batchswap_calldata(
-        pool_id_hex32,
-        token_in,
-        token_out,
-        int(amount_in),
-    )
+    try:
+        data = build_balancer_query_batchswap_calldata(
+            pool_id_hex32,
+            token_in,
+            token_out,
+            int(amount_in),
+        )
+    except (TypeError, ValueError, OverflowError):
+        record_quote_parse_failure(diagnostics, "invalid_balancer_request")
+        return None
     r = await rpc.eth_call(vault, data)
     if not r.ok:
         record_quote_failure(diagnostics, classify_quote_error(r.error))
