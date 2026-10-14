@@ -4,6 +4,7 @@ import pytest
 
 from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_balancer import (
+    BalancerQuote,
     build_balancer_query_batchswap_calldata,
     quote_balancer_given_in_many,
 )
@@ -12,8 +13,10 @@ from victor_ai_bot.quote_balancer import (
 class _BatchRpc:
     def __init__(self, results):
         self.results = results
+        self.calls = []
 
     async def eth_call_batch(self, calls):
+        self.calls.extend(calls)
         return list(self.results)
 
 
@@ -98,3 +101,37 @@ def test_balancer_querybatchswap_rejects_malformed_pool_id_and_nonpositive_size(
         build_balancer_query_batchswap_calldata("0x1234", "0x" + "33" * 20, "0x" + "44" * 20, 1)
     with pytest.raises(ValueError, match="positive"):
         build_balancer_query_batchswap_calldata("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 0)
+
+
+@pytest.mark.asyncio
+async def test_malformed_balancer_request_does_not_abort_valid_batch_sibling():
+    # queryBatchSwap returns an ABI-encoded int256[]: offset 32, length 2,
+    # deltas [0, -120], meaning a 120-unit token output.
+    encoded = (
+        (32).to_bytes(32, "big")
+        + (2).to_bytes(32, "big")
+        + (0).to_bytes(32, "big")
+        + ((1 << 256) - 120).to_bytes(32, "big")
+    )
+    rpc = _BatchRpc([RpcResult(True, result="0x" + encoded.hex())])
+    diagnostics = {}
+    valid_pool_id = "0x" + "22" * 32
+    token_in = "0x" + "33" * 20
+    token_out = "0x" + "44" * 20
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [
+            ("0x1234", token_in, token_out, 100),
+            (valid_pool_id, token_in, token_out, 100),
+        ],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None, BalancerQuote(amount_out=120)]
+    assert len(rpc.calls) == 1
+    assert rpc.calls[0]["data"] == build_balancer_query_batchswap_calldata(
+        valid_pool_id, token_in, token_out, 100
+    )
+    assert diagnostics["failure_reasons"] == {"invalid_balancer_request": 1}
