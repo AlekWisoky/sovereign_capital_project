@@ -981,4 +981,11 @@ async def test_three_leg_selected_chunk_uses_full_route_universe_for_cross_chunk
     assert telemetry["route_universe_edge_count"] == 3
     assert telemetry["route_universe"]["edges_by_dex"] == {"aerodrome": 1, "univ3": 2}
     assert telemetry["route_groups_evaluated"] >= 1
+    schedule = telemetry["route_group_schedule"]
+    assert schedule["third_leg_quote_batches_total"] >= 1
+    assert schedule["third_leg_quote_batches_unique"] >= 1
+    assert schedule["third_leg_quote_batches_completed"] >= 1
+    assert schedule["third_leg_quote_batches_cancelled"] == 0
+    assert schedule["third_leg_quote_batches_skipped_budget"] == 0
+    assert schedule["third_leg_quote_parallelism_limit"] <= 4
     assert any(item.expected_profit_raw == "40" for item in opportunities)
