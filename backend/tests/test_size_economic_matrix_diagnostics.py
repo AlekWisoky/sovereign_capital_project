@@ -42,6 +42,7 @@ def test_size_economic_matrix_preserves_gross_rejected_diagnostics():
     assert matrix[0]["selection_basis"] == "gross_profit_diagnostic_only"
     assert matrix[0]["candidates"] == [{
         **rejected,
+        "gas_cost_conversion_available": True,
         "gross_minus_flashloan_fee_wei": "1770811652699",
         "gross_minus_flashloan_fee_minus_gas_wei": "960811652699",
         "repayment_valid": True,
@@ -126,3 +127,52 @@ def test_size_economic_diagnostics_are_bounded_per_route_not_global_top_n():
     for candidate in candidates:
         counts[candidate["route_id"]] += 1
     assert counts == {"route-a": 16, "route-b": 16}
+
+
+def test_missing_gas_conversion_is_upper_bound_not_economic_optimum():
+    metrics = {}
+    _record_size_economic_diagnostic(
+        metrics,
+        route_id="route-unknown-gas",
+        amount_in=1_000,
+        gross_profit_wei=-100,
+        flashloan_fee_wei=9,
+        gas_cost_wei=500,
+        gas_cost_profit_token_wei=None,
+        reason="non_positive_gross_profit",
+    )
+    _record_size_economic_diagnostic(
+        metrics,
+        route_id="route-known-gas",
+        amount_in=1_000,
+        gross_profit_wei=-300,
+        flashloan_fee_wei=10,
+        gas_cost_wei=500,
+        gas_cost_profit_token_wei=190,
+        reason="non_positive_gross_profit",
+    )
+
+    matrix = _build_size_economic_matrix([{
+        "amount_in": 1_000,
+        "two": [],
+        "three": [],
+        "two_metrics": {"size_economic_diagnostics": metrics["size_economic_diagnostics"]},
+        "three_metrics": {},
+    }])
+
+    row = matrix[0]
+    # The unknown route's gross-minus-fee upper bound is less negative, but its
+    # actual net is unknown. It must never displace the fully converted estimate.
+    assert row["economic_optimum_route_id"] == "route-known-gas"
+    assert row["economic_optimum_after_cost_profit_wei"] == "-500"
+    assert row["economic_optimum_status"] == "signed_after_cost_diagnostic"
+    assert row["economic_upper_bound_route_id"] == "route-unknown-gas"
+    assert row["economic_upper_bound_after_flashloan_fee_wei"] == "-109"
+
+    candidates = {item["route_id"]: item for item in row["candidates"]}
+    unknown = candidates["route-unknown-gas"]
+    assert unknown["gas_cost_conversion_available"] is False
+    assert unknown["after_cost_profit_wei"] == ""
+    assert unknown["economic_after_cost_profit_wei"] == ""
+    assert unknown["gross_minus_flashloan_fee_upper_bound_wei"] == "-109"
+    assert unknown["after_cost_profit_is_upper_bound"] is True

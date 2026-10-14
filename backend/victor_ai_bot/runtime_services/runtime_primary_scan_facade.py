@@ -566,7 +566,15 @@ def _reconstruct_nonrepay_economic_profit(row: Dict[str, Any]) -> int | None:
 
 
 def _economic_after_cost_profit(row: Dict[str, Any]) -> int | None:
-    """Return signed P&L for sizing while keeping execution fail-closed."""
+    """Return signed P&L only when its gas conversion is dimensionally known."""
+    if (
+        row.get("diagnostic_only") is True
+        and row.get("gas_cost_conversion_available") is False
+    ):
+        # Gross-minus-flash-loan-fee is only an upper bound when native gas
+        # cannot be converted into the borrowed token. It is not an after-cost
+        # profit estimate and must not participate in economic-optimum ranking.
+        return None
     explicit = row.get("economic_after_cost_profit_wei")
     if explicit not in (None, ""):
         try:
@@ -747,6 +755,18 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     profitability = profitability if isinstance(profitability, dict) else {}
     legs, amount_in_value = _candidate_route_snapshot(candidate)
     fields = _candidate_economic_fields(candidate, meta, profitability, amount_in_value)
+    gas_conversion_available = bool(
+        profitability.get("gas_cost_profit_token_wei") not in (None, "")
+        and int(fields["gas_cost_profit_token_wei"]) > 0
+    )
+    authoritative_after_cost = bool(
+        profitability.get("revalidated")
+        and profitability.get("authoritative")
+        and profitability.get("valid")
+    )
+    economic_unknown = bool(
+        not gas_conversion_available and not authoritative_after_cost
+    )
     row = {
         "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
         "amount_in": amount_in_value,
@@ -757,10 +777,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
             if profitability.get("gas_cost_profit_token_wei") not in (None, "")
             else ""
         ),
-        "gas_cost_conversion_available": bool(
-            profitability.get("gas_cost_profit_token_wei") not in (None, "")
-            and int(fields["gas_cost_profit_token_wei"]) > 0
-        ),
+        "gas_cost_conversion_available": gas_conversion_available,
         "gas_units_estimate": str(meta.get("economic_gas_units") or ""),
         "gas_cost_l2_wei": str(meta.get("economic_gas_l2_wei") or ""),
         "base_l1_fee_wei": str(meta.get("economic_base_l1_fee_wei", meta.get("base_l1_fee_wei", "0")) or "0"),
@@ -771,15 +788,26 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "gross_minus_flashloan_fee_wei": str(fields["gross_minus_flashloan_fee_wei"]),
         "gross_minus_flashloan_fee_minus_gas_wei": str(fields["gross_minus_flashloan_fee_minus_gas_wei"]),
         "repayment_valid": fields["repayment_valid"],
-        "after_cost_profit_wei": str(profitability.get("profit_after_costs_wei") or "0"),
+        "after_cost_profit_wei": (
+            "" if economic_unknown
+            else str(profitability.get("profit_after_costs_wei") or "0")
+        ),
         "after_cost_profit_usd_micro": str((meta.get("canonical_after_fee_usd") or {}).get("profit_after_costs_usd_micro") or "0"),
-        "economic_after_cost_profit_wei": str(fields["economic_after_cost_profit_wei"]),
+        "economic_after_cost_profit_wei": (
+            "" if economic_unknown
+            else str(fields["economic_after_cost_profit_wei"])
+        ),
         "revalidated": bool(profitability.get("revalidated")),
         "authoritative": bool(profitability.get("authoritative")),
         "valid": bool(profitability.get("valid")),
         "reason": str(profitability.get("reason") or "unavailable"),
         "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
     }
+    if economic_unknown:
+        row["gross_minus_flashloan_fee_upper_bound_wei"] = str(
+            fields["gross_minus_flashloan_fee_wei"]
+        )
+        row["after_cost_profit_is_upper_bound"] = True
     if legs:
         row["legs"] = legs
     return row
@@ -807,14 +835,38 @@ def _size_diagnostic_rows(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
         amount_out = int(diagnostic.get("amount_out_wei") or 0)
         gross = int(diagnostic.get("gross_profit_wei") or 0)
         fee = int(diagnostic.get("flashloan_fee_wei") or 0)
-        gas = int(diagnostic.get("gas_cost_profit_token_wei") or 0)
-        economic = diagnostic.get("economic_after_cost_profit_wei")
-        if economic in (None, ""):
-            economic = gross - fee - gas
+        gas_raw = diagnostic.get("gas_cost_profit_token_wei")
         try:
-            economic = int(economic)
-        except (TypeError, ValueError):
-            economic = gross - fee - gas
+            gas = int(gas_raw or 0)
+        except (TypeError, ValueError, OverflowError):
+            gas = 0
+        conversion_flag = diagnostic.get("gas_cost_conversion_available")
+        gas_conversion_available = (
+            conversion_flag is True
+            if conversion_flag is not None
+            else gas_raw not in (None, "") and gas > 0
+        )
+        upper_bound = gross - fee
+        if gas_conversion_available:
+            economic = diagnostic.get("economic_after_cost_profit_wei")
+            if economic in (None, ""):
+                economic = gross - fee - gas
+            try:
+                economic = int(economic)
+            except (TypeError, ValueError, OverflowError):
+                economic = gross - fee - gas
+            after_cost = str(diagnostic.get("after_cost_profit_wei") or economic)
+            gas_cost_token_value = str(gas)
+            gross_minus_fee_minus_gas = str(gross - fee - gas)
+        else:
+            # The source diagnostic's legacy after_cost_profit_wei is only
+            # gross-minus-fee in this case. Preserve that upper bound separately
+            # and leave true after-cost fields unknown.
+            economic = None
+            after_cost = ""
+            gas_cost_token_value = ""
+            gross_minus_fee_minus_gas = ""
+
         row = {
             "route_id": str(diagnostic.get("route_id") or ""),
             "amount_in": str(amount_in),
@@ -822,17 +874,21 @@ def _size_diagnostic_rows(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
             "gross_profit_wei": str(gross),
             "flashloan_fee_wei": str(fee),
             "gas_cost_wei": str(diagnostic.get("gas_cost_wei") or "0"),
-            "gas_cost_profit_token_wei": str(gas),
+            "gas_cost_profit_token_wei": gas_cost_token_value,
+            "gas_cost_conversion_available": bool(gas_conversion_available),
             "gross_minus_flashloan_fee_wei": str(gross - fee),
-            "gross_minus_flashloan_fee_minus_gas_wei": str(gross - fee - gas),
+            "gross_minus_flashloan_fee_minus_gas_wei": gross_minus_fee_minus_gas,
             "repayment_valid": bool(amount_out > 0 and amount_out >= amount_in + fee),
-            "after_cost_profit_wei": str(diagnostic.get("after_cost_profit_wei") or "0"),
-            "economic_after_cost_profit_wei": str(economic),
+            "after_cost_profit_wei": after_cost,
+            "economic_after_cost_profit_wei": str(economic) if economic is not None else "",
             "revalidated": bool(diagnostic.get("revalidated")),
             "authoritative": bool(diagnostic.get("authoritative")),
             "reason": str(diagnostic.get("reason") or "diagnostic_only"),
             "diagnostic_only": True,
         }
+        if not gas_conversion_available:
+            row["gross_minus_flashloan_fee_upper_bound_wei"] = str(upper_bound)
+            row["after_cost_profit_is_upper_bound"] = True
         legs = [dict(leg) for leg in (diagnostic.get("legs") or []) if isinstance(leg, dict)][:3]
         if legs:
             row["legs"] = legs
@@ -852,10 +908,16 @@ def _size_route_rows(record: Dict[str, Any]) -> tuple[List[Dict[str, Any]], Dict
 
 
 def _size_matrix_selection(rows: List[Dict[str, Any]]) -> tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
-    positive = [
-        row for row in rows
-        if row["revalidated"] and row["authoritative"] and int(row["after_cost_profit_wei"]) > 0
-    ]
+    positive: List[Dict[str, Any]] = []
+    for row in rows:
+        if not (row.get("revalidated") and row.get("authoritative")):
+            continue
+        try:
+            after_cost = int(row.get("after_cost_profit_wei") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if after_cost > 0:
+            positive.append(row)
     selected = max(positive, key=lambda row: int(row["after_cost_profit_wei"]), default=None)
     economic_rows = [
         row for row in rows
@@ -878,6 +940,16 @@ def _build_size_matrix_row(
     three_metrics: Dict[str, Any],
 ) -> Dict[str, Any]:
     selected, economic = _size_matrix_selection(rows)
+    upper_bound_rows = [
+        row for row in rows
+        if row.get("route_id")
+        and row.get("gross_minus_flashloan_fee_upper_bound_wei") not in (None, "")
+    ]
+    economic_upper_bound = max(
+        upper_bound_rows,
+        key=lambda row: int(row.get("gross_minus_flashloan_fee_upper_bound_wei") or 0),
+        default=None,
+    )
     requests = int(two_metrics.get("quote_requests", 0) or 0) + int(three_metrics.get("quote_requests", 0) or 0)
     successes = int(two_metrics.get("quote_successes", 0) or 0) + int(three_metrics.get("quote_successes", 0) or 0)
     cancelled = int(two_metrics.get("quote_cancelled", 0) or 0) + int(three_metrics.get("quote_cancelled", 0) or 0)
@@ -886,6 +958,8 @@ def _build_size_matrix_row(
         basis = "economic_optimum_diagnostic"
         if str(economic.get("reason") or "") == "non_positive_gross_profit":
             basis = "gross_profit_diagnostic_only"
+    elif economic_upper_bound and not selected:
+        basis = "gross_profit_upper_bound_only"
     return {
         "amount_in": str(amount),
         "quote_requests": requests,
@@ -909,6 +983,27 @@ def _build_size_matrix_row(
         ),
         "economic_optimum_authoritative": bool(economic and economic["authoritative"]),
         "economic_optimum_executable": bool(selected),
+        "economic_upper_bound_route_id": (
+            str(economic_upper_bound.get("route_id") or "")
+            if economic_upper_bound else ""
+        ),
+        "economic_upper_bound_after_flashloan_fee_wei": (
+            str(economic_upper_bound.get("gross_minus_flashloan_fee_upper_bound_wei") or "")
+            if economic_upper_bound else ""
+        ),
+        "economic_optimum_status": (
+            "verified_after_cost"
+            if selected
+            else (
+                "signed_after_cost_diagnostic"
+                if economic
+                else (
+                    "upper_bound_only_gas_conversion_unavailable"
+                    if economic_upper_bound
+                    else "no_economic_evidence"
+                )
+            )
+        ),
     }
 
 
