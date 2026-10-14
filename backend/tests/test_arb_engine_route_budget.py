@@ -411,11 +411,13 @@ async def test_three_leg_route_evaluation_consumes_quotes_returned_after_budget(
         assert out == []
         assert telemetry["route_groups_evaluated"] == 0
     elif slow_phase == "second":
-        # The completed second-leg quote is consumed, but no dependent final-leg
-        # RPC is started after the absolute route deadline.
-        assert out == []
+        # A completed second-leg result earns at most one bounded final-leg
+        # quote batch even when it returns just after the shared deadline.
+        # Later groups remain skipped; the global deadline is not extended.
+        assert len(out) >= 1
+        assert any(item.expected_profit_raw == "20" for item in out)
         assert telemetry["route_groups_evaluated"] >= 1
-        assert telemetry["route_group_schedule"]["third_leg_quote_batches_skipped_budget"] >= 1
+        assert telemetry["route_group_schedule"]["third_leg_quote_batches_completed"] >= 1
     else:
         # A final-leg quote already dispatched before the deadline is retained
         # even if it returns after the logical clock has crossed the deadline.
