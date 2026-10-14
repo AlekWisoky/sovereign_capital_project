@@ -3552,8 +3552,9 @@ class RuntimePrimaryScanFacade:
         cache: PerBlockCache,
         shared_gas_price_consensus: Dict[str, Any] | None = None,
         shared_flashloan_fee_observation: Dict[str, Any] | None = None,
+        diagnostic_evidence: List[Dict[str, Any]] | None = None,
     ) -> tuple[List[Opportunity], Dict[str, Any]]:
-        """Probe promising routes using the same block/cost snapshot as provider selection."""
+        """Probe genuine routes and bounded quote-derived near misses on the same cost snapshot."""
         telemetry: Dict[str, Any] = {}
         adaptive_amounts = self._adaptive_scan_amounts(
             int(base_amount_in),
@@ -3629,6 +3630,19 @@ class RuntimePrimaryScanFacade:
             if len(selected) >= route_cap:
                 break
 
+        selected_diagnostic_candidates = _diagnostic_size_probe_candidates(
+            list(diagnostic_evidence or []),
+            chain_name=str(getattr(getattr(self.cfg, "chain", None), "name", "") or ""),
+            excluded_route_ids=set(seen_routes),
+            max_candidates=max(0, route_cap - len(selected)),
+        )
+        selected.extend(selected_diagnostic_candidates)
+        selected_diagnostic_route_ids = {
+            _route_key(candidate)
+            for candidate in selected_diagnostic_candidates
+            if _route_key(candidate)
+        }
+
         # Profitability at the current notional does not prove that the notional
         # is optimal. Whenever routes are available and the authorized ladder has
         # alternatives, evaluate their size curve before handing candidates on.
@@ -3652,6 +3666,14 @@ class RuntimePrimaryScanFacade:
             "authoritative_positive_candidates_before_probe": int(positive_base),
             "probe_basis": "bounded_selected_route_requote",
             "selected_route_count": int(len(selected)),
+            "selected_diagnostic_route_count": int(len(selected_diagnostic_candidates)),
+            "diagnostic_probe_route_ids": sorted(selected_diagnostic_route_ids),
+            "diagnostic_probe_source_rows": int(sum(
+                1 for row in list(diagnostic_evidence or [])
+                if isinstance(row, dict)
+                and row.get("diagnostic_only") is True
+                and str(row.get("route_id") or "") in selected_diagnostic_route_ids
+            )),
             "route_cap": int(route_cap),
             "triangle_cap": int(triangle_cap),
             "probe_candidate_delta": 0,
@@ -3709,6 +3731,45 @@ class RuntimePrimaryScanFacade:
             int(record.get("amount_in") or 0): record
             for record in size_scan_records
         }
+        # Preserve diagnostic evidence at its observed source size. When a
+        # size-probe candidate supplies a re-quoted row for the same route/size,
+        # _size_route_rows prefers that re-quoted candidate over this fallback.
+        for diagnostic in list(diagnostic_evidence or []):
+            if not isinstance(diagnostic, dict):
+                continue
+            route_id = str(diagnostic.get("route_id") or "")
+            if route_id not in selected_diagnostic_route_ids or diagnostic.get("diagnostic_only") is not True:
+                continue
+            try:
+                source_amount = int(diagnostic.get("amount_in") or 0)
+                diagnostic_legs = [
+                    leg for leg in list(diagnostic.get("legs") or [])
+                    if isinstance(leg, dict)
+                ]
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if source_amount <= 0 or len(diagnostic_legs) not in {2, 3}:
+                continue
+            group_name = "two_metrics" if len(diagnostic_legs) == 2 else "three_metrics"
+            source_record = size_scan_records_by_amount.setdefault(
+                source_amount,
+                {
+                    "amount_in": source_amount,
+                    "two": [],
+                    "three": [],
+                    "two_metrics": {},
+                    "three_metrics": {},
+                },
+            )
+            group_metrics = source_record.setdefault(group_name, {})
+            diagnostic_rows = group_metrics.setdefault("size_economic_diagnostics", [])
+            if not any(
+                isinstance(existing, dict)
+                and str(existing.get("route_id") or "") == route_id
+                and str(existing.get("amount_in") or "") == str(source_amount)
+                for existing in diagnostic_rows
+            ):
+                diagnostic_rows.append(dict(diagnostic))
         probe_run = _SizeProbeRun(
             rpc=rpc,
             cfg=self.cfg,
@@ -3747,12 +3808,27 @@ class RuntimePrimaryScanFacade:
             )
 
         finalized = _finalize_size_probe(probe_run)
+        for row in list(finalized.get("size_economic_evidence") or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("route_id") or "") in selected_diagnostic_route_ids:
+                row["diagnostic_only"] = True
+                row["size_probe_diagnostic_only"] = True
+                row["execution_authority_granted"] = False
         telemetry["size_economic_matrix"] = list(finalized["size_economic_matrix"])
         telemetry["size_economic_evidence"] = list(finalized["size_economic_evidence"])
         telemetry["adaptive_size_discovery"].update(
             dict(finalized["adaptive_size_discovery"])
         )
-        return [*base_opps, *sized], telemetry
+        return [
+            *base_opps,
+            *[
+                candidate for candidate in sized
+                if not bool(
+                    (getattr(candidate, "meta", {}) or {}).get("size_probe_diagnostic_only")
+                )
+            ],
+        ], telemetry
 
     async def _select_rpc_and_scan(
         self,
