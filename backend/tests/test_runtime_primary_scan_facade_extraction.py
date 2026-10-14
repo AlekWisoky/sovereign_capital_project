@@ -828,27 +828,28 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
 def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
     two_leg = {
         "quote_attempts_by_family": {"univ3": 10, "curve": 2},
-        "quote_network_requests_by_family": {"univ3": 9},
+        "quote_network_requests_by_family": {"univ3": 10},
         "quote_successes_by_family": {"univ3": 7},
         "quote_failures_by_family": {"univ3": 2},
-        "quote_cancelled_by_family": {"univ3": 1, "balancer": 2},
+        "quote_cancelled_by_family": {"univ3": 1},
         "quote_adapter_unavailable_by_family": {"curve": 1},
     }
     three_leg = {
-        "quote_attempts_by_family": {"univ3": 4, "balancer": 3},
-        "quote_network_requests_by_family": {"univ3": 3, "balancer": 3},
+        "quote_attempts_by_family": {"univ3": 3, "balancer": 5},
+        "quote_network_requests_by_family": {"univ3": 3, "balancer": 5},
         "quote_successes_by_family": {"univ3": 2, "balancer": 1},
         "quote_failures_by_family": {"univ3": 1, "balancer": 2},
+        "quote_cancelled_by_family": {"balancer": 2},
         "quote_adapter_unavailable_by_family": {"balancer": 1},
     }
 
     result = scan_mod._aggregate_quote_family_metrics(two_leg, three_leg)
 
     assert result["quote_attempts_by_family"] == {
-        "univ3": 14, "curve": 2, "balancer": 3,
+        "univ3": 13, "curve": 2, "balancer": 5,
     }
     assert result["quote_network_requests_by_family"] == {
-        "univ3": 12, "balancer": 3,
+        "univ3": 13, "balancer": 5,
     }
     assert result["quote_successes_by_family"] == {
         "univ3": 9, "balancer": 1,
