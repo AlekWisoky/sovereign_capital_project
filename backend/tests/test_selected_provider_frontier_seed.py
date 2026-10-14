@@ -43,6 +43,13 @@ def test_frontier_seed_timeout_covers_inner_route_budget():
         configured_timeout_s=8.0,
         route_budget_ms=9_000,
     ) == 8.0
+    assert resolver(
+        selection_timeout_s=35.0,
+        seed_budget_s=10.0,
+        configured_timeout_s=8.0,
+        route_budget_ms=9_000,
+        explicit_override=True,
+    ) == 8.0
 
 
 def test_route_evaluation_budget_is_bounded_configurable_and_split(monkeypatch):
