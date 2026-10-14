@@ -262,6 +262,66 @@ class PoolStateEventCache:
             ),
         }
 
+    @staticmethod
+    def _edge_family_name(edge: Any) -> str:
+        """Return the canonical venue family used for bounded graph fairness."""
+        dex = str(getattr(edge, "dex", "") or "").strip().lower()
+        params = getattr(edge, "params", {}) or {}
+        if dex == "constant_product":
+            venue_name = str(params.get("venue_name") or "").strip().lower()
+            if venue_name:
+                return venue_name[:64]
+        return (dex or "unknown")[:64]
+
+    @classmethod
+    def _family_edge_counts(cls, edges: Iterable[Any]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for edge in edges:
+            family = cls._edge_family_name(edge)
+            counts[family] = int(counts.get(family, 0)) + 1
+        return dict(sorted(counts.items()))
+
+    @classmethod
+    def _round_robin_by_family(
+        cls,
+        edges: Iterable[Any],
+        limit: int,
+        *,
+        rotation_index: int = 0,
+    ) -> List[Any]:
+        """Select across families before spending the remaining cap on one family.
+
+        Input order within a family is preserved, so callers can provide event-
+        prioritized edges. Rotating the first family by block number prevents a
+        stable family sort from creating persistent first/last-family bias.
+        """
+        cap = max(0, int(limit))
+        if cap == 0:
+            return []
+        buckets: Dict[str, List[Any]] = {}
+        for edge in edges:
+            buckets.setdefault(cls._edge_family_name(edge), []).append(edge)
+        families = sorted(buckets)
+        if not families:
+            return []
+        offset = max(0, int(rotation_index)) % len(families)
+        families = families[offset:] + families[:offset]
+
+        selected: List[Any] = []
+        while len(selected) < cap:
+            made_progress = False
+            for family in families:
+                bucket = buckets.get(family) or []
+                if not bucket:
+                    continue
+                selected.append(bucket.pop(0))
+                made_progress = True
+                if len(selected) >= cap:
+                    break
+            if not made_progress:
+                break
+        return selected
+
     def candidate_edges(
         self,
         edges: List[Any],
@@ -339,28 +399,39 @@ class PoolStateEventCache:
             exploration_reserve = min(len(cold), max(8, cap // 4))
             exploration_count = exploration_reserve
 
-        exploration: List[Any] = []
-        if cold and exploration_count:
-            stride = max(1, len(cold) // exploration_count)
-            start = int(current_block) % len(cold)
-            idx = start
-            visited = 0
-            while len(exploration) < exploration_count and visited < len(cold) * 2:
-                exploration.append(cold[idx % len(cold)])
-                idx += stride
-                visited += 1
-                if visited >= len(cold) and len(exploration) < exploration_count:
-                    exploration.append(cold[visited % len(cold)])
+        # Prioritize independently within each set, then interleave families
+        # before applying the hard cap. Previously hot[:cap] followed graph-build
+        # order; when common-token V3 edges filled the hot list, the exploration
+        # reserve was zero and low-cardinality families were silently starved.
+        ordered_cold, _cold_priority = self.prioritize_edges(
+            cold, current_block=int(current_block)
+        )
+        exploration = self._round_robin_by_family(
+            ordered_cold,
+            exploration_count,
+            rotation_index=int(current_block),
+        )
 
         hot_budget = max(0, cap - exploration_reserve)
-        exploration_budget = max(0, cap - min(len(hot), hot_budget))
+        ordered_hot, _hot_priority = self.prioritize_edges(
+            hot, current_block=int(current_block)
+        )
+        hot_selected = self._round_robin_by_family(
+            ordered_hot,
+            hot_budget,
+            rotation_index=int(current_block),
+        )
+        exploration_budget = max(0, cap - len(hot_selected))
+        exploration_selected = exploration[:exploration_budget]
+
         combined: List[Any] = []
-        for edge in [
-            *hot[:hot_budget],
-            *exploration[:exploration_budget],
-        ]:
-            if edge not in combined:
-                combined.append(edge)
+        selected_ids: set[str] = set()
+        for edge in [*hot_selected, *exploration_selected]:
+            edge_id = self._edge_identity(edge)
+            if edge_id in selected_ids:
+                continue
+            selected_ids.add(edge_id)
+            combined.append(edge)
 
         combined = combined[:cap]
         if not combined and full:
@@ -375,13 +446,21 @@ class PoolStateEventCache:
                 "candidate_edges_full": int(len(full)),
                 "candidate_edges_pruned": int(max(0, len(full) - len(combined))),
                 "exploration_edge_count": int(
-                    sum(1 for edge in exploration if edge in combined)
+                    sum(1 for edge in exploration_selected if self._edge_identity(edge) in selected_ids)
                 ),
                 "hot_subgraph_edge_count": int(len(hot)),
+                "hot_selected_edge_count": int(len(hot_selected)),
+                "exploration_selected_edge_count": int(len(exploration_selected)),
+                "hot_subgraph_edges_by_family": self._family_edge_counts(hot),
+                "hot_selected_edges_by_family": self._family_edge_counts(hot_selected),
+                "exploration_pool_edges_by_family": self._family_edge_counts(cold),
+                "exploration_edges_by_family": self._family_edge_counts(exploration_selected),
+                "candidate_edges_by_family": self._family_edge_counts(combined),
                 "fresh_dirty_pool_count": int(len(fresh_dirty_pools)),
                 "affected_token_count": int(len(affected_tokens)),
                 "max_candidates": int(cap),
                 "exploration_ratio": float(ratio),
+                "family_fair_selection": True,
             }
         )
         self._last_candidate_metrics = dict(priority)
