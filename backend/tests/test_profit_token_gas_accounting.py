@@ -67,6 +67,8 @@ def test_revalidation_accepts_non_weth_profit_token_gas_conversion():
     assert state["authoritative"] is True
     assert state["gas_cost_wei"] == str(10**12)
     assert state["gas_cost_profit_token_wei"] == "1000"
+    assert state["gas_cost_conversion_available"] is True
+    assert state["repayment_valid"] is True
     assert state["profit_after_costs_wei"] == "10000"
 
 
