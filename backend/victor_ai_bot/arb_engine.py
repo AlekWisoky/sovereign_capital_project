@@ -2256,6 +2256,80 @@ async def _quote_two_leg_route_group_wave(
     )
 
 
+def _recover_cached_edge_quotes(
+    cache: PerBlockCache,
+    amount_in: int,
+    edges: Sequence[Edge],
+) -> Dict[str, Optional[Tuple[int, Dict[str, Any]]]]:
+    """Recover valid quotes cached for this exact edge and input amount."""
+    recovered: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
+    for edge in edges:
+        try:
+            cached = cache.get(_edge_quote_cache_key(edge, int(amount_in)))
+        except (AttributeError, KeyError, OSError, TypeError, ValueError):
+            continue
+        if not isinstance(cached, tuple) or len(cached) < 2 or not isinstance(cached[1], dict):
+            continue
+        try:
+            amount_out = int(cached[0])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if amount_out > 0:
+            recovered[edge_key(edge)] = (amount_out, dict(cached[1]))
+    return recovered
+
+
+def _recover_skipped_edge_jobs(
+    jobs: Sequence[Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]],
+    cache: PerBlockCache,
+    results: Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]],
+) -> int:
+    """Reuse exact-key cached quotes for skipped jobs without dispatching RPCs."""
+    recovered_count = 0
+    for signature, amount_in, edges in jobs:
+        recovered = _recover_cached_edge_quotes(cache, amount_in, edges)
+        if recovered:
+            results[signature] = recovered
+            recovered_count += len(recovered)
+    return recovered_count
+
+
+def _collect_quote_edge_job_results(
+    tasks: Sequence[asyncio.Task],
+    done: set,
+    task_jobs: Mapping[asyncio.Task, Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]],
+    cache: PerBlockCache,
+) -> Tuple[Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, int]]:
+    """Collect completed quote jobs, recovering only exact cached values after cancellation."""
+    results: Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]] = {}
+    completed = failed = cancelled = recovered = 0
+    for task in tasks:
+        if task not in done:
+            continue
+        signature, amount_in, edges = task_jobs[task]
+        if task.cancelled():
+            cancelled += 1
+            partial = _recover_cached_edge_quotes(cache, amount_in, edges)
+            if partial:
+                results[signature] = partial
+                recovered += len(partial)
+            continue
+        error = task.exception()
+        if error is not None:
+            if isinstance(error, _SAFE_EDGE_QUOTE_EXCEPTIONS):
+                failed += 1
+                continue
+            raise error
+        results[signature] = dict(task.result() or {})
+        completed += 1
+    return results, {
+        "batches_completed": completed,
+        "batches_failed": failed,
+        "batches_cancelled": cancelled,
+        "edges_recovered_after_cancellation": recovered,
+    }
+
+
 async def _quote_edge_jobs_in_bounded_waves(
     rpc: Any,
     cfg: Any,
@@ -2265,103 +2339,83 @@ async def _quote_edge_jobs_in_bounded_waves(
     deadline: float,
     parallelism: int,
     metrics: Dict[str, Any],
+    allow_one_after_deadline: bool = False,
 ) -> tuple[Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, Any]]:
-    """Run distinct amount/edge-set quote jobs in bounded waves under one deadline.
+    """Quote unique jobs in bounded waves and retain exact completed evidence.
 
-    Completed maps are retained. If a job is cancelled mid-adapter-batch, only
-    successful cache entries for its exact edge+amount pairs are recovered;
-    missing/in-flight quotes remain absent. The signature lets callers safely
-    coalesce identical requests without conflating different input notionals.
+    Triangle final-leg callers may finish one already-funded batch after the
+    global route deadline. That single batch gets at most 500ms to finish; no
+    later route group or wave receives extra time.
     """
     ordered = list(jobs)
     limit = max(1, min(4, int(parallelism)))
     results: Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]] = {}
-    completed = failed = cancelled = skipped = waves = recovered = 0
+    completed = failed = cancelled = skipped = waves = 0
+    recovered_cancelled = recovered_skipped = 0
     cursor = 0
+    grace_used = False
 
     while cursor < len(ordered):
-        if time.perf_counter() >= deadline:
-            skipped += len(ordered) - cursor
+        expired = time.perf_counter() >= deadline
+        if expired and (not allow_one_after_deadline or grace_used):
+            remaining = ordered[cursor:]
+            skipped += len(remaining)
+            recovered_skipped += _recover_skipped_edge_jobs(remaining, cache, results)
             break
-        wave = ordered[cursor:cursor + limit]
+
+        wave_size = 1 if expired else limit
+        wait_deadline = deadline
+        if expired:
+            grace_used = True
+            wait_deadline = max(deadline, time.perf_counter()) + 0.5
+
+        wave = ordered[cursor:cursor + wave_size]
         tasks: List[asyncio.Task] = []
         task_jobs: Dict[asyncio.Task, Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]] = {}
         for job in wave:
             signature, amount_in, edges = job
             task = asyncio.create_task(
-                quote_edges_batch(
-                    rpc, cfg, cache, edges, int(amount_in), metrics=metrics
-                )
+                quote_edges_batch(rpc, cfg, cache, edges, int(amount_in), metrics=metrics)
             )
             tasks.append(task)
             task_jobs[task] = job
 
-        done, pending = await _wait_for_quote_tasks_until_deadline(
-            tasks,
-            deadline=deadline,
-        )
+        done, pending = await _wait_for_quote_tasks_until_deadline(tasks, deadline=wait_deadline)
         waves += 1
-        for task in tasks:
-            if task not in done:
-                continue
-            if task.cancelled():
-                failed += 1
-                continue
-            error = task.exception()
-            if error is not None:
-                failed += 1
-                continue
-            signature, _amount_in, _edges = task_jobs[task]
-            results[signature] = dict(task.result() or {})
-            completed += 1
+        wave_results, wave_counts = _collect_quote_edge_job_results(tasks, done, task_jobs, cache)
+        results.update(wave_results)
+        completed += wave_counts["batches_completed"]
+        failed += wave_counts["batches_failed"]
+        cancelled += wave_counts["batches_cancelled"]
+        recovered_cancelled += wave_counts["edges_recovered_after_cancellation"]
+        cursor += len(wave)
 
         if pending:
             cancelled += len(pending)
             for task in pending:
                 signature, amount_in, edges = task_jobs[task]
-                partial: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
-                for edge in edges:
-                    try:
-                        cached = cache.get(_edge_quote_cache_key(edge, int(amount_in)))
-                    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-                        cached = None
-                    if (
-                        isinstance(cached, tuple)
-                        and len(cached) >= 2
-                        and isinstance(cached[1], dict)
-                    ):
-                        try:
-                            positive_output = int(cached[0]) > 0
-                        except (TypeError, ValueError, OverflowError):
-                            positive_output = False
-                        if positive_output:
-                            partial[edge_key(edge)] = (int(cached[0]), dict(cached[1]))
-                if partial:
-                    results[signature] = partial
-                    recovered += len(partial)
-        cursor += len(wave)
-        if pending:
-            skipped += len(ordered) - cursor
+                recovered = _recover_cached_edge_quotes(cache, amount_in, edges)
+                if recovered:
+                    results[signature] = recovered
+                    recovered_cancelled += len(recovered)
+            remaining = ordered[cursor:]
+            skipped += len(remaining)
+            recovered_skipped += _recover_skipped_edge_jobs(remaining, cache, results)
             break
 
-    # These bounded counters are shared by second- and third-leg route
-    # waves, then surfaced through the public route_group_schedule snapshot.
-    def add_metric(key: str, count: int) -> None:
+    metric_counts = {
+        "route_group_quote_batches_completed": completed,
+        "route_group_quote_batches_failed": failed,
+        "route_group_quote_batches_cancelled": cancelled,
+        "route_group_quote_batches_skipped_budget": skipped,
+        "route_group_quote_waves_started": waves,
+        "route_group_quote_edges_recovered_after_cancellation": recovered_cancelled,
+        "route_group_quote_edges_recovered_from_cache_when_skipped": recovered_skipped,
+    }
+    for key, count in metric_counts.items():
         metrics[key] = max(0, int(metrics.get(key, 0) or 0)) + max(0, int(count))
 
-    for key, value in (
-        ("route_group_quote_batches_completed", completed),
-        ("route_group_quote_batches_failed", failed),
-        ("route_group_quote_batches_cancelled", cancelled),
-        ("route_group_quote_batches_skipped_budget", skipped),
-        ("route_group_quote_waves_started", waves),
-        ("route_group_quote_edges_recovered_after_cancellation", recovered),
-    ):
-        add_metric(key, value)
-
-    deadline_exceeded = bool(
-        ordered and (cancelled > 0 or skipped > 0 or time.perf_counter() >= deadline)
-    )
+    deadline_exceeded = bool(cancelled or skipped or time.perf_counter() >= deadline)
     return results, {
         "batches_total": int(len(ordered)),
         "batches_completed": int(completed),
@@ -2370,7 +2424,8 @@ async def _quote_edge_jobs_in_bounded_waves(
         "batches_skipped_budget": int(skipped),
         "waves_started": int(waves),
         "parallelism_limit": int(limit),
-        "partial_quote_edges_recovered_after_cancellation": int(recovered),
+        "partial_quote_edges_recovered_after_cancellation": int(recovered_cancelled),
+        "edges_recovered_from_cache_when_skipped": int(recovered_skipped),
         "deadline_exceeded": deadline_exceeded,
     }
 
@@ -2865,6 +2920,7 @@ async def find_two_leg_opportunities(
             "route_group_quote_batches_cancelled": int(metrics.get("route_group_quote_batches_cancelled", 0) or 0),
             "route_group_quote_batches_skipped_budget": int(metrics.get("route_group_quote_batches_skipped_budget", 0) or 0),
             "route_group_quote_edges_recovered_after_cancellation": int(metrics.get("route_group_quote_edges_recovered_after_cancellation", 0) or 0),
+            "route_group_quote_edges_recovered_from_cache_when_skipped": int(metrics.get("route_group_quote_edges_recovered_from_cache_when_skipped", 0) or 0),
             "route_group_quote_waves_started": int(metrics.get("route_group_quote_waves_started", 0) or 0),
             "route_group_waves_started": int(route_quote_waves_started),
             "duplicate_quote_batches_coalesced": int(coalesced_route_quote_batches),
@@ -3409,6 +3465,7 @@ async def find_three_leg_opportunities(
     triangle_third_leg_quote_batches_cancelled = 0
     triangle_third_leg_quote_batches_skipped_budget = 0
     triangle_third_leg_quote_edges_recovered_after_cancellation = 0
+    triangle_third_leg_quote_edges_recovered_from_cache_when_skipped = 0
     triangle_third_leg_quote_waves_started = 0
     triangle_third_leg_quote_batches_coalesced = 0
     triangle_third_leg_quote_deadline_exceeded = False
@@ -3528,6 +3585,7 @@ async def find_three_leg_opportunities(
             deadline=route_deadline,
             parallelism=triangle_route_parallelism,
             metrics=metrics,
+            allow_one_after_deadline=True,
         )
         triangle_third_leg_quote_batches_completed += int(third_leg_schedule["batches_completed"])
         triangle_third_leg_quote_batches_failed += int(third_leg_schedule["batches_failed"])
@@ -3536,6 +3594,9 @@ async def find_three_leg_opportunities(
         triangle_third_leg_quote_waves_started += int(third_leg_schedule["waves_started"])
         triangle_third_leg_quote_edges_recovered_after_cancellation += int(
             third_leg_schedule["partial_quote_edges_recovered_after_cancellation"]
+        )
+        triangle_third_leg_quote_edges_recovered_from_cache_when_skipped += int(
+            third_leg_schedule["edges_recovered_from_cache_when_skipped"]
         )
         triangle_third_leg_quote_batches_coalesced += max(
             0, int(third_leg_logical_batches) - len(third_leg_jobs)
@@ -3845,6 +3906,7 @@ async def find_three_leg_opportunities(
             "route_group_quote_batches_cancelled": int(metrics.get("route_group_quote_batches_cancelled", 0) or 0),
             "route_group_quote_batches_skipped_budget": int(metrics.get("route_group_quote_batches_skipped_budget", 0) or 0),
             "route_group_quote_edges_recovered_after_cancellation": int(metrics.get("route_group_quote_edges_recovered_after_cancellation", 0) or 0),
+            "route_group_quote_edges_recovered_from_cache_when_skipped": int(metrics.get("route_group_quote_edges_recovered_from_cache_when_skipped", 0) or 0),
             "route_group_quote_waves_started": int(metrics.get("route_group_quote_waves_started", 0) or 0),
             "third_leg_quote_batches_total": int(triangle_third_leg_quote_batches_total),
             "third_leg_quote_batches_unique": int(triangle_third_leg_quote_batches_unique),
@@ -3855,6 +3917,9 @@ async def find_three_leg_opportunities(
             "third_leg_quote_batches_coalesced": int(triangle_third_leg_quote_batches_coalesced),
             "third_leg_quote_edges_recovered_after_cancellation": int(
                 triangle_third_leg_quote_edges_recovered_after_cancellation
+            ),
+            "third_leg_quote_edges_recovered_from_cache_when_skipped": int(
+                triangle_third_leg_quote_edges_recovered_from_cache_when_skipped
             ),
             "third_leg_quote_waves_started": int(triangle_third_leg_quote_waves_started),
             "third_leg_quote_parallelism_limit": int(triangle_route_parallelism),
