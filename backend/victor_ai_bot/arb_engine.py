@@ -730,6 +730,14 @@ async def _safe_venue_quote_batch(
     return results
 
 
+def _edge_quote_cache_key(edge: Edge, amount_in: int) -> str:
+    """Match the per-block quote cache key used by every venue adapter."""
+    return (
+        f"edge:{edge.dex}:{edge.venue}:{edge.token_in}:{edge.token_out}:"
+        f"{json_key(edge.params)}:{int(amount_in)}"
+    )
+
+
 async def quote_edges_batch(
     rpc,
     cfg,
@@ -777,7 +785,7 @@ async def quote_edges_batch(
     # read cache first
     for idx, e in enumerate(edges):
         ek = edge_key(e)
-        ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+        ck = _edge_quote_cache_key(e, amount_in)
         hit = cache.get(ck)
         if hit is not None:
             out[ek] = hit
@@ -910,7 +918,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             if q:
                 metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (
@@ -948,7 +956,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             if q:
                 metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (
@@ -988,7 +996,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             out[ek] = None if q is None else (q.amount_out, {"stable": q.stable, "factory": q.factory})
             cache.set(ck, out[ek])
             if q is not None:
@@ -1018,7 +1026,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             if q:
                 metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (
@@ -1051,7 +1059,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             if q:
                 metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (
@@ -1086,7 +1094,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             if q:
                 metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (int(q.amount_out), {"fee_model": "router_observed", "pool": str(e.params.get("pool") or "")})
@@ -1121,7 +1129,7 @@ async def quote_edges_batch(
             )
             for e, q in zip(grouped, quotes):
                 ek = edge_key(e)
-                ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+                ck = _edge_quote_cache_key(e, amount_in)
                 if q:
                     metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                     val = (int(q.amount_out), {"fee_model": "router_observed", "pool": str(e.params.get("pool") or ""), "venue_name": str(e.params.get("venue_name") or "")})
@@ -1155,7 +1163,7 @@ async def quote_edges_batch(
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
-            ck = f"edge:{e.dex}:{e.venue}:{e.token_in}:{e.token_out}:{json_key(e.params)}:{amount_in}"
+            ck = _edge_quote_cache_key(e, amount_in)
             if q:
                 metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + 1
                 val = (int(q.amount_out), {"pool_id": str(e.params.get("pool_id") or "")})
@@ -2013,17 +2021,20 @@ async def _quote_edge_groups_in_bounded_waves(
     limit = max(1, min(4, int(parallelism)))
     quote_map: Dict[str, Optional[Tuple[int, Dict[str, Any]]]] = {}
     completed = failed = skipped = waves = cancelled = 0
+    recovered_after_cancellation = 0
     for wave_start in range(0, len(ordered), limit):
         if time.perf_counter() >= deadline:
             skipped = len(ordered) - wave_start
             break
         wave = ordered[wave_start:wave_start + limit]
-        tasks = [
-            asyncio.create_task(
+        task_groups: Dict[asyncio.Task, Tuple[int, List[Edge]]] = {}
+        tasks: List[asyncio.Task] = []
+        for amount, edges in wave:
+            task = asyncio.create_task(
                 quote_edges_batch(rpc, cfg, cache, edges, int(amount), metrics=metrics)
             )
-            for amount, edges in wave
-        ]
+            tasks.append(task)
+            task_groups[task] = (int(amount), list(edges))
         done, pending = await _wait_for_quote_tasks_until_deadline(
             tasks,
             deadline=deadline,
@@ -2040,6 +2051,24 @@ async def _quote_edge_groups_in_bounded_waves(
         pending_count = len(pending)
         if pending_count:
             cancelled += pending_count
+            # A cancelled quote_edges_batch can already have completed one or
+            # more venue-family subcalls and written their valid outputs to the
+            # block-scoped cache. Its coroutine cannot return the partially built
+            # map after cancellation, so recover only successful cache entries
+            # for the exact edge + notional. Missing/failed/in-flight quotes
+            # remain absent and are never promoted to successes.
+            for task in pending:
+                amount, edges = task_groups[task]
+                for edge in edges:
+                    cache_key = _edge_quote_cache_key(edge, amount)
+                    try:
+                        cached = cache.get(cache_key)
+                    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                        cached = None
+                    if cached is None:
+                        continue
+                    quote_map[edge_key(edge)] = cached
+                    recovered_after_cancellation += 1
 
         next_start = wave_start + len(wave)
         if pending_count or (
@@ -2059,6 +2088,7 @@ async def _quote_edge_groups_in_bounded_waves(
         "batches_skipped_budget": int(skipped),
         "waves_started": int(waves),
         "parallelism_limit": int(limit),
+        "partial_quote_edges_recovered_after_cancellation": int(recovered_after_cancellation),
         "deadline_exceeded": deadline_exceeded,
         "ordering": "route_potential_priority_then_block_rotated",
     }
@@ -2573,6 +2603,9 @@ async def find_two_leg_opportunities(
             "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
             "first_leg_quote_batches_cancelled": int(first_leg_quote_schedule["batches_cancelled"]),
             "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_edges_recovered_after_cancellation": int(
+                first_leg_quote_schedule.get("partial_quote_edges_recovered_after_cancellation", 0)
+            ),
             "first_leg_quote_budget_ms": int(first_leg_quote_budget_ms),
             "first_leg_quote_budget_exhausted": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
@@ -3467,6 +3500,9 @@ async def find_three_leg_opportunities(
             "first_leg_quote_batches_failed": int(first_leg_quote_schedule["batches_failed"]),
             "first_leg_quote_batches_cancelled": int(first_leg_quote_schedule["batches_cancelled"]),
             "first_leg_quote_batches_skipped_budget": int(first_leg_quote_schedule["batches_skipped_budget"]),
+            "first_leg_quote_edges_recovered_after_cancellation": int(
+                first_leg_quote_schedule.get("partial_quote_edges_recovered_after_cancellation", 0)
+            ),
             "first_leg_quote_budget_ms": int(first_leg_quote_budget_ms),
             "first_leg_quote_budget_exhausted": bool(first_leg_quote_schedule["deadline_exceeded"]),
             "first_leg_quote_waves_started": int(first_leg_quote_schedule["waves_started"]),
