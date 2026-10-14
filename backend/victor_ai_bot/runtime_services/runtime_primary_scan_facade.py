@@ -5207,12 +5207,9 @@ class RuntimePrimaryScanFacade:
                             shared_gas_price_consensus=shared_gas_consensus,
 
                             shared_flashloan_fee_observation=shared_flashloan_fee,
-                        diagnostic_evidence=diagnostic_evidence,
-
+                            diagnostic_evidence=diagnostic_evidence,
                         ),
-
                         timeout=selection_timeout_s,
-
                     )
         except asyncio.TimeoutError:
             adaptive_telemetry.setdefault("scan_error", "selected_provider_adaptive_timeout")
