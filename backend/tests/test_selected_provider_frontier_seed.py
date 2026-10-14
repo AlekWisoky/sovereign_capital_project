@@ -8,6 +8,7 @@ import pytest
 from victor_ai_bot.config import load_config
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     RuntimePrimaryScanFacade,
+    _diagnostic_size_evidence_from_telemetry,
     _candidate_economic_after_cost_for_sizing,
     _candidate_sizing_sort_key,
     _merge_size_economic_matrices,
@@ -301,6 +302,57 @@ def test_frontier_seed_default_cycles_through_every_alternative_ladder_point(mon
     ]
     assert set(sampled) == set(ladder) - {1000}
     assert len(set(sampled)) == len(ladder) - 1
+
+
+def test_diagnostic_size_evidence_includes_full_graph_and_frontier_matrix_rows():
+    def sample(route_id, amount, *, diagnostic=True):
+        return {
+            "route_id": route_id,
+            "amount_in": str(amount),
+            "gross_profit_wei": "-100",
+            "flashloan_fee_wei": "10",
+            "gas_cost_wei": "1000",
+            "gas_cost_conversion_available": False,
+            "diagnostic_only": diagnostic,
+            "legs": [],
+        }
+
+    selected = {
+        "size_economic_diagnostics": [sample("base-near-miss", 1000)],
+        "size_economic_evidence": [sample("base-evidence", 1000)],
+        "size_economic_matrix": [{
+            "amount_in": "1000",
+            "candidates": [
+                sample("selected-matrix-near-miss", 1000),
+                sample("selected-matrix-not-diagnostic", 1000, diagnostic=False),
+            ],
+        }],
+        "selected_provider_full_scan": {
+            "size_economic_matrix": [{
+                "amount_in": "1000",
+                "candidates": [sample("full-graph-near-miss", 1000)],
+            }],
+        },
+    }
+    frontier = {
+        "size_economic_evidence": [sample("frontier-evidence", 2000)],
+        "size_economic_matrix": [{
+            "amount_in": "2000",
+            "candidates": [sample("frontier-matrix-near-miss", 2000)],
+        }],
+    }
+
+    evidence = _diagnostic_size_evidence_from_telemetry(selected, frontier)
+
+    assert {row["route_id"] for row in evidence} == {
+        "base-near-miss",
+        "base-evidence",
+        "selected-matrix-near-miss",
+        "full-graph-near-miss",
+        "frontier-evidence",
+        "frontier-matrix-near-miss",
+    }
+    assert all(row["diagnostic_only"] is True for row in evidence)
 
 
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
