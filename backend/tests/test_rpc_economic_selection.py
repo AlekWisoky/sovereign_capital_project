@@ -416,6 +416,7 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
         cache,
         shared_gas_price_consensus=None,
         shared_flashloan_fee_observation=None,
+        diagnostic_evidence=None,
     ):
         selected_probe_calls.append((rpc.url, list(base_opps), int(base_amount_in)))
         return [], {
