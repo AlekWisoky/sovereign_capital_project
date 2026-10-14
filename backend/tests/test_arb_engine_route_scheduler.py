@@ -197,3 +197,66 @@ async def test_first_leg_quote_wave_cleans_up_when_caller_is_cancelled(monkeypat
         await scan
 
     assert cleaned == [100]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_first_leg_recovers_completed_quote_cache_entries(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    router = "0x" + "aa" * 20
+    completed_edge = arb.Edge("univ3", router, token_a, token_b, {"fee": 500})
+    in_flight_edge = arb.Edge(
+        "balancer", "0x" + "bb" * 20, token_b, token_c,
+        {"pool_id": "0x" + "cc" * 32},
+    )
+
+    class Cache:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = value
+
+    cache = Cache()
+    result_value = (123_456, {"fee": 500})
+    started = asyncio.Event()
+
+    async def partial_quote_batch(_rpc, _cfg, local_cache, requested_edges, amount_in, metrics=None):
+        del metrics
+        local_cache.set(
+            arb._edge_quote_cache_key(completed_edge, amount_in),
+            result_value,
+        )
+        started.set()
+        # Simulate a later venue's quote still in flight when the shared deadline
+        # expires. The already-cached UniV3 result is usable; the Balancer result
+        # does not exist and must not be synthesized.
+        await asyncio.Event().wait()
+        return {
+            arb.edge_key(completed_edge): result_value,
+            arb.edge_key(in_flight_edge): (999_999, {}),
+        }
+
+    monkeypatch.setattr(arb, "quote_edges_batch", partial_quote_batch)
+    quotes, schedule = await arb._quote_edge_groups_in_bounded_waves(
+        object(),
+        object(),
+        cache,
+        [(100_000, [completed_edge, in_flight_edge])],
+        deadline=__import__("time").perf_counter() + 0.03,
+        block_number=1,
+        parallelism=1,
+        metrics={},
+    )
+
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    assert quotes[arb.edge_key(completed_edge)] == result_value
+    assert arb.edge_key(in_flight_edge) not in quotes
+    assert schedule["batches_completed"] == 0
+    assert schedule["batches_cancelled"] == 1
+    assert schedule["partial_quote_edges_recovered_after_cancellation"] == 1
+    assert schedule["deadline_exceeded"] is True
