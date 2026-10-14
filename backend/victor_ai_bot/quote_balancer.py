@@ -10,7 +10,6 @@ from .ethabi import (
     enc_bool,
     enc_bytes32,
     enc_bytes_dyn,
-    decode_int256_array,
 )
 
 _SIG = "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[],(address,bool,address,bool))"
@@ -19,6 +18,36 @@ _SIG = "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[]
 @dataclass
 class BalancerQuote:
     amount_out: int
+
+
+def _decode_balancer_swap_deltas(hex_result: str) -> list[int]:
+    """Decode a strict ABI int256[] return without accepting truncated words."""
+    if not isinstance(hex_result, str):
+        raise TypeError("Balancer result must be a hex string")
+    payload = hex_result[2:] if hex_result.startswith("0x") else hex_result
+    try:
+        raw = bytes.fromhex(payload)
+    except ValueError as exc:
+        raise ValueError("Balancer result is not valid hex") from exc
+    if len(raw) < 64 or len(raw) % 32:
+        raise ValueError("Balancer result has an invalid ABI word length")
+
+    offset = int.from_bytes(raw[:32], "big")
+    if offset != 32:
+        raise ValueError("Balancer int256[] return has a non-canonical offset")
+
+    count = int.from_bytes(raw[32:64], "big")
+    expected_length = 64 + count * 32
+    if len(raw) != expected_length:
+        raise ValueError("Balancer int256[] return length does not match its element count")
+
+    deltas: list[int] = []
+    for start in range(64, expected_length, 32):
+        value = int.from_bytes(raw[start:start + 32], "big")
+        if value >= 2**255:
+            value -= 2**256
+        deltas.append(value)
+    return deltas
 
 
 async def quote_balancer_given_in(
@@ -44,8 +73,7 @@ async def quote_balancer_given_in(
         record_quote_parse_failure(diagnostics, "invalid_rpc_result")
         return None
     try:
-        raw = bytes.fromhex(r.result[2:]) if r.result.startswith("0x") else bytes.fromhex(r.result)
-        deltas = decode_int256_array(raw)
+        deltas = _decode_balancer_swap_deltas(r.result)
     except (TypeError, ValueError):
         record_quote_parse_failure(diagnostics, "invalid_quote_result")
         return None
@@ -119,12 +147,7 @@ def build_balancer_query_batchswap_calldata(
 
 
 def parse_balancer_query_result(hex_result: str) -> Optional[int]:
-    if not isinstance(hex_result, str):
-        return None
-    raw = (
-        bytes.fromhex(hex_result[2:]) if hex_result.startswith("0x") else bytes.fromhex(hex_result)
-    )
-    deltas = decode_int256_array(raw)
+    deltas = _decode_balancer_swap_deltas(hex_result)
     if len(deltas) < 2:
         return None
     amt_out = -deltas[1]
