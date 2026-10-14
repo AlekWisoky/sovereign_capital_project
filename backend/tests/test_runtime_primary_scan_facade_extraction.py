@@ -46,6 +46,53 @@ class _Runtime(RuntimePrimaryScanFacade):
         )
 
 
+def _priced_route(amount_in: int, amount_out: int):
+    return SimpleNamespace(legs=[
+        SimpleNamespace(
+            amount_in=str(amount_in), token_in="0xtoken", token_out="0xmiddle",
+            min_out=str(max(1, amount_in)), dex="univ3", venue="0xvenue-a", data="0x01",
+        ),
+        SimpleNamespace(
+            amount_in=str(max(1, amount_in)), token_in="0xmiddle", token_out="0xtoken",
+            min_out=str(max(1, amount_out)), dex="univ3", venue="0xvenue-b", data="0x02",
+        ),
+    ])
+
+
+def _priced_route_meta(amount_out: int):
+    return {
+        "venues": ["univ3", "univ3"],
+        "leg1": {"gas_estimate": 1},
+        "leg2": {"gas_estimate": 1},
+        "out2": str(amount_out),
+        "gas_cost_estimate_wei": "10",
+    }
+
+
+def _install_known_test_gas_conversion(monkeypatch, runtime):
+    class _GasManager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = _GasManager()
+    monkeypatch.setattr(scan_mod, "estimate_route_gas_units", lambda _meta: 1)
+    monkeypatch.setattr(
+        scan_mod,
+        "estimate_gas_cost_wei_from_cfg",
+        lambda *args, **kwargs: 10,
+    )
+
+    async def converted_gas(*args, **kwargs):
+        return 10
+
+    monkeypatch.setattr(scan_mod, "gas_wei_to_token_wei", converted_gas)
+
+
 def _opp(profit: int, *, expected: int | None = None, amount_in: int | None = None):
     route = None
     if amount_in is not None:
@@ -69,6 +116,7 @@ def test_runtime_bundle_inherits_primary_scan_facade():
 @pytest.mark.asyncio
 async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_truncate(monkeypatch):
     runtime = _Runtime()
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
     calls = {'two': None, 'three': None}
 
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
@@ -243,6 +291,14 @@ async def test_scan_primary_opportunities_does_not_swallow_unexpected_scan_bug(m
 @pytest.mark.asyncio
 async def test_scan_primary_opportunities_prefers_verified_after_cost_truth_over_gross_estimates(monkeypatch):
     runtime = _Runtime()
+    monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "0")
+
+    async def preserve_sort_fixture(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        runtime, "_annotate_canonical_after_fee_usd", preserve_sort_fixture
+    )
 
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
         return [
@@ -481,15 +537,6 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
         return []
 
     monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
-    async def preserve_fixture_cost_state(*args, **kwargs):
-        # This test isolates adaptive triggering/selection. Other tests exercise
-        # scan-time cost recomputation and gas conversion with real route inputs;
-        # preserve this fixture's explicit, already-computed cost contract here.
-        return None
-
-    monkeypatch.setattr(
-        runtime, "_annotate_canonical_after_fee_usd", preserve_fixture_cost_state
-    )
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
 
