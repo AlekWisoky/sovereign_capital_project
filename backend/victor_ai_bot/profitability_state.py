@@ -429,17 +429,37 @@ def revalidate_profitability_state(
     resolved_gas_cost_wei = _infer_gas_cost_wei(opp, cfg, gas_cost_wei)
     existing_profitability = _safe_dict(meta.get("profitability"))
     existing_safety = _safe_dict(meta.get("safety"))
-    inherited_profit_token_gas = _safe_int(
-        existing_profitability.get("gas_cost_profit_token_wei")
-        or existing_safety.get("gas_cost_profit_token_wei"),
-        0,
-    )
+    inherited_gas_raw = existing_profitability.get("gas_cost_profit_token_wei")
+    if inherited_gas_raw in (None, ""):
+        inherited_gas_raw = existing_safety.get("gas_cost_profit_token_wei")
+    try:
+        inherited_profit_token_gas = (
+            int(inherited_gas_raw) if inherited_gas_raw not in (None, "") else None
+        )
+    except (TypeError, ValueError, OverflowError):
+        inherited_profit_token_gas = None
+
+    inherited_conversion_valid = False
+    if (
+        existing_profitability.get("gas_cost_conversion_available") is True
+        and inherited_profit_token_gas is not None
+        and inherited_profit_token_gas >= 0
+    ):
+        try:
+            inherited_conversion_valid = (
+                int(existing_profitability.get("amount_in_wei") or 0) == int(amount_in_wei)
+                and int(existing_profitability.get("amount_out_wei") or 0) == int(amount_out_wei)
+                and int(existing_profitability.get("gas_cost_wei") or 0) == int(resolved_gas_cost_wei)
+            )
+        except (TypeError, ValueError, OverflowError):
+            inherited_conversion_valid = False
+
     resolved_gas_cost_in_profit_token_wei = (
         max(0, int(gas_cost_in_profit_token_wei))
         if gas_cost_in_profit_token_wei is not None
         else (
             int(inherited_profit_token_gas)
-            if inherited_profit_token_gas > 0
+            if inherited_conversion_valid and inherited_profit_token_gas is not None
             else int(resolved_gas_cost_wei)
         )
     )
@@ -577,19 +597,6 @@ def revalidate_profitability_state(
     )
     # Keep unit-conversion and repayment evidence explicit for every consumer.
     # Never infer a native-wei conversion merely because a numeric gas value exists.
-    inherited_conversion_valid = False
-    if (
-        existing_profitability.get("gas_cost_conversion_available") is True
-        and inherited_profit_token_gas > 0
-    ):
-        try:
-            inherited_conversion_valid = (
-                int(existing_profitability.get("amount_in_wei") or 0) == int(amount_in_wei)
-                and int(existing_profitability.get("amount_out_wei") or 0) == int(amount_out_wei)
-                and int(existing_profitability.get("gas_cost_wei") or 0) == int(resolved_gas_cost_wei)
-            )
-        except (TypeError, ValueError, OverflowError):
-            inherited_conversion_valid = False
     state["gas_cost_conversion_available"] = bool(
         gas_cost_in_profit_token_wei is not None or inherited_conversion_valid
     )
