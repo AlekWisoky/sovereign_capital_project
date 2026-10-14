@@ -1178,6 +1178,12 @@ async def quote_edges_batch(
         )
     )
     requested_failures = max(0, requested_edge_count - batch_successes)
+    if adapter_unavailable_count:
+        failure_counts["quote_adapter_unavailable"] = (
+            int(failure_counts.get("quote_adapter_unavailable", 0) or 0)
+            + int(adapter_unavailable_count)
+        )
+    classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
@@ -2596,6 +2602,7 @@ async def find_two_leg_opportunities(
             "candidate_count": int(snapshot["candidate_count"]),
             "quote_requests": int(snapshot["quote_requests"]),
             "quote_successes": int(snapshot["quote_successes"]),
+            "quote_cancelled": int(metrics.get("quote_cancelled", 0) or 0),
             "quote_success_rate": float(snapshot["quote_success_rate"]),
             "cache_hits": int(snapshot["cache_hits"]),
             "network_batches": int(snapshot["network_batches"]),
@@ -3491,6 +3498,7 @@ async def find_three_leg_opportunities(
             "candidate_count": int(snapshot["candidate_count"]),
             "quote_requests": int(snapshot["quote_requests"]),
             "quote_successes": int(snapshot["quote_successes"]),
+            "quote_cancelled": int(metrics.get("quote_cancelled", 0) or 0),
             "quote_success_rate": float(snapshot["quote_success_rate"]),
             "cache_hits": int(snapshot["cache_hits"]),
             "network_batches": int(snapshot["network_batches"]),
