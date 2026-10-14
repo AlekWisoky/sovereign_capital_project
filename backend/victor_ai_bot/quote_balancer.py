@@ -41,7 +41,12 @@ def _leading_hex_payload(stripped: str) -> str | None:
 def _iter_text_hex_payloads(value: str) -> Iterator[str]:
     """Extract a bounded set of candidate hex strings from provider text."""
     text = value[:8192]
-    stripped = text.strip().strip("\\'\\\" ,;")
+    stripped = text.strip()
+    edge_chars = "\\'\" ,;"
+    while stripped and stripped[0] in edge_chars:
+        stripped = stripped[1:]
+    while stripped and stripped[-1] in edge_chars:
+        stripped = stripped[:-1]
     candidate = _leading_hex_payload(stripped)
     if candidate is not None:
         yield candidate
