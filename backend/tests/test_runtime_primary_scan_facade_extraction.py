@@ -855,7 +855,7 @@ def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
         "univ3": 9, "balancer": 1,
     }
     assert result["quote_failures_by_family"] == {
-        "univ3": 3, "balancer": 2,
+        "univ3": 3, "curve": 2, "balancer": 2,
     }
     assert result["quote_cancelled_by_family"] == {
         "univ3": 1, "balancer": 2,
