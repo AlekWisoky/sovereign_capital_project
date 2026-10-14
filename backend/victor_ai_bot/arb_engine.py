@@ -3370,6 +3370,7 @@ async def find_three_leg_opportunities(
     triangle_third_leg_quote_edges_recovered_after_cancellation = 0
     triangle_third_leg_quote_waves_started = 0
     triangle_third_leg_quote_batches_coalesced = 0
+    triangle_third_leg_quote_deadline_exceeded = False
     triangle_coalesced_quote_batches = 0
     triangle_quote_waves_started = 0
 
@@ -3491,6 +3492,7 @@ async def find_three_leg_opportunities(
             0, int(third_leg_logical_batches) - len(third_leg_jobs)
         )
         if third_leg_schedule["deadline_exceeded"]:
+            triangle_third_leg_quote_deadline_exceeded = True
             route_budget_exhausted = True
 
         # Process every completed/recovered quote before honoring the budget
@@ -3787,7 +3789,24 @@ async def find_three_leg_opportunities(
                 triangle_second_leg_quote_batches_completed
                 + triangle_third_leg_quote_batches_completed
             ),
-            "route_group_quote_batches_coalesced": int(triangle_coalesced_quote_batches),
+            "route_group_quote_batches_coalesced": int(
+                triangle_coalesced_quote_batches + triangle_third_leg_quote_batches_coalesced
+            ),
+            "third_leg_quote_batches_total": int(triangle_third_leg_quote_batches_total),
+            "third_leg_quote_batches_unique": int(triangle_third_leg_quote_batches_unique),
+            "third_leg_quote_batches_completed": int(triangle_third_leg_quote_batches_completed),
+            "third_leg_quote_batches_failed": int(triangle_third_leg_quote_batches_failed),
+            "third_leg_quote_batches_cancelled": int(triangle_third_leg_quote_batches_cancelled),
+            "third_leg_quote_batches_skipped_budget": int(triangle_third_leg_quote_batches_skipped_budget),
+            "third_leg_quote_batches_coalesced": int(triangle_third_leg_quote_batches_coalesced),
+            "third_leg_quote_edges_recovered_after_cancellation": int(
+                triangle_third_leg_quote_edges_recovered_after_cancellation
+            ),
+            "third_leg_quote_waves_started": int(triangle_third_leg_quote_waves_started),
+            "third_leg_quote_parallelism_limit": int(triangle_route_parallelism),
+            "third_leg_quote_deadline_exceeded": bool(triangle_third_leg_quote_deadline_exceeded),
+            "route_group_quote_batches_coalesced_second_leg": int(triangle_coalesced_quote_batches),
+            "route_group_quote_batches_coalesced_third_leg": int(triangle_third_leg_quote_batches_coalesced),
             "parallelism_limit": int(triangle_route_parallelism),
             "waves_started": int(triangle_quote_waves_started),
             "ordering": "round_robin_source_token_protocol",
