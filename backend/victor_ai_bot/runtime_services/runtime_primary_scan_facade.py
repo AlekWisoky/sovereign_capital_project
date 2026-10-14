@@ -2379,6 +2379,41 @@ class RuntimePrimaryScanFacade:
                     "gas_cost_profit_token_wei": "0",
                     "flashloan_fee_wei": "0",
                 }
+            # Stamp the evidence from this exact scan, including fail-closed
+            # conversion availability and the independent repayment predicate.
+            # These are consumed by matrix/frontier selectors; missing fields must
+            # never be interpreted as a valid zero-cost quote.
+            try:
+                amount_in_for_repayment = int(
+                    getattr(getattr(opportunity, "route", None).legs[0], "amount_in", 0)
+                )
+            except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+                amount_in_for_repayment = 0
+            try:
+                amount_out_for_repayment = int(_resolve_scan_quoted_amount(meta) or 0)
+            except (TypeError, ValueError, OverflowError):
+                amount_out_for_repayment = 0
+            repayment_fee = (
+                max(0, int(amount_in_for_repayment))
+                * max(0, int(effective_flashloan_fee_bps))
+            ) // 10_000
+            try:
+                converted_gas_cost = (
+                    int(gas_cost_in_profit_token_wei)
+                    if gas_cost_in_profit_token_wei is not None else 0
+                )
+            except (TypeError, ValueError, OverflowError):
+                converted_gas_cost = 0
+            state["gas_cost_conversion_available"] = bool(
+                has_route_gas_inputs
+                and gas_cost_in_profit_token_wei is not None
+                and converted_gas_cost > 0
+            )
+            state["repayment_valid"] = bool(
+                amount_in_for_repayment > 0
+                and amount_out_for_repayment > 0
+                and amount_out_for_repayment >= amount_in_for_repayment + repayment_fee
+            )
             # Preserve the diagnostic revalidation result for the sizing
             # evidence matrix, but only promote a valid authoritative result to
             # canonical profitability. Invalid states must not poison legacy
