@@ -2371,6 +2371,65 @@ async def _quote_edge_job_wave(
     }
 
 
+def _quote_job_wave_plan(
+    cursor: int,
+    total: int,
+    *,
+    deadline: float,
+    parallelism: int,
+    allow_one_after_deadline: bool,
+    grace_used: bool,
+) -> Tuple[int, float, bool, bool]:
+    """Return wave size, wait deadline, grace state and skip decision."""
+    remaining = max(0, int(total) - int(cursor))
+    now = time.perf_counter()
+    if remaining == 0:
+        return 0, float(deadline), grace_used, True
+    if now < deadline:
+        return min(remaining, max(1, min(4, int(parallelism)))), deadline, grace_used, False
+    if allow_one_after_deadline and not grace_used:
+        return 1, now + 0.5, True, False
+    return 0, float(deadline), grace_used, True
+
+
+def _record_quote_job_schedule(
+    metrics: Dict[str, Any],
+    totals: Mapping[str, int],
+    *,
+    skipped: int,
+    recovered_cancelled: int,
+    recovered_skipped: int,
+    waves: int,
+    deadline: float,
+) -> Dict[str, Any]:
+    """Publish consistent bounded-wave counters and return one schedule snapshot."""
+    metric_counts = {
+        "route_group_quote_batches_completed": totals["completed"],
+        "route_group_quote_batches_failed": totals["failed"],
+        "route_group_quote_batches_cancelled": totals["cancelled"],
+        "route_group_quote_batches_skipped_budget": skipped,
+        "route_group_quote_waves_started": waves,
+        "route_group_quote_edges_recovered_after_cancellation": recovered_cancelled,
+        "route_group_quote_edges_recovered_from_cache_when_skipped": recovered_skipped,
+    }
+    for key, count in metric_counts.items():
+        metrics[key] = max(0, int(metrics.get(key, 0) or 0)) + max(0, int(count))
+    cancelled = totals["cancelled"]
+    deadline_exceeded = bool(cancelled or skipped or time.perf_counter() >= deadline)
+    return {
+        "batches_total": int(totals["total"]),
+        "batches_completed": int(totals["completed"]),
+        "batches_failed": int(totals["failed"]),
+        "batches_cancelled": int(cancelled),
+        "batches_skipped_budget": int(skipped),
+        "waves_started": int(waves),
+        "parallelism_limit": int(totals["parallelism"]),
+        "partial_quote_edges_recovered_after_cancellation": int(recovered_cancelled),
+        "edges_recovered_from_cache_when_skipped": int(recovered_skipped),
+        "deadline_exceeded": deadline_exceeded,
+    }
+
+
 async def _quote_edge_jobs_in_bounded_waves(
     rpc: Any,
     cfg: Any,
@@ -2382,80 +2441,47 @@ async def _quote_edge_jobs_in_bounded_waves(
     metrics: Dict[str, Any],
     allow_one_after_deadline: bool = False,
 ) -> tuple[Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, Any]]:
-    """Quote unique jobs in bounded waves; optionally finish one funded final-leg batch.
-
-    Triangle final-leg callers may finish one already-funded batch after the
-    global route deadline. That single batch gets at most 500ms; later route
-    groups and waves receive no additional time.
-    """
+    """Quote unique jobs in bounded waves; optionally finish one funded final-leg batch."""
     ordered = list(jobs)
     limit = max(1, min(4, int(parallelism)))
     results: Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]] = {}
-    completed = failed = cancelled = skipped = waves = 0
-    recovered_cancelled = recovered_skipped = 0
-    cursor = 0
+    totals = {"total": len(ordered), "parallelism": limit, "completed": 0, "failed": 0, "cancelled": 0}
+    skipped = recovered_cancelled = recovered_skipped = waves = cursor = 0
     grace_used = False
 
     while cursor < len(ordered):
-        expired = time.perf_counter() >= deadline
-        if expired and (not allow_one_after_deadline or grace_used):
+        wave_size, wait_deadline, grace_used, stop = _quote_job_wave_plan(
+            cursor, len(ordered), deadline=deadline, parallelism=limit,
+            allow_one_after_deadline=allow_one_after_deadline, grace_used=grace_used,
+        )
+        if stop:
             remaining = ordered[cursor:]
             skipped += len(remaining)
             recovered_skipped += _recover_skipped_edge_jobs(remaining, cache, results)
             break
 
-        wave_size = 1 if expired else limit
-        if expired:
-            grace_used = True
-        wait_deadline = max(deadline, time.perf_counter()) + 0.5 if expired else deadline
         wave = ordered[cursor:cursor + wave_size]
-        wave_results, wave_counts = await _quote_edge_job_wave(
-            rpc,
-            cfg,
-            cache,
-            wave,
-            deadline=wait_deadline,
-            metrics=metrics,
+        wave_results, counts = await _quote_edge_job_wave(
+            rpc, cfg, cache, wave, deadline=wait_deadline, metrics=metrics
         )
         waves += 1
         results.update(wave_results)
-        completed += wave_counts["batches_completed"]
-        failed += wave_counts["batches_failed"]
-        cancelled += wave_counts["batches_cancelled"]
-        recovered_cancelled += wave_counts["edges_recovered_after_cancellation"]
+        for key in ("completed", "failed", "cancelled"):
+            totals[key] += counts["batches_" + key]
+        recovered_cancelled += counts["edges_recovered_after_cancellation"]
         cursor += len(wave)
 
-        if wave_counts["pending_batches"]:
+        if counts["pending_batches"]:
             remaining = ordered[cursor:]
             skipped += len(remaining)
             recovered_skipped += _recover_skipped_edge_jobs(remaining, cache, results)
             break
 
-    metric_counts = {
-        "route_group_quote_batches_completed": completed,
-        "route_group_quote_batches_failed": failed,
-        "route_group_quote_batches_cancelled": cancelled,
-        "route_group_quote_batches_skipped_budget": skipped,
-        "route_group_quote_waves_started": waves,
-        "route_group_quote_edges_recovered_after_cancellation": recovered_cancelled,
-        "route_group_quote_edges_recovered_from_cache_when_skipped": recovered_skipped,
-    }
-    for key, count in metric_counts.items():
-        metrics[key] = max(0, int(metrics.get(key, 0) or 0)) + max(0, int(count))
-
-    deadline_exceeded = bool(cancelled or skipped or time.perf_counter() >= deadline)
-    return results, {
-        "batches_total": int(len(ordered)),
-        "batches_completed": int(completed),
-        "batches_failed": int(failed),
-        "batches_cancelled": int(cancelled),
-        "batches_skipped_budget": int(skipped),
-        "waves_started": int(waves),
-        "parallelism_limit": int(limit),
-        "partial_quote_edges_recovered_after_cancellation": int(recovered_cancelled),
-        "edges_recovered_from_cache_when_skipped": int(recovered_skipped),
-        "deadline_exceeded": deadline_exceeded,
-    }
+    schedule = _record_quote_job_schedule(
+        metrics, totals, skipped=skipped, recovered_cancelled=recovered_cancelled,
+        recovered_skipped=recovered_skipped, waves=waves, deadline=deadline,
+    )
+    return results, schedule
 
 
 @dataclass
