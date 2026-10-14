@@ -2929,6 +2929,9 @@ class RuntimePrimaryScanFacade:
             successes = int(two_leg_telemetry.get("quote_successes", 0)) + int(
                 three_leg_telemetry.get("quote_successes", 0)
             )
+            cancelled = int(two_leg_telemetry.get("quote_cancelled", 0) or 0) + int(
+                three_leg_telemetry.get("quote_cancelled", 0) or 0
+            )
             quote_failure_reasons: Dict[str, int] = {}
             route_rejections: Dict[str, int] = {}
             failed_quote_edge_samples: List[str] = []
@@ -2943,6 +2946,7 @@ class RuntimePrimaryScanFacade:
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
+                "cancelled": cancelled,
                 "failure_reasons": quote_failure_reasons,
                 **_aggregate_quote_family_metrics(
                     two_leg_telemetry,
