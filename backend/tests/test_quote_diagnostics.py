@@ -272,3 +272,45 @@ async def test_cancelled_quote_batch_only_counts_dispatched_family(monkeypatch):
     assert metrics.get("quote_successes_by_family", {}) == {}
     assert metrics.get("quote_failures_by_family", {}) == {}
     assert "balancer" not in metrics["quote_attempts_by_family"]
+
+
+@pytest.mark.asyncio
+async def test_malformed_balancer_edge_is_local_failure_and_does_not_count_network(monkeypatch):
+    valid = arb.Edge(
+        "balancer",
+        "0x" + "77" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"pool_id": "0x" + "88" * 32},
+    )
+    malformed = arb.Edge(
+        "balancer",
+        "0x" + "77" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"pool_id": "0x1234"},
+    )
+
+    async def quote_valid_only(_rpc, _vault, reqs, diagnostics=None):
+        assert len(reqs) == 1
+        assert reqs[0][0] == valid.params["pool_id"]
+        return [SimpleNamespace(amount_out=120)]
+
+    monkeypatch.setattr(arb, "quote_balancer_given_in_many", quote_valid_only)
+    cfg = SimpleNamespace(chain=SimpleNamespace(balancer_vault="0x" + "77" * 20))
+    metrics = {}
+    out = await arb.quote_edges_batch(
+        object(), cfg, _NoCache(), [malformed, valid], 100, metrics=metrics
+    )
+
+    assert out[arb.edge_key(malformed)] is None
+    assert out[arb.edge_key(valid)][0] == 120
+    assert metrics["quote_requests"] == 2
+    assert metrics["quote_attempts_by_family"] == {"balancer": 2}
+    assert metrics["quote_network_requests_by_family"] == {"balancer": 1}
+    assert metrics["quote_successes_by_family"] == {"balancer": 1}
+    assert metrics["quote_failures_by_family"] == {"balancer": 1}
+    assert metrics["quote_failure_reasons"]["invalid_balancer_request"] == 1
+    assert metrics["quote_failure_reasons_by_adapter"] == {
+        "balancer": {"invalid_balancer_request": 1}
+    }
