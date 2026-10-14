@@ -306,6 +306,9 @@ def test_execution_service_prepare_auto_execution_revalidates_profitability_befo
         "flashloan_fee_wei": "0",
         "amount_in_wei": "100",
         "amount_out_wei": "120",
+        "gas_cost_profit_token_wei": "5",
+        "gas_cost_conversion_available": True,
+        "gas_cost_profit_token_address": "usdc",
         "continuity": {},
     }
     opp.capital_required_usd = 1_000.0
@@ -349,6 +352,11 @@ def test_execution_service_prepare_auto_execution_revalidates_profitability_befo
             "flashloan_fee_wei": "0",
             "amount_in_wei": "100",
             "amount_out_wei": "120",
+            # This route fixture keeps token, size, quote and gas unchanged, so
+            # its explicit token-denominated conversion remains valid post-mutation.
+            "gas_cost_profit_token_wei": "5",
+            "gas_cost_conversion_available": True,
+            "gas_cost_profit_token_address": "usdc",
             "continuity": {"valid": True, "reason": "ok"},
         }
         opp2.min_outs = ["120", "120"]
