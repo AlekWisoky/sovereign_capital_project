@@ -285,6 +285,8 @@ async def test_third_leg_quote_jobs_are_bounded_and_recover_cached_successes(mon
     cache = Cache()
     completed_value = (111_000, {"fee": 500})
     recovered_value = (222_000, {"pool_id": "0x" + "cc" * 32})
+    skipped_value = (444_000, {"i": 0, "j": 1})
+    cache.set(arb._edge_quote_cache_key(skipped_edge, 300), skipped_value)
     started = asyncio.Event()
     calls = []
 
@@ -330,13 +332,14 @@ async def test_third_leg_quote_jobs_are_bounded_and_recover_cached_successes(mon
     assert sorted(calls) == [100, 200]
     assert results[signature(100, [completed_edge])][arb.edge_key(completed_edge)] == completed_value
     assert results[signature(200, [cancelled_edge])][arb.edge_key(cancelled_edge)] == recovered_value
-    assert signature(300, [skipped_edge]) not in results
+    assert results[signature(300, [skipped_edge])][arb.edge_key(skipped_edge)] == skipped_value
     assert schedule["batches_total"] == 3
     assert schedule["batches_completed"] == 1
     assert schedule["batches_failed"] == 0
     assert schedule["batches_cancelled"] == 1
     assert schedule["batches_skipped_budget"] == 1
     assert schedule["partial_quote_edges_recovered_after_cancellation"] == 1
+    assert schedule["edges_recovered_from_cache_when_skipped"] == 1
     assert schedule["waves_started"] == 1
     assert schedule["parallelism_limit"] == 2
     assert schedule["deadline_exceeded"] is True
@@ -386,3 +389,26 @@ async def test_two_leg_route_group_wave_cancels_at_deadline_and_recovers_exact_c
     assert metrics["route_group_quote_batches_cancelled"] == 1
     assert metrics["route_group_quote_edges_recovered_after_cancellation"] == 1
 
+
+
+@pytest.mark.asyncio
+async def test_route_job_scheduler_propagates_unexpected_programming_errors(monkeypatch):
+    token_a = "0x" + "61" * 20
+    token_b = "0x" + "62" * 20
+    edge = arb.Edge("univ3", "0x" + "63" * 20, token_a, token_b, {"fee": 500})
+    signature = (100, (arb.edge_key(edge),))
+
+    async def broken_quote(*_args, **_kwargs):
+        raise NameError("unexpected scheduler regression")
+
+    monkeypatch.setattr(arb, "quote_edges_batch", broken_quote)
+    with pytest.raises(NameError, match="unexpected scheduler regression"):
+        await arb._quote_edge_jobs_in_bounded_waves(
+            object(),
+            object(),
+            object(),
+            [(signature, 100, [edge])],
+            deadline=__import__("time").perf_counter() + 1.0,
+            parallelism=1,
+            metrics={},
+        )
