@@ -289,7 +289,9 @@ def test_positive_size_matrix_selection_requires_all_profitability_gates():
         "valid": True,
         "repayment_valid": True,
         "gas_cost_conversion_available": True,
+        "gas_cost_profit_token_wei": "0",
     }
+    # An exact zero conversion is valid evidence; a missing/malformed value is not.
     selected, _economic = _size_matrix_selection([base])
     assert selected is base
 
@@ -303,3 +305,10 @@ def test_positive_size_matrix_selection_requires_all_profitability_gates():
         rejected = {**base, field: invalid_value}
         selected, _economic = _size_matrix_selection([rejected])
         assert selected is None, field
+
+    for incomplete in (
+        {**base, "gas_cost_profit_token_wei": ""},
+        {**base, "gas_cost_profit_token_wei": "not-an-integer"},
+    ):
+        selected, _economic = _size_matrix_selection([incomplete])
+        assert selected is None
