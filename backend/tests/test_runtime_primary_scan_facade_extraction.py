@@ -918,3 +918,43 @@ async def test_base_only_scan_reuses_unused_two_leg_budget_for_triangles(monkeyp
     assert route_budget["configured_total_budget_ms"] == 9_000
     assert route_budget["three_leg_budget_allocated_ms"] == observed["three_ms"]
     assert route_budget["three_leg_budget_reallocated_ms"] == observed["three_ms"] - 5_000
+
+
+def test_probe_telemetry_merge_preserves_balancer_query_revert_and_family_counters():
+    target = {
+        "quote_requests": 10,
+        "quote_successes": 7,
+        "quote_query_revert_decoded": 2,
+        "quote_attempts_by_family": {"balancer": 5, "univ3": 5},
+        "quote_network_requests_by_family": {"balancer": 5, "univ3": 5},
+        "quote_successes_by_family": {"balancer": 2, "univ3": 5},
+        "quote_failures_by_family": {"balancer": 3},
+        "quote_cancelled_by_family": {},
+        "quote_adapter_unavailable_by_family": {},
+        "quote_failure_reasons_by_adapter": {"balancer": {"rpc_revert": 3}},
+    }
+    source = {
+        "quote_requests": 4,
+        "quote_successes": 3,
+        "quote_query_revert_decoded": 3,
+        "quote_attempts_by_family": {"balancer": 4},
+        "quote_network_requests_by_family": {"balancer": 4},
+        "quote_successes_by_family": {"balancer": 3},
+        "quote_failures_by_family": {"balancer": 1},
+        "quote_cancelled_by_family": {"balancer": 0},
+        "quote_adapter_unavailable_by_family": {},
+        "quote_failure_reasons_by_adapter": {"balancer": {"rpc_revert": 1}},
+    }
+
+    scan_mod._merge_probe_scan_telemetry(target, source)
+
+    assert target["quote_requests"] == 14
+    assert target["quote_successes"] == 10
+    assert target["quote_query_revert_decoded"] == 5
+    assert target["quote_attempts_by_family"] == {"balancer": 9, "univ3": 5}
+    assert target["quote_network_requests_by_family"] == {"balancer": 9, "univ3": 5}
+    assert target["quote_successes_by_family"] == {"balancer": 5, "univ3": 5}
+    assert target["quote_failures_by_family"] == {"balancer": 4}
+    assert target["quote_failure_reasons_by_adapter"] == {
+        "balancer": {"rpc_revert": 4}
+    }
