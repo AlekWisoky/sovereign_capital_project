@@ -340,3 +340,49 @@ async def test_third_leg_quote_jobs_are_bounded_and_recover_cached_successes(mon
     assert schedule["waves_started"] == 1
     assert schedule["parallelism_limit"] == 2
     assert schedule["deadline_exceeded"] is True
+
+
+@pytest.mark.asyncio
+async def test_two_leg_route_group_wave_cancels_at_deadline_and_recovers_exact_cache(monkeypatch):
+    token_a = "0x" + "51" * 20
+    token_b = "0x" + "52" * 20
+    edge = arb.Edge("univ3", "0x" + "53" * 20, token_a, token_b, {"fee": 3000})
+
+    class Cache:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = value
+
+    cache = Cache()
+    quote = (909, {"fee": 3000})
+    started = asyncio.Event()
+
+    async def slow_quote(_rpc, _cfg, local_cache, edges, amount_in, metrics=None):
+        del metrics
+        local_cache.set(arb._edge_quote_cache_key(edge, amount_in), quote)
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(arb, "quote_edges_batch", slow_quote)
+    metrics = {}
+    maps, completed, coalesced = await arb._quote_two_leg_route_group_wave(
+        object(),
+        object(),
+        cache,
+        [{"out1": 100, "revs": [edge]}],
+        metrics=metrics,
+        deadline=__import__("time").perf_counter() + 0.03,
+    )
+
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    assert maps == [{arb.edge_key(edge): quote}]
+    assert completed == 0
+    assert coalesced == 0
+    assert metrics["route_group_quote_batches_cancelled"] == 1
+    assert metrics["route_group_quote_edges_recovered_after_cancellation"] == 1
+
