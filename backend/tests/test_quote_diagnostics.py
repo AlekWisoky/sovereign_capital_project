@@ -213,3 +213,58 @@ async def test_one_venue_batch_failure_does_not_abort_later_families(monkeypatch
     }
     assert metrics["quote_failure_reasons"]["quote_batch_exception_aerodrome"] == 1
     assert metrics["quote_failure_reasons"]["quote_batch_missing_results_slipstream"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_quote_batch_only_counts_dispatched_family(monkeypatch):
+    aerodrome = arb.Edge(
+        "aerodrome",
+        "0x" + "11" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"stable": False, "factory": "0x" + "44" * 20},
+    )
+    balancer = arb.Edge(
+        "balancer",
+        "0x" + "55" * 20,
+        "0x" + "22" * 20,
+        "0x" + "33" * 20,
+        {"pool_id": "0x" + "66" * 32},
+    )
+    started = asyncio.Event()
+
+    async def blocked_aerodrome(*args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("later venue must not be counted as dispatched")
+
+    monkeypatch.setattr(arb, "quote_aerodrome_many", blocked_aerodrome)
+    monkeypatch.setattr(arb, "quote_balancer_given_in_many", should_not_run)
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(
+            aerodrome_router="0x" + "77" * 20,
+            balancer_vault="0x" + "88" * 20,
+        )
+    )
+    metrics = {}
+    task = asyncio.create_task(
+        arb.quote_edges_batch(
+            object(), cfg, _NoCache(), [aerodrome, balancer], 100,
+            metrics=metrics,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert metrics["quote_requests"] == 1
+    assert metrics["quote_cancelled"] == 1
+    assert metrics["quote_attempts_by_family"] == {"aerodrome": 1}
+    assert metrics["quote_network_requests_by_family"] == {"aerodrome": 1}
+    assert metrics["quote_cancelled_by_family"] == {"aerodrome": 1}
+    assert metrics.get("quote_successes_by_family", {}) == {}
+    assert metrics.get("quote_failures_by_family", {}) == {}
+    assert "balancer" not in metrics["quote_attempts_by_family"]
