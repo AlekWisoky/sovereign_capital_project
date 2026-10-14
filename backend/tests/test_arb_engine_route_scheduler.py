@@ -260,3 +260,83 @@ async def test_cancelled_first_leg_recovers_completed_quote_cache_entries(monkey
     assert schedule["batches_cancelled"] == 1
     assert schedule["partial_quote_edges_recovered_after_cancellation"] == 1
     assert schedule["deadline_exceeded"] is True
+
+
+@pytest.mark.asyncio
+async def test_third_leg_quote_jobs_are_bounded_and_recover_cached_successes(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    router = "0x" + "aa" * 20
+    completed_edge = arb.Edge("univ3", router, token_a, token_b, {"fee": 500})
+    cancelled_edge = arb.Edge("balancer", router, token_b, token_c, {"pool_id": "0x" + "cc" * 32})
+    skipped_edge = arb.Edge("curve", "0x" + "dd" * 20, token_c, token_a, {"i": 0, "j": 1})
+
+    class Cache:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = value
+
+    cache = Cache()
+    completed_value = (111_000, {"fee": 500})
+    recovered_value = (222_000, {"pool_id": "0x" + "cc" * 32})
+    started = asyncio.Event()
+    calls = []
+
+    async def fake_quote_batch(_rpc, _cfg, local_cache, requested_edges, amount_in, metrics=None):
+        amount = int(amount_in)
+        calls.append(amount)
+        if amount == 200:
+            local_cache.set(
+                arb._edge_quote_cache_key(cancelled_edge, amount),
+                recovered_value,
+            )
+            started.set()
+            await asyncio.Event().wait()
+        await asyncio.sleep(0.001)
+        return {
+            arb.edge_key(edge): (
+                completed_value if amount == 100 else (333_000, {})
+            )
+            for edge in requested_edges
+        }
+
+    def signature(amount, edges):
+        return (int(amount), tuple(sorted(arb.edge_key(edge) for edge in edges)))
+
+    jobs = [
+        (signature(100, [completed_edge]), 100, [completed_edge]),
+        (signature(200, [cancelled_edge]), 200, [cancelled_edge]),
+        (signature(300, [skipped_edge]), 300, [skipped_edge]),
+    ]
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quote_batch)
+
+    results, schedule = await arb._quote_edge_jobs_in_bounded_waves(
+        object(),
+        object(),
+        cache,
+        jobs,
+        deadline=__import__("time").perf_counter() + 0.04,
+        parallelism=2,
+        metrics={},
+    )
+
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    assert sorted(calls) == [100, 200]
+    assert results[signature(100, [completed_edge])][arb.edge_key(completed_edge)] == completed_value
+    assert results[signature(200, [cancelled_edge])][arb.edge_key(cancelled_edge)] == recovered_value
+    assert signature(300, [skipped_edge]) not in results
+    assert schedule["batches_total"] == 3
+    assert schedule["batches_completed"] == 1
+    assert schedule["batches_failed"] == 0
+    assert schedule["batches_cancelled"] == 1
+    assert schedule["batches_skipped_budget"] == 1
+    assert schedule["partial_quote_edges_recovered_after_cancellation"] == 1
+    assert schedule["waves_started"] == 1
+    assert schedule["parallelism_limit"] == 2
+    assert schedule["deadline_exceeded"] is True
