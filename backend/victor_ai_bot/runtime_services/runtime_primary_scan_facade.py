@@ -1234,6 +1234,51 @@ def _existing_size_probe_route_ids(candidates: List[Opportunity]) -> set[str]:
     return route_ids
 
 
+def _diagnostic_size_evidence_from_telemetry(
+    selected_telemetry: Dict[str, Any],
+    frontier_seed_telemetry: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Collect route near-misses from base, full-graph and frontier telemetry."""
+    selected = dict(selected_telemetry or {})
+    frontier = dict(frontier_seed_telemetry or {})
+    full_scan = selected.get("selected_provider_full_scan")
+    full_scan = full_scan if isinstance(full_scan, dict) else {}
+
+    evidence: List[Dict[str, Any]] = []
+
+    def append_direct(rows: Any) -> None:
+        if not isinstance(rows, list):
+            return
+        for row in rows:
+            if isinstance(row, dict) and row.get("diagnostic_only") is True:
+                evidence.append(dict(row))
+
+    for source in (
+        selected.get("size_economic_diagnostics"),
+        selected.get("size_economic_evidence"),
+        full_scan.get("size_economic_evidence"),
+        frontier.get("size_economic_diagnostics"),
+        frontier.get("size_economic_evidence"),
+    ):
+        append_direct(source)
+
+    # Full-graph rescue diagnostics are nested in their size matrix, while
+    # frontier seed diagnostics arrive there as well. Flatten these rows or
+    # they never reach route rehydration when the base scan finds no positives.
+    for matrix in (
+        selected.get("size_economic_matrix"),
+        full_scan.get("size_economic_matrix"),
+        frontier.get("size_economic_matrix"),
+    ):
+        if not isinstance(matrix, list):
+            continue
+        for size_row in matrix:
+            if not isinstance(size_row, dict):
+                continue
+            append_direct(size_row.get("candidates"))
+    return evidence
+
+
 def _diagnostic_size_probe_candidates(
     evidence: List[Dict[str, Any]] | None,
     *,
@@ -5142,16 +5187,10 @@ class RuntimePrimaryScanFacade:
                 "frontier_seed_candidates_added": int(frontier_seed_telemetry.get("candidates_added", 0) or 0),
             },
         )
-        diagnostic_evidence: List[Dict[str, Any]] = []
-        for source in (
-            list(selected_telemetry.get("size_economic_diagnostics") or []),
-            list(selected_telemetry.get("size_economic_evidence") or []),
-            list(frontier_seed_telemetry.get("size_economic_diagnostics") or []),
-            list(frontier_seed_telemetry.get("size_economic_evidence") or []),
-        ):
-            diagnostic_evidence.extend(
-                dict(row) for row in source if isinstance(row, dict)
-            )
+        diagnostic_evidence = _diagnostic_size_evidence_from_telemetry(
+            selected_telemetry,
+            frontier_seed_telemetry,
+        )
         # The helper accepts only diagnostics with exact edge parameters. Keep
         # duplicate source samples so it can pick the strongest observed size
         # for each canonical route, then probe only the unused route-cap slots.
