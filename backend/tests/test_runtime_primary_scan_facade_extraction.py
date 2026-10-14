@@ -347,9 +347,10 @@ async def test_scan_enriches_canonical_after_fee_profit_with_explicit_usd(monkey
         expected_profit_raw="100",
         expected_profit_usd="0",
         min_outs=["210"],
-        route=SimpleNamespace(legs=[SimpleNamespace(token_in="0xtoken", amount_in="100")]),
-        meta={"gas_cost_estimate_wei": "10"},
+        route=_priced_route(100, 210),
+        meta=_priced_route_meta(210),
     )
+    _install_known_test_gas_conversion(monkeypatch, runtime)
 
     async def fake_usd(*args, **kwargs):
         assert kwargs["token"] == "0xtoken"
@@ -673,6 +674,13 @@ async def test_scan_selects_same_route_variant_by_verified_after_cost(monkeypatc
 async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(monkeypatch):
     runtime = _Runtime()
     runtime.cfg.flags.enable_three_leg_loops = False
+
+    async def preserve_diagnostic_state(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        runtime, "_annotate_canonical_after_fee_usd", preserve_diagnostic_state
+    )
     runtime.cfg.execution = SimpleNamespace(
         usd_accounting_enabled=False,
         flashloan_fee_bps=9,
@@ -744,6 +752,7 @@ async def test_scan_uses_revalidated_diagnostic_after_cost_for_economic_optimum(
 async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypatch):
     runtime = _Runtime()
     runtime.cfg.flags.enable_three_leg_loops = False
+    _install_known_test_gas_conversion(monkeypatch, runtime)
     runtime.cfg.execution = SimpleNamespace(usd_accounting_enabled=False)
     runtime.cfg.safety.minProfitAbs = 0
     runtime.cfg.safety.minProfitBps = 0
@@ -753,8 +762,8 @@ async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypa
             id=f"opp-{amount}",
             route_id="same-route",
             expected_profit_raw=str(gross),
-            route=SimpleNamespace(legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]),
-            meta={},
+            route=_priced_route(amount, amount + gross),
+            meta=_priced_route_meta(amount + gross),
         )
 
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
@@ -782,6 +791,9 @@ async def test_scan_revalidates_candidates_before_same_route_size_dedup(monkeypa
             "profit_after_costs_wei": str({50: 300, 100: 200, 200: 250}[amount]),
             "flashloan_fee_wei": str(amount // 10),
             "gas_cost_wei": "10",
+            "gas_cost_profit_token_wei": "10",
+            "gas_cost_conversion_available": True,
+            "repayment_valid": True,
         }
 
     monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
@@ -804,6 +816,7 @@ async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
     runtime = _Runtime()
     runtime.cfg.flags.enable_three_leg_loops = False
     runtime.cfg.execution = SimpleNamespace(usd_accounting_enabled=False)
+    _install_known_test_gas_conversion(monkeypatch, runtime)
 
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
         kwargs["telemetry"].update({"quote_requests": 1, "quote_successes": 1})
@@ -812,8 +825,8 @@ async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
                 id="legacy",
                 route_id="legacy-route",
                 expected_profit_raw="900",
-                route=None,
-                meta={},
+                route=_priced_route(100, 1000),
+                meta=_priced_route_meta(1000),
             )
         ]
 
@@ -845,6 +858,7 @@ async def test_invalid_revalidation_stays_diagnostic_only(monkeypatch):
 async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails(monkeypatch):
     runtime = _Runtime()
     runtime.cfg.flags.enable_three_leg_loops = False
+    _install_known_test_gas_conversion(monkeypatch, runtime)
 
     async def fake_two(rpc, cfg, cache, block_number, **kwargs):
         amount = int(kwargs["amount_in"])
@@ -860,10 +874,8 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
                 id=f"opp-{amount}",
                 route_id=f"route-{amount}",
                 expected_profit_raw="100",
-                route=SimpleNamespace(
-                    legs=[SimpleNamespace(amount_in=str(amount), token_in="0xtoken")]
-                ),
-                meta={"gas_cost_estimate_wei": "10"},
+                route=_priced_route(amount, amount + 100),
+                meta=_priced_route_meta(amount + 100),
             )
         ]
 
