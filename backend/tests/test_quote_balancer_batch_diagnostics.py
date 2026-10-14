@@ -107,11 +107,11 @@ def test_balancer_querybatchswap_rejects_malformed_pool_id_and_nonpositive_size(
 @pytest.mark.asyncio
 async def test_malformed_balancer_request_does_not_abort_valid_batch_sibling():
     # queryBatchSwap returns an ABI-encoded int256[]: offset 32, length 2,
-    # deltas [0, -120], meaning a 120-unit token output.
+    # deltas [100, -120], matching the exact-input request for 100 units.
     encoded = (
         (32).to_bytes(32, "big")
         + (2).to_bytes(32, "big")
-        + (0).to_bytes(32, "big")
+        + (100).to_bytes(32, "big")
         + ((1 << 256) - 120).to_bytes(32, "big")
     )
     rpc = _BatchRpc([RpcResult(True, result="0x" + encoded.hex())])
@@ -314,3 +314,43 @@ async def test_malformed_balancer_queryerror_payload_fails_closed():
     assert diagnostics["failure_reasons"] == {
         "invalid_query_batch_swap_revert_data": 1
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_query_revert", [False, True])
+async def test_balancer_quote_rejects_asset_deltas_for_different_input_amount(
+    is_query_revert,
+):
+    # The output is positive and the encoding is well-formed, but the input
+    # delta is 99 while this quote was requested for 100. Never bind this output
+    # to the wrong size candidate or allow it to win the size optimum.
+    if is_query_revert:
+        result = RpcResult(
+            False,
+            error={
+                "code": -32000,
+                "message": "execution reverted",
+                "data": _query_batch_swap_error([99, -120]),
+            },
+        )
+    else:
+        ordinary = (
+            (32).to_bytes(32, "big")
+            + (2).to_bytes(32, "big")
+            + (99).to_bytes(32, "big")
+            + ((1 << 256) - 120).to_bytes(32, "big")
+        )
+        result = RpcResult(True, result="0x" + ordinary.hex())
+
+    rpc = _BatchRpc([result])
+    diagnostics = {}
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {"unexpected_input_delta": 1}
+    assert diagnostics.get("query_revert_decoded", 0) == 0
