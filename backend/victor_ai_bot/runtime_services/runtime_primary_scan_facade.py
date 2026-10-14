@@ -2381,11 +2381,7 @@ class RuntimePrimaryScanFacade:
                 opportunity=opportunity,
                 meta=meta,
                 gas_cost_wei=int(gas_cost_wei),
-                gas_cost_profit_token_wei=(
-                    gas_cost_in_profit_token_wei
-                    if has_route_gas_inputs
-                    else int(gas_cost_wei)
-                ),
+                gas_cost_profit_token_wei=gas_cost_in_profit_token_wei,
                 flashloan_fee_bps=int(effective_flashloan_fee_bps),
             )
             prior_after_fee_usd = meta.get("canonical_after_fee_usd")
@@ -2445,11 +2441,7 @@ class RuntimePrimaryScanFacade:
                     opportunity=opportunity,
                     meta=meta,
                     gas_cost_wei=int(gas_cost_wei),
-                    gas_cost_profit_token_wei=(
-                        gas_cost_in_profit_token_wei
-                        if has_route_gas_inputs
-                        else int(gas_cost_wei)
-                    ),
+                    gas_cost_profit_token_wei=gas_cost_in_profit_token_wei,
                     flashloan_fee_bps=int(effective_flashloan_fee_bps),
                 )
             ):
@@ -2459,11 +2451,7 @@ class RuntimePrimaryScanFacade:
                     revalidation_kwargs = {
                         "gas_cost_wei": gas_cost_wei,
                         "quoted_amount_out_wei": _resolve_scan_quoted_amount(meta),
-                        "gas_cost_in_profit_token_wei": (
-                            gas_cost_in_profit_token_wei
-                            if has_route_gas_inputs
-                            else gas_cost_wei
-                        ),
+                        "gas_cost_in_profit_token_wei": gas_cost_in_profit_token_wei,
                     }
                     if native_flashloan_fee_bps is not None:
                         revalidation_kwargs["flashloan_fee_bps_override"] = native_flashloan_fee_bps
@@ -2492,6 +2480,31 @@ class RuntimePrimaryScanFacade:
                         "flashloan_fee_wei": "0",
                     }
             if gas_cost_in_profit_token_wei is None:
+                # Revoke any prior canonical state whose cost units are no longer
+                # supported. A stale positive must not survive as the live state
+                # while this quote is explicitly marked gas-unpriced.
+                meta.pop("profitability", None)
+                _clear_stale_after_fee_projection(meta)
+                safety_state = meta.get("safety")
+                if isinstance(safety_state, dict):
+                    for key in (
+                        "profit_after_costs_wei",
+                        "economic_profit_after_costs_wei",
+                        "profit_after_costs_usd_micro",
+                        "profit_after_costs_usd_source",
+                    ):
+                        safety_state.pop(key, None)
+                    safety_state.update({
+                        "ok": False,
+                        "is_safe": False,
+                        "revalidated": False,
+                        "reason": (
+                            "gas_cost_profit_token_unavailable"
+                            if has_route_gas_inputs
+                            else "route_gas_evidence_unavailable"
+                        ),
+                        "gas_cost_conversion_available": False,
+                    })
                 state = {
                     "stage": "scan_after_fee_revalidation",
                     "source": "runtime_primary_scan",
