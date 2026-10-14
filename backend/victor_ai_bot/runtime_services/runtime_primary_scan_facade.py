@@ -2565,7 +2565,7 @@ class RuntimePrimaryScanFacade:
             state["gas_cost_conversion_available"] = bool(
                 has_route_gas_inputs
                 and gas_cost_in_profit_token_wei is not None
-                and converted_gas_cost > 0
+                and converted_gas_cost >= 0
             )
             state["repayment_valid"] = bool(
                 amount_in_for_repayment > 0
