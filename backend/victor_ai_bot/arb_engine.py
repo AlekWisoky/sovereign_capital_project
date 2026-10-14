@@ -763,6 +763,7 @@ async def quote_edges_batch(
     batch_successes = 0
     metrics.setdefault("quote_failure_reasons", {})
     metrics.setdefault("quote_failure_reasons_by_adapter", {})
+    metrics.setdefault("quote_query_revert_decoded", 0)
     for metric_name in (
         "quote_attempts_by_family",
         "quote_network_requests_by_family",
@@ -773,6 +774,7 @@ async def quote_edges_batch(
     ):
         metrics.setdefault(metric_name, {})
     adapter_unavailable_count = 0
+    query_revert_count_merged = 0
 
     def _increment_family_metric(metric_name: str, edge: Edge) -> None:
         family = _scan_edge_family(edge)
@@ -872,6 +874,7 @@ async def quote_edges_batch(
     missing_bal = valid_balancer
 
     def _merge_partial_quote_diagnostics(*, include_adapter_unavailable: bool) -> None:
+        nonlocal query_revert_count_merged
         accumulated = {
             str(key): max(0, int(value or 0))
             for key, value in dict(metrics.get("quote_failure_reasons") or {}).items()
@@ -883,6 +886,18 @@ async def quote_edges_batch(
                 accumulated.get("quote_adapter_unavailable", 0) + adapter_unavailable_count
             )
         metrics["quote_failure_reasons"] = accumulated
+        current_query_reverts = max(
+            0, int(quote_diagnostics.get("query_revert_decoded", 0) or 0)
+        )
+        query_revert_delta = max(0, current_query_reverts - query_revert_count_merged)
+        if query_revert_delta:
+            metrics["quote_query_revert_decoded"] = (
+                int(metrics.get("quote_query_revert_decoded", 0) or 0)
+                + query_revert_delta
+            )
+        query_revert_count_merged = max(
+            query_revert_count_merged, current_query_reverts
+        )
 
     def _record_adapter_failure_reasons(
         adapter: str,
@@ -1285,6 +1300,10 @@ async def quote_edges_batch(
             accumulated_failure_counts.get(str(reason), 0) + max(0, int(count))
         )
     metrics["quote_failure_reasons"] = accumulated_failure_counts
+    metrics["quote_query_revert_decoded"] = (
+        int(metrics.get("quote_query_revert_decoded", 0) or 0)
+        + max(0, int(quote_diagnostics.get("query_revert_decoded", 0) or 0))
+    )
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
     # Coverage sets intentionally persist across all quote batches for a scan;
     # the caller finalizes them once after both first- and second-leg phases.
@@ -1297,7 +1316,7 @@ async def quote_edges_batch(
     return out
 
 
-def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[str, int]]:
+def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Any]:
     """Publish bounded venue-family quote counters from one scan's accumulator."""
     metric_names = (
         "quote_attempts_by_family",
@@ -1307,7 +1326,7 @@ def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[
         "quote_cancelled_by_family",
         "quote_adapter_unavailable_by_family",
     )
-    snapshot: Dict[str, Dict[str, int]] = {}
+    snapshot: Dict[str, Any] = {}
     for metric_name in metric_names:
         raw = metrics.get(metric_name)
         counters = raw if isinstance(raw, Mapping) else {}
@@ -1322,6 +1341,12 @@ def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[
                 continue
             normalized[name] = normalized.get(name, 0) + value
         snapshot[metric_name] = normalized
+    try:
+        snapshot["quote_query_revert_decoded"] = max(
+            0, int(metrics.get("quote_query_revert_decoded", 0) or 0)
+        )
+    except (TypeError, ValueError, OverflowError):
+        snapshot["quote_query_revert_decoded"] = 0
     return snapshot
 
 def _quote_failure_reason_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[str, Dict[str, int]]]:
