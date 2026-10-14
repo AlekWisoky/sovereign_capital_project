@@ -162,8 +162,10 @@ def _decode_balancer_rpc_result(
     if not getattr(rpc_result, "ok", False):
         deltas, recognized = _decode_query_batch_swap_error(getattr(rpc_result, "error", None))
         if deltas is None:
-            reason = "invalid_query_batch_swap_revert_data" if recognized else classify_quote_error(
-                getattr(rpc_result, "error", None)
+            reason = (
+                "invalid_query_batch_swap_revert_data"
+                if recognized
+                else classify_balancer_quote_error(getattr(rpc_result, "error", None))
             )
             if recognized:
                 record_quote_parse_failure(diagnostics, reason)
