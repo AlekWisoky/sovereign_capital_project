@@ -4346,16 +4346,12 @@ class RuntimePrimaryScanFacade:
             explicit_seed_timeout = (
                 "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S" in os.environ
             )
-            if not explicit_seed_timeout:
-                configured_seed_timeout_s = max(
-                    configured_seed_timeout_s,
-                    max(1, int(route_budget_ms)) / 1000.0 + 0.25,
-                )
             seed_timeout_s = self._selected_provider_frontier_seed_timeout_s(
                 selection_timeout_s=selection_timeout_s,
                 seed_budget_s=seed_budget_s,
                 configured_timeout_s=configured_seed_timeout_s,
                 route_budget_ms=route_budget_ms,
+                explicit_override=explicit_seed_timeout,
             )
 
             frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
@@ -5190,16 +5186,23 @@ class RuntimePrimaryScanFacade:
         seed_budget_s: float,
         configured_timeout_s: float,
         route_budget_ms: int,
+        explicit_override: bool = False,
     ) -> float:
-        """Make the seed timeout compatible with its inner route budget."""
-        # The caller raises the default to the inner route deadline plus
-        # setup cushion. This helper applies only hard outer deadlines.
+        """Fit a seed around its inner scan unless an operator sets a hard cap."""
+        minimum_complete_scan_s = max(
+            1.0, max(1, int(route_budget_ms)) / 1000.0 + 0.25
+        )
+        effective_requested = (
+            float(configured_timeout_s)
+            if explicit_override
+            else max(float(configured_timeout_s), minimum_complete_scan_s)
+        )
         return max(
             1.0,
             min(
                 float(selection_timeout_s),
                 float(seed_budget_s),
-                float(configured_timeout_s),
+                effective_requested,
             ),
         )
 
