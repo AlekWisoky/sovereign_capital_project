@@ -438,8 +438,17 @@ def _existing_profitability_matches_scan_inputs(
     try:
         legs = list(getattr(getattr(opportunity, "route", None), "legs", []) or [])
         amount_in = int(getattr(legs[0], "amount_in", 0) or 0) if legs else 0
+        profit_token = str(getattr(legs[0], "token_in", "") or "").strip().lower() if legs else ""
+        state_profit_token = str(state.get("gas_cost_profit_token_address") or "").strip().lower()
         amount_out = _resolve_scan_quoted_amount(meta)
-        if amount_in <= 0 or amount_out is None or int(amount_out) <= 0:
+        if (
+            amount_in <= 0
+            or amount_out is None
+            or int(amount_out) <= 0
+            or state.get("gas_cost_conversion_available") is not True
+            or not profit_token
+            or state_profit_token != profit_token
+        ):
             return False
         expected_fee = (int(amount_in) * max(0, int(flashloan_fee_bps))) // 10_000
         return bool(
@@ -2567,6 +2576,7 @@ class RuntimePrimaryScanFacade:
                 and gas_cost_in_profit_token_wei is not None
                 and converted_gas_cost >= 0
             )
+            state["gas_cost_profit_token_address"] = str(profit_token or "").strip().lower()
             state["repayment_valid"] = bool(
                 amount_in_for_repayment > 0
                 and amount_out_for_repayment > 0
