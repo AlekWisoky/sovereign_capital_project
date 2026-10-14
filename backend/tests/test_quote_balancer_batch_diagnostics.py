@@ -354,3 +354,28 @@ async def test_balancer_quote_rejects_asset_deltas_for_different_input_amount(
     assert quotes == [None]
     assert diagnostics["failure_reasons"] == {"unexpected_input_delta": 1}
     assert diagnostics.get("query_revert_decoded", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_balancer_known_vault_revert_keeps_protocol_specific_classification():
+    rpc = _BatchRpc([
+        RpcResult(
+            False,
+            error={
+                "code": -32000,
+                "message": "execution reverted: BAL#521: TOKEN_NOT_REGISTERED",
+            },
+        )
+    ])
+    diagnostics = {}
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {"balancer_token_not_registered": 1}
+    assert diagnostics.get("query_revert_decoded", 0) == 0
