@@ -481,6 +481,15 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
         return []
 
     monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", fake_two)
+    async def preserve_fixture_cost_state(*args, **kwargs):
+        # This test isolates adaptive triggering/selection. Other tests exercise
+        # scan-time cost recomputation and gas conversion with real route inputs;
+        # preserve this fixture's explicit, already-computed cost contract here.
+        return None
+
+    monkeypatch.setattr(
+        runtime, "_annotate_canonical_after_fee_usd", preserve_fixture_cost_state
+    )
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_DISCOVERY", "1")
     monkeypatch.setenv("VICTOR_ADAPTIVE_SIZE_MULTIPLIERS", "0.5,2.0")
 
