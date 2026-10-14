@@ -570,6 +570,10 @@ def _aggregate_quote_family_metrics(
                     continue
                 target[reason_name] = target.get(reason_name, 0) + value
     result["quote_failure_reasons_by_adapter"] = reasons_by_adapter
+    result["quote_query_revert_decoded"] = sum(
+        max(0, int(source.get("quote_query_revert_decoded", 0) or 0))
+        for source in sources
+    )
     return result
 
 
