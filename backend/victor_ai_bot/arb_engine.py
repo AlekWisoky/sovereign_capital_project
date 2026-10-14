@@ -853,8 +853,7 @@ async def quote_edges_batch(
     ) -> None:
         current = dict(quote_diagnostics.get("failure_reasons") or {})
         adapter_name = str(adapter or "unknown").strip().lower()[:64] or "unknown"
-        by_adapter = metrics.setdefault("quote_failure_reasons_by_adapter", {})
-        target = by_adapter.setdefault(adapter_name, {})
+        deltas: Dict[str, int] = {}
         for reason, raw_count in current.items():
             try:
                 delta = max(0, int(raw_count or 0) - int(before.get(reason, 0) or 0))
@@ -862,7 +861,13 @@ async def quote_edges_batch(
                 continue
             if delta:
                 key = str(reason or "unknown")[:96]
-                target[key] = int(target.get(key, 0) or 0) + delta
+                deltas[key] = deltas.get(key, 0) + delta
+        if not deltas:
+            return
+        by_adapter = metrics.setdefault("quote_failure_reasons_by_adapter", {})
+        target = by_adapter.setdefault(adapter_name, {})
+        for reason, delta in deltas.items():
+            target[reason] = int(target.get(reason, 0) or 0) + int(delta)
 
     async def _run_quote_family_batch(
         family: str,
