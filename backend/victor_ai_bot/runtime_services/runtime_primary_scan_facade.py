@@ -3799,24 +3799,6 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             min_opportunities = 2
 
-        def _authoritative_positive(candidate: Any) -> bool:
-            meta = getattr(candidate, "meta", {}) or {}
-            state = meta.get("profitability") if isinstance(meta, dict) else {}
-            if not isinstance(state, dict):
-                return False
-            try:
-                return bool(
-                    state.get("revalidated") is True
-                    and state.get("authoritative") is True
-                    and state.get("valid") is True
-                    and state.get("repayment_valid") is True
-                    and state.get("gas_cost_conversion_available") is True
-                    and state.get("gas_cost_profit_token_wei") not in (None, "")
-                    and int(state.get("profit_after_costs_wei") or 0) > 0
-                )
-            except (TypeError, ValueError, OverflowError):
-                return False
-
         def _route_key(candidate: Any) -> str:
             return str(
                 getattr(candidate, "route_id", "")
@@ -3824,58 +3806,15 @@ class RuntimePrimaryScanFacade:
                 or ""
             )
 
-        direct = [
-            candidate
-            for candidate in list(base_opps or [])
-            if str(getattr(candidate, "strategy", "") or "").startswith("two-leg:")
-        ]
-        triangles = [
-            candidate
-            for candidate in list(base_opps or [])
-            if str(getattr(candidate, "strategy", "") or "").startswith("tri:")
-        ]
-        direct.sort(key=_candidate_sizing_sort_key, reverse=True)
-        triangles.sort(key=_candidate_sizing_sort_key, reverse=True)
-
-        try:
-            route_cap = max(
-                4,
-                min(24, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_ROUTE_CAP", "12") or 12)),
+        selected, selected_diagnostic_route_ids, diagnostic_source_rows = (
+            _select_bounded_size_probe_candidates(
+                list(base_opps or []),
+                diagnostic_evidence,
+                chain_name=str(getattr(getattr(self.cfg, "chain", None), "name", "") or ""),
+                route_cap=route_cap,
+                triangle_cap=triangle_cap,
             )
-        except (TypeError, ValueError):
-            route_cap = 12
-        try:
-            triangle_cap = max(
-                0,
-                min(route_cap, int(os.environ.get("VICTOR_ADAPTIVE_SIZE_TRIANGLE_CAP", "4") or 4)),
-            )
-        except (TypeError, ValueError):
-            triangle_cap = 4
-
-        selected: List[Opportunity] = []
-        seen_routes: set[str] = set()
-        for candidate in [*direct[:route_cap], *triangles[:triangle_cap]]:
-            key = _route_key(candidate)
-            if key and key in seen_routes:
-                continue
-            if key:
-                seen_routes.add(key)
-            selected.append(candidate)
-            if len(selected) >= route_cap:
-                break
-
-        selected_diagnostic_candidates = _diagnostic_size_probe_candidates(
-            list(diagnostic_evidence or []),
-            chain_name=str(getattr(getattr(self.cfg, "chain", None), "name", "") or ""),
-            excluded_route_ids=set(seen_routes),
-            max_candidates=max(0, route_cap - len(selected)),
         )
-        selected.extend(selected_diagnostic_candidates)
-        selected_diagnostic_route_ids = {
-            _route_key(candidate)
-            for candidate in selected_diagnostic_candidates
-            if _route_key(candidate)
-        }
 
         # Profitability at the current notional does not prove that the notional
         # is optimal. Whenever routes are available and the authorized ladder has
@@ -3884,7 +3823,7 @@ class RuntimePrimaryScanFacade:
         # execution authority; when no routes exist, graph-frontier discovery is
         # responsible for introducing size-emergent routes.
         positive_base = sum(
-            1 for candidate in base_opps if _authoritative_positive(candidate)
+            1 for candidate in base_opps if _authoritative_positive_size_candidate(candidate)
         )
         should_probe = bool(len(adaptive_amounts) > 1 and selected)
         telemetry["adaptive_size_discovery"] = {
@@ -3902,12 +3841,7 @@ class RuntimePrimaryScanFacade:
             "selected_route_count": int(len(selected)),
             "selected_diagnostic_route_count": int(len(selected_diagnostic_candidates)),
             "diagnostic_probe_route_ids": sorted(selected_diagnostic_route_ids),
-            "diagnostic_probe_source_rows": int(sum(
-                1 for row in list(diagnostic_evidence or [])
-                if isinstance(row, dict)
-                and row.get("diagnostic_only") is True
-                and str(row.get("route_id") or "") in selected_diagnostic_route_ids
-            )),
+            "diagnostic_probe_source_rows": int(diagnostic_source_rows),
             "route_cap": int(route_cap),
             "triangle_cap": int(triangle_cap),
             "probe_candidate_delta": 0,
@@ -3965,45 +3899,11 @@ class RuntimePrimaryScanFacade:
             int(record.get("amount_in") or 0): record
             for record in size_scan_records
         }
-        # Preserve diagnostic evidence at its observed source size. When a
-        # size-probe candidate supplies a re-quoted row for the same route/size,
-        # _size_route_rows prefers that re-quoted candidate over this fallback.
-        for diagnostic in list(diagnostic_evidence or []):
-            if not isinstance(diagnostic, dict):
-                continue
-            route_id = str(diagnostic.get("route_id") or "")
-            if route_id not in selected_diagnostic_route_ids or diagnostic.get("diagnostic_only") is not True:
-                continue
-            try:
-                source_amount = int(diagnostic.get("amount_in") or 0)
-                diagnostic_legs = [
-                    leg for leg in list(diagnostic.get("legs") or [])
-                    if isinstance(leg, dict)
-                ]
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if source_amount <= 0 or len(diagnostic_legs) not in {2, 3}:
-                continue
-            group_name = "two_metrics" if len(diagnostic_legs) == 2 else "three_metrics"
-            source_record = size_scan_records_by_amount.setdefault(
-                source_amount,
-                {
-                    "amount_in": source_amount,
-                    "two": [],
-                    "three": [],
-                    "two_metrics": {},
-                    "three_metrics": {},
-                },
-            )
-            group_metrics = source_record.setdefault(group_name, {})
-            diagnostic_rows = group_metrics.setdefault("size_economic_diagnostics", [])
-            if not any(
-                isinstance(existing, dict)
-                and str(existing.get("route_id") or "") == route_id
-                and str(existing.get("amount_in") or "") == str(source_amount)
-                for existing in diagnostic_rows
-            ):
-                diagnostic_rows.append(dict(diagnostic))
+        _merge_diagnostic_evidence_into_size_records(
+            diagnostic_evidence,
+            selected_diagnostic_route_ids,
+            size_scan_records_by_amount,
+        )
         probe_run = _SizeProbeRun(
             rpc=rpc,
             cfg=self.cfg,
