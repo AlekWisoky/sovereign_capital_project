@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import re
+from itertools import islice
 from typing import Any, Iterator, Optional
 from .rpc import JsonRpcClient
 from .quote_diagnostics import classify_quote_error, record_quote_failure, record_quote_parse_failure
@@ -38,36 +39,41 @@ def _leading_hex_payload(stripped: str) -> str | None:
 
 
 def _iter_text_hex_payloads(value: str) -> Iterator[str]:
-    """Extract bounded hex candidates from a provider message or raw string."""
+    """Extract a bounded set of candidate hex strings from provider text."""
     text = value[:8192]
-    stripped = text.strip().strip("\\'\" ,;")
+    stripped = text.strip().strip("\\'\\\" ,;")
     candidate = _leading_hex_payload(stripped)
     if candidate is not None:
         yield candidate
-    yielded = 0
-    for match in re.finditer(r"0x[0-9a-fA-F]{8,}", text):
-        candidate = match.group(0)
-        if candidate == stripped:
-            continue
-        yield candidate
-        yielded += 1
-        if yielded >= 8:
-            break
+    embedded = (
+        match.group(0)
+        for match in re.finditer(r"0x[0-9a-fA-F]{8,}", text)
+        if match.group(0) != stripped
+    )
+    yield from islice(embedded, 8)
+
+
+def _preferred_error_children(value: dict[str, Any]) -> Iterator[Any]:
+    for key in ("data", "return", "result", "originalError", "error", "cause", "message"):
+        if key in value:
+            yield value[key]
+
+
+def _additional_error_children(value: dict[str, Any]) -> Iterator[Any]:
+    preferred = {"data", "return", "result", "originalError", "error", "cause", "message"}
+    for key, item in islice(value.items(), 12):
+        if str(key) not in preferred:
+            yield item
 
 
 def _iter_error_children(value: Any) -> Iterator[Any]:
     """Yield likely revert-data children first, bounded against noisy RPC errors."""
     if isinstance(value, dict):
-        priority = ("data", "return", "result", "originalError", "error", "cause", "message")
-        visited = set(priority).intersection(value)
-        for key in priority:
-            if key in value:
-                yield value[key]
-        for key, item in list(value.items())[:12]:
-            if str(key) not in visited:
-                yield item
-    elif isinstance(value, (list, tuple)):
-        yield from list(value)[:8]
+        yield from _preferred_error_children(value)
+        yield from _additional_error_children(value)
+        return
+    if isinstance(value, (list, tuple)):
+        yield from islice(value, 8)
 
 
 def _iter_error_hex_payloads(value: Any, *, depth: int = 0) -> Iterator[str]:
