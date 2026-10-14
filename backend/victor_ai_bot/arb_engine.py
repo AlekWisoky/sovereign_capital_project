@@ -104,6 +104,11 @@ def _record_size_economic_diagnostic(
             if terminal_amount_out > 0:
                 break
 
+    gas_conversion_available = bool(
+        gas_cost_profit_token_wei is not None
+        and int(gas_cost_profit_token_wei) > 0
+    )
+    gross_after_fee_upper_bound = int(gross_profit_wei) - int(flashloan_fee_wei)
     row = {
         "route_id": str(route_id),
         "amount_in": str(max(0, int(amount_in))),
@@ -116,18 +121,24 @@ def _record_size_economic_diagnostic(
             if gas_cost_profit_token_wei is not None
             else ""
         ),
-        # Diagnostic rows are only produced after gross profit is already
-        # non-positive. When the native gas conversion is unavailable, do not
-        # subtract native wei from profit-token units; gross-minus-fee remains
-        # a dimensionally valid upper bound and cannot become executable.
+        "gas_cost_conversion_available": gas_conversion_available,
+        # For telemetry compatibility this retains the old upper-bound value
+        # when conversion is missing. Consumers must use the explicit flag and
+        # must not treat this field as a signed after-cost estimate in that case.
         "after_cost_profit_wei": str(
             int(gross_profit_wei)
             - int(flashloan_fee_wei)
             - (
                 int(gas_cost_profit_token_wei)
-                if gas_cost_profit_token_wei is not None
+                if gas_conversion_available
                 else 0
             )
+        ),
+        "after_cost_profit_is_upper_bound": not gas_conversion_available,
+        "gross_minus_flashloan_fee_upper_bound_wei": (
+            str(gross_after_fee_upper_bound)
+            if not gas_conversion_available
+            else ""
         ),
         "revalidated": False,
         "authoritative": False,
