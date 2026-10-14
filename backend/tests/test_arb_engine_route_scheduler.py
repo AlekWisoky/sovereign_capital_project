@@ -260,3 +260,111 @@ async def test_cancelled_first_leg_recovers_completed_quote_cache_entries(monkey
     assert schedule["batches_cancelled"] == 1
     assert schedule["partial_quote_edges_recovered_after_cancellation"] == 1
     assert schedule["deadline_exceeded"] is True
+
+
+@pytest.mark.asyncio
+async def test_route_group_quote_wave_cancels_at_deadline_and_recovers_only_cached_results(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    token_d = "0x" + "44" * 20
+    fast_edge = arb.Edge("univ3", "0x" + "aa" * 20, token_a, token_b, {"fee": 500})
+    slow_edge = arb.Edge("balancer", "0x" + "bb" * 20, token_b, token_c, {"pool_id": "0x" + "cc" * 32})
+    skipped_edge = arb.Edge("curve", "0x" + "dd" * 20, token_c, token_d, {"i": 0, "j": 1})
+
+    class Cache:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = value
+
+    cache = Cache()
+    fast_quote = (111, {"fee": 500})
+    slow_quote = (222, {"pool_id": slow_edge.params["pool_id"]})
+    slow_started = asyncio.Event()
+    calls = []
+
+    async def fake_quote_batch(_rpc, _cfg, local_cache, edges, amount_in, metrics=None):
+        del metrics
+        calls.append((int(amount_in), tuple(arb.edge_key(edge) for edge in edges)))
+        if int(amount_in) == 100:
+            await asyncio.sleep(0.001)
+            local_cache.set(arb._edge_quote_cache_key(fast_edge, amount_in), fast_quote)
+            return {arb.edge_key(fast_edge): fast_quote}
+        if int(amount_in) == 200:
+            local_cache.set(arb._edge_quote_cache_key(slow_edge, amount_in), slow_quote)
+            slow_started.set()
+            await asyncio.Event().wait()
+        raise AssertionError("request past the absolute deadline must not start")
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quote_batch)
+    metrics = {}
+    maps, schedule = await arb._quote_edge_request_wave(
+        object(),
+        object(),
+        cache,
+        [(100, [fast_edge]), (200, [slow_edge]), (300, [skipped_edge])],
+        deadline=__import__("time").perf_counter() + 0.03,
+        parallelism=2,
+        metrics=metrics,
+    )
+
+    await asyncio.wait_for(slow_started.wait(), timeout=1.0)
+    assert [amount for amount, _ in calls] == [100, 200]
+    assert maps[0] == {arb.edge_key(fast_edge): fast_quote}
+    assert maps[1] == {arb.edge_key(slow_edge): slow_quote}
+    assert maps[2] == {}
+    assert schedule["batches_completed"] == 1
+    assert schedule["batches_cancelled"] == 1
+    assert schedule["batches_skipped_budget"] == 1
+    assert schedule["edges_recovered_after_cancellation"] == 1
+    assert schedule["edges_recovered_from_cache_when_skipped"] == 0
+    assert metrics["route_group_quote_batches_cancelled"] == 1
+    assert metrics["route_group_quote_batches_skipped_budget"] == 1
+    assert metrics["route_group_quote_edges_recovered_after_cancellation"] == 1
+
+
+@pytest.mark.asyncio
+async def test_two_leg_route_group_wave_obeys_absolute_deadline_and_recovers_cache(monkeypatch):
+    token_a = "0x" + "51" * 20
+    token_b = "0x" + "52" * 20
+    edge = arb.Edge("univ3", "0x" + "53" * 20, token_a, token_b, {"fee": 3000})
+
+    class Cache:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = value
+
+    cache = Cache()
+    quote = (909, {"fee": 3000})
+    started = asyncio.Event()
+
+    async def fake_quote_batch(_rpc, _cfg, local_cache, edges, amount_in, metrics=None):
+        del metrics
+        local_cache.set(arb._edge_quote_cache_key(edge, amount_in), quote)
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quote_batch)
+    maps, completed, coalesced = await arb._quote_two_leg_route_group_wave(
+        object(),
+        object(),
+        cache,
+        [{"out1": 100, "revs": [edge]}],
+        metrics={},
+        deadline=__import__("time").perf_counter() + 0.03,
+    )
+
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    assert maps == [{arb.edge_key(edge): quote}]
+    assert completed == 0
+    assert coalesced == 0
