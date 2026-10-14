@@ -548,7 +548,9 @@ def revalidate_profitability_state(
         fee_bps = (
             int(flashloan_fee_bps_override)
             if flashloan_fee_bps_override is not None
-            else int(getattr(cfg.execution, "flashloan_fee_bps", 0) or 0)
+            else int(
+                getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0
+            )
         )
         flash_fee = int(compute_flashloan_fee(int(amount_in_wei), max(0, fee_bps)))
         state = build_profitability_state(
