@@ -189,7 +189,7 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         and stage['pools_returned'] == 1
         for stage in discovery_telemetry['runtime']['stages']
     )
-    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True, 'two_leg_budget_ms': 4000, 'three_leg_budget_ms': 5000, 'configured_total_budget_ms': 9000}
+    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True, 'two_leg_budget_ms': 4000, 'three_leg_budget_ms': 5000, 'three_leg_budget_allocated_ms': 5000, 'three_leg_budget_reallocated_ms': 0, 'configured_total_budget_ms': 9000}
     assert runtime._market_pipeline_telemetry['gross_candidates'] == 4
     adaptive = runtime._market_pipeline_telemetry['adaptive_size_discovery']
     assert adaptive['candidates_before_probe'] == 4
