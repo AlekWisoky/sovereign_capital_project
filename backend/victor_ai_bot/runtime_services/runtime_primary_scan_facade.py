@@ -535,6 +535,7 @@ def _aggregate_quote_family_metrics(
         "quote_network_requests_by_family",
         "quote_successes_by_family",
         "quote_failures_by_family",
+        "quote_cancelled_by_family",
         "quote_adapter_unavailable_by_family",
     )
     sources = (two_leg, three_leg)
@@ -879,6 +880,7 @@ def _build_size_matrix_row(
     selected, economic = _size_matrix_selection(rows)
     requests = int(two_metrics.get("quote_requests", 0) or 0) + int(three_metrics.get("quote_requests", 0) or 0)
     successes = int(two_metrics.get("quote_successes", 0) or 0) + int(three_metrics.get("quote_successes", 0) or 0)
+    cancelled = int(two_metrics.get("quote_cancelled", 0) or 0) + int(three_metrics.get("quote_cancelled", 0) or 0)
     basis = "verified_after_cost_profit" if selected else "no_economic_evidence"
     if economic and not selected:
         basis = "economic_optimum_diagnostic"
@@ -888,7 +890,8 @@ def _build_size_matrix_row(
         "amount_in": str(amount),
         "quote_requests": requests,
         "quote_successes": successes,
-        "quote_failures": max(0, requests - successes),
+        "quote_cancelled": cancelled,
+        "quote_failures": max(0, requests - successes - cancelled),
         "quote_failure_reasons": _merge_size_quote_failure_reasons(two_metrics, three_metrics),
         "failed_quote_edge_count": int(two_metrics.get("failed_quote_edge_count", 0) or 0) + int(three_metrics.get("failed_quote_edge_count", 0) or 0),
         "failed_quote_edge_samples": list(dict.fromkeys([
@@ -1340,14 +1343,15 @@ def _merge_size_economic_matrices(
                         existing_candidates[prior_index] = candidate
                         by_candidate[key] = candidate
 
-                for metric in ("quote_requests", "quote_successes", "failed_quote_edge_count"):
+                for metric in ("quote_requests", "quote_successes", "quote_cancelled", "failed_quote_edge_count"):
                     existing[metric] = int(existing.get(metric, 0) or 0) + int(
                         incoming.get(metric, 0) or 0
                     )
                 existing["quote_failures"] = max(
                     0,
                     int(existing.get("quote_requests", 0) or 0)
-                    - int(existing.get("quote_successes", 0) or 0),
+                    - int(existing.get("quote_successes", 0) or 0)
+                    - int(existing.get("quote_cancelled", 0) or 0),
                 )
                 failure_reasons = dict(existing.get("quote_failure_reasons") or {})
                 for reason, count in dict(incoming.get("quote_failure_reasons") or {}).items():
@@ -2481,9 +2485,23 @@ class RuntimePrimaryScanFacade:
                     getattr(self.cfg.flags, "enable_three_leg_loops", False)
                     or getattr(self.cfg.flags, "enable_v3_triangular", False)
                 )
-                remaining_three_leg_budget_ms = min(
-                    int(three_leg_budget_window_ms),
+                route_budget_remaining_ms = max(
+                    0,
                     int((three_leg_route_deadline - time.perf_counter()) * 1000.0),
+                )
+                # A base-only graph pass is the discovery rescue, not a sizing
+                # ladder pass. Reuse time left by two-leg work for triangles while
+                # preserving the same absolute per-tick deadline. Normal adaptive
+                # scans retain the configured three-leg slice so alternate sizes
+                # still have time to be evaluated.
+                remaining_three_leg_budget_ms = (
+                    route_budget_remaining_ms
+                    if three_leg_enabled and selected_full_graph_base_only
+                    else (
+                        min(int(three_leg_budget_window_ms), route_budget_remaining_ms)
+                        if three_leg_enabled
+                        else 0
+                    )
                 )
                 if three_leg_enabled and remaining_three_leg_budget_ms > 0:
                     three = await find_three_leg_opportunities(
@@ -2533,6 +2551,9 @@ class RuntimePrimaryScanFacade:
                         "route_budget_elapsed_ms": 0.0,
                         "route_budget_deadline_ms": 0,
                     })
+                three_metrics["route_budget_allocated_ms"] = max(
+                    0, int(remaining_three_leg_budget_ms)
+                )
                 return list(two), list(three), two_metrics, three_metrics
 
             # Base-size scan is authoritative for the normal path.
@@ -2639,6 +2660,7 @@ class RuntimePrimaryScanFacade:
                         for key in (
                             "quote_requests",
                             "quote_successes",
+                            "quote_cancelled",
                             "routes_considered",
                             "edges_generated",
                             "gross_candidates",
@@ -2907,6 +2929,9 @@ class RuntimePrimaryScanFacade:
             successes = int(two_leg_telemetry.get("quote_successes", 0)) + int(
                 three_leg_telemetry.get("quote_successes", 0)
             )
+            cancelled = int(two_leg_telemetry.get("quote_cancelled", 0) or 0) + int(
+                three_leg_telemetry.get("quote_cancelled", 0) or 0
+            )
             quote_failure_reasons: Dict[str, int] = {}
             route_rejections: Dict[str, int] = {}
             failed_quote_edge_samples: List[str] = []
@@ -2921,6 +2946,7 @@ class RuntimePrimaryScanFacade:
             telemetry["quotes"] = {
                 "requests": requests,
                 "successes": successes,
+                "cancelled": cancelled,
                 "failure_reasons": quote_failure_reasons,
                 **_aggregate_quote_family_metrics(
                     two_leg_telemetry,
@@ -2948,6 +2974,17 @@ class RuntimePrimaryScanFacade:
                 ) + float(three_leg_telemetry.get("route_evaluation_ms", 0.0)),
                 "two_leg_budget_ms": int(two_leg_route_budget_ms),
                 "three_leg_budget_ms": int(three_leg_route_budget_ms),
+                "three_leg_budget_allocated_ms": int(
+                    three_leg_telemetry.get("route_budget_allocated_ms", three_leg_budget_window_ms)
+                    or 0
+                ),
+                "three_leg_budget_reallocated_ms": max(
+                    0,
+                    int(
+                        three_leg_telemetry.get("route_budget_allocated_ms", three_leg_budget_window_ms)
+                        or 0
+                    ) - int(three_leg_budget_window_ms),
+                ),
                 "configured_total_budget_ms": int(
                     two_leg_route_budget_ms + three_leg_route_budget_ms
                 ),
@@ -3025,8 +3062,10 @@ class RuntimePrimaryScanFacade:
                 (time.perf_counter() - scan_started) * 1000.0
             )
             telemetry["scan_status"] = "completed"
+            completed_quote_requests = max(0, requests - cancelled)
             telemetry["quote_success_rate"] = (
-                float(successes) / float(requests) if requests else 0.0
+                float(successes) / float(completed_quote_requests)
+                if completed_quote_requests else 0.0
             )
             rpc_url = str(getattr(rpc, "url", "") or "")
             rpc_host = str(urlsplit(rpc_url).hostname or "") if rpc_url else ""
@@ -4294,22 +4333,25 @@ class RuntimePrimaryScanFacade:
                 configured_seed_timeout_s = float(
                     os.environ.get(
                         "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S",
-                        "8.0",
+                        "10.0",
                     )
-                    or 8.0
+                    or 10.0
                 )
             except (TypeError, ValueError):
-                configured_seed_timeout_s = 8.0
-            # Previously three sequential probes each had only a 3s timeout.
-            # Production showed 0/3 seed slices completing. Spend the bounded
-            # frontier budget on one rotating notional per block instead.
-            seed_timeout_s = max(
-                1.0,
-                min(
-                    selection_timeout_s,
-                    seed_budget_s,
-                    configured_seed_timeout_s,
-                ),
+                configured_seed_timeout_s = 10.0
+            route_budget_ms = sum(self._route_evaluation_budgets_ms())
+            # The default wrapper must outlive the inner route evaluator plus
+            # setup, or slow-chain discovery gets cancelled before its own
+            # bounded deadline. An explicit operator override remains a hard cap.
+            explicit_seed_timeout = (
+                "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_TIMEOUT_S" in os.environ
+            )
+            seed_timeout_s = self._selected_provider_frontier_seed_timeout_s(
+                selection_timeout_s=selection_timeout_s,
+                seed_budget_s=seed_budget_s,
+                configured_timeout_s=configured_seed_timeout_s,
+                route_budget_ms=route_budget_ms,
+                explicit_override=explicit_seed_timeout,
             )
 
             frontier_edge_cap = int(self._selected_provider_frontier_edge_cap())
@@ -5136,6 +5178,33 @@ class RuntimePrimaryScanFacade:
         waves = max(1, (chunks + parallelism - 1) // parallelism)
         adaptive = configured * float(waves) / 4.0
         return min(12.0, max(configured, adaptive))
+
+    @staticmethod
+    def _selected_provider_frontier_seed_timeout_s(
+        *,
+        selection_timeout_s: float,
+        seed_budget_s: float,
+        configured_timeout_s: float,
+        route_budget_ms: int,
+        explicit_override: bool = False,
+    ) -> float:
+        """Fit a seed around its inner scan unless an operator sets a hard cap."""
+        minimum_complete_scan_s = max(
+            1.0, max(1, int(route_budget_ms)) / 1000.0 + 0.25
+        )
+        effective_requested = (
+            float(configured_timeout_s)
+            if explicit_override
+            else max(float(configured_timeout_s), minimum_complete_scan_s)
+        )
+        return max(
+            1.0,
+            min(
+                float(selection_timeout_s),
+                float(seed_budget_s),
+                effective_requested,
+            ),
+        )
 
     @staticmethod
     def _selected_provider_frontier_seed_budget_s() -> float:

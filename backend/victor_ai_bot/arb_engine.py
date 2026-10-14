@@ -744,6 +744,7 @@ async def quote_edges_batch(
         "quote_network_requests_by_family",
         "quote_successes_by_family",
         "quote_failures_by_family",
+        "quote_cancelled_by_family",
         "quote_adapter_unavailable_by_family",
     ):
         metrics.setdefault(metric_name, {})
@@ -790,8 +791,6 @@ async def quote_edges_batch(
         else:
             out[ek] = None
 
-    metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(missing_univ3) + len(missing_curve) + len(missing_bal) + len(missing_aero) + len(missing_slipstream) + len(missing_camelot_algebra) + len(missing_camelot_v2) + len(missing_constant_product)
-    metrics["network_batches"] = int(metrics.get("network_batches", 0)) + int(bool(missing_univ3)) + int(bool(missing_curve)) + int(bool(missing_bal)) + int(bool(missing_aero)) + int(bool(missing_slipstream)) + int(bool(missing_camelot_algebra)) + int(bool(missing_camelot_v2)) + int(bool(missing_constant_product))
     metrics.setdefault("failed_quote_edge_samples", [])
     successful_edges = metrics.setdefault("_successful_quote_edge_keys", set())
     successful_pools = metrics.setdefault("_successful_quote_pool_keys", set())
@@ -815,6 +814,44 @@ async def quote_edges_batch(
         if len(samples) < 256:
             samples.append(edge_key(edge))
 
+    def _merge_partial_quote_diagnostics(*, include_adapter_unavailable: bool) -> None:
+        accumulated = {
+            str(key): max(0, int(value or 0))
+            for key, value in dict(metrics.get("quote_failure_reasons") or {}).items()
+        }
+        for reason, count in dict(quote_diagnostics.get("failure_reasons") or {}).items():
+            accumulated[str(reason)] = accumulated.get(str(reason), 0) + max(0, int(count or 0))
+        if include_adapter_unavailable and adapter_unavailable_count:
+            accumulated["quote_adapter_unavailable"] = (
+                accumulated.get("quote_adapter_unavailable", 0) + adapter_unavailable_count
+            )
+        metrics["quote_failure_reasons"] = accumulated
+
+    async def _run_quote_family_batch(
+        family: str,
+        family_edges: Sequence[Edge],
+        quote_call: Any,
+    ) -> List[Any]:
+        # Count work only when this family is actually dispatched. Previously all
+        # families were pre-counted before the first await, so cancellation of an
+        # early batch falsely reported later families as network attempts.
+        for edge in family_edges:
+            _increment_family_metric("quote_attempts_by_family", edge)
+            _increment_family_metric("quote_network_requests_by_family", edge)
+        metrics["quote_requests"] = int(metrics.get("quote_requests", 0) or 0) + len(family_edges)
+        if family_edges:
+            metrics["network_batches"] = int(metrics.get("network_batches", 0) or 0) + 1
+        try:
+            return await quote_call
+        except asyncio.CancelledError:
+            for edge in family_edges:
+                _increment_family_metric("quote_cancelled_by_family", edge)
+            metrics["quote_cancelled"] = int(metrics.get("quote_cancelled", 0) or 0) + len(family_edges)
+            # Retain failure classifications from completed subcalls, but do not
+            # label interrupted quote results as RPC reverts or zero-output failures.
+            _merge_partial_quote_diagnostics(include_adapter_unavailable=True)
+            raise
+
     adapter_groups = (
         (missing_univ3, bool(getattr(cfg.chain, "univ3_quoter_v2", ""))),
         (missing_curve, True),
@@ -827,17 +864,18 @@ async def quote_edges_batch(
     )
     for group, adapter_available in adapter_groups:
         for _, edge in group:
-            _increment_family_metric("quote_attempts_by_family", edge)
             available = bool(adapter_available)
             if edge.dex == "constant_product":
                 available = available and bool(edge.venue)
             if available:
-                _increment_family_metric("quote_network_requests_by_family", edge)
-            else:
-                adapter_unavailable_count += 1
-                _increment_family_metric("quote_adapter_unavailable_by_family", edge)
-                _record_failed_edge(edge)
-                out[edge_key(edge)] = None
+                continue
+            # A missing adapter is a known local failure, not an RPC request.
+            _increment_family_metric("quote_attempts_by_family", edge)
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0) or 0) + 1
+            adapter_unavailable_count += 1
+            _increment_family_metric("quote_adapter_unavailable_by_family", edge)
+            _record_failed_edge(edge)
+            out[edge_key(edge)] = None
 
     # UniV3 batch
     if missing_univ3 and getattr(cfg.chain, "univ3_quoter_v2", ""):
@@ -847,13 +885,17 @@ async def quote_edges_batch(
             fee = int(e.params.get("fee", 3000))
             reqs.append((e.token_in, e.token_out, fee, int(amount_in), 0))
             order.append(e)
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "univ3",
-            quote_exact_input_single_batch(
-                rpc, cfg.chain.univ3_quoter_v2, reqs, diagnostics=quote_diagnostics
+            order,
+            _safe_venue_quote_batch(
+                "univ3",
+                quote_exact_input_single_batch(
+                    rpc, cfg.chain.univ3_quoter_v2, reqs, diagnostics=quote_diagnostics
+                ),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
             ),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -883,11 +925,15 @@ async def quote_edges_batch(
             underlying = bool(e.params.get("underlying", False))
             reqs.append((pool, i, j, int(amount_in), underlying))
             order.append(e)
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "curve",
-            quote_curve_many(rpc, reqs, diagnostics=quote_diagnostics),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
+            order,
+            _safe_venue_quote_batch(
+                "curve",
+                quote_curve_many(rpc, reqs, diagnostics=quote_diagnostics),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
+            ),
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -917,13 +963,17 @@ async def quote_edges_batch(
             for _, e in missing_aero
         ]
         order = [e for _, e in missing_aero]
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "aerodrome",
-            quote_aerodrome_many(
-                rpc, cfg.chain.aerodrome_router, reqs, diagnostics=quote_diagnostics
+            order,
+            _safe_venue_quote_batch(
+                "aerodrome",
+                quote_aerodrome_many(
+                    rpc, cfg.chain.aerodrome_router, reqs, diagnostics=quote_diagnostics
+                ),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
             ),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -943,13 +993,17 @@ async def quote_edges_batch(
             for _, e in missing_slipstream
         ]
         order = [e for _, e in missing_slipstream]
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "slipstream",
-            quote_slipstream_many(
-                rpc, cfg.chain.slipstream_quoter_v2, reqs, diagnostics=quote_diagnostics
+            order,
+            _safe_venue_quote_batch(
+                "slipstream",
+                quote_slipstream_many(
+                    rpc, cfg.chain.slipstream_quoter_v2, reqs, diagnostics=quote_diagnostics
+                ),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
             ),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -972,13 +1026,17 @@ async def quote_edges_batch(
     if missing_camelot_algebra and getattr(cfg.chain, "camelot_algebra_quoter_v2", ""):
         reqs = [(e.token_in, e.token_out, int(amount_in)) for _, e in missing_camelot_algebra]
         order = [e for _, e in missing_camelot_algebra]
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "camelot_algebra",
-            quote_camelot_algebra_many(
-                rpc, cfg.chain.camelot_algebra_quoter_v2, reqs, diagnostics=quote_diagnostics
+            order,
+            _safe_venue_quote_batch(
+                "camelot_algebra",
+                quote_camelot_algebra_many(
+                    rpc, cfg.chain.camelot_algebra_quoter_v2, reqs, diagnostics=quote_diagnostics
+                ),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
             ),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -1003,13 +1061,17 @@ async def quote_edges_batch(
     if missing_camelot_v2 and getattr(cfg.chain, "camelot_v2_router", ""):
         reqs = [(e.token_in, e.token_out, int(amount_in)) for _, e in missing_camelot_v2]
         order = [e for _, e in missing_camelot_v2]
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "camelot_v2",
-            quote_camelot_v2_many(
-                rpc, cfg.chain.camelot_v2_router, reqs, diagnostics=quote_diagnostics
+            order,
+            _safe_venue_quote_batch(
+                "camelot_v2",
+                quote_camelot_v2_many(
+                    rpc, cfg.chain.camelot_v2_router, reqs, diagnostics=quote_diagnostics
+                ),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
             ),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -1034,13 +1096,17 @@ async def quote_edges_batch(
             by_router.setdefault(str(e.venue), []).append(e)
         for router, grouped in by_router.items():
             reqs = [(e.token_in, e.token_out, int(amount_in)) for e in grouped]
-            quotes = await _safe_venue_quote_batch(
+            quotes = await _run_quote_family_batch(
                 "constant_product",
-                quote_constant_product_many(
-                    rpc, router, reqs, diagnostics=quote_diagnostics
+                grouped,
+                _safe_venue_quote_batch(
+                    "constant_product",
+                    quote_constant_product_many(
+                        rpc, router, reqs, diagnostics=quote_diagnostics
+                    ),
+                    expected_count=len(grouped),
+                    diagnostics=quote_diagnostics,
                 ),
-                expected_count=len(grouped),
-                diagnostics=quote_diagnostics,
             )
             for e, q in zip(grouped, quotes):
                 ek = edge_key(e)
@@ -1064,13 +1130,17 @@ async def quote_edges_batch(
             pool_id = str(e.params.get("pool_id") or "")
             reqs.append((pool_id, e.token_in, e.token_out, int(amount_in)))
             order.append(e)
-        quotes = await _safe_venue_quote_batch(
+        quotes = await _run_quote_family_batch(
             "balancer",
-            quote_balancer_given_in_many(
-                rpc, cfg.chain.balancer_vault, reqs, diagnostics=quote_diagnostics
+            order,
+            _safe_venue_quote_batch(
+                "balancer",
+                quote_balancer_given_in_many(
+                    rpc, cfg.chain.balancer_vault, reqs, diagnostics=quote_diagnostics
+                ),
+                expected_count=len(order),
+                diagnostics=quote_diagnostics,
             ),
-            expected_count=len(order),
-            diagnostics=quote_diagnostics,
         )
         for e, q in zip(order, quotes):
             ek = edge_key(e)
@@ -1090,11 +1160,6 @@ async def quote_edges_batch(
         str(k): int(v)
         for k, v in dict(quote_diagnostics.get("failure_reasons") or {}).items()
     }
-    if adapter_unavailable_count:
-        failure_counts["quote_adapter_unavailable"] = (
-            int(failure_counts.get("quote_adapter_unavailable", 0) or 0)
-            + int(adapter_unavailable_count)
-        )
     # A failed edge without a lower-layer classification is still a concrete
     # observation. Attribute the residual instead of silently losing it from
     # the quote failure denominator; never convert it into a successful quote.
@@ -1113,6 +1178,12 @@ async def quote_edges_batch(
         )
     )
     requested_failures = max(0, requested_edge_count - batch_successes)
+    if adapter_unavailable_count:
+        failure_counts["quote_adapter_unavailable"] = (
+            int(failure_counts.get("quote_adapter_unavailable", 0) or 0)
+            + int(adapter_unavailable_count)
+        )
+    classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
     residual_unknown = max(0, requested_failures - classified_failures)
     if residual_unknown:
         failure_counts["unknown_quote_failure"] = int(
@@ -1150,6 +1221,7 @@ def _quote_family_metric_snapshot(metrics: Mapping[str, Any]) -> Dict[str, Dict[
         "quote_network_requests_by_family",
         "quote_successes_by_family",
         "quote_failures_by_family",
+        "quote_cancelled_by_family",
         "quote_adapter_unavailable_by_family",
     )
     snapshot: Dict[str, Dict[str, int]] = {}
@@ -2530,6 +2602,7 @@ async def find_two_leg_opportunities(
             "candidate_count": int(snapshot["candidate_count"]),
             "quote_requests": int(snapshot["quote_requests"]),
             "quote_successes": int(snapshot["quote_successes"]),
+            "quote_cancelled": int(metrics.get("quote_cancelled", 0) or 0),
             "quote_success_rate": float(snapshot["quote_success_rate"]),
             "cache_hits": int(snapshot["cache_hits"]),
             "network_batches": int(snapshot["network_batches"]),
@@ -3425,6 +3498,7 @@ async def find_three_leg_opportunities(
             "candidate_count": int(snapshot["candidate_count"]),
             "quote_requests": int(snapshot["quote_requests"]),
             "quote_successes": int(snapshot["quote_successes"]),
+            "quote_cancelled": int(metrics.get("quote_cancelled", 0) or 0),
             "quote_success_rate": float(snapshot["quote_success_rate"]),
             "cache_hits": int(snapshot["cache_hits"]),
             "network_batches": int(snapshot["network_batches"]),

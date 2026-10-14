@@ -169,11 +169,13 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert runtime._market_pipeline_telemetry['quotes'] == {
         'requests': 14,
         'successes': 12,
+        'cancelled': 0,
         'failure_reasons': {},
         'quote_attempts_by_family': {},
         'quote_network_requests_by_family': {},
         'quote_successes_by_family': {},
         'quote_failures_by_family': {},
+        'quote_cancelled_by_family': {},
         'quote_adapter_unavailable_by_family': {},
     }
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
@@ -187,7 +189,7 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
         and stage['pools_returned'] == 1
         for stage in discovery_telemetry['runtime']['stages']
     )
-    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True, 'two_leg_budget_ms': 4000, 'three_leg_budget_ms': 5000, 'configured_total_budget_ms': 9000}
+    assert runtime._market_pipeline_telemetry['route_evaluation'] == {'quote_phase_ms': 130.0, 'route_evaluation_ms': 27.5, 'route_groups_evaluated': 3, 'route_budget_exhausted': True, 'route_budget_stop_reason': 'time_budget', 'budget_exhausted_after_quote': True, 'two_leg_budget_ms': 4000, 'three_leg_budget_ms': 5000, 'three_leg_budget_allocated_ms': 5000, 'three_leg_budget_reallocated_ms': 0, 'configured_total_budget_ms': 9000}
     assert runtime._market_pipeline_telemetry['gross_candidates'] == 4
     adaptive = runtime._market_pipeline_telemetry['adaptive_size_discovery']
     assert adaptive['candidates_before_probe'] == 4
@@ -826,34 +828,91 @@ async def test_scan_preserves_sizing_telemetry_when_candidate_revalidation_fails
 def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
     two_leg = {
         "quote_attempts_by_family": {"univ3": 10, "curve": 2},
-        "quote_network_requests_by_family": {"univ3": 9},
+        "quote_network_requests_by_family": {"univ3": 10, "curve": 1},
         "quote_successes_by_family": {"univ3": 7},
-        "quote_failures_by_family": {"univ3": 2},
+        "quote_failures_by_family": {"univ3": 2, "curve": 2},
+        "quote_cancelled_by_family": {"univ3": 1},
         "quote_adapter_unavailable_by_family": {"curve": 1},
     }
     three_leg = {
-        "quote_attempts_by_family": {"univ3": 4, "balancer": 3},
-        "quote_network_requests_by_family": {"univ3": 3, "balancer": 3},
+        "quote_attempts_by_family": {"univ3": 3, "balancer": 5},
+        "quote_network_requests_by_family": {"univ3": 3, "balancer": 4},
         "quote_successes_by_family": {"univ3": 2, "balancer": 1},
         "quote_failures_by_family": {"univ3": 1, "balancer": 2},
+        "quote_cancelled_by_family": {"balancer": 2},
         "quote_adapter_unavailable_by_family": {"balancer": 1},
     }
 
     result = scan_mod._aggregate_quote_family_metrics(two_leg, three_leg)
 
     assert result["quote_attempts_by_family"] == {
-        "univ3": 14, "curve": 2, "balancer": 3,
+        "univ3": 13, "curve": 2, "balancer": 5,
     }
     assert result["quote_network_requests_by_family"] == {
-        "univ3": 12, "balancer": 3,
+        "univ3": 13, "curve": 1, "balancer": 4,
     }
     assert result["quote_successes_by_family"] == {
         "univ3": 9, "balancer": 1,
     }
     assert result["quote_failures_by_family"] == {
-        "univ3": 3, "balancer": 2,
+        "univ3": 3, "curve": 2, "balancer": 2,
+    }
+    assert result["quote_cancelled_by_family"] == {
+        "univ3": 1, "balancer": 2,
     }
     assert result["quote_adapter_unavailable_by_family"] == {
         "curve": 1, "balancer": 1,
     }
     assert two_leg["quote_attempts_by_family"]["univ3"] == 10
+
+
+@pytest.mark.asyncio
+async def test_base_only_scan_reuses_unused_two_leg_budget_for_triangles(monkeypatch):
+    runtime = _Runtime()
+    runtime.cfg.flags.enable_three_leg_loops = True
+    monkeypatch.delenv("VICTOR_ROUTE_EVALUATION_BUDGET_MS", raising=False)
+    monkeypatch.delenv("VICTOR_TWO_LEG_ROUTE_BUDGET_MS", raising=False)
+    monkeypatch.delenv("VICTOR_THREE_LEG_ROUTE_BUDGET_MS", raising=False)
+    observed = {}
+
+    async def quick_two(_rpc, _cfg, _cache, _block, **kwargs):
+        observed["two_ms"] = int(kwargs["time_budget_ms"])
+        kwargs["telemetry"].update({
+            "quote_requests": 0,
+            "quote_successes": 0,
+            "quote_cancelled": 0,
+            "route_groups_evaluated": 0,
+            "budget_exhausted_after_quote": False,
+        })
+        return []
+
+    async def quick_three(_rpc, _cfg, _cache, _block, **kwargs):
+        observed["three_ms"] = int(kwargs["time_budget_ms"])
+        kwargs["telemetry"].update({
+            "quote_requests": 0,
+            "quote_successes": 0,
+            "quote_cancelled": 0,
+            "route_groups_evaluated": 0,
+            "budget_exhausted_after_quote": False,
+            "route_budget_deadline_ms": int(kwargs["time_budget_ms"]),
+        })
+        return []
+
+    monkeypatch.setattr(scan_mod, "find_two_leg_opportunities", quick_two)
+    monkeypatch.setattr(scan_mod, "find_three_leg_opportunities", quick_three)
+
+    await runtime._scan_primary_opportunities(
+        object(),
+        current_block=321,
+        amount_in=10,
+        discovery_context={"_selected_provider_full_graph_base_only": True},
+    )
+
+    assert 0 < observed["two_ms"] <= 4_000
+    # In a base-only graph rescue, the triangle stage may reuse the unspent
+    # two-leg allocation, but the outer absolute deadline remains 9 seconds.
+    assert 5_000 < observed["three_ms"] <= 9_000
+    route_budget = runtime._market_pipeline_telemetry["route_evaluation"]
+    assert route_budget["configured_total_budget_ms"] == 9_000
+    assert route_budget["three_leg_budget_allocated_ms"] == observed["three_ms"]
+    assert route_budget["three_leg_budget_reallocated_ms"] == observed["three_ms"] - 5_000

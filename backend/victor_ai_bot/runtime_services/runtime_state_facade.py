@@ -322,6 +322,8 @@ class RuntimeStateFacade:
         )
         requests = int(quotes.get("requests") or 0)
         successes = int(quotes.get("successes") or 0)
+        cancelled = int(quotes.get("cancelled") or 0)
+        completed_requests = max(0, requests - cancelled)
         discovery = dict(telemetry.get("discovery") or {})
         payload = to_json_safe({
             "ok": True,
@@ -369,13 +371,18 @@ class RuntimeStateFacade:
             "quotes": {
                 "requests": requests,
                 "successes": successes,
-                "failures": max(0, requests - successes),
-                "success_rate": (float(successes) / float(requests)) if requests else 0.0,
+                "cancelled": cancelled,
+                "failures": max(0, requests - successes - cancelled),
+                "success_rate": (
+                    float(successes) / float(completed_requests)
+                    if completed_requests else 0.0
+                ),
                 "failure_reasons": dict(quotes.get("failure_reasons") or {}),
                 "quote_attempts_by_family": dict(quotes.get("quote_attempts_by_family") or {}),
                 "quote_network_requests_by_family": dict(quotes.get("quote_network_requests_by_family") or {}),
                 "quote_successes_by_family": dict(quotes.get("quote_successes_by_family") or {}),
                 "quote_failures_by_family": dict(quotes.get("quote_failures_by_family") or {}),
+                "quote_cancelled_by_family": dict(quotes.get("quote_cancelled_by_family") or {}),
                 "quote_adapter_unavailable_by_family": dict(quotes.get("quote_adapter_unavailable_by_family") or {}),
             },
             "scan_sizing": scan_sizing,

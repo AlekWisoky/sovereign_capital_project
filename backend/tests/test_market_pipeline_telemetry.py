@@ -183,6 +183,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
     assert out["quotes"] == {
         "requests": 10,
         "successes": 8,
+        "cancelled": 0,
         "failures": 2,
         "success_rate": 0.8,
         "failure_reasons": {},
@@ -190,6 +191,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "quote_network_requests_by_family": {},
         "quote_successes_by_family": {},
         "quote_failures_by_family": {},
+        "quote_cancelled_by_family": {},
         "quote_adapter_unavailable_by_family": {},
     }
     assert out["rpc"] == {
