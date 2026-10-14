@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
+    _aggregate_quote_family_metrics,
     _canonical_route_universe_telemetry,
     _merge_route_group_schedule_telemetry,
 )
@@ -187,6 +188,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "failures": 2,
         "success_rate": 0.8,
         "failure_reasons": {},
+        "failure_reasons_by_adapter": {},
         "quote_attempts_by_family": {},
         "quote_network_requests_by_family": {},
         "quote_successes_by_family": {},
@@ -526,3 +528,26 @@ def test_route_scheduler_aggregation_preserves_block_identity_and_completed_work
     assert by_block["200"]["parallelism_limit"] == 4
     assert by_block["201"]["groups_completed"] == 1
     assert target["route_group_schedule"]["block_number"] == 201
+
+
+def test_aggregate_quote_family_metrics_merges_adapter_failure_causes():
+    merged = _aggregate_quote_family_metrics(
+        {
+            "quote_failure_reasons_by_adapter": {
+                "balancer": {"rpc_revert": 3, "invalid_quote_result": 1},
+                "univ3": {"rpc_timeout": 2},
+            }
+        },
+        {
+            "quote_failure_reasons_by_adapter": {
+                "balancer": {"rpc_revert": 2},
+                "curve": {"rpc_rate_limited": 1},
+            }
+        },
+    )
+
+    assert merged["quote_failure_reasons_by_adapter"] == {
+        "balancer": {"rpc_revert": 5, "invalid_quote_result": 1},
+        "univ3": {"rpc_timeout": 2},
+        "curve": {"rpc_rate_limited": 1},
+    }
