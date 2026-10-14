@@ -1709,6 +1709,19 @@ def _merge_route_group_schedule_row(
         schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
             incoming.get(count_key, 0) or 0
         )
+    for count_key in (
+        "route_group_quote_batches_failed",
+        "route_group_quote_batches_cancelled",
+        "route_group_quote_batches_skipped_budget",
+        "route_group_quote_edges_recovered_after_cancellation",
+        "route_group_quote_edges_recovered_from_cache_when_skipped",
+        "route_group_quote_waves_started",
+    ):
+        if count_key not in schedule and count_key not in incoming:
+            continue
+        schedule[count_key] = int(schedule.get(count_key, 0) or 0) + int(
+            incoming.get(count_key, 0) or 0
+        )
     for limit_key in ("parallelism_limit", "first_leg_quote_parallelism_limit"):
         schedule[limit_key] = max(
             int(schedule.get(limit_key, 0) or 0),
