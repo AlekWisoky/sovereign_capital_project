@@ -535,6 +535,30 @@ class PoolStateEventCache:
             "candidate_affected_token_count": int(
                 self._last_candidate_metrics.get("affected_token_count", 0) or 0
             ),
+            "family_fair_selection": bool(
+                self._last_candidate_metrics.get("family_fair_selection", False)
+            ),
+            "hot_selected_edge_count": int(
+                self._last_candidate_metrics.get("hot_selected_edge_count", 0) or 0
+            ),
+            "exploration_selected_edge_count": int(
+                self._last_candidate_metrics.get("exploration_selected_edge_count", 0) or 0
+            ),
+            "hot_subgraph_edges_by_family": dict(
+                self._last_candidate_metrics.get("hot_subgraph_edges_by_family") or {}
+            ),
+            "hot_selected_edges_by_family": dict(
+                self._last_candidate_metrics.get("hot_selected_edges_by_family") or {}
+            ),
+            "exploration_pool_edges_by_family": dict(
+                self._last_candidate_metrics.get("exploration_pool_edges_by_family") or {}
+            ),
+            "exploration_edges_by_family": dict(
+                self._last_candidate_metrics.get("exploration_edges_by_family") or {}
+            ),
+            "candidate_edges_by_family": dict(
+                self._last_candidate_metrics.get("candidate_edges_by_family") or {}
+            ),
         }
 
     def state_for_pool(self, address: str) -> Optional[PoolEventState]:
