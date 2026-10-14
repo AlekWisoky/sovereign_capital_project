@@ -3774,7 +3774,7 @@ class RuntimePrimaryScanFacade:
         # break-even threshold; do not spend every frontier probe near 1x.
         raw = os.environ.get(
             "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS",
-            "0.5,2.0,8.0",
+            "0.5,2.0,8.0,1.5,4.0,16.0",
         )
         ladder_set = set(ladder)
         for item in str(raw).split(","):
