@@ -528,7 +528,7 @@ def _canonical_route_universe_telemetry(
 def _aggregate_quote_family_metrics(
     two_leg: Dict[str, Any],
     three_leg: Dict[str, Any],
-) -> Dict[str, Dict[str, int]]:
+) -> Dict[str, Any]:
     """Combine per-family quote counters without losing either route family's evidence."""
     metric_names = (
         "quote_attempts_by_family",
@@ -551,6 +551,25 @@ def _aggregate_quote_family_metrics(
                 key = str(family)
                 combined[key] = combined.get(key, 0) + normalized_count
         result[metric_name] = combined
+
+    reasons_by_adapter: Dict[str, Dict[str, int]] = {}
+    for source in sources:
+        raw = source.get("quote_failure_reasons_by_adapter") or {}
+        if not isinstance(raw, dict):
+            continue
+        for adapter, reasons in raw.items():
+            if not isinstance(reasons, dict):
+                continue
+            adapter_name = str(adapter or "unknown").strip().lower()[:64] or "unknown"
+            target = reasons_by_adapter.setdefault(adapter_name, {})
+            for reason, count in reasons.items():
+                reason_name = str(reason or "unknown").strip().lower()[:96] or "unknown"
+                try:
+                    value = max(0, int(count or 0))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                target[reason_name] = target.get(reason_name, 0) + value
+    result["quote_failure_reasons_by_adapter"] = reasons_by_adapter
     return result
 
 
@@ -3064,6 +3083,10 @@ class RuntimePrimaryScanFacade:
                 two_leg_telemetry.get("edges_generated", 0)
             ) + int(three_leg_telemetry.get("edges_generated", 0))
             route_evaluation = {
+                "route_universe_edge_count": max(
+                    int(two_leg_telemetry.get("route_universe_edge_count", 0) or 0),
+                    int(three_leg_telemetry.get("route_universe_edge_count", 0) or 0),
+                ),
                 "quote_phase_ms": float(
                     two_leg_telemetry.get("quote_phase_ms", 0.0)
                 ) + float(three_leg_telemetry.get("quote_phase_ms", 0.0)),
