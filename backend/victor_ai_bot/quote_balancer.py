@@ -91,6 +91,70 @@ def _iter_error_hex_payloads(value: Any, *, depth: int = 0) -> Iterator[str]:
         yield from _iter_error_hex_payloads(child, depth=depth + 1)
 
 
+_BALANCER_REVERT_LABELS = {
+    500: "balancer_invalid_pool_id",
+    520: "balancer_tokens_mismatch",
+    521: "balancer_token_not_registered",
+    527: "balancer_pool_no_tokens",
+}
+
+
+def _decode_balancer_error_string(value: str) -> str:
+    """Decode a bounded Solidity Error(string) payload; ignore other selectors."""
+    if not isinstance(value, str):
+        return ""
+    payload = value[2:] if value.startswith("0x") else value
+    if len(payload) < 8 + 64 or len(payload) % 2:
+        return ""
+    try:
+        raw = bytes.fromhex(payload)
+    except ValueError:
+        return ""
+    if raw[:4] != bytes.fromhex("08c379a0") or len(raw) < 4 + 64:
+        return ""
+    body = raw[4:]
+    offset = int.from_bytes(body[:32], "big")
+    if offset != 32 or len(body) < offset + 32:
+        return ""
+    size = int.from_bytes(body[offset:offset + 32], "big")
+    if size > 512 or len(body) < offset + 32 + size:
+        return ""
+    return body[offset + 32:offset + 32 + size].decode("utf-8", errors="replace")
+
+
+def _balancer_error_text(error: Any, *, depth: int = 0) -> str:
+    """Extract bounded message/revert text from a JSON-RPC error object."""
+    if depth > 3:
+        return ""
+    if isinstance(error, str):
+        decoded = _decode_balancer_error_string(error)
+        return " ".join((error[:512], decoded[:512])).strip()
+    if isinstance(error, dict):
+        fragments = []
+        for key in ("message", "data", "originalError", "error", "cause"):
+            value = error.get(key)
+            if isinstance(value, (str, dict)):
+                fragment = _balancer_error_text(value, depth=depth + 1)
+                if fragment:
+                    fragments.append(fragment)
+        return " ".join(fragments)[:2048]
+    if isinstance(error, (list, tuple)):
+        return " ".join(
+            _balancer_error_text(item, depth=depth + 1)
+            for item in list(error)[:3]
+        )[:2048]
+    return ""
+
+
+def classify_balancer_quote_error(error: Any) -> str:
+    """Classify known Vault reverts without publishing raw provider payloads."""
+    text = _balancer_error_text(error)
+    match = re.search(r"\bBAL#([0-9]{3})\b", text, flags=re.IGNORECASE)
+    if match:
+        code = int(match.group(1))
+        return _BALANCER_REVERT_LABELS.get(code, f"balancer_revert_code_{code:03d}")
+    return classify_quote_error(error)
+
 def _decode_query_error_body(body: bytes) -> list[int] | None:
     if len(body) < 32 or len(body) > _MAX_QUERY_ERROR_BYTES or (len(body) - 32) % 32:
         return None
