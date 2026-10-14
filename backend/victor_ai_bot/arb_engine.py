@@ -9,7 +9,11 @@ from .cache import PerBlockCache
 from .models import Opportunity, Route, RouteLeg
 from .quote_univ3 import quote_exact_input_single, quote_exact_input_single_batch
 from .quote_curve import quote_curve, quote_curve_many
-from .quote_balancer import quote_balancer_given_in, quote_balancer_given_in_many
+from .quote_balancer import (
+    build_balancer_query_batchswap_calldata,
+    quote_balancer_given_in,
+    quote_balancer_given_in_many,
+)
 from .quote_aerodrome import quote_aerodrome, quote_aerodrome_many
 from .quote_slipstream import quote_slipstream, quote_slipstream_many
 from .quote_camelot_algebra import quote_camelot_algebra, quote_camelot_algebra_many
@@ -834,6 +838,39 @@ async def quote_edges_batch(
         if len(samples) < 256:
             samples.append(edge_key(edge))
 
+    # Validate Balancer request payloads before marking the batch as dispatched.
+    # A malformed pool ID/token pair is a local quote failure, not an RPC
+    # network request, and must not abort valid Balancer siblings.
+    local_validation_failures = 0
+    valid_balancer: List[Tuple[int, Edge]] = []
+    for index, edge in missing_bal:
+        try:
+            build_balancer_query_batchswap_calldata(
+                str(edge.params.get("pool_id") or ""),
+                str(edge.token_in),
+                str(edge.token_out),
+                int(amount_in),
+            )
+        except (TypeError, ValueError, OverflowError):
+            local_validation_failures += 1
+            _increment_family_metric("quote_attempts_by_family", edge)
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0) or 0) + 1
+            _record_failed_edge(edge)
+            out[edge_key(edge)] = None
+            quote_diagnostics.setdefault("failure_reasons", {})
+            reasons = quote_diagnostics["failure_reasons"]
+            reasons["invalid_balancer_request"] = int(
+                reasons.get("invalid_balancer_request", 0) or 0
+            ) + 1
+            reasons_by_adapter = metrics.setdefault("quote_failure_reasons_by_adapter", {})
+            adapter_reasons = reasons_by_adapter.setdefault("balancer", {})
+            adapter_reasons["invalid_balancer_request"] = int(
+                adapter_reasons.get("invalid_balancer_request", 0) or 0
+            ) + 1
+            continue
+        valid_balancer.append((index, edge))
+    missing_bal = valid_balancer
+
     def _merge_partial_quote_diagnostics(*, include_adapter_unavailable: bool) -> None:
         accumulated = {
             str(key): max(0, int(value or 0))
@@ -1210,7 +1247,7 @@ async def quote_edges_batch(
     # observation. Attribute the residual instead of silently losing it from
     # the quote failure denominator; never convert it into a successful quote.
     classified_failures = sum(max(0, int(v)) for v in failure_counts.values())
-    requested_edge_count = sum(
+    requested_edge_count = local_validation_failures + sum(
         len(group)
         for group in (
             missing_univ3,
