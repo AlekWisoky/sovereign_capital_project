@@ -49,7 +49,7 @@ def test_size_economic_matrix_preserves_gross_rejected_diagnostics():
         "diagnostic_only": True,
     }]
     assert matrix[0]["selected_route_id"] == ""
-    assert matrix[0]["selected_after_cost_profit_wei"] == "0"
+    assert matrix[0]["selected_after_cost_profit_wei"] == ""
     assert matrix[0]["candidates"][0]["amount_out_wei"] == "5001786893695962"
     assert matrix[0]["candidates"][0]["gas_cost_profit_token_wei"] == "810000000000"
 
@@ -168,6 +168,12 @@ def test_missing_gas_conversion_is_upper_bound_not_economic_optimum():
     assert row["economic_optimum_status"] == "signed_after_cost_diagnostic"
     assert row["economic_upper_bound_route_id"] == "route-unknown-gas"
     assert row["economic_upper_bound_after_flashloan_fee_wei"] == "-109"
+    assert row["economic_optimum_route_id"] == "route-known-gas"
+
+    # If no dimensionally valid signed estimate exists, the optimum P&L is
+    # unknown/empty rather than fabricated as zero. Here the known converted
+    # diagnostic is the signed optimum, so it must remain -500.
+    assert row["economic_optimum_after_cost_profit_wei"] == "-500"
 
     candidates = {item["route_id"]: item for item in row["candidates"]}
     unknown = candidates["route-unknown-gas"]
