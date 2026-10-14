@@ -772,7 +772,6 @@ def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]
         and state.get("valid") is True
         and state.get("repayment_valid") is True
         and state.get("gas_cost_conversion_available") is True
-        and state.get("gas_cost_conversion_available") is True
         and state.get("gas_cost_profit_token_wei") not in (None, "")
         and canonical_after_cost > 0
     )
