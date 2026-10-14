@@ -3420,6 +3420,13 @@ async def find_three_leg_opportunities(
             "revs": e2_cands,
         })
 
+    configured_reverse_candidates = (
+        max_reverse_candidates
+        if max_reverse_candidates not in (None, "")
+        else int(os.environ.get("VICTOR_MAX_REVERSE_CANDIDATES", "8") or 8)
+    )
+    max_reverse_candidates = max(3, min(12, int(configured_reverse_candidates)))
+
     triangle_route_parallelism = _route_group_parallelism()
     for wave_start in range(0, len(triangle_route_groups), triangle_route_parallelism):
         if time.perf_counter() >= route_deadline:
