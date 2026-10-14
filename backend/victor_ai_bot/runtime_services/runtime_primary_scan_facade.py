@@ -767,9 +767,12 @@ def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]
     except (TypeError, ValueError, OverflowError):
         canonical_after_cost = 0
     executable_positive = bool(
-        state.get("revalidated")
-        and state.get("authoritative")
-        and state.get("valid")
+        state.get("revalidated") is True
+        and state.get("authoritative") is True
+        and state.get("valid") is True
+        and state.get("repayment_valid") is True
+        and state.get("gas_cost_conversion_available") is True
+        and state.get("gas_cost_profit_token_wei") not in (None, "")
         and canonical_after_cost > 0
     )
     try:
@@ -883,14 +886,7 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         profitability.get("gas_cost_profit_token_wei") not in (None, "")
         and int(fields["gas_cost_profit_token_wei"]) > 0
     )
-    authoritative_after_cost = bool(
-        profitability.get("revalidated")
-        and profitability.get("authoritative")
-        and profitability.get("valid")
-    )
-    economic_unknown = bool(
-        not gas_conversion_available and not authoritative_after_cost
-    )
+    economic_unknown = not gas_conversion_available
     row = {
         "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
         "amount_in": amount_in_value,
@@ -925,7 +921,15 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "authoritative": bool(profitability.get("authoritative")),
         "valid": bool(profitability.get("valid")),
         "reason": str(profitability.get("reason") or "unavailable"),
-        "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
+        "diagnostic_only": bool(
+            meta.get("size_probe_diagnostic_only")
+            or (
+                profitability.get("revalidated")
+                and not profitability.get("authoritative")
+            )
+        ),
+        "size_probe_diagnostic_only": bool(meta.get("size_probe_diagnostic_only")),
+        "execution_authority_granted": bool(getattr(candidate, "can_execute", False)),
     }
     if economic_unknown:
         row["gross_minus_flashloan_fee_upper_bound_wei"] = str(
@@ -1034,7 +1038,13 @@ def _size_route_rows(record: Dict[str, Any]) -> tuple[List[Dict[str, Any]], Dict
 def _size_matrix_selection(rows: List[Dict[str, Any]]) -> tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
     positive: List[Dict[str, Any]] = []
     for row in rows:
-        if not (row.get("revalidated") and row.get("authoritative")):
+        if not (
+            row.get("revalidated") is True
+            and row.get("authoritative") is True
+            and row.get("valid") is True
+            and row.get("repayment_valid") is True
+            and row.get("gas_cost_conversion_available") is True
+        ):
             continue
         try:
             after_cost = int(row.get("after_cost_profit_wei") or 0)
@@ -1108,7 +1118,11 @@ def _build_size_matrix_row(
             else ""
         ),
         "economic_optimum_authoritative": bool(economic and economic["authoritative"]),
-        "economic_optimum_executable": bool(selected),
+        "economic_optimum_executable": bool(
+            selected
+            and not selected.get("diagnostic_only")
+            and selected.get("execution_authority_granted") is True
+        ),
         "economic_upper_bound_route_id": (
             str(economic_upper_bound.get("route_id") or "")
             if economic_upper_bound else ""
@@ -3578,9 +3592,12 @@ class RuntimePrimaryScanFacade:
                 return False
             try:
                 return bool(
-                    state.get("revalidated")
-                    and state.get("authoritative")
-                    and state.get("valid")
+                    state.get("revalidated") is True
+                    and state.get("authoritative") is True
+                    and state.get("valid") is True
+                    and state.get("repayment_valid") is True
+                    and state.get("gas_cost_conversion_available") is True
+                    and state.get("gas_cost_profit_token_wei") not in (None, "")
                     and int(state.get("profit_after_costs_wei") or 0) > 0
                 )
             except (TypeError, ValueError, OverflowError):
