@@ -1300,6 +1300,10 @@ async def quote_edges_batch(
             accumulated_failure_counts.get(str(reason), 0) + max(0, int(count))
         )
     metrics["quote_failure_reasons"] = accumulated_failure_counts
+    metrics["quote_query_revert_decoded"] = (
+        int(metrics.get("quote_query_revert_decoded", 0) or 0)
+        + max(0, int(quote_diagnostics.get("query_revert_decoded", 0) or 0))
+    )
     metrics["failed_quote_edge_count"] = int(len(metrics.get("failed_quote_edge_samples") or []))
     # Coverage sets intentionally persist across all quote batches for a scan;
     # the caller finalizes them once after both first- and second-leg phases.
