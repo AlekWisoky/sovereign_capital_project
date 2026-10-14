@@ -882,10 +882,14 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     profitability = profitability if isinstance(profitability, dict) else {}
     legs, amount_in_value = _candidate_route_snapshot(candidate)
     fields = _candidate_economic_fields(candidate, meta, profitability, amount_in_value)
+    try:
+        gas_profit_token_value = int(fields["gas_cost_profit_token_wei"])
+    except (TypeError, ValueError, OverflowError):
+        gas_profit_token_value = -1
     gas_conversion_available = bool(
         profitability.get("gas_cost_conversion_available") is True
         and profitability.get("gas_cost_profit_token_wei") not in (None, "")
-        and int(fields["gas_cost_profit_token_wei"]) > 0
+        and gas_profit_token_value >= 0
     )
     economic_unknown = not gas_conversion_available
     row = {
@@ -1974,7 +1978,14 @@ def _merge_size_economic_matrices(
             else ""
         )
         row["economic_optimum_authoritative"] = bool(economic and economic.get("authoritative"))
-        row["economic_optimum_executable"] = bool(selected)
+        # A merged telemetry matrix is evidence only. Selection can describe
+        # the best verified economic row, but only an independently executable
+        # source candidate may claim execution capability.
+        row["economic_optimum_executable"] = bool(
+            selected
+            and not selected.get("diagnostic_only")
+            and selected.get("execution_authority_granted") is True
+        )
         row["evidence_sources"] = list(sources_by_amount.get(amount) or [])
         row["frontier_seed_samples"] = list(samples_by_amount.get(amount) or [])
         row["evidence_only"] = True
