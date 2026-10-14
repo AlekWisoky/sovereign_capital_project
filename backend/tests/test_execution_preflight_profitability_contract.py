@@ -43,6 +43,9 @@ class _Opp:
                 "flashloan_fee_wei": "0",
                 "amount_in_wei": "100",
                 "amount_out_wei": "105",
+                "gas_cost_profit_token_wei": "10",
+                "gas_cost_conversion_available": True,
+                "gas_cost_profit_token_address": "usdc",
                 "continuity": {"valid": True, "reason": "ok"},
             },
             "safety": {

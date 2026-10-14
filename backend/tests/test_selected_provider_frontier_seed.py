@@ -8,6 +8,7 @@ import pytest
 from victor_ai_bot.config import load_config
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     RuntimePrimaryScanFacade,
+    _diagnostic_size_evidence_from_telemetry,
     _candidate_economic_after_cost_for_sizing,
     _candidate_sizing_sort_key,
     _merge_size_economic_matrices,
@@ -278,6 +279,82 @@ def test_frontier_seed_defaults_span_low_mid_and_high_authorized_sizes(monkeypat
     ]
 
 
+def test_frontier_seed_default_cycles_through_every_alternative_ladder_point(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    monkeypatch.delenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES", raising=False)
+    monkeypatch.delenv("VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS", raising=False)
+    ladder = [1000, 500, 1500, 2000, 4000, 8000, 16000]
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: list(ladder),
+    )
+
+    candidates = runtime._selected_provider_frontier_seed_amounts(1000)
+
+    # The rotating scan still evaluates one alternate size per block, but its
+    # schedule must include all six alternatives rather than permanently
+    # skipping 1.5x, 4x, and 16x because the preferred list filled a 3-probe cap.
+    assert candidates == [500, 2000, 8000, 1500, 4000, 16000]
+    sampled = [
+        _selected_provider_frontier_seed_for_block(candidates, block)[0][0]
+        for block in range(100, 106)
+    ]
+    assert set(sampled) == set(ladder) - {1000}
+    assert len(set(sampled)) == len(ladder) - 1
+
+
+def test_diagnostic_size_evidence_includes_full_graph_and_frontier_matrix_rows():
+    def sample(route_id, amount, *, diagnostic=True):
+        return {
+            "route_id": route_id,
+            "amount_in": str(amount),
+            "gross_profit_wei": "-100",
+            "flashloan_fee_wei": "10",
+            "gas_cost_wei": "1000",
+            "gas_cost_conversion_available": False,
+            "diagnostic_only": diagnostic,
+            "legs": [],
+        }
+
+    selected = {
+        "size_economic_diagnostics": [sample("base-near-miss", 1000)],
+        "size_economic_evidence": [sample("base-evidence", 1000)],
+        "size_economic_matrix": [{
+            "amount_in": "1000",
+            "candidates": [
+                sample("selected-matrix-near-miss", 1000),
+                sample("selected-matrix-not-diagnostic", 1000, diagnostic=False),
+            ],
+        }],
+        "selected_provider_full_scan": {
+            "size_economic_matrix": [{
+                "amount_in": "1000",
+                "candidates": [sample("full-graph-near-miss", 1000)],
+            }],
+        },
+    }
+    frontier = {
+        "size_economic_evidence": [sample("frontier-evidence", 2000)],
+        "size_economic_matrix": [{
+            "amount_in": "2000",
+            "candidates": [sample("frontier-matrix-near-miss", 2000)],
+        }],
+    }
+
+    evidence = _diagnostic_size_evidence_from_telemetry(selected, frontier)
+
+    assert {row["route_id"] for row in evidence} == {
+        "base-near-miss",
+        "base-evidence",
+        "selected-matrix-near-miss",
+        "full-graph-near-miss",
+        "frontier-evidence",
+        "frontier-matrix-near-miss",
+    }
+    assert all(row["diagnostic_only"] is True for row in evidence)
+
+
 def test_selected_provider_frontier_seed_amounts_prioritize_nearby_sizes(monkeypatch):
     runtime = RuntimePrimaryScanFacade()
     monkeypatch.setenv(
@@ -400,7 +477,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
                 },
             }
         )
-        if int(amount_in) != 2000:
+        if int(amount_in) != 4000:
             return []
         candidate.route.legs[0].amount_in = str(int(amount_in))
         return [candidate]
@@ -416,6 +493,7 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
         cache,
         shared_gas_price_consensus=None,
         shared_flashloan_fee_observation=None,
+        diagnostic_evidence=None,
     ):
         probe_calls.append(list(base_opps))
         return list(base_opps), {
@@ -441,20 +519,131 @@ async def test_selected_provider_frontier_seed_discovers_route_missing_at_base_s
 
     # One alternate notional is scanned in a tick; size selection rotates
     # across blocks, and the scan budget is no longer split into three 3s timeouts.
-    assert scan_amounts == [1000, 1000, 2000]
+    assert scan_amounts == [1000, 1000, 4000]
     assert provider_comparison_flags == [True, False, False]
     assert full_graph_base_only_flags == [False, True, True]
     assert len(probe_calls) == 1
     assert [opp.route_id for opp in probe_calls[0]] == ["seed-route"]
     assert [opp.route_id for opp in result["opps"]] == ["seed-route"]
     frontier = result["telemetry"]["selected_provider_adaptive"]["adaptive_size_discovery"]["frontier_seed"]
-    assert frontier["candidate_amounts"] == ["500", "2000", "8000"]
-    assert frontier["amounts_scanned"] == ["2000"]
-    assert frontier["notional_rotation_index"] == 1
+    assert frontier["candidate_amounts"] == ["500", "2000", "8000", "1500", "4000", "16000"]
+    assert frontier["amounts_scanned"] == ["4000"]
+    assert frontier["notional_rotation_index"] == 4
     assert frontier["candidates_added"] == 1
     progress = result["telemetry"]["rpc_selection_progress"]
     assert progress["phase"] == "complete"
     assert "details" not in progress or "chunks_total" not in progress["details"]
+
+
+@pytest.mark.asyncio
+async def test_non_positive_diagnostic_routes_get_full_size_curve_but_never_live_opportunity(monkeypatch):
+    runtime = RuntimePrimaryScanFacade()
+    runtime.cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="test-chain"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_adaptive_scan_amounts",
+        lambda amount, **kwargs: [1000, 500, 1500, 2000],
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_annotate_canonical_after_fee_usd",
+        lambda **kwargs: asyncio.sleep(0),
+    )
+
+    class Manager:
+        async def gas_price_consensus(self):
+            return {
+                "gas_price_wei": 1,
+                "status": "consensus",
+                "observations": [],
+                "anomalies": [],
+            }
+
+    runtime.rpc_manager = Manager()
+    diagnostic = {
+        "route_id": "diagnostic-route",
+        "amount_in": "1500",
+        "gross_profit_wei": "-10",
+        "flashloan_fee_wei": "1",
+        "gas_cost_wei": "100",
+        "gas_cost_profit_token_wei": "",
+        "gas_cost_conversion_available": False,
+        "after_cost_profit_wei": "",
+        "after_cost_profit_is_upper_bound": True,
+        "revalidated": False,
+        "authoritative": False,
+        "reason": "non_positive_gross_profit",
+        "diagnostic_only": True,
+        "legs": [
+            {
+                "dex": "univ3",
+                "venue": "0x" + "11" * 20,
+                "token_in": "0x" + "22" * 20,
+                "token_out": "0x" + "33" * 20,
+                "amount_in": "1500",
+                "quoted_amount_out": "1400",
+                "min_out": "1390",
+                "edge_params": {"fee": 3000},
+                "data": "0x" + "0" * 64,
+                "quote_meta": {"fee": 3000},
+            },
+            {
+                "dex": "univ3",
+                "venue": "0x" + "11" * 20,
+                "token_in": "0x" + "33" * 20,
+                "token_out": "0x" + "22" * 20,
+                "amount_in": "1400",
+                "quoted_amount_out": "1490",
+                "min_out": "1480",
+                "edge_params": {"fee": 500},
+                "data": "0x" + "0" * 64,
+                "quote_meta": {"fee": 500},
+            },
+        ],
+    }
+
+    seen_amounts = []
+
+    async def fake_requote(
+        rpc, cfg, cache, candidate, *, new_amount_in, slippage_bps
+    ):
+        seen_amounts.append(int(new_amount_in))
+        candidate.route.legs[0].amount_in = str(int(new_amount_in))
+        candidate.expected_profit_raw = "-10"
+        return candidate
+
+    monkeypatch.setattr(
+        "victor_ai_bot.runtime_services.runtime_primary_scan_facade.requote_opportunity",
+        fake_requote,
+    )
+
+    live, telemetry = await runtime._run_bounded_selected_provider_size_probe(
+        object(),
+        current_block=123,
+        base_amount_in=1000,
+        base_opps=[],
+        cache=object(),
+        diagnostic_evidence=[diagnostic],
+    )
+
+    assert live == []
+    assert seen_amounts == [1000, 500, 2000]
+    adaptive = telemetry["adaptive_size_discovery"]
+    assert adaptive["selected_diagnostic_route_count"] == 1
+    assert adaptive["amounts_scanned"] == ["500", "1000", "1500", "2000"]
+    assert adaptive["economic_matrix_complete"] is True
+    matrix = telemetry["size_economic_matrix"]
+    assert {row["amount_in"] for row in matrix} == {"500", "1000", "1500", "2000"}
+    for row in matrix:
+        near_misses = [
+            candidate for candidate in row["candidates"]
+            if candidate.get("route_id") == "diagnostic-route"
+        ]
+        assert near_misses
+        assert all(candidate.get("diagnostic_only") is True for candidate in near_misses)
 
 
 @pytest.mark.asyncio
@@ -587,6 +776,9 @@ async def test_size_curve_runs_when_base_routes_are_already_profitable(monkeypat
                     "revalidated": True,
                     "authoritative": True,
                     "valid": True,
+                    "repayment_valid": True,
+                    "gas_cost_conversion_available": True,
+                    "gas_cost_profit_token_wei": "1",
                     "profit_after_costs_wei": "10",
                     "economic_profit_after_costs_wei": "10",
                     "reason": "verified",
@@ -702,6 +894,9 @@ def test_size_economic_matrix_merges_frontier_and_requote_evidence():
             "revalidated": True,
             "authoritative": True,
             "valid": True,
+            "repayment_valid": True,
+            "gas_cost_conversion_available": True,
+            "gas_cost_profit_token_wei": "1",
             "diagnostic_only": False,
             "reason": "verified",
             "after_cost_profit_wei": "10",
@@ -768,6 +963,7 @@ def test_size_economic_matrix_merges_frontier_and_requote_evidence():
         "rotation_index": 3,
     }]
     assert row["execution_authority_granted"] is False
+    assert row["economic_optimum_executable"] is False
 
 
 def test_frontier_seed_offsets_cover_the_graph_instead_of_only_the_prefix():

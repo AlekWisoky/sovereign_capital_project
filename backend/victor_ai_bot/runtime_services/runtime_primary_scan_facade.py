@@ -12,7 +12,7 @@ from ..arb_engine import build_edges, find_three_leg_opportunities, find_two_leg
 from ..execution_capture.final_quote import FinalQuoteError, produce_market_price_evidence
 from ..cache import PerBlockCache
 from ..gas_model import BASE_CHAIN_ID, estimate_base_l1_fee_wei, estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
-from ..models import Opportunity
+from ..models import Opportunity, Route, RouteLeg
 from ..calldata_builder import build_execute_calldata
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
@@ -438,8 +438,17 @@ def _existing_profitability_matches_scan_inputs(
     try:
         legs = list(getattr(getattr(opportunity, "route", None), "legs", []) or [])
         amount_in = int(getattr(legs[0], "amount_in", 0) or 0) if legs else 0
+        profit_token = str(getattr(legs[0], "token_in", "") or "").strip().lower() if legs else ""
+        state_profit_token = str(state.get("gas_cost_profit_token_address") or "").strip().lower()
         amount_out = _resolve_scan_quoted_amount(meta)
-        if amount_in <= 0 or amount_out is None or int(amount_out) <= 0:
+        if (
+            amount_in <= 0
+            or amount_out is None
+            or int(amount_out) <= 0
+            or state.get("gas_cost_conversion_available") is not True
+            or not profit_token
+            or state_profit_token != profit_token
+        ):
             return False
         expected_fee = (int(amount_in) * max(0, int(flashloan_fee_bps))) // 10_000
         return bool(
@@ -753,6 +762,19 @@ def _candidate_economic_after_cost_for_sizing(candidate: Any) -> int | None:
     return after_cost
 
 
+
+def _has_explicit_profit_token_gas_conversion(state: Dict[str, Any]) -> bool:
+    """Accept only a declared, non-negative conversion result—not native-wei fallback."""
+    if state.get("gas_cost_conversion_available") is not True:
+        return False
+    raw = state.get("gas_cost_profit_token_wei")
+    if raw in (None, ""):
+        return False
+    try:
+        return int(raw) >= 0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
 def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]:
     """Prefer verified executable positives, then best signed economic evidence."""
     meta = getattr(candidate, "meta", {}) or {}
@@ -767,9 +789,11 @@ def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]
     except (TypeError, ValueError, OverflowError):
         canonical_after_cost = 0
     executable_positive = bool(
-        state.get("revalidated")
-        and state.get("authoritative")
-        and state.get("valid")
+        state.get("revalidated") is True
+        and state.get("authoritative") is True
+        and state.get("valid") is True
+        and state.get("repayment_valid") is True
+        and _has_explicit_profit_token_gas_conversion(state)
         and canonical_after_cost > 0
     )
     try:
@@ -879,18 +903,10 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     profitability = profitability if isinstance(profitability, dict) else {}
     legs, amount_in_value = _candidate_route_snapshot(candidate)
     fields = _candidate_economic_fields(candidate, meta, profitability, amount_in_value)
-    gas_conversion_available = bool(
-        profitability.get("gas_cost_profit_token_wei") not in (None, "")
-        and int(fields["gas_cost_profit_token_wei"]) > 0
+    gas_conversion_available = _has_explicit_profit_token_gas_conversion(
+        profitability
     )
-    authoritative_after_cost = bool(
-        profitability.get("revalidated")
-        and profitability.get("authoritative")
-        and profitability.get("valid")
-    )
-    economic_unknown = bool(
-        not gas_conversion_available and not authoritative_after_cost
-    )
+    economic_unknown = not gas_conversion_available
     row = {
         "route_id": str(getattr(candidate, "route_id", "") or getattr(candidate, "id", "") or ""),
         "amount_in": amount_in_value,
@@ -925,7 +941,15 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
         "authoritative": bool(profitability.get("authoritative")),
         "valid": bool(profitability.get("valid")),
         "reason": str(profitability.get("reason") or "unavailable"),
-        "diagnostic_only": bool(profitability.get("revalidated")) and not bool(profitability.get("authoritative")),
+        "diagnostic_only": bool(
+            meta.get("size_probe_diagnostic_only")
+            or (
+                profitability.get("revalidated")
+                and not profitability.get("authoritative")
+            )
+        ),
+        "size_probe_diagnostic_only": bool(meta.get("size_probe_diagnostic_only")),
+        "execution_authority_granted": bool(getattr(candidate, "can_execute", False)),
     }
     if economic_unknown:
         row["gross_minus_flashloan_fee_upper_bound_wei"] = str(
@@ -1034,7 +1058,13 @@ def _size_route_rows(record: Dict[str, Any]) -> tuple[List[Dict[str, Any]], Dict
 def _size_matrix_selection(rows: List[Dict[str, Any]]) -> tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
     positive: List[Dict[str, Any]] = []
     for row in rows:
-        if not (row.get("revalidated") and row.get("authoritative")):
+        if not (
+            row.get("revalidated") is True
+            and row.get("authoritative") is True
+            and row.get("valid") is True
+            and row.get("repayment_valid") is True
+            and _has_explicit_profit_token_gas_conversion(row)
+        ):
             continue
         try:
             after_cost = int(row.get("after_cost_profit_wei") or 0)
@@ -1108,7 +1138,11 @@ def _build_size_matrix_row(
             else ""
         ),
         "economic_optimum_authoritative": bool(economic and economic["authoritative"]),
-        "economic_optimum_executable": bool(selected),
+        "economic_optimum_executable": bool(
+            selected
+            and not selected.get("diagnostic_only")
+            and selected.get("execution_authority_granted") is True
+        ),
         "economic_upper_bound_route_id": (
             str(economic_upper_bound.get("route_id") or "")
             if economic_upper_bound else ""
@@ -1218,6 +1252,301 @@ def _existing_size_probe_route_ids(candidates: List[Opportunity]) -> set[str]:
             route_ids.add(route_id)
     return route_ids
 
+
+def _diagnostic_size_evidence_from_telemetry(
+    selected_telemetry: Dict[str, Any],
+    frontier_seed_telemetry: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Collect route near-misses from base, full-graph and frontier telemetry."""
+    selected = dict(selected_telemetry or {})
+    frontier = dict(frontier_seed_telemetry or {})
+    full_scan = selected.get("selected_provider_full_scan")
+    full_scan = full_scan if isinstance(full_scan, dict) else {}
+
+    evidence: List[Dict[str, Any]] = []
+
+    def append_direct(rows: Any) -> None:
+        if not isinstance(rows, list):
+            return
+        for row in rows:
+            if isinstance(row, dict) and row.get("diagnostic_only") is True:
+                evidence.append(dict(row))
+
+    for source in (
+        selected.get("size_economic_diagnostics"),
+        selected.get("size_economic_evidence"),
+        full_scan.get("size_economic_evidence"),
+        frontier.get("size_economic_diagnostics"),
+        frontier.get("size_economic_evidence"),
+    ):
+        append_direct(source)
+
+    # Full-graph rescue diagnostics are nested in their size matrix, while
+    # frontier seed diagnostics arrive there as well. Flatten these rows or
+    # they never reach route rehydration when the base scan finds no positives.
+    for matrix in (
+        selected.get("size_economic_matrix"),
+        full_scan.get("size_economic_matrix"),
+        frontier.get("size_economic_matrix"),
+    ):
+        if not isinstance(matrix, list):
+            continue
+        for size_row in matrix:
+            if not isinstance(size_row, dict):
+                continue
+            append_direct(size_row.get("candidates"))
+    return evidence
+
+
+def _diagnostic_size_probe_candidates(
+    evidence: List[Dict[str, Any]] | None,
+    *,
+    chain_name: str,
+    excluded_route_ids: set[str],
+    max_candidates: int,
+) -> List[Opportunity]:
+    """Rehydrate bounded read-only near-miss routes for economic size probing.
+
+    Only diagnostic records that preserve exact edge params and encoded leg data
+    are eligible. The resulting models are explicitly non-executable and are
+    filtered from the live opportunity list after their size evidence is saved.
+    """
+    limit = max(0, int(max_candidates))
+    if limit <= 0:
+        return []
+    supported_dexes = {
+        "univ3", "curve", "balancer", "aerodrome", "slipstream",
+        "camelot_algebra", "camelot_v2", "constant_product",
+    }
+    best_by_route: Dict[str, tuple[tuple[int, int, int], Dict[str, Any]]] = {}
+    for raw in list(evidence or []):
+        if not isinstance(raw, dict) or raw.get("diagnostic_only") is not True:
+            continue
+        route_id = str(raw.get("route_id") or "").strip()
+        if not route_id or route_id in excluded_route_ids:
+            continue
+        try:
+            amount_in = int(raw.get("amount_in") or 0)
+            legs = [leg for leg in list(raw.get("legs") or []) if isinstance(leg, dict)]
+            gross = int(raw.get("gross_profit_wei") or 0)
+            fee = int(raw.get("flashloan_fee_wei") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if amount_in <= 0 or len(legs) not in {2, 3}:
+            continue
+        exact_params: List[Dict[str, Any]] = []
+        valid_legs = True
+        for leg in legs:
+            dex = str(leg.get("dex") or "").strip().lower()
+            params = leg.get("edge_params")
+            try:
+                leg_amount = int(leg.get("amount_in") or 0)
+                leg_min_out = int(leg.get("min_out") or 0)
+            except (TypeError, ValueError, OverflowError):
+                valid_legs = False
+                break
+            if (
+                dex not in supported_dexes
+                or not str(leg.get("venue") or "").strip()
+                or not str(leg.get("token_in") or "").strip()
+                or not str(leg.get("token_out") or "").strip()
+                or not isinstance(params, dict)
+                or leg_amount <= 0
+                or leg_min_out < 0
+                or "data" not in leg
+            ):
+                valid_legs = False
+                break
+            exact_params.append(dict(params))
+        if not valid_legs:
+            continue
+        score = (
+            int(raw.get("gas_cost_conversion_available") is True),
+            gross - fee,
+            gross,
+        )
+        current = best_by_route.get(route_id)
+        if current is None or score > current[0]:
+            best_by_route[route_id] = (score, raw)
+
+    ranked = sorted(
+        best_by_route.items(),
+        key=lambda item: (
+            item[1][0],
+            item[0],
+        ),
+        reverse=True,
+    )
+    candidates: List[Opportunity] = []
+    for route_id, (_score, raw) in ranked[:limit]:
+        legs_raw = [leg for leg in list(raw.get("legs") or []) if isinstance(leg, dict)]
+        route_legs: List[RouteLeg] = []
+        params: List[Dict[str, Any]] = []
+        outs: List[str] = []
+        quote_metas: List[Dict[str, Any]] = []
+        for leg in legs_raw:
+            route_legs.append(RouteLeg(
+                dex=str(leg["dex"]).strip().lower(),
+                venue=str(leg["venue"]),
+                token_in=str(leg["token_in"]),
+                token_out=str(leg["token_out"]),
+                amount_in=str(leg["amount_in"]),
+                min_out=str(leg.get("min_out") or "0"),
+                data=str(leg.get("data") or ""),
+            ))
+            params.append(dict(leg["edge_params"]))
+            outs.append(str(leg.get("quoted_amount_out") or ""))
+            quote_meta = leg.get("quote_meta")
+            quote_metas.append(dict(quote_meta) if isinstance(quote_meta, dict) else {})
+        amount_in = int(raw["amount_in"])
+        meta: Dict[str, Any] = {
+            "route_type": "2leg" if len(route_legs) == 2 else "3leg",
+            "route_edge_params": params,
+            "adaptive_seed_amount_in": str(amount_in),
+            "diagnostic_only": True,
+            "size_probe_diagnostic_only": True,
+            "size_probe_source": "non_positive_quote_diagnostic",
+            "size_probe_source_reason": str(raw.get("reason") or "non_positive_gross_profit"),
+        }
+        for index, (out, quote_meta) in enumerate(zip(outs, quote_metas), start=1):
+            if out:
+                meta[f"out{index}"] = out
+            meta[f"leg{index}"] = quote_meta
+        try:
+            gross = int(raw.get("gross_profit_wei") or 0)
+        except (TypeError, ValueError, OverflowError):
+            gross = 0
+        candidates.append(Opportunity(
+            id=f"size-probe-{route_id}-{amount_in}",
+            chain=str(chain_name),
+            strategy=(
+                "two-leg:diagnostic" if len(route_legs) == 2 else "tri:diagnostic"
+            ),
+            expected_profit_raw=str(gross),
+            expected_profit_usd="0",
+            route=Route(legs=route_legs),
+            min_outs=[str(leg.min_out) for leg in route_legs],
+            route_id=route_id,
+            can_execute=False,
+            created_at_ms=0,
+            meta=meta,
+        ))
+    return candidates
+
+
+def _authoritative_positive_size_candidate(candidate: Any) -> bool:
+    meta = getattr(candidate, "meta", {}) or {}
+    state = meta.get("profitability") if isinstance(meta, dict) else {}
+    if not isinstance(state, dict):
+        return False
+    try:
+        return bool(
+            state.get("revalidated") is True
+            and state.get("authoritative") is True
+            and state.get("valid") is True
+            and state.get("repayment_valid") is True
+            and _has_explicit_profit_token_gas_conversion(state)
+            and int(state.get("profit_after_costs_wei") or 0) > 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _select_bounded_size_probe_candidates(
+    base_opps: List[Opportunity],
+    diagnostic_evidence: List[Dict[str, Any]] | None,
+    *,
+    chain_name: str,
+    route_cap: int,
+    triangle_cap: int,
+) -> tuple[List[Opportunity], set[str], int]:
+    """Select live route re-quotes first, then fill unused slots with read-only near-misses."""
+    direct = [
+        candidate for candidate in list(base_opps or [])
+        if str(getattr(candidate, "strategy", "") or "").startswith("two-leg:")
+    ]
+    triangles = [
+        candidate for candidate in list(base_opps or [])
+        if str(getattr(candidate, "strategy", "") or "").startswith("tri:")
+    ]
+    direct.sort(key=_candidate_sizing_sort_key, reverse=True)
+    triangles.sort(key=_candidate_sizing_sort_key, reverse=True)
+
+    selected: List[Opportunity] = []
+    seen_routes: set[str] = set()
+    for candidate in [*direct[:route_cap], *triangles[:triangle_cap]]:
+        key = _size_probe_route_key(candidate)
+        if key and key in seen_routes:
+            continue
+        if key:
+            seen_routes.add(key)
+        selected.append(candidate)
+        if len(selected) >= route_cap:
+            break
+
+    diagnostics = _diagnostic_size_probe_candidates(
+        list(diagnostic_evidence or []),
+        chain_name=chain_name,
+        excluded_route_ids=set(seen_routes),
+        max_candidates=max(0, route_cap - len(selected)),
+    )
+    selected.extend(diagnostics)
+    diagnostic_route_ids = {
+        _size_probe_route_key(candidate)
+        for candidate in diagnostics
+        if _size_probe_route_key(candidate)
+    }
+    source_rows = sum(
+        1 for row in list(diagnostic_evidence or [])
+        if isinstance(row, dict)
+        and row.get("diagnostic_only") is True
+        and str(row.get("route_id") or "") in diagnostic_route_ids
+    )
+    return selected, diagnostic_route_ids, int(source_rows)
+
+
+def _merge_diagnostic_evidence_into_size_records(
+    evidence: List[Dict[str, Any]] | None,
+    selected_route_ids: set[str],
+    records_by_amount: Dict[int, Dict[str, Any]],
+) -> None:
+    """Retain each selected near-miss at its source notional, without fabricating P&L."""
+    for diagnostic in list(evidence or []):
+        if not isinstance(diagnostic, dict):
+            continue
+        route_id = str(diagnostic.get("route_id") or "")
+        if route_id not in selected_route_ids or diagnostic.get("diagnostic_only") is not True:
+            continue
+        try:
+            source_amount = int(diagnostic.get("amount_in") or 0)
+            diagnostic_legs = [
+                leg for leg in list(diagnostic.get("legs") or [])
+                if isinstance(leg, dict)
+            ]
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if source_amount <= 0 or len(diagnostic_legs) not in {2, 3}:
+            continue
+        group_name = "two_metrics" if len(diagnostic_legs) == 2 else "three_metrics"
+        source_record = records_by_amount.setdefault(
+            source_amount,
+            {
+                "amount_in": source_amount,
+                "two": [],
+                "three": [],
+                "two_metrics": {},
+                "three_metrics": {},
+            },
+        )
+        group_metrics = source_record.setdefault(group_name, {})
+        diagnostic_rows = group_metrics.setdefault("size_economic_diagnostics", [])
+        if not any(
+            isinstance(existing, dict)
+            and str(existing.get("route_id") or "") == route_id
+            and str(existing.get("amount_in") or "") == str(source_amount)
+            for existing in diagnostic_rows
+        ):
+            diagnostic_rows.append(dict(diagnostic))
 
 def _merge_size_probe_group(
     record: Dict[str, Any],
@@ -1491,21 +1820,29 @@ def _merge_size_economic_matrices(
 
     def candidate_rank(row: Dict[str, Any]) -> tuple[int, int, int, int]:
         try:
-            after_cost = int(row.get("after_cost_profit_wei") or 0)
+            after_cost = int(row.get("after_cost_profit_wei")) if row.get("after_cost_profit_wei") not in (None, "") else None
         except (TypeError, ValueError, OverflowError):
-            after_cost = 0
-        try:
-            economic = int(_economic_after_cost_profit(row) or 0)
-        except (TypeError, ValueError, OverflowError):
-            economic = after_cost
-        valid_authority = bool(
-            row.get("revalidated") and row.get("authoritative") and row.get("valid")
+            after_cost = None
+        economic = _economic_after_cost_profit(row)
+        gas_converted = _has_explicit_profit_token_gas_conversion(row)
+        repayment_valid = row.get("repayment_valid") is True
+        authoritative_valid = bool(
+            row.get("revalidated") is True
+            and row.get("authoritative") is True
+            and row.get("valid") is True
+            and repayment_valid
+            and gas_converted
+        )
+        signed_cost_known = bool(gas_converted and economic is not None)
+        signed_value = int(economic) if signed_cost_known else -(1 << 255)
+        verified_positive = bool(
+            authoritative_valid and after_cost is not None and after_cost > 0
         )
         return (
-            int(valid_authority and after_cost > 0),
-            int(valid_authority),
-            int(bool(row.get("revalidated") or row.get("diagnostic_only"))),
-            economic,
+            int(verified_positive),
+            int(authoritative_valid),
+            int(signed_cost_known and bool(row.get("revalidated") or row.get("diagnostic_only"))),
+            signed_value,
         )
 
     for matrix in matrices:
@@ -1651,7 +1988,14 @@ def _merge_size_economic_matrices(
             else ""
         )
         row["economic_optimum_authoritative"] = bool(economic and economic.get("authoritative"))
-        row["economic_optimum_executable"] = bool(selected)
+        # A merged telemetry matrix is evidence only. Selection can describe
+        # the best verified economic row, but only an independently executable
+        # source candidate may claim execution capability.
+        row["economic_optimum_executable"] = bool(
+            selected
+            and not selected.get("diagnostic_only")
+            and selected.get("execution_authority_granted") is True
+        )
         row["evidence_sources"] = list(sources_by_amount.get(amount) or [])
         row["frontier_seed_samples"] = list(samples_by_amount.get(amount) or [])
         row["evidence_only"] = True
@@ -2058,11 +2402,7 @@ class RuntimePrimaryScanFacade:
                 opportunity=opportunity,
                 meta=meta,
                 gas_cost_wei=int(gas_cost_wei),
-                gas_cost_profit_token_wei=(
-                    gas_cost_in_profit_token_wei
-                    if has_route_gas_inputs
-                    else int(gas_cost_wei)
-                ),
+                gas_cost_profit_token_wei=gas_cost_in_profit_token_wei,
                 flashloan_fee_bps=int(effective_flashloan_fee_bps),
             )
             prior_after_fee_usd = meta.get("canonical_after_fee_usd")
@@ -2122,11 +2462,7 @@ class RuntimePrimaryScanFacade:
                     opportunity=opportunity,
                     meta=meta,
                     gas_cost_wei=int(gas_cost_wei),
-                    gas_cost_profit_token_wei=(
-                        gas_cost_in_profit_token_wei
-                        if has_route_gas_inputs
-                        else int(gas_cost_wei)
-                    ),
+                    gas_cost_profit_token_wei=gas_cost_in_profit_token_wei,
                     flashloan_fee_bps=int(effective_flashloan_fee_bps),
                 )
             ):
@@ -2136,11 +2472,7 @@ class RuntimePrimaryScanFacade:
                     revalidation_kwargs = {
                         "gas_cost_wei": gas_cost_wei,
                         "quoted_amount_out_wei": _resolve_scan_quoted_amount(meta),
-                        "gas_cost_in_profit_token_wei": (
-                            gas_cost_in_profit_token_wei
-                            if has_route_gas_inputs
-                            else gas_cost_wei
-                        ),
+                        "gas_cost_in_profit_token_wei": gas_cost_in_profit_token_wei,
                     }
                     if native_flashloan_fee_bps is not None:
                         revalidation_kwargs["flashloan_fee_bps_override"] = native_flashloan_fee_bps
@@ -2168,11 +2500,40 @@ class RuntimePrimaryScanFacade:
                         "gas_cost_wei": str(max(0, gas_cost_wei)),
                         "flashloan_fee_wei": "0",
                     }
-            if has_route_gas_inputs and gas_cost_in_profit_token_wei is None:
+            if gas_cost_in_profit_token_wei is None:
+                # Revoke any prior canonical state whose cost units are no longer
+                # supported. A stale positive must not survive as the live state
+                # while this quote is explicitly marked gas-unpriced.
+                meta.pop("profitability", None)
+                _clear_stale_after_fee_projection(meta)
+                safety_state = meta.get("safety")
+                if isinstance(safety_state, dict):
+                    for key in (
+                        "profit_after_costs_wei",
+                        "economic_profit_after_costs_wei",
+                        "profit_after_costs_usd_micro",
+                        "profit_after_costs_usd_source",
+                    ):
+                        safety_state.pop(key, None)
+                    safety_state.update({
+                        "ok": False,
+                        "is_safe": False,
+                        "revalidated": False,
+                        "reason": (
+                            "gas_cost_profit_token_unavailable"
+                            if has_route_gas_inputs
+                            else "route_gas_evidence_unavailable"
+                        ),
+                        "gas_cost_conversion_available": False,
+                    })
                 state = {
                     "stage": "scan_after_fee_revalidation",
                     "source": "runtime_primary_scan",
-                    "reason": "gas_cost_profit_token_unavailable",
+                    "reason": (
+                        "gas_cost_profit_token_unavailable"
+                        if has_route_gas_inputs
+                        else "route_gas_evidence_unavailable"
+                    ),
                     "revalidated": False,
                     "stale": True,
                     "valid": False,
@@ -2182,7 +2543,45 @@ class RuntimePrimaryScanFacade:
                     "gas_cost_wei": str(max(0, gas_cost_wei)),
                     "gas_cost_profit_token_wei": "0",
                     "flashloan_fee_wei": "0",
+                    "gas_cost_conversion_available": False,
+                    "repayment_valid": False,
                 }
+            # Stamp the evidence from this exact scan, including fail-closed
+            # conversion availability and the independent repayment predicate.
+            # These are consumed by matrix/frontier selectors; missing fields must
+            # never be interpreted as a valid zero-cost quote.
+            try:
+                amount_in_for_repayment = int(
+                    getattr(getattr(opportunity, "route", None).legs[0], "amount_in", 0)
+                )
+            except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+                amount_in_for_repayment = 0
+            try:
+                amount_out_for_repayment = int(_resolve_scan_quoted_amount(meta) or 0)
+            except (TypeError, ValueError, OverflowError):
+                amount_out_for_repayment = 0
+            repayment_fee = (
+                max(0, int(amount_in_for_repayment))
+                * max(0, int(effective_flashloan_fee_bps))
+            ) // 10_000
+            try:
+                converted_gas_cost = (
+                    int(gas_cost_in_profit_token_wei)
+                    if gas_cost_in_profit_token_wei is not None else 0
+                )
+            except (TypeError, ValueError, OverflowError):
+                converted_gas_cost = 0
+            state["gas_cost_conversion_available"] = bool(
+                has_route_gas_inputs
+                and gas_cost_in_profit_token_wei is not None
+                and converted_gas_cost >= 0
+            )
+            state["gas_cost_profit_token_address"] = str(profit_token or "").strip().lower()
+            state["repayment_valid"] = bool(
+                amount_in_for_repayment > 0
+                and amount_out_for_repayment > 0
+                and amount_out_for_repayment >= amount_in_for_repayment + repayment_fee
+            )
             # Preserve the diagnostic revalidation result for the sizing
             # evidence matrix, but only promote a valid authoritative result to
             # canonical profitability. Invalid states must not poison legacy
@@ -3360,21 +3759,24 @@ class RuntimePrimaryScanFacade:
             return []
 
         try:
+            # The graph seed rotates exactly one notional per block, so broaden
+            # the candidate cycle to cover every alternative in the bounded
+            # ladder without multiplying this tick's RPC/latency budget.
             max_probes = max(
                 1,
                 min(
-                    3,
+                    8,
                     int(
                         os.environ.get(
                             "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES",
-                            "3",
+                            "8",
                         )
-                        or 3
+                        or 8
                     ),
                 ),
             )
         except (TypeError, ValueError):
-            max_probes = 3
+            max_probes = 8
 
         preferred: List[int] = []
         # Sample a low, middle, and upper authorized notional. Larger sizes
@@ -3382,7 +3784,7 @@ class RuntimePrimaryScanFacade:
         # break-even threshold; do not spend every frontier probe near 1x.
         raw = os.environ.get(
             "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MULTIPLIERS",
-            "0.5,2.0,8.0",
+            "0.5,2.0,8.0,1.5,4.0,16.0",
         )
         ladder_set = set(ladder)
         for item in str(raw).split(","):
@@ -3416,8 +3818,9 @@ class RuntimePrimaryScanFacade:
         cache: PerBlockCache,
         shared_gas_price_consensus: Dict[str, Any] | None = None,
         shared_flashloan_fee_observation: Dict[str, Any] | None = None,
+        diagnostic_evidence: List[Dict[str, Any]] | None = None,
     ) -> tuple[List[Opportunity], Dict[str, Any]]:
-        """Probe promising routes using the same block/cost snapshot as provider selection."""
+        """Probe genuine routes and bounded quote-derived near misses on the same cost snapshot."""
         telemetry: Dict[str, Any] = {}
         adaptive_amounts = self._adaptive_scan_amounts(
             int(base_amount_in),
@@ -3431,40 +3834,12 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             min_opportunities = 2
 
-        def _authoritative_positive(candidate: Any) -> bool:
-            meta = getattr(candidate, "meta", {}) or {}
-            state = meta.get("profitability") if isinstance(meta, dict) else {}
-            if not isinstance(state, dict):
-                return False
-            try:
-                return bool(
-                    state.get("revalidated")
-                    and state.get("authoritative")
-                    and state.get("valid")
-                    and int(state.get("profit_after_costs_wei") or 0) > 0
-                )
-            except (TypeError, ValueError, OverflowError):
-                return False
-
         def _route_key(candidate: Any) -> str:
             return str(
                 getattr(candidate, "route_id", "")
                 or getattr(candidate, "id", "")
                 or ""
             )
-
-        direct = [
-            candidate
-            for candidate in list(base_opps or [])
-            if str(getattr(candidate, "strategy", "") or "").startswith("two-leg:")
-        ]
-        triangles = [
-            candidate
-            for candidate in list(base_opps or [])
-            if str(getattr(candidate, "strategy", "") or "").startswith("tri:")
-        ]
-        direct.sort(key=_candidate_sizing_sort_key, reverse=True)
-        triangles.sort(key=_candidate_sizing_sort_key, reverse=True)
 
         try:
             route_cap = max(
@@ -3481,17 +3856,16 @@ class RuntimePrimaryScanFacade:
         except (TypeError, ValueError):
             triangle_cap = 4
 
-        selected: List[Opportunity] = []
-        seen_routes: set[str] = set()
-        for candidate in [*direct[:route_cap], *triangles[:triangle_cap]]:
-            key = _route_key(candidate)
-            if key and key in seen_routes:
-                continue
-            if key:
-                seen_routes.add(key)
-            selected.append(candidate)
-            if len(selected) >= route_cap:
-                break
+        selected, selected_diagnostic_route_ids, diagnostic_source_rows = (
+            _select_bounded_size_probe_candidates(
+                list(base_opps or []),
+                diagnostic_evidence,
+                chain_name=str(getattr(getattr(self.cfg, "chain", None), "name", "") or ""),
+                route_cap=route_cap,
+                triangle_cap=triangle_cap,
+            )
+        )
+        selected_diagnostic_count = len(selected_diagnostic_route_ids)
 
         # Profitability at the current notional does not prove that the notional
         # is optimal. Whenever routes are available and the authorized ladder has
@@ -3500,7 +3874,7 @@ class RuntimePrimaryScanFacade:
         # execution authority; when no routes exist, graph-frontier discovery is
         # responsible for introducing size-emergent routes.
         positive_base = sum(
-            1 for candidate in base_opps if _authoritative_positive(candidate)
+            1 for candidate in base_opps if _authoritative_positive_size_candidate(candidate)
         )
         should_probe = bool(len(adaptive_amounts) > 1 and selected)
         telemetry["adaptive_size_discovery"] = {
@@ -3516,6 +3890,9 @@ class RuntimePrimaryScanFacade:
             "authoritative_positive_candidates_before_probe": int(positive_base),
             "probe_basis": "bounded_selected_route_requote",
             "selected_route_count": int(len(selected)),
+            "selected_diagnostic_route_count": int(selected_diagnostic_count),
+            "diagnostic_probe_route_ids": sorted(selected_diagnostic_route_ids),
+            "diagnostic_probe_source_rows": int(diagnostic_source_rows),
             "route_cap": int(route_cap),
             "triangle_cap": int(triangle_cap),
             "probe_candidate_delta": 0,
@@ -3537,8 +3914,16 @@ class RuntimePrimaryScanFacade:
         # Keep the economic row aligned to the notional actually quoted rather
         # than relabeling every seed route as the base-size result.
         candidates_by_source_size: Dict[int, Dict[str, List[Opportunity]]] = {}
-        for candidate in [*direct, *triangles]:
+        for candidate in list(base_opps or []):
             meta = getattr(candidate, "meta", {}) or {}
+            if isinstance(meta, dict) and meta.get("size_probe_diagnostic_only") is True:
+                continue
+            strategy = str(getattr(candidate, "strategy", "") or "")
+            if not (
+                strategy.startswith("two-leg:")
+                or strategy.startswith("tri:")
+            ):
+                continue
             try:
                 source_amount = max(
                     1, int(meta.get("adaptive_seed_amount_in") or base_amount_in)
@@ -3548,7 +3933,6 @@ class RuntimePrimaryScanFacade:
             group = candidates_by_source_size.setdefault(
                 source_amount, {"two": [], "three": []}
             )
-            strategy = str(getattr(candidate, "strategy", "") or "")
             group["two" if strategy.startswith("two-leg:") else "three"].append(candidate)
 
         size_scan_records: List[Dict[str, Any]] = [
@@ -3573,6 +3957,11 @@ class RuntimePrimaryScanFacade:
             int(record.get("amount_in") or 0): record
             for record in size_scan_records
         }
+        _merge_diagnostic_evidence_into_size_records(
+            diagnostic_evidence,
+            selected_diagnostic_route_ids,
+            size_scan_records_by_amount,
+        )
         probe_run = _SizeProbeRun(
             rpc=rpc,
             cfg=self.cfg,
@@ -3611,12 +4000,27 @@ class RuntimePrimaryScanFacade:
             )
 
         finalized = _finalize_size_probe(probe_run)
+        for row in list(finalized.get("size_economic_evidence") or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("route_id") or "") in selected_diagnostic_route_ids:
+                row["diagnostic_only"] = True
+                row["size_probe_diagnostic_only"] = True
+                row["execution_authority_granted"] = False
         telemetry["size_economic_matrix"] = list(finalized["size_economic_matrix"])
         telemetry["size_economic_evidence"] = list(finalized["size_economic_evidence"])
         telemetry["adaptive_size_discovery"].update(
             dict(finalized["adaptive_size_discovery"])
         )
-        return [*base_opps, *sized], telemetry
+        return [
+            *base_opps,
+            *[
+                candidate for candidate in sized
+                if not bool(
+                    (getattr(candidate, "meta", {}) or {}).get("size_probe_diagnostic_only")
+                )
+            ],
+        ], telemetry
 
     async def _select_rpc_and_scan(
         self,
@@ -4909,6 +5313,13 @@ class RuntimePrimaryScanFacade:
                 "frontier_seed_candidates_added": int(frontier_seed_telemetry.get("candidates_added", 0) or 0),
             },
         )
+        diagnostic_evidence = _diagnostic_size_evidence_from_telemetry(
+            selected_telemetry,
+            frontier_seed_telemetry,
+        )
+        # The helper accepts only diagnostics with exact edge parameters. Keep
+        # duplicate source samples so it can pick the strongest observed size
+        # for each canonical route, then probe only the unused route-cap slots.
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
@@ -4929,6 +5340,7 @@ class RuntimePrimaryScanFacade:
                         shared_gas_price_consensus=shared_gas_consensus,
 
                         shared_flashloan_fee_observation=shared_flashloan_fee,
+                        diagnostic_evidence=diagnostic_evidence,
 
                     ),
 
@@ -4959,11 +5371,9 @@ class RuntimePrimaryScanFacade:
                             shared_gas_price_consensus=shared_gas_consensus,
 
                             shared_flashloan_fee_observation=shared_flashloan_fee,
-
+                            diagnostic_evidence=diagnostic_evidence,
                         ),
-
                         timeout=selection_timeout_s,
-
                     )
         except asyncio.TimeoutError:
             adaptive_telemetry.setdefault("scan_error", "selected_provider_adaptive_timeout")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping
 
-from .safety import check_profit_and_repay
+from .safety import check_profit_and_repay, compute_flashloan_fee
 
 
 _MICRO_USD_THRESHOLD = 1000.0
@@ -429,20 +429,66 @@ def revalidate_profitability_state(
     resolved_gas_cost_wei = _infer_gas_cost_wei(opp, cfg, gas_cost_wei)
     existing_profitability = _safe_dict(meta.get("profitability"))
     existing_safety = _safe_dict(meta.get("safety"))
-    inherited_profit_token_gas = _safe_int(
-        existing_profitability.get("gas_cost_profit_token_wei")
-        or existing_safety.get("gas_cost_profit_token_wei"),
-        0,
+    route_legs = list(getattr(getattr(opp, "route", None), "legs", []) or [])
+    profit_token = str(getattr(route_legs[0], "token_in", "") or "").strip().lower() if route_legs else ""
+    wrapped_native = str(
+        getattr(getattr(cfg, "chain", None), "weth", "") or ""
+    ).strip().lower()
+    native_gas_units_match = bool(
+        profit_token and wrapped_native and profit_token == wrapped_native
     )
-    resolved_gas_cost_in_profit_token_wei = (
-        max(0, int(gas_cost_in_profit_token_wei))
-        if gas_cost_in_profit_token_wei is not None
-        else (
-            int(inherited_profit_token_gas)
-            if inherited_profit_token_gas > 0
-            else int(resolved_gas_cost_wei)
+    inherited_gas_raw = existing_profitability.get("gas_cost_profit_token_wei")
+    if inherited_gas_raw in (None, ""):
+        inherited_gas_raw = existing_safety.get("gas_cost_profit_token_wei")
+    try:
+        inherited_profit_token_gas = (
+            int(inherited_gas_raw) if inherited_gas_raw not in (None, "") else None
         )
-    )
+    except (TypeError, ValueError, OverflowError):
+        inherited_profit_token_gas = None
+
+    inherited_conversion_valid = False
+    if (
+        existing_profitability.get("gas_cost_conversion_available") is True
+        and str(existing_profitability.get("gas_cost_profit_token_address") or "").strip().lower()
+        == profit_token
+        and inherited_profit_token_gas is not None
+        and inherited_profit_token_gas >= 0
+    ):
+        try:
+            inherited_conversion_valid = (
+                int(existing_profitability.get("amount_in_wei") or 0) == int(amount_in_wei)
+                and int(existing_profitability.get("amount_out_wei") or 0) == int(amount_out_wei)
+                and int(existing_profitability.get("gas_cost_wei") or 0) == int(resolved_gas_cost_wei)
+            )
+        except (TypeError, ValueError, OverflowError):
+            inherited_conversion_valid = False
+
+    explicit_conversion_valid = False
+    explicit_converted_gas: int | None = None
+    if gas_cost_in_profit_token_wei is not None:
+        try:
+            parsed_converted_gas = int(gas_cost_in_profit_token_wei)
+            if parsed_converted_gas >= 0:
+                explicit_converted_gas = parsed_converted_gas
+                explicit_conversion_valid = True
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    if explicit_conversion_valid:
+        resolved_gas_cost_in_profit_token_wei: int | None = explicit_converted_gas
+    elif gas_cost_in_profit_token_wei is not None:
+        # An explicitly malformed/negative conversion is not silently replaced
+        # with native-wei arithmetic.
+        resolved_gas_cost_in_profit_token_wei = None
+    elif inherited_conversion_valid and inherited_profit_token_gas is not None:
+        resolved_gas_cost_in_profit_token_wei = int(inherited_profit_token_gas)
+    elif native_gas_units_match:
+        # Native gas wei and WETH wei share the same denomination only when the
+        # actual borrowed token is the chain's configured wrapped-native token.
+        resolved_gas_cost_in_profit_token_wei = int(resolved_gas_cost_wei)
+    else:
+        resolved_gas_cost_in_profit_token_wei = None
 
     if continuity and not bool(continuity.get("valid", False)):
         state = build_profitability_state(
@@ -498,6 +544,53 @@ def revalidate_profitability_state(
             amount_out_wei=int(amount_out_wei),
             continuity=continuity,
         )
+    elif resolved_gas_cost_in_profit_token_wei is None:
+        fee_bps = (
+            int(flashloan_fee_bps_override)
+            if flashloan_fee_bps_override is not None
+            else int(
+                getattr(getattr(cfg, "execution", None), "flashloan_fee_bps", 0) or 0
+            )
+        )
+        flash_fee = int(compute_flashloan_fee(int(amount_in_wei), max(0, fee_bps)))
+        state = build_profitability_state(
+            stage=str(stage),
+            source=str(source),
+            reason="gas_cost_profit_token_unavailable",
+            revalidated=False,
+            stale=True,
+            valid=False,
+            gross_profit_wei=int(gross_profit_wei),
+            expected_profit_usd=float(expected_profit_usd),
+            profit_after_costs_wei=0,
+            economic_profit_after_costs_wei=0,
+            profit_after_costs_usd_micro=0,
+            gas_cost_wei=int(resolved_gas_cost_wei),
+            flashloan_fee_wei=flash_fee,
+            amount_in_wei=int(amount_in_wei),
+            amount_out_wei=int(amount_out_wei),
+            continuity=continuity,
+        )
+        state["profit_after_costs_wei"] = ""
+        state["economic_profit_after_costs_wei"] = ""
+        safety = _safe_dict(meta.get("safety"))
+        for key in (
+            "profit_after_costs_wei",
+            "economic_profit_after_costs_wei",
+            "profit_after_costs_usd_micro",
+        ):
+            safety.pop(key, None)
+        safety.update({
+            "ok": False,
+            "is_safe": False,
+            "revalidated": False,
+            "reason": "gas_cost_profit_token_unavailable",
+            "gas_cost_wei": str(int(resolved_gas_cost_wei)),
+            "gas_cost_profit_token_wei": "",
+            "gas_cost_conversion_available": False,
+            "flashloan_fee_wei": str(flash_fee),
+        })
+        meta["safety"] = safety
     else:
         sr = check_profit_and_repay(
             amount_in_wei=int(amount_in_wei),
@@ -566,14 +659,33 @@ def revalidate_profitability_state(
             except (AttributeError, TypeError, ValueError):
                 pass
         meta["safety"] = safety
-    state["gas_cost_profit_token_wei"] = str(
-        int(
-            getattr(
-                locals().get("sr", None),
-                "gas_cost_profit_token_wei",
-                resolved_gas_cost_in_profit_token_wei,
-            )
+    state["gas_cost_profit_token_wei"] = (
+        str(int(getattr(
+            locals().get("sr", None),
+            "gas_cost_profit_token_wei",
+            resolved_gas_cost_in_profit_token_wei,
+        )))
+        if resolved_gas_cost_in_profit_token_wei is not None
+        else ""
+    )
+    # Keep unit-conversion and repayment evidence explicit for every consumer.
+    # Native gas is same-unit only for an exact wrapped-native borrowed token.
+    state["gas_cost_conversion_available"] = bool(
+        explicit_conversion_valid
+        or (
+            gas_cost_in_profit_token_wei is None
+            and (inherited_conversion_valid or native_gas_units_match)
         )
+    )
+    state["gas_cost_profit_token_address"] = profit_token
+    try:
+        state_fee = int(state.get("flashloan_fee_wei") or 0)
+    except (TypeError, ValueError, OverflowError):
+        state_fee = 0
+    state["repayment_valid"] = bool(
+        int(amount_in_wei) > 0
+        and int(amount_out_wei) > 0
+        and int(amount_out_wei) >= int(amount_in_wei) + max(0, state_fee)
     )
     set_profitability_state(opp, state)
     unit_econ = _safe_dict(meta.get("unit_econ"))

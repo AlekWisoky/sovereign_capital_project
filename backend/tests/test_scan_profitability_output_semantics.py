@@ -41,6 +41,7 @@ def test_scan_revalidation_uses_quoted_terminal_output_not_min_out_floor():
         source="test",
         gas_cost_wei=1,
         quoted_amount_out_wei=1010,
+        gas_cost_in_profit_token_wei=1,
     )
 
     assert state["revalidated"] is True
@@ -49,6 +50,8 @@ def test_scan_revalidation_uses_quoted_terminal_output_not_min_out_floor():
     assert state["amount_out_wei"] == "1010"
     assert state["gross_profit_wei"] == "10"
     assert state["profit_after_costs_wei"] == "9"
+    assert state["gas_cost_conversion_available"] is True
+    assert state["repayment_valid"] is True
 
 
 def test_revalidation_without_fresh_quote_keeps_min_out_fallback():
@@ -58,6 +61,7 @@ def test_revalidation_without_fresh_quote_keeps_min_out_fallback():
         stage="execution_preflight_gate",
         source="test",
         gas_cost_wei=1,
+        gas_cost_in_profit_token_wei=1,
     )
 
     assert state["revalidated"] is True

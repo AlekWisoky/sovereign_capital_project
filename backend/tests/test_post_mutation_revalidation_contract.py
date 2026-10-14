@@ -199,6 +199,9 @@ def test_prepare_auto_execution_threads_canonical_post_mutation_revalidation_int
             "flashloan_fee_wei": "0",
             "amount_in_wei": "100",
             "amount_out_wei": "120",
+            "gas_cost_profit_token_wei": "5",
+            "gas_cost_conversion_available": True,
+            "gas_cost_profit_token_address": "usdc",
             "continuity": {"valid": True, "reason": "ok"},
         }
         opp2.meta["safety"] = {
