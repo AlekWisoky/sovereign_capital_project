@@ -2375,11 +2375,15 @@ class RuntimePrimaryScanFacade:
                         "gas_cost_wei": str(max(0, gas_cost_wei)),
                         "flashloan_fee_wei": "0",
                     }
-            if has_route_gas_inputs and gas_cost_in_profit_token_wei is None:
+            if gas_cost_in_profit_token_wei is None:
                 state = {
                     "stage": "scan_after_fee_revalidation",
                     "source": "runtime_primary_scan",
-                    "reason": "gas_cost_profit_token_unavailable",
+                    "reason": (
+                        "gas_cost_profit_token_unavailable"
+                        if has_route_gas_inputs
+                        else "route_gas_evidence_unavailable"
+                    ),
                     "revalidated": False,
                     "stale": True,
                     "valid": False,
@@ -2389,6 +2393,8 @@ class RuntimePrimaryScanFacade:
                     "gas_cost_wei": str(max(0, gas_cost_wei)),
                     "gas_cost_profit_token_wei": "0",
                     "flashloan_fee_wei": "0",
+                    "gas_cost_conversion_available": False,
+                    "repayment_valid": False,
                 }
             # Stamp the evidence from this exact scan, including fail-closed
             # conversion availability and the independent repayment predicate.
