@@ -1687,21 +1687,32 @@ def _merge_size_economic_matrices(
 
     def candidate_rank(row: Dict[str, Any]) -> tuple[int, int, int, int]:
         try:
-            after_cost = int(row.get("after_cost_profit_wei") or 0)
+            after_cost = int(row.get("after_cost_profit_wei")) if row.get("after_cost_profit_wei") not in (None, "") else None
         except (TypeError, ValueError, OverflowError):
-            after_cost = 0
-        try:
-            economic = int(_economic_after_cost_profit(row) or 0)
-        except (TypeError, ValueError, OverflowError):
-            economic = after_cost
-        valid_authority = bool(
-            row.get("revalidated") and row.get("authoritative") and row.get("valid")
+            after_cost = None
+        economic = _economic_after_cost_profit(row)
+        gas_converted = bool(
+            row.get("gas_cost_conversion_available") is True
+            and row.get("gas_cost_profit_token_wei") not in (None, "")
+        )
+        repayment_valid = row.get("repayment_valid") is True
+        authoritative_valid = bool(
+            row.get("revalidated") is True
+            and row.get("authoritative") is True
+            and row.get("valid") is True
+            and repayment_valid
+            and gas_converted
+        )
+        signed_cost_known = bool(gas_converted and economic is not None)
+        signed_value = int(economic) if signed_cost_known else -(1 << 255)
+        verified_positive = bool(
+            authoritative_valid and after_cost is not None and after_cost > 0
         )
         return (
-            int(valid_authority and after_cost > 0),
-            int(valid_authority),
-            int(bool(row.get("revalidated") or row.get("diagnostic_only"))),
-            economic,
+            int(verified_positive),
+            int(authoritative_valid),
+            int(signed_cost_known and bool(row.get("revalidated") or row.get("diagnostic_only"))),
+            signed_value,
         )
 
     for matrix in matrices:
