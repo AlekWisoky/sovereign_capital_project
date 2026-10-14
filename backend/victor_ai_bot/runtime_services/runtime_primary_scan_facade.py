@@ -3496,21 +3496,24 @@ class RuntimePrimaryScanFacade:
             return []
 
         try:
+            # The graph seed rotates exactly one notional per block, so broaden
+            # the candidate cycle to cover every alternative in the bounded
+            # ladder without multiplying this tick's RPC/latency budget.
             max_probes = max(
                 1,
                 min(
-                    3,
+                    8,
                     int(
                         os.environ.get(
                             "VICTOR_ADAPTIVE_SIZE_FRONTIER_SEED_MAX_PROBES",
-                            "3",
+                            "8",
                         )
-                        or 3
+                        or 8
                     ),
                 ),
             )
         except (TypeError, ValueError):
-            max_probes = 3
+            max_probes = 8
 
         preferred: List[int] = []
         # Sample a low, middle, and upper authorized notional. Larger sizes
