@@ -539,7 +539,7 @@ def _aggregate_quote_family_metrics(
         "quote_adapter_unavailable_by_family",
     )
     sources = (two_leg, three_leg)
-    result: Dict[str, Dict[str, int]] = {}
+    result: Dict[str, Any] = {}
     for metric_name in metric_names:
         combined: Dict[str, int] = {}
         for source in sources:
