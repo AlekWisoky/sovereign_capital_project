@@ -61,6 +61,7 @@ def test_revalidation_without_fresh_quote_keeps_min_out_fallback():
         stage="execution_preflight_gate",
         source="test",
         gas_cost_wei=1,
+        gas_cost_in_profit_token_wei=1,
     )
 
     assert state["revalidated"] is True
