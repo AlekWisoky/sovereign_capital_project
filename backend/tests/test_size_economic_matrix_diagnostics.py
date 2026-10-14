@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from victor_ai_bot.arb_engine import _record_size_economic_diagnostic
 from victor_ai_bot.runtime_services.runtime_primary_scan_facade import (
     _build_size_economic_matrix,
+    _diagnostic_size_probe_candidates,
+    _size_matrix_selection,
 )
 
 
@@ -202,3 +204,102 @@ def test_missing_gas_conversion_is_upper_bound_not_economic_optimum():
     assert upper_only["economic_optimum_executable"] is False
     assert upper_only["economic_upper_bound_route_id"] == "route-unknown-gas"
     assert upper_only["selected_after_cost_profit_wei"] == ""
+
+
+
+def test_diagnostic_routes_are_rehydrated_only_with_exact_quote_parameters():
+    route_id = "0x" + "ab" * 32
+    evidence = [{
+        "route_id": route_id,
+        "amount_in": "1000",
+        "gross_profit_wei": "-5",
+        "flashloan_fee_wei": "3",
+        "gas_cost_conversion_available": False,
+        "diagnostic_only": True,
+        "reason": "non_positive_gross_profit",
+        "legs": [
+            {
+                "dex": "univ3",
+                "venue": "0xrouter",
+                "token_in": "0x" + "11" * 20,
+                "token_out": "0x" + "22" * 20,
+                "amount_in": "1000",
+                "quoted_amount_out": "1200",
+                "min_out": "1180",
+                "data": "0x000000",
+                "edge_params": {"fee": 500, "pool": "0x" + "33" * 20},
+                "quote_meta": {"fee": 500},
+            },
+            {
+                "dex": "univ3",
+                "venue": "0xrouter",
+                "token_in": "0x" + "22" * 20,
+                "token_out": "0x" + "11" * 20,
+                "amount_in": "1200",
+                "quoted_amount_out": "995",
+                "min_out": "970",
+                "data": "0x000bb8",
+                "edge_params": {"fee": 3000, "pool": "0x" + "44" * 20},
+                "quote_meta": {"fee": 3000},
+            },
+        ],
+    }]
+    candidates = _diagnostic_size_probe_candidates(
+        evidence,
+        chain_name="ethereum",
+        excluded_route_ids=set(),
+        max_candidates=1,
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.route_id == route_id
+    assert candidate.can_execute is False
+    assert candidate.meta["diagnostic_only"] is True
+    assert candidate.meta["size_probe_diagnostic_only"] is True
+    assert candidate.meta["route_edge_params"] == [
+        {"fee": 500, "pool": "0x" + "33" * 20},
+        {"fee": 3000, "pool": "0x" + "44" * 20},
+    ]
+    assert [leg.data for leg in candidate.route.legs] == ["0x000000", "0x000bb8"]
+
+    # Old/incomplete diagnostic rows are not reconstructed with guessed venue
+    # parameters or empty encoded calldata.
+    incomplete = {
+        **evidence[0],
+        "route_id": "incomplete-route",
+        "legs": [{**evidence[0]["legs"][0]}, {**evidence[0]["legs"][1]}],
+    }
+    incomplete["legs"][1].pop("edge_params")
+    assert _diagnostic_size_probe_candidates(
+        [incomplete],
+        chain_name="ethereum",
+        excluded_route_ids=set(),
+        max_candidates=1,
+    ) == []
+
+
+def test_positive_size_matrix_selection_requires_all_profitability_gates():
+    base = {
+        "route_id": "route-trusted-positive",
+        "after_cost_profit_wei": "10",
+        "economic_after_cost_profit_wei": "10",
+        "revalidated": True,
+        "authoritative": True,
+        "valid": True,
+        "repayment_valid": True,
+        "gas_cost_conversion_available": True,
+    }
+    selected, _economic = _size_matrix_selection([base])
+    assert selected is base
+
+    for field, invalid_value in (
+        ("revalidated", False),
+        ("authoritative", False),
+        ("valid", False),
+        ("repayment_valid", False),
+        ("gas_cost_conversion_available", False),
+    ):
+        rejected = {**base, field: invalid_value}
+        selected, _economic = _size_matrix_selection([rejected])
+        assert selected is None, field
