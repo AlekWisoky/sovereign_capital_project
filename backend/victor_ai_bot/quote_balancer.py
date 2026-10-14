@@ -30,42 +30,13 @@ async def quote_balancer_given_in(
     amount_in: int,
     diagnostics: dict | None = None,
 ) -> Optional[BalancerQuote]:
-    kind = 0  # GIVEN_IN
-    pool_id = bytes.fromhex(pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32)
-    pool_id = pool_id.ljust(32, b"\x00")[:32]
-
-    step_head = b"".join(
-        [
-            enc_bytes32(pool_id),
-            enc_uint(0),
-            enc_uint(1),
-            enc_uint(amount_in),
-            enc_uint(32 * 5),
-        ]
+    data = build_balancer_query_batchswap_calldata(
+        pool_id_hex32,
+        token_in,
+        token_out,
+        int(amount_in),
     )
-    user_data = enc_bytes_dyn(b"")
-    step = step_head + user_data
-    swaps = enc_uint(1) + step
-
-    assets = enc_uint(2) + enc_address(token_in) + enc_address(token_out)
-    funds = (
-        enc_address("0x0000000000000000000000000000000000000000")
-        + enc_bool(False)
-        + enc_address("0x0000000000000000000000000000000000000000")
-        + enc_bool(False)
-    )
-
-    head = b"".join(
-        [
-            enc_uint(kind),
-            enc_uint(32 * 4),
-            enc_uint(32 * 4 + len(swaps)),
-            enc_uint(32 * 4 + len(swaps) + len(assets)),
-        ]
-    )
-    data = selector(_SIG) + head + swaps + assets + funds
-
-    r = await rpc.eth_call(vault, "0x" + data.hex())
+    r = await rpc.eth_call(vault, data)
     if not r.ok:
         record_quote_failure(diagnostics, classify_quote_error(r.error))
         return None
@@ -90,13 +61,25 @@ async def quote_balancer_given_in(
 def build_balancer_query_batchswap_calldata(
     pool_id_hex32: str, token_in: str, token_out: str, amount_in: int
 ) -> str:
+    """ABI-encode a one-step queryBatchSwap(GIVEN_IN) call.
+
+    BatchSwapStep[] contains a tuple with dynamic bytes, so the array needs an
+    element-offset word before the tuple body. FundManagement is a static tuple,
+    so its four words belong inline in the top-level head, not in a dynamic tail.
+    ABI offsets are relative to the start of the argument block (after selector).
+    """
     kind = 0  # GIVEN_IN
-    pool_id = bytes.fromhex(pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32)
-    pool_id = pool_id.ljust(32, b"\x00")[:32]
+    raw_pool_id = bytes.fromhex(
+        pool_id_hex32[2:] if pool_id_hex32.startswith("0x") else pool_id_hex32
+    )
+    if len(raw_pool_id) != 32:
+        raise ValueError("Balancer pool id must be exactly 32 bytes")
+    if int(amount_in) <= 0:
+        raise ValueError("Balancer quote amount must be positive")
 
     step_head = b"".join(
         [
-            enc_bytes32(pool_id),
+            enc_bytes32(raw_pool_id),
             enc_uint(0),
             enc_uint(1),
             enc_uint(int(amount_in)),
@@ -105,25 +88,33 @@ def build_balancer_query_batchswap_calldata(
     )
     user_data = enc_bytes_dyn(b"")
     step = step_head + user_data
-    swaps = enc_uint(1) + step
 
+    # A dynamic array of dynamic tuple elements encodes the length, an array
+    # of offsets (relative to the element-head area after the length), then
+    # the tuple bodies. The one tuple starts 32 bytes after that area.
+    swaps = enc_uint(1) + enc_uint(32) + step
     assets = enc_uint(2) + enc_address(token_in) + enc_address(token_out)
+
+    zero_address = "0x0000000000000000000000000000000000000000"
     funds = (
-        enc_address("0x0000000000000000000000000000000000000000")
+        enc_address(zero_address)
         + enc_bool(False)
-        + enc_address("0x0000000000000000000000000000000000000000")
+        + enc_address(zero_address)
         + enc_bool(False)
     )
 
-    head = b"".join(
-        [
-            enc_uint(kind),
-            enc_uint(32 * 4),
-            enc_uint(32 * 4 + len(swaps)),
-            enc_uint(32 * 4 + len(swaps) + len(assets)),
-        ]
+    # The static FundManagement tuple expands to four head words. The full
+    # top-level head is 7 words: kind, swaps offset, assets offset, and funds.
+    head_size = 32 * 7
+    swaps_offset = head_size
+    assets_offset = swaps_offset + len(swaps)
+    head = (
+        enc_uint(kind)
+        + enc_uint(swaps_offset)
+        + enc_uint(assets_offset)
+        + funds
     )
-    data = selector(_SIG) + head + swaps + assets + funds
+    data = selector(_SIG) + head + swaps + assets
     return "0x" + data.hex()
 
 
