@@ -226,3 +226,88 @@ def test_pool_event_cache_keeps_full_graph_without_fresh_events():
     assert candidates == edges
     assert telemetry["candidate_generation_mode"] == "full_graph"
     assert telemetry["candidate_edges_pruned"] == 0
+
+
+def test_hot_subgraph_cap_round_robins_families_when_all_edges_are_hot():
+    cache = PoolStateEventCache(
+        chain_name="base",
+        chain_id=8453,
+        ws_urls=["wss://example"],
+        rpc_urls=["https://example"],
+    )
+    anchor = "0x" + "11" * 20
+    other = "0x" + "90" * 20
+    hot_pool = "0x" + f"{1000:040x}"
+
+    # Common-token V3 edges lead the builder output. Every later family touches
+    # the dirty anchor too, so the entire graph is hot and the old implementation
+    # truncated the list at the cap before the exploration reserve could help.
+    hot_edges = [
+        Edge(
+            "univ3", "0x" + "aa" * 20, anchor, other,
+            {"pool": "0x" + f"{1000 + i:040x}", "fee": 3000},
+        )
+        for i in range(80)
+    ]
+    hot_edges[0].params["pool"] = hot_pool
+
+    other_families = [
+        ("curve", "curve", {"i": 0, "j": 1}),
+        ("balancer", "0x" + "bb" * 20, {"pool_id": "0x" + f"{3000:064x}"}),
+        ("aerodrome", "0x" + "cc" * 20, {"factory": "0x" + "dd" * 20, "stable": False}),
+        ("slipstream", "0x" + "ee" * 20, {"factory": "0x" + "ff" * 20, "tick_spacing": 60}),
+        ("camelot_algebra", "0x" + "12" * 20, {"factory": "0x" + "13" * 20, "tick_spacing": 60}),
+        ("camelot_v2", "0x" + "14" * 20, {"factory": "0x" + "15" * 20}),
+        ("constant_product", "0x" + "16" * 20, {"venue_name": "uniswap_v2", "factory": "0x" + "17" * 20}),
+        ("constant_product", "0x" + "18" * 20, {"venue_name": "sushiswap_v2", "factory": "0x" + "19" * 20}),
+    ]
+    diverse_edges = []
+    for family_index, (dex, venue, extra) in enumerate(other_families):
+        for pool_index in range(6):
+            pool = "0x" + f"{4000 + family_index * 10 + pool_index:040x}"
+            params = {**extra, "pool": pool}
+            if dex == "balancer":
+                params["pool_address"] = pool
+                params["pool_id"] = "0x" + f"{5000 + family_index * 10 + pool_index:064x}"
+            if dex == "curve":
+                venue = pool
+            token_out = "0x" + f"{6000 + family_index * 10 + pool_index:040x}"
+            diverse_edges.append(Edge(dex, venue, anchor, token_out, params))
+            reverse_params = dict(params)
+            if dex == "curve":
+                reverse_params["i"], reverse_params["j"] = 1, 0
+            diverse_edges.append(Edge(dex, venue, token_out, anchor, reverse_params))
+
+    edges = [*hot_edges, *diverse_edges]
+    cache.refresh_edges(edges)
+    cache._apply_log({
+        "address": hot_pool,
+        "blockNumber": hex(100),
+        "transactionHash": "0xhot",
+        "topics": [_SYNC_TOPIC],
+        "data": _sync_data(1000, 900),
+    })
+
+    candidates, telemetry = cache.candidate_edges(
+        edges,
+        current_block=101,
+        max_candidates=32,
+        exploration_ratio=0.10,
+    )
+
+    families = {
+        cache._edge_family_name(edge)
+        for edge in candidates
+    }
+    expected_families = {
+        "univ3", "curve", "balancer", "aerodrome", "slipstream",
+        "camelot_algebra", "camelot_v2", "uniswap_v2", "sushiswap_v2",
+    }
+    assert len(candidates) == 32
+    assert expected_families.issubset(families)
+    assert telemetry["candidate_generation_mode"] == "dirty_subgraph"
+    assert telemetry["hot_subgraph_edge_count"] == len(edges)
+    assert telemetry["exploration_edge_count"] == 0
+    assert telemetry["family_fair_selection"] is True
+    assert expected_families.issubset(set(telemetry["candidate_edges_by_family"]))
+    assert expected_families.issubset(set(telemetry["hot_selected_edges_by_family"]))
