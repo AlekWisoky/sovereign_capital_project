@@ -888,3 +888,97 @@ def test_provider_comparison_edge_cap_samples_all_venue_families():
         counts[family] = counts.get(family, 0) + 1
     assert set(counts.values()) == {2}
 
+
+
+@pytest.mark.asyncio
+async def test_three_leg_selected_chunk_uses_full_route_universe_for_cross_chunk_cycle(monkeypatch):
+    token_a = "0x" + "11" * 20
+    token_b = "0x" + "22" * 20
+    token_c = "0x" + "33" * 20
+    e1 = arb.Edge(
+        "univ3", "0x" + "aa" * 20, token_a, token_b,
+        {"fee": 3000, "pool": "pool-a"},
+    )
+    e2 = arb.Edge(
+        "aerodrome", "0x" + "bb" * 20, token_b, token_c,
+        {"factory": "0x" + "44" * 20, "stable": False, "pool": "pool-b"},
+    )
+    e3 = arb.Edge(
+        "univ3", "0x" + "cc" * 20, token_c, token_a,
+        {"fee": 500, "pool": "pool-c"},
+    )
+    monkeypatch.setattr(arb, "build_edges", lambda *args, **kwargs: [e1, e2, e3])
+
+    class RouteSlice:
+        def refresh_edges(self, *args, **kwargs):
+            return None
+
+        def candidate_edges(self, *args, **kwargs):
+            return [e1], {
+                "candidate_edge_count": 1,
+                "candidate_edges_full": 3,
+            }
+
+        def route_universe_edges(self):
+            return [e1, e2, e3]
+
+        def edge_priority(self, edge, *, current_block):
+            return 1
+
+    async def fake_quotes(_rpc, _cfg, _cache, requested_edges, amount_in, metrics=None):
+        if metrics is not None:
+            metrics["quote_requests"] = int(metrics.get("quote_requests", 0)) + len(requested_edges)
+            metrics["quote_successes"] = int(metrics.get("quote_successes", 0)) + len(requested_edges)
+        result = {}
+        for edge in requested_edges:
+            amount_out = {arb.edge_key(e1): 110, arb.edge_key(e2): 120, arb.edge_key(e3): 140}[arb.edge_key(edge)]
+            if edge.dex == "aerodrome":
+                meta = {"stable": False, "factory": edge.params["factory"], "gas_estimate": 1}
+            else:
+                meta = {"fee": int(edge.params.get("fee", 3000)), "gas_estimate": 1}
+            result[arb.edge_key(edge)] = (amount_out, meta)
+        return result
+
+    monkeypatch.setattr(arb, "quote_edges_batch", fake_quotes)
+    monkeypatch.setattr(
+        arb,
+        "scan_efficiency_snapshot",
+        lambda **kwargs: {
+            "elapsed_ms": float(kwargs["elapsed_ms"]),
+            "candidate_count": int(kwargs["candidate_count"]),
+            "quote_requests": int(kwargs["quote_requests"]),
+            "quote_successes": int(kwargs["quote_successes"]),
+            "quote_success_rate": (
+                float(kwargs["quote_successes"]) / float(kwargs["quote_requests"])
+                if kwargs["quote_requests"] else 0.0
+            ),
+            "cache_hits": 0,
+            "network_batches": 3,
+        },
+    )
+    cfg = SimpleNamespace(
+        chain=SimpleNamespace(name="arbitrum"),
+        safety=SimpleNamespace(slippage_bps=50),
+    )
+    telemetry = {}
+
+    opportunities = await arb.find_three_leg_opportunities(
+        object(),
+        cfg,
+        object(),
+        123,
+        amount_in=100,
+        slippage_bps=50,
+        time_budget_ms=1_000,
+        telemetry=telemetry,
+        pool_event_cache=RouteSlice(),
+    )
+
+    # Only A->B belongs to the quote slice; B->C and C->A are outside it.
+    # Their topology must still be visible so the selected A->B quote can close
+    # the cross-slice A->B->C->A triangle.
+    assert telemetry["scan_edges_selected"] == 1
+    assert telemetry["route_universe_edge_count"] == 3
+    assert telemetry["route_universe"]["edges_by_dex"] == {"aerodrome": 1, "univ3": 2}
+    assert telemetry["route_groups_evaluated"] >= 1
+    assert any(item.expected_profit_raw == "40" for item in opportunities)
