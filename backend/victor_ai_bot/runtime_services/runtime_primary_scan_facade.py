@@ -1415,6 +1415,122 @@ def _diagnostic_size_probe_candidates(
     return candidates
 
 
+def _authoritative_positive_size_candidate(candidate: Any) -> bool:
+    meta = getattr(candidate, "meta", {}) or {}
+    state = meta.get("profitability") if isinstance(meta, dict) else {}
+    if not isinstance(state, dict):
+        return False
+    try:
+        return bool(
+            state.get("revalidated") is True
+            and state.get("authoritative") is True
+            and state.get("valid") is True
+            and state.get("repayment_valid") is True
+            and state.get("gas_cost_conversion_available") is True
+            and state.get("gas_cost_profit_token_wei") not in (None, "")
+            and int(state.get("profit_after_costs_wei") or 0) > 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _select_bounded_size_probe_candidates(
+    base_opps: List[Opportunity],
+    diagnostic_evidence: List[Dict[str, Any]] | None,
+    *,
+    chain_name: str,
+    route_cap: int,
+    triangle_cap: int,
+) -> tuple[List[Opportunity], set[str], int]:
+    """Select live route re-quotes first, then fill unused slots with read-only near-misses."""
+    direct = [
+        candidate for candidate in list(base_opps or [])
+        if str(getattr(candidate, "strategy", "") or "").startswith("two-leg:")
+    ]
+    triangles = [
+        candidate for candidate in list(base_opps or [])
+        if str(getattr(candidate, "strategy", "") or "").startswith("tri:")
+    ]
+    direct.sort(key=_candidate_sizing_sort_key, reverse=True)
+    triangles.sort(key=_candidate_sizing_sort_key, reverse=True)
+
+    selected: List[Opportunity] = []
+    seen_routes: set[str] = set()
+    for candidate in [*direct[:route_cap], *triangles[:triangle_cap]]:
+        key = _size_probe_route_key(candidate)
+        if key and key in seen_routes:
+            continue
+        if key:
+            seen_routes.add(key)
+        selected.append(candidate)
+        if len(selected) >= route_cap:
+            break
+
+    diagnostics = _diagnostic_size_probe_candidates(
+        list(diagnostic_evidence or []),
+        chain_name=chain_name,
+        excluded_route_ids=set(seen_routes),
+        max_candidates=max(0, route_cap - len(selected)),
+    )
+    selected.extend(diagnostics)
+    diagnostic_route_ids = {
+        _size_probe_route_key(candidate)
+        for candidate in diagnostics
+        if _size_probe_route_key(candidate)
+    }
+    source_rows = sum(
+        1 for row in list(diagnostic_evidence or [])
+        if isinstance(row, dict)
+        and row.get("diagnostic_only") is True
+        and str(row.get("route_id") or "") in diagnostic_route_ids
+    )
+    return selected, diagnostic_route_ids, int(source_rows)
+
+
+def _merge_diagnostic_evidence_into_size_records(
+    evidence: List[Dict[str, Any]] | None,
+    selected_route_ids: set[str],
+    records_by_amount: Dict[int, Dict[str, Any]],
+) -> None:
+    """Retain each selected near-miss at its source notional, without fabricating P&L."""
+    for diagnostic in list(evidence or []):
+        if not isinstance(diagnostic, dict):
+            continue
+        route_id = str(diagnostic.get("route_id") or "")
+        if route_id not in selected_route_ids or diagnostic.get("diagnostic_only") is not True:
+            continue
+        try:
+            source_amount = int(diagnostic.get("amount_in") or 0)
+            diagnostic_legs = [
+                leg for leg in list(diagnostic.get("legs") or [])
+                if isinstance(leg, dict)
+            ]
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if source_amount <= 0 or len(diagnostic_legs) not in {2, 3}:
+            continue
+        group_name = "two_metrics" if len(diagnostic_legs) == 2 else "three_metrics"
+        source_record = records_by_amount.setdefault(
+            source_amount,
+            {
+                "amount_in": source_amount,
+                "two": [],
+                "three": [],
+                "two_metrics": {},
+                "three_metrics": {},
+            },
+        )
+        group_metrics = source_record.setdefault(group_name, {})
+        diagnostic_rows = group_metrics.setdefault("size_economic_diagnostics", [])
+        if not any(
+            isinstance(existing, dict)
+            and str(existing.get("route_id") or "") == route_id
+            and str(existing.get("amount_in") or "") == str(source_amount)
+            for existing in diagnostic_rows
+        ):
+            diagnostic_rows.append(dict(diagnostic))
+
+
 def _merge_size_probe_group(
     record: Dict[str, Any],
     group: str,
