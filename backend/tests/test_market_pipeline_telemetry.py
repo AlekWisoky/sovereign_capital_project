@@ -189,6 +189,7 @@ def test_market_pipeline_telemetry_preserves_zero_candidate_diagnostics():
         "success_rate": 0.8,
         "failure_reasons": {},
         "failure_reasons_by_adapter": {},
+        "quote_query_revert_decoded": 0,
         "quote_attempts_by_family": {},
         "quote_network_requests_by_family": {},
         "quote_successes_by_family": {},
@@ -536,16 +537,19 @@ def test_aggregate_quote_family_metrics_merges_adapter_failure_causes():
             "quote_failure_reasons_by_adapter": {
                 "balancer": {"rpc_revert": 3, "invalid_quote_result": 1},
                 "univ3": {"rpc_timeout": 2},
-            }
+            },
+            "quote_query_revert_decoded": 2,
         },
         {
             "quote_failure_reasons_by_adapter": {
                 "balancer": {"rpc_revert": 2},
                 "curve": {"rpc_rate_limited": 1},
-            }
+            },
+            "quote_query_revert_decoded": 3,
         },
     )
 
+    assert merged["quote_query_revert_decoded"] == 5
     assert merged["quote_failure_reasons_by_adapter"] == {
         "balancer": {"rpc_revert": 5, "invalid_quote_result": 1},
         "univ3": {"rpc_timeout": 2},
