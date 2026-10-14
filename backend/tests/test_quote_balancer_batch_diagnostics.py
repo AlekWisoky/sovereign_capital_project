@@ -6,6 +6,7 @@ from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_balancer import (
     BalancerQuote,
     build_balancer_query_batchswap_calldata,
+    quote_balancer_given_in,
     quote_balancer_given_in_many,
 )
 
@@ -176,3 +177,24 @@ async def test_balancer_batch_rejects_truncated_or_noncanonical_return(
 
     assert quotes == [None]
     assert diagnostics["failure_reasons"] == {"invalid_quote_result": 1}
+
+
+@pytest.mark.asyncio
+async def test_single_balancer_quote_invalid_request_is_local_failure():
+    class _NoCallRpc:
+        async def eth_call(self, *_args, **_kwargs):
+            raise AssertionError("malformed request must not reach RPC")
+
+    diagnostics = {}
+    quote = await quote_balancer_given_in(
+        _NoCallRpc(),
+        "0x" + "11" * 20,
+        "0x1234",
+        "0x" + "33" * 20,
+        "0x" + "44" * 20,
+        100,
+        diagnostics=diagnostics,
+    )
+
+    assert quote is None
+    assert diagnostics["failure_reasons"] == {"invalid_balancer_request": 1}
