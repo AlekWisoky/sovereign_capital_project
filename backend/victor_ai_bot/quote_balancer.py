@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import re
-from itertools import islice
+from itertools import chain, islice
 from typing import Any, Iterator, Optional
 from .rpc import JsonRpcClient
 from .quote_diagnostics import classify_quote_error, record_quote_failure, record_quote_parse_failure
@@ -69,11 +69,10 @@ def _additional_error_children(value: dict[str, Any]) -> Iterator[Any]:
 def _iter_error_children(value: Any) -> Iterator[Any]:
     """Yield likely revert-data children first, bounded against noisy RPC errors."""
     if isinstance(value, dict):
-        yield from _preferred_error_children(value)
-        yield from _additional_error_children(value)
-        return
+        return chain(_preferred_error_children(value), _additional_error_children(value))
     if isinstance(value, (list, tuple)):
-        yield from islice(value, 8)
+        return iter(value[:8])
+    return iter(())
 
 
 def _iter_error_hex_payloads(value: Any, *, depth: int = 0) -> Iterator[str]:
@@ -130,10 +129,15 @@ def _decode_query_batch_swap_error(error: Any) -> tuple[list[int] | None, bool]:
 
 def _quote_from_deltas(
     deltas: list[int],
+    expected_amount_in: int,
     diagnostics: dict | None = None,
 ) -> Optional["BalancerQuote"]:
     if len(deltas) != 2:
         record_quote_parse_failure(diagnostics, "unexpected_swap_delta_count")
+        return None
+    requested_amount = int(expected_amount_in)
+    if requested_amount <= 0 or int(deltas[0]) != requested_amount:
+        record_quote_parse_failure(diagnostics, "unexpected_input_delta")
         return None
     amount_out = -int(deltas[1])
     if amount_out <= 0:
@@ -149,8 +153,12 @@ def _record_query_revert_decoded(diagnostics: dict | None) -> None:
         ) + 1
 
 
-def _decode_balancer_rpc_result(rpc_result: Any, diagnostics: dict | None = None) -> Optional[BalancerQuote]:
-    """Normalize ordinary returndata and Balancer's documented query-revert result."""
+def _decode_balancer_rpc_result(
+    rpc_result: Any,
+    expected_amount_in: int,
+    diagnostics: dict | None = None,
+) -> Optional[BalancerQuote]:
+    """Normalize returndata and require it to match the requested GIVEN_IN amount."""
     if not getattr(rpc_result, "ok", False):
         deltas, recognized = _decode_query_batch_swap_error(getattr(rpc_result, "error", None))
         if deltas is None:
@@ -162,15 +170,20 @@ def _decode_balancer_rpc_result(rpc_result: Any, diagnostics: dict | None = None
             else:
                 record_quote_failure(diagnostics, reason)
             return None
-        _record_query_revert_decoded(diagnostics)
-        return _quote_from_deltas(deltas, diagnostics)
+        quote = _quote_from_deltas(deltas, expected_amount_in, diagnostics)
+        # Count only a valid quote, not a recognized QueryError envelope.
+        if quote is not None:
+            _record_query_revert_decoded(diagnostics)
+        return quote
 
     value = getattr(rpc_result, "result", None)
     if not isinstance(value, str):
         record_quote_parse_failure(diagnostics, "invalid_rpc_result")
         return None
     try:
-        return _quote_from_deltas(_decode_balancer_swap_deltas(value), diagnostics)
+        return _quote_from_deltas(
+            _decode_balancer_swap_deltas(value), expected_amount_in, diagnostics
+        )
     except (TypeError, ValueError):
         record_quote_parse_failure(diagnostics, "invalid_quote_result")
         return None
@@ -226,7 +239,9 @@ async def quote_balancer_given_in(
         record_quote_parse_failure(diagnostics, "invalid_balancer_request")
         return None
     r = await rpc.eth_call(vault, data)
-    return _decode_balancer_rpc_result(r, diagnostics)
+    return _decode_balancer_rpc_result(
+        r, expected_amount_in=int(amount_in), diagnostics=diagnostics
+    )
 
 
 def build_balancer_query_batchswap_calldata(
@@ -289,14 +304,18 @@ def build_balancer_query_batchswap_calldata(
     return "0x" + data.hex()
 
 
-def parse_balancer_query_result(hex_result: str) -> Optional[int]:
-    deltas = _decode_balancer_swap_deltas(hex_result)
-    if len(deltas) < 2:
+def parse_balancer_query_result(
+    hex_result: str,
+    expected_amount_in: int,
+    diagnostics: dict | None = None,
+) -> Optional[int]:
+    try:
+        deltas = _decode_balancer_swap_deltas(hex_result)
+    except (TypeError, ValueError):
+        record_quote_parse_failure(diagnostics, "invalid_quote_result")
         return None
-    amt_out = -deltas[1]
-    if amt_out <= 0:
-        return None
-    return int(amt_out)
+    quote = _quote_from_deltas(deltas, expected_amount_in, diagnostics)
+    return int(quote.amount_out) if quote is not None else None
 
 
 async def quote_balancer_given_in_many(
@@ -334,7 +353,11 @@ async def quote_balancer_given_in_many(
         if position >= len(results):
             record_quote_parse_failure(diagnostics, "missing_rpc_batch_result")
             continue
-        out[request_index] = _decode_balancer_rpc_result(results[position], diagnostics)
+        out[request_index] = _decode_balancer_rpc_result(
+            results[position],
+            expected_amount_in=int(reqs[request_index][3]),
+            diagnostics=diagnostics,
+        )
 
     if len(results) > len(valid_indices):
         record_quote_parse_failure(diagnostics, "unexpected_rpc_batch_result")
