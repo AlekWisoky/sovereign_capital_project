@@ -5121,6 +5121,19 @@ class RuntimePrimaryScanFacade:
                 "frontier_seed_candidates_added": int(frontier_seed_telemetry.get("candidates_added", 0) or 0),
             },
         )
+        diagnostic_evidence: List[Dict[str, Any]] = []
+        for source in (
+            list(selected_telemetry.get("size_economic_diagnostics") or []),
+            list(selected_telemetry.get("size_economic_evidence") or []),
+            list(frontier_seed_telemetry.get("size_economic_diagnostics") or []),
+            list(frontier_seed_telemetry.get("size_economic_evidence") or []),
+        ):
+            diagnostic_evidence.extend(
+                dict(row) for row in source if isinstance(row, dict)
+            )
+        # The helper accepts only diagnostics with exact edge parameters. Keep
+        # duplicate source samples so it can pick the strongest observed size
+        # for each canonical route, then probe only the unused route-cap slots.
         try:
             if selected_provider_url == bootstrap_url:
                 selected_provider_rpc = bootstrap_rpc
@@ -5141,6 +5154,7 @@ class RuntimePrimaryScanFacade:
                         shared_gas_price_consensus=shared_gas_consensus,
 
                         shared_flashloan_fee_observation=shared_flashloan_fee,
+                        diagnostic_evidence=diagnostic_evidence,
 
                     ),
 
@@ -5171,6 +5185,7 @@ class RuntimePrimaryScanFacade:
                             shared_gas_price_consensus=shared_gas_consensus,
 
                             shared_flashloan_fee_observation=shared_flashloan_fee,
+                        diagnostic_evidence=diagnostic_evidence,
 
                         ),
 
