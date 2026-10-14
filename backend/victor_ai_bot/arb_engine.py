@@ -3077,21 +3077,36 @@ async def find_three_leg_opportunities(
         except (AttributeError, TypeError, ValueError):
             pool_event_metrics = {}
     edges = _apply_scan_edge_cap(edges, max_scan_edges, metrics)
-    # Keep a bounded graph, but spend the bound on edges that can actually
-    # close an arbitrage cycle. Discovery order is no longer an economic filter.
+    # A selected-provider chunk bounds which edges are initially quoted, not
+    # which edges are allowed to define cycle topology. Three-leg search must
+    # retain the immutable full graph for adjacency/reverse-leg lookup, matching
+    # the two-leg scanner; otherwise a cycle spanning two chunks is invisible.
+    scan_edges = list(edges)
+    route_edges = list(scan_edges)
+    route_universe_edges_fn = getattr(pool_event_cache, "route_universe_edges", None)
+    if callable(route_universe_edges_fn):
+        try:
+            candidate_route_edges = list(route_universe_edges_fn() or [])
+            if candidate_route_edges:
+                route_edges = candidate_route_edges
+        except (AttributeError, TypeError, ValueError):
+            route_edges = list(scan_edges)
+
+    # Keep first-leg quote work bounded to this tick's slice while deriving
+    # adjacency and route closure from the complete immutable graph.
     max_edges_per_token = max(
         1, int(os.environ.get("VICTOR_MAX_EDGES_PER_TOKEN", "16") or 16)
     )
     adj, pruned_edges = _prioritize_three_leg_adjacency(
-        edges,
+        route_edges,
         max_edges_per_token=max_edges_per_token,
     )
     by_pair: Dict[Tuple[str, str], List[Edge]] = {}
-    for edge in edges:
+    for edge in route_edges:
         by_pair.setdefault((edge.token_in, edge.token_out), []).append(edge)
     route_universe = _route_universe_snapshot(
         cfg,
-        edges,
+        route_edges,
         adjacency=adj,
         max_edges_per_token=max_edges_per_token,
         pruned_edges=pruned_edges,
@@ -3109,7 +3124,7 @@ async def find_three_leg_opportunities(
         if str(token) and int(value) > 0
     }
     edge_groups: Dict[int, List[Edge]] = {}
-    for edge in edges:
+    for edge in scan_edges:
         effective_amount = int(normalized_amounts.get(str(edge.token_in).lower(), int(amount_in)))
         edge_groups.setdefault(effective_amount, []).append(edge)
     ordered_triangle_edge_groups = sorted(
@@ -3138,7 +3153,7 @@ async def find_three_leg_opportunities(
     triangle_quote_waves_started = 0
 
     frontier_adj = _build_three_leg_frontier(
-        edges,
+        route_edges,
         pruned_edges,
         adj,
         by_pair,
@@ -3550,7 +3565,8 @@ async def find_three_leg_opportunities(
             "cache_hits": int(snapshot["cache_hits"]),
             "network_batches": int(snapshot["network_batches"]),
             "routes_considered": int(snapshot["candidate_count"]),
-            "edges_generated": len(edges),
+            "edges_generated": len(scan_edges),
+            "route_universe_edge_count": int(len(route_edges)),
             "route_universe": dict(route_universe),
             "gross_candidates": len(opps),
             "opportunity_count": len(opps),
