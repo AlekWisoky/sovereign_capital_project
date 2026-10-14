@@ -976,10 +976,12 @@ def _build_size_matrix_row(
         "candidates": rows,
         "selection_basis": basis,
         "selected_route_id": selected["route_id"] if selected else "",
-        "selected_after_cost_profit_wei": selected["after_cost_profit_wei"] if selected else "0",
+        "selected_after_cost_profit_wei": selected["after_cost_profit_wei"] if selected else "",
         "economic_optimum_route_id": economic["route_id"] if economic else "",
         "economic_optimum_after_cost_profit_wei": (
-            str(_economic_after_cost_profit(economic)) if economic else "0"
+            str(_economic_after_cost_profit(economic))
+            if economic and _economic_after_cost_profit(economic) is not None
+            else ""
         ),
         "economic_optimum_authoritative": bool(economic and economic["authoritative"]),
         "economic_optimum_executable": bool(selected),
@@ -1517,12 +1519,12 @@ def _merge_size_economic_matrices(
         if economic and not selected and str(economic.get("reason") or "") == "non_positive_gross_profit":
             row["selection_basis"] = "gross_profit_diagnostic_only"
         row["selected_route_id"] = str(selected.get("route_id") or "") if selected else ""
-        row["selected_after_cost_profit_wei"] = str(selected.get("after_cost_profit_wei") or "0") if selected else "0"
+        row["selected_after_cost_profit_wei"] = str(selected.get("after_cost_profit_wei") or "") if selected else ""
         row["economic_optimum_route_id"] = str(economic.get("route_id") or "") if economic else ""
         row["economic_optimum_after_cost_profit_wei"] = (
             str(_economic_after_cost_profit(economic))
             if economic and _economic_after_cost_profit(economic) is not None
-            else "0"
+            else ""
         )
         row["economic_optimum_authoritative"] = bool(economic and economic.get("authoritative"))
         row["economic_optimum_executable"] = bool(selected)

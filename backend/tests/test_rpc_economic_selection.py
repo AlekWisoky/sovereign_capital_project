@@ -448,7 +448,7 @@ async def test_runtime_rpc_race_preserves_selected_adaptive_telemetry_without_ca
         "1000", "500", "1500", "2000"
     ]
     assert telemetry["selected_provider_adaptive"]["adaptive_size_discovery"]["probe_triggered"] is True
-    assert telemetry["size_economic_matrix"][0]["economic_optimum_after_cost_profit_wei"] == "0"
+    assert telemetry["size_economic_matrix"][0]["economic_optimum_after_cost_profit_wei"] == ""
     assert result["opps"] == []
 
 
