@@ -535,6 +535,7 @@ def _aggregate_quote_family_metrics(
         "quote_network_requests_by_family",
         "quote_successes_by_family",
         "quote_failures_by_family",
+        "quote_cancelled_by_family",
         "quote_adapter_unavailable_by_family",
     )
     sources = (two_leg, three_leg)
@@ -879,6 +880,7 @@ def _build_size_matrix_row(
     selected, economic = _size_matrix_selection(rows)
     requests = int(two_metrics.get("quote_requests", 0) or 0) + int(three_metrics.get("quote_requests", 0) or 0)
     successes = int(two_metrics.get("quote_successes", 0) or 0) + int(three_metrics.get("quote_successes", 0) or 0)
+    cancelled = int(two_metrics.get("quote_cancelled", 0) or 0) + int(three_metrics.get("quote_cancelled", 0) or 0)
     basis = "verified_after_cost_profit" if selected else "no_economic_evidence"
     if economic and not selected:
         basis = "economic_optimum_diagnostic"
@@ -888,7 +890,8 @@ def _build_size_matrix_row(
         "amount_in": str(amount),
         "quote_requests": requests,
         "quote_successes": successes,
-        "quote_failures": max(0, requests - successes),
+        "quote_cancelled": cancelled,
+        "quote_failures": max(0, requests - successes - cancelled),
         "quote_failure_reasons": _merge_size_quote_failure_reasons(two_metrics, three_metrics),
         "failed_quote_edge_count": int(two_metrics.get("failed_quote_edge_count", 0) or 0) + int(three_metrics.get("failed_quote_edge_count", 0) or 0),
         "failed_quote_edge_samples": list(dict.fromkeys([
@@ -1340,14 +1343,15 @@ def _merge_size_economic_matrices(
                         existing_candidates[prior_index] = candidate
                         by_candidate[key] = candidate
 
-                for metric in ("quote_requests", "quote_successes", "failed_quote_edge_count"):
+                for metric in ("quote_requests", "quote_successes", "quote_cancelled", "failed_quote_edge_count"):
                     existing[metric] = int(existing.get(metric, 0) or 0) + int(
                         incoming.get(metric, 0) or 0
                     )
                 existing["quote_failures"] = max(
                     0,
                     int(existing.get("quote_requests", 0) or 0)
-                    - int(existing.get("quote_successes", 0) or 0),
+                    - int(existing.get("quote_successes", 0) or 0)
+                    - int(existing.get("quote_cancelled", 0) or 0),
                 )
                 failure_reasons = dict(existing.get("quote_failure_reasons") or {})
                 for reason, count in dict(incoming.get("quote_failure_reasons") or {}).items():
@@ -2481,9 +2485,19 @@ class RuntimePrimaryScanFacade:
                     getattr(self.cfg.flags, "enable_three_leg_loops", False)
                     or getattr(self.cfg.flags, "enable_v3_triangular", False)
                 )
-                remaining_three_leg_budget_ms = min(
-                    int(three_leg_budget_window_ms),
+                route_budget_remaining_ms = max(
+                    0,
                     int((three_leg_route_deadline - time.perf_counter()) * 1000.0),
+                )
+                # A base-only graph pass is the discovery rescue, not a sizing
+                # ladder pass. Reuse time left by two-leg work for triangles while
+                # preserving the same absolute per-tick deadline. Normal adaptive
+                # scans retain the configured three-leg slice so alternate sizes
+                # still have time to be evaluated.
+                remaining_three_leg_budget_ms = (
+                    route_budget_remaining_ms
+                    if selected_full_graph_base_only
+                    else min(int(three_leg_budget_window_ms), route_budget_remaining_ms)
                 )
                 if three_leg_enabled and remaining_three_leg_budget_ms > 0:
                     three = await find_three_leg_opportunities(
@@ -2533,6 +2547,9 @@ class RuntimePrimaryScanFacade:
                         "route_budget_elapsed_ms": 0.0,
                         "route_budget_deadline_ms": 0,
                     })
+                three_metrics["route_budget_allocated_ms"] = max(
+                    0, int(remaining_three_leg_budget_ms)
+                )
                 return list(two), list(three), two_metrics, three_metrics
 
             # Base-size scan is authoritative for the normal path.
@@ -2639,6 +2656,7 @@ class RuntimePrimaryScanFacade:
                         for key in (
                             "quote_requests",
                             "quote_successes",
+                            "quote_cancelled",
                             "routes_considered",
                             "edges_generated",
                             "gross_candidates",
@@ -2948,6 +2966,17 @@ class RuntimePrimaryScanFacade:
                 ) + float(three_leg_telemetry.get("route_evaluation_ms", 0.0)),
                 "two_leg_budget_ms": int(two_leg_route_budget_ms),
                 "three_leg_budget_ms": int(three_leg_route_budget_ms),
+                "three_leg_budget_allocated_ms": int(
+                    three_leg_telemetry.get("route_budget_allocated_ms")
+                    or three_leg_budget_window_ms
+                ),
+                "three_leg_budget_reallocated_ms": max(
+                    0,
+                    int(
+                        three_leg_telemetry.get("route_budget_allocated_ms")
+                        or three_leg_budget_window_ms
+                    ) - int(three_leg_budget_window_ms),
+                ),
                 "configured_total_budget_ms": int(
                     two_leg_route_budget_ms + three_leg_route_budget_ms
                 ),
