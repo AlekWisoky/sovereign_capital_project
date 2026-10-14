@@ -6,7 +6,6 @@ from victor_ai_bot.rpc import RpcResult
 from victor_ai_bot.quote_balancer import (
     BalancerQuote,
     build_balancer_query_batchswap_calldata,
-    classify_balancer_quote_error,
     quote_balancer_given_in,
     quote_balancer_given_in_many,
 )
@@ -108,11 +107,11 @@ def test_balancer_querybatchswap_rejects_malformed_pool_id_and_nonpositive_size(
 @pytest.mark.asyncio
 async def test_malformed_balancer_request_does_not_abort_valid_batch_sibling():
     # queryBatchSwap returns an ABI-encoded int256[]: offset 32, length 2,
-    # deltas [0, -120], meaning a 120-unit token output.
+    # deltas [100, -120], matching the exact-input request for 100 units.
     encoded = (
         (32).to_bytes(32, "big")
         + (2).to_bytes(32, "big")
-        + (0).to_bytes(32, "big")
+        + (100).to_bytes(32, "big")
         + ((1 << 256) - 120).to_bytes(32, "big")
     )
     rpc = _BatchRpc([RpcResult(True, result="0x" + encoded.hex())])
@@ -201,43 +200,172 @@ async def test_single_balancer_quote_invalid_request_is_local_failure():
     assert diagnostics["failure_reasons"] == {"invalid_balancer_request": 1}
 
 
-def _error_string_revert(reason: str) -> str:
-    raw = reason.encode("utf-8")
-    padded = raw + (b"\x00" * ((32 - len(raw) % 32) % 32))
-    payload = (
-        (32).to_bytes(32, "big")
-        + len(raw).to_bytes(32, "big")
-        + padded
-    )
-    return "0x08c379a0" + payload.hex()
-
-
-def test_balancer_revert_classifier_extracts_nested_balancer_codes():
-    assert classify_balancer_quote_error({
-        "code": -32000,
-        "message": "execution reverted: BAL#520",
-    }) == "balancer_tokens_mismatch"
-
-    # Some providers put only the Solidity Error(string) bytes in error.data.
-    assert classify_balancer_quote_error({
-        "code": -32000,
-        "message": "execution reverted",
-        "data": _error_string_revert("BAL#500"),
-    }) == "balancer_invalid_pool_id"
-
-    assert classify_balancer_quote_error({
-        "code": -32000,
-        "message": "execution reverted: an unknown pool error",
-    }) == "rpc_revert"
+def _query_batch_swap_error(deltas):
+    body = len(deltas).to_bytes(32, "big")
+    for value in deltas:
+        body += (int(value) % (1 << 256)).to_bytes(32, "big")
+    return "0xfa61cc12" + body.hex()
 
 
 @pytest.mark.asyncio
-async def test_balancer_batch_quote_publishes_specific_revert_reason():
+async def test_balancer_querybatchswap_decodes_documented_queryerror_revert():
+    # Vault queryBatchSwap intentionally reverts with QueryError(int256[]).
+    # The payload is selector + raw array length + signed deltas (no ABI offset).
+    encoded = _query_batch_swap_error([100, -120])
     rpc = _BatchRpc([
-        RpcResult(False, error={
-            "code": -32000,
-            "message": "execution reverted: BAL#521",
-        })
+        RpcResult(
+            False,
+            error={
+                "code": -32000,
+                "message": "execution reverted",
+                "data": {"originalError": {"data": encoded}},
+            },
+        )
+    ])
+    diagnostics = {}
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [BalancerQuote(amount_out=120)]
+    assert diagnostics["query_revert_decoded"] == 1
+    assert diagnostics.get("failure_reasons", {}) == {}
+
+
+@pytest.mark.asyncio
+async def test_single_balancer_quote_decodes_documented_queryerror_revert():
+    encoded = _query_batch_swap_error([100, -120])
+
+    class _SingleRpc:
+        async def eth_call(self, _vault, _data):
+            return RpcResult(
+                False,
+                error={"code": -32000, "message": "execution reverted: " + encoded},
+            )
+
+    diagnostics = {}
+    quote = await quote_balancer_given_in(
+        _SingleRpc(),
+        "0x" + "11" * 20,
+        "0x" + "22" * 32,
+        "0x" + "33" * 20,
+        "0x" + "44" * 20,
+        100,
+        diagnostics=diagnostics,
+    )
+
+    assert quote == BalancerQuote(amount_out=120)
+    assert diagnostics["query_revert_decoded"] == 1
+    assert diagnostics.get("failure_reasons", {}) == {}
+
+
+@pytest.mark.asyncio
+async def test_non_query_balancer_revert_is_not_accepted_as_a_quote():
+    rpc = _BatchRpc([
+        RpcResult(
+            False,
+            error={
+                "code": -32000,
+                "message": "execution reverted",
+                "data": "0xdeadbeef" + "00" * 64,
+            },
+        )
+    ])
+    diagnostics = {}
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {"rpc_revert": 1}
+    assert diagnostics.get("query_revert_decoded", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_malformed_balancer_queryerror_payload_fails_closed():
+    # Correct selector, but the declared length requires three values and only
+    # two are present. Never infer missing deltas or turn this into a quote.
+    malformed = "0xfa61cc12" + (
+        (3).to_bytes(32, "big")
+        + (100).to_bytes(32, "big")
+        + ((1 << 256) - 120).to_bytes(32, "big")
+    ).hex()
+    rpc = _BatchRpc([
+        RpcResult(False, error={"code": -32000, "message": "execution reverted", "data": malformed})
+    ])
+    diagnostics = {}
+
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {
+        "invalid_query_batch_swap_revert_data": 1
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_query_revert", [False, True])
+async def test_balancer_quote_rejects_asset_deltas_for_different_input_amount(
+    is_query_revert,
+):
+    # The output is positive and the encoding is well-formed, but the input
+    # delta is 99 while this quote was requested for 100. Never bind this output
+    # to the wrong size candidate or allow it to win the size optimum.
+    if is_query_revert:
+        result = RpcResult(
+            False,
+            error={
+                "code": -32000,
+                "message": "execution reverted",
+                "data": _query_batch_swap_error([99, -120]),
+            },
+        )
+    else:
+        ordinary = (
+            (32).to_bytes(32, "big")
+            + (2).to_bytes(32, "big")
+            + (99).to_bytes(32, "big")
+            + ((1 << 256) - 120).to_bytes(32, "big")
+        )
+        result = RpcResult(True, result="0x" + ordinary.hex())
+
+    rpc = _BatchRpc([result])
+    diagnostics = {}
+    quotes = await quote_balancer_given_in_many(
+        rpc,
+        "0x" + "11" * 20,
+        [("0x" + "22" * 32, "0x" + "33" * 20, "0x" + "44" * 20, 100)],
+        diagnostics=diagnostics,
+    )
+
+    assert quotes == [None]
+    assert diagnostics["failure_reasons"] == {"unexpected_input_delta": 1}
+    assert diagnostics.get("query_revert_decoded", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_balancer_known_vault_revert_keeps_protocol_specific_classification():
+    rpc = _BatchRpc([
+        RpcResult(
+            False,
+            error={
+                "code": -32000,
+                "message": "execution reverted: BAL#521: TOKEN_NOT_REGISTERED",
+            },
+        )
     ])
     diagnostics = {}
 
@@ -250,3 +378,4 @@ async def test_balancer_batch_quote_publishes_specific_revert_reason():
 
     assert quotes == [None]
     assert diagnostics["failure_reasons"] == {"balancer_token_not_registered": 1}
+    assert diagnostics.get("query_revert_decoded", 0) == 0

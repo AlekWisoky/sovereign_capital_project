@@ -525,6 +525,107 @@ def _canonical_route_universe_telemetry(
     )
 
 
+_PROBE_SUM_KEYS = (
+    "quote_requests", "quote_successes", "quote_cancelled",
+    "routes_considered", "edges_generated", "gross_candidates",
+    "candidate_count", "route_groups_evaluated",
+    "successful_quote_edge_count", "successful_quote_pool_count",
+    "successful_quote_pair_count", "quote_phase_ms",
+    "route_evaluation_ms", "route_budget_elapsed_ms",
+)
+_PROBE_FAMILY_KEYS = (
+    "quote_attempts_by_family", "quote_network_requests_by_family",
+    "quote_successes_by_family", "quote_failures_by_family",
+    "quote_cancelled_by_family", "quote_adapter_unavailable_by_family",
+)
+
+
+def _merge_probe_flags(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    for key in ("budget_exhausted_after_quote", "route_budget_exhausted"):
+        if key in source:
+            target[key] = bool(target.get(key, False) or source.get(key, False))
+    if source.get("route_budget_exhausted") or source.get("budget_exhausted_after_quote"):
+        target["route_budget_stop_reason"] = "time_budget"
+    target["budget_exhausted_after_quote"] = bool(
+        target.get("budget_exhausted_after_quote", False)
+        or source.get("budget_exhausted_after_quote", False)
+    )
+
+
+def _merge_probe_numeric_counters(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    for key in _PROBE_SUM_KEYS:
+        if key in source:
+            target[key] = float(target.get(key, 0) or 0) + float(source.get(key, 0) or 0)
+    if "quote_query_revert_decoded" in source:
+        target["quote_query_revert_decoded"] = (
+            max(0, int(target.get("quote_query_revert_decoded", 0) or 0))
+            + max(0, int(source.get("quote_query_revert_decoded", 0) or 0))
+        )
+    if "route_budget_deadline_ms" in source:
+        target["route_budget_deadline_ms"] = max(
+            int(target.get("route_budget_deadline_ms", 0) or 0),
+            int(source.get("route_budget_deadline_ms", 0) or 0),
+        )
+
+
+def _merge_probe_reason_maps(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    for key in ("quote_failure_reasons", "route_rejections"):
+        raw = source.get(key) or {}
+        if not isinstance(raw, dict):
+            continue
+        merged = dict(target.get(key) or {})
+        for reason, count in raw.items():
+            name = str(reason)
+            merged[name] = int(merged.get(name, 0) or 0) + max(0, int(count or 0))
+        if merged:
+            target[key] = merged
+
+
+def _merge_probe_family_maps(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    for key in _PROBE_FAMILY_KEYS:
+        raw = source.get(key) or {}
+        if not isinstance(raw, dict):
+            continue
+        merged = dict(target.get(key) or {})
+        for family, count in raw.items():
+            name = str(family).strip().lower()[:64]
+            if name:
+                merged[name] = int(merged.get(name, 0) or 0) + max(0, int(count or 0))
+        target[key] = merged
+
+
+def _merge_probe_adapter_reasons(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    raw = source.get("quote_failure_reasons_by_adapter") or {}
+    if not isinstance(raw, dict):
+        return
+    adapters = dict(target.get("quote_failure_reasons_by_adapter") or {})
+    for adapter, reasons in raw.items():
+        if not isinstance(reasons, dict):
+            continue
+        name = str(adapter).strip().lower()[:64]
+        combined = dict(adapters.get(name) or {})
+        for reason, count in reasons.items():
+            reason_name = str(reason).strip().lower()[:96]
+            combined[reason_name] = int(combined.get(reason_name, 0) or 0) + max(0, int(count or 0))
+        adapters[name] = combined
+    target["quote_failure_reasons_by_adapter"] = adapters
+
+
+def _merge_probe_scan_telemetry(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """Merge one adaptive-size probe without losing route or quote evidence."""
+    _merge_probe_flags(target, source)
+    _merge_probe_numeric_counters(target, source)
+    _merge_probe_reason_maps(target, source)
+    _merge_probe_family_maps(target, source)
+    _merge_probe_adapter_reasons(target, source)
+
+    diagnostics = source.get("size_economic_diagnostics")
+    if diagnostics:
+        target.setdefault("size_economic_diagnostics", [])
+        target["size_economic_diagnostics"].extend(list(diagnostics))
+    _merge_route_group_schedule_telemetry(target, source)
+
+
 def _aggregate_quote_family_metrics(
     two_leg: Dict[str, Any],
     three_leg: Dict[str, Any],
@@ -539,7 +640,7 @@ def _aggregate_quote_family_metrics(
         "quote_adapter_unavailable_by_family",
     )
     sources = (two_leg, three_leg)
-    result: Dict[str, Dict[str, int]] = {}
+    result: Dict[str, Any] = {}
     for metric_name in metric_names:
         combined: Dict[str, int] = {}
         for source in sources:
@@ -570,6 +671,10 @@ def _aggregate_quote_family_metrics(
                     continue
                 target[reason_name] = target.get(reason_name, 0) + value
     result["quote_failure_reasons_by_adapter"] = reasons_by_adapter
+    result["quote_query_revert_decoded"] = sum(
+        max(0, int(source.get("quote_query_revert_decoded", 0) or 0))
+        for source in sources
+    )
     return result
 
 
@@ -2767,54 +2872,7 @@ class RuntimePrimaryScanFacade:
                         (two_leg_telemetry, probe_two_metrics),
                         (three_leg_telemetry, probe_three_metrics),
                     ):
-                        for key in ("budget_exhausted_after_quote", "route_budget_exhausted"):
-                            if key in source:
-                                target[key] = bool(
-                                    target.get(key, False) or source.get(key, False)
-                                )
-                        if source.get("route_budget_exhausted") or source.get("budget_exhausted_after_quote"):
-                            target["route_budget_stop_reason"] = "time_budget"
-                        for key in (
-                            "quote_requests",
-                            "quote_successes",
-                            "quote_cancelled",
-                            "routes_considered",
-                            "edges_generated",
-                            "gross_candidates",
-                            "candidate_count",
-                            "route_groups_evaluated",
-                            "successful_quote_edge_count",
-                            "successful_quote_pool_count",
-                            "successful_quote_pair_count",
-                            "quote_phase_ms",
-                            "route_evaluation_ms",
-                            "route_budget_elapsed_ms",
-                        ):
-                            if key in source:
-                                target[key] = (
-                                    float(target.get(key, 0) or 0) + float(source.get(key, 0) or 0)
-                                )
-                        if "route_budget_deadline_ms" in source:
-                            target["route_budget_deadline_ms"] = max(
-                                int(target.get("route_budget_deadline_ms", 0) or 0),
-                                int(source.get("route_budget_deadline_ms", 0) or 0),
-                            )
-                        for key in ("quote_failure_reasons", "route_rejections"):
-                            merged = dict(target.get(key) or {})
-                            for reason, count in dict(source.get(key) or {}).items():
-                                merged[str(reason)] = int(merged.get(str(reason), 0)) + int(count)
-                            if merged:
-                                target[key] = merged
-                        if source.get("size_economic_diagnostics"):
-                            target.setdefault("size_economic_diagnostics", [])
-                            target["size_economic_diagnostics"].extend(
-                                list(source.get("size_economic_diagnostics") or [])
-                            )
-                        _merge_route_group_schedule_telemetry(target, source)
-                        target["budget_exhausted_after_quote"] = bool(
-                            target.get("budget_exhausted_after_quote", False)
-                            or source.get("budget_exhausted_after_quote", False)
-                        )
+                        _merge_probe_scan_telemetry(target, source)
 
             candidates_after_probe = len(opps2) + len(opps3)
 

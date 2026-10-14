@@ -381,6 +381,9 @@ class RuntimeStateFacade:
                 "failure_reasons_by_adapter": dict(
                     quotes.get("quote_failure_reasons_by_adapter") or {}
                 ),
+                "quote_query_revert_decoded": max(
+                    0, int(quotes.get("quote_query_revert_decoded", 0) or 0)
+                ),
                 "quote_attempts_by_family": dict(quotes.get("quote_attempts_by_family") or {}),
                 "quote_network_requests_by_family": dict(quotes.get("quote_network_requests_by_family") or {}),
                 "quote_successes_by_family": dict(quotes.get("quote_successes_by_family") or {}),
