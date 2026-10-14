@@ -12,7 +12,7 @@ from ..arb_engine import build_edges, find_three_leg_opportunities, find_two_leg
 from ..execution_capture.final_quote import FinalQuoteError, produce_market_price_evidence
 from ..cache import PerBlockCache
 from ..gas_model import BASE_CHAIN_ID, estimate_base_l1_fee_wei, estimate_gas_cost_wei_from_cfg, estimate_route_gas_units
-from ..models import Opportunity
+from ..models import Opportunity, Route, RouteLeg
 from ..calldata_builder import build_execute_calldata
 from ..rpc import JsonRpcClient
 from ..rpc_economic_selector import RpcEconomicEvidence, select_best_rpc_evidence
@@ -1217,6 +1217,142 @@ def _existing_size_probe_route_ids(candidates: List[Opportunity]) -> set[str]:
         if route_id:
             route_ids.add(route_id)
     return route_ids
+
+
+def _diagnostic_size_probe_candidates(
+    evidence: List[Dict[str, Any]] | None,
+    *,
+    chain_name: str,
+    excluded_route_ids: set[str],
+    max_candidates: int,
+) -> List[Opportunity]:
+    """Rehydrate bounded read-only near-miss routes for economic size probing.
+
+    Only diagnostic records that preserve exact edge params and encoded leg data
+    are eligible. The resulting models are explicitly non-executable and are
+    filtered from the live opportunity list after their size evidence is saved.
+    """
+    limit = max(0, int(max_candidates))
+    if limit <= 0:
+        return []
+    supported_dexes = {
+        "univ3", "curve", "balancer", "aerodrome", "slipstream",
+        "camelot_algebra", "camelot_v2", "constant_product",
+    }
+    best_by_route: Dict[str, tuple[tuple[int, int, int], Dict[str, Any]]] = {}
+    for raw in list(evidence or []):
+        if not isinstance(raw, dict) or raw.get("diagnostic_only") is not True:
+            continue
+        route_id = str(raw.get("route_id") or "").strip()
+        if not route_id or route_id in excluded_route_ids:
+            continue
+        try:
+            amount_in = int(raw.get("amount_in") or 0)
+            legs = [leg for leg in list(raw.get("legs") or []) if isinstance(leg, dict)]
+            gross = int(raw.get("gross_profit_wei") or 0)
+            fee = int(raw.get("flashloan_fee_wei") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if amount_in <= 0 or len(legs) not in {2, 3}:
+            continue
+        exact_params: List[Dict[str, Any]] = []
+        valid_legs = True
+        for leg in legs:
+            dex = str(leg.get("dex") or "").strip().lower()
+            params = leg.get("edge_params")
+            try:
+                leg_amount = int(leg.get("amount_in") or 0)
+                leg_min_out = int(leg.get("min_out") or 0)
+            except (TypeError, ValueError, OverflowError):
+                valid_legs = False
+                break
+            if (
+                dex not in supported_dexes
+                or not str(leg.get("venue") or "").strip()
+                or not str(leg.get("token_in") or "").strip()
+                or not str(leg.get("token_out") or "").strip()
+                or not isinstance(params, dict)
+                or leg_amount <= 0
+                or leg_min_out < 0
+                or "data" not in leg
+            ):
+                valid_legs = False
+                break
+            exact_params.append(dict(params))
+        if not valid_legs:
+            continue
+        score = (
+            int(raw.get("gas_cost_conversion_available") is True),
+            gross - fee,
+            gross,
+        )
+        current = best_by_route.get(route_id)
+        if current is None or score > current[0]:
+            best_by_route[route_id] = (score, raw)
+
+    ranked = sorted(
+        best_by_route.items(),
+        key=lambda item: (
+            item[1][0],
+            item[0],
+        ),
+        reverse=True,
+    )
+    candidates: List[Opportunity] = []
+    for route_id, (_score, raw) in ranked[:limit]:
+        legs_raw = [leg for leg in list(raw.get("legs") or []) if isinstance(leg, dict)]
+        route_legs: List[RouteLeg] = []
+        params: List[Dict[str, Any]] = []
+        outs: List[str] = []
+        quote_metas: List[Dict[str, Any]] = []
+        for leg in legs_raw:
+            route_legs.append(RouteLeg(
+                dex=str(leg["dex"]).strip().lower(),
+                venue=str(leg["venue"]),
+                token_in=str(leg["token_in"]),
+                token_out=str(leg["token_out"]),
+                amount_in=str(leg["amount_in"]),
+                min_out=str(leg.get("min_out") or "0"),
+                data=str(leg.get("data") or ""),
+            ))
+            params.append(dict(leg["edge_params"]))
+            outs.append(str(leg.get("quoted_amount_out") or ""))
+            quote_meta = leg.get("quote_meta")
+            quote_metas.append(dict(quote_meta) if isinstance(quote_meta, dict) else {})
+        amount_in = int(raw["amount_in"])
+        meta: Dict[str, Any] = {
+            "route_type": "2leg" if len(route_legs) == 2 else "3leg",
+            "route_edge_params": params,
+            "adaptive_seed_amount_in": str(amount_in),
+            "diagnostic_only": True,
+            "size_probe_diagnostic_only": True,
+            "size_probe_source": "non_positive_quote_diagnostic",
+            "size_probe_source_reason": str(raw.get("reason") or "non_positive_gross_profit"),
+        }
+        for index, (out, quote_meta) in enumerate(zip(outs, quote_metas), start=1):
+            if out:
+                meta[f"out{index}"] = out
+            meta[f"leg{index}"] = quote_meta
+        try:
+            gross = int(raw.get("gross_profit_wei") or 0)
+        except (TypeError, ValueError, OverflowError):
+            gross = 0
+        candidates.append(Opportunity(
+            id=f"size-probe-{route_id}-{amount_in}",
+            chain=str(chain_name),
+            strategy=(
+                "two-leg:diagnostic" if len(route_legs) == 2 else "tri:diagnostic"
+            ),
+            expected_profit_raw=str(gross),
+            expected_profit_usd="0",
+            route=Route(legs=route_legs),
+            min_outs=[str(leg.min_out) for leg in route_legs],
+            route_id=route_id,
+            can_execute=False,
+            created_at_ms=0,
+            meta=meta,
+        ))
+    return candidates
 
 
 def _merge_size_probe_group(
