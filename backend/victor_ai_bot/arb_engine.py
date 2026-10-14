@@ -2330,6 +2330,47 @@ def _collect_quote_edge_job_results(
     }
 
 
+async def _quote_edge_job_wave(
+    rpc: Any,
+    cfg: Any,
+    cache: PerBlockCache,
+    wave: Sequence[Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]],
+    *,
+    deadline: float,
+    metrics: Dict[str, Any],
+) -> Tuple[Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, int]]:
+    """Execute one bounded quote wave and account for drained/cancelled jobs."""
+    tasks: List[asyncio.Task] = []
+    task_jobs: Dict[asyncio.Task, Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]] = {}
+    for job in wave:
+        signature, amount_in, edges = job
+        task = asyncio.create_task(
+            quote_edges_batch(rpc, cfg, cache, edges, int(amount_in), metrics=metrics)
+        )
+        tasks.append(task)
+        task_jobs[task] = job
+
+    done, pending = await _wait_for_quote_tasks_until_deadline(tasks, deadline=deadline)
+    results, counts = _collect_quote_edge_job_results(tasks, done, task_jobs, cache)
+    recovered_pending = 0
+    for task in pending:
+        signature, amount_in, edges = task_jobs[task]
+        recovered = _recover_cached_edge_quotes(cache, amount_in, edges)
+        if recovered:
+            results[signature] = recovered
+            recovered_pending += len(recovered)
+
+    return results, {
+        "batches_completed": counts["batches_completed"],
+        "batches_failed": counts["batches_failed"],
+        "batches_cancelled": counts["batches_cancelled"] + len(pending),
+        "pending_batches": len(pending),
+        "edges_recovered_after_cancellation": (
+            counts["edges_recovered_after_cancellation"] + recovered_pending
+        ),
+    }
+
+
 async def _quote_edge_jobs_in_bounded_waves(
     rpc: Any,
     cfg: Any,
@@ -2341,11 +2382,11 @@ async def _quote_edge_jobs_in_bounded_waves(
     metrics: Dict[str, Any],
     allow_one_after_deadline: bool = False,
 ) -> tuple[Dict[Tuple[int, Tuple[str, ...]], Dict[str, Optional[Tuple[int, Dict[str, Any]]]]], Dict[str, Any]]:
-    """Quote unique jobs in bounded waves and retain exact completed evidence.
+    """Quote unique jobs in bounded waves; optionally finish one funded final-leg batch.
 
     Triangle final-leg callers may finish one already-funded batch after the
-    global route deadline. That single batch gets at most 500ms to finish; no
-    later route group or wave receives extra time.
+    global route deadline. That single batch gets at most 500ms; later route
+    groups and waves receive no additional time.
     """
     ordered = list(jobs)
     limit = max(1, min(4, int(parallelism)))
@@ -2364,25 +2405,19 @@ async def _quote_edge_jobs_in_bounded_waves(
             break
 
         wave_size = 1 if expired else limit
-        wait_deadline = deadline
         if expired:
             grace_used = True
-            wait_deadline = max(deadline, time.perf_counter()) + 0.5
-
+        wait_deadline = max(deadline, time.perf_counter()) + 0.5 if expired else deadline
         wave = ordered[cursor:cursor + wave_size]
-        tasks: List[asyncio.Task] = []
-        task_jobs: Dict[asyncio.Task, Tuple[Tuple[int, Tuple[str, ...]], int, List[Edge]]] = {}
-        for job in wave:
-            signature, amount_in, edges = job
-            task = asyncio.create_task(
-                quote_edges_batch(rpc, cfg, cache, edges, int(amount_in), metrics=metrics)
-            )
-            tasks.append(task)
-            task_jobs[task] = job
-
-        done, pending = await _wait_for_quote_tasks_until_deadline(tasks, deadline=wait_deadline)
+        wave_results, wave_counts = await _quote_edge_job_wave(
+            rpc,
+            cfg,
+            cache,
+            wave,
+            deadline=wait_deadline,
+            metrics=metrics,
+        )
         waves += 1
-        wave_results, wave_counts = _collect_quote_edge_job_results(tasks, done, task_jobs, cache)
         results.update(wave_results)
         completed += wave_counts["batches_completed"]
         failed += wave_counts["batches_failed"]
@@ -2390,14 +2425,7 @@ async def _quote_edge_jobs_in_bounded_waves(
         recovered_cancelled += wave_counts["edges_recovered_after_cancellation"]
         cursor += len(wave)
 
-        if pending:
-            cancelled += len(pending)
-            for task in pending:
-                signature, amount_in, edges = task_jobs[task]
-                recovered = _recover_cached_edge_quotes(cache, amount_in, edges)
-                if recovered:
-                    results[signature] = recovered
-                    recovered_cancelled += len(recovered)
+        if wave_counts["pending_batches"]:
             remaining = ordered[cursor:]
             skipped += len(remaining)
             recovered_skipped += _recover_skipped_edge_jobs(remaining, cache, results)
