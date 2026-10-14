@@ -169,11 +169,13 @@ async def test_scan_primary_opportunities_preserves_discovery_scan_sort_and_trun
     assert runtime._market_pipeline_telemetry['quotes'] == {
         'requests': 14,
         'successes': 12,
+        'cancelled': 0,
         'failure_reasons': {},
         'quote_attempts_by_family': {},
         'quote_network_requests_by_family': {},
         'quote_successes_by_family': {},
         'quote_failures_by_family': {},
+        'quote_cancelled_by_family': {},
         'quote_adapter_unavailable_by_family': {},
     }
     assert runtime._market_pipeline_telemetry['routes_considered'] == 17
@@ -829,6 +831,7 @@ def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
         "quote_network_requests_by_family": {"univ3": 9},
         "quote_successes_by_family": {"univ3": 7},
         "quote_failures_by_family": {"univ3": 2},
+        "quote_cancelled_by_family": {"univ3": 1, "balancer": 2},
         "quote_adapter_unavailable_by_family": {"curve": 1},
     }
     three_leg = {
@@ -852,6 +855,9 @@ def test_quote_family_telemetry_aggregates_two_and_three_leg_counts():
     }
     assert result["quote_failures_by_family"] == {
         "univ3": 3, "balancer": 2,
+    }
+    assert result["quote_cancelled_by_family"] == {
+        "univ3": 1, "balancer": 2,
     }
     assert result["quote_adapter_unavailable_by_family"] == {
         "curve": 1, "balancer": 1,
