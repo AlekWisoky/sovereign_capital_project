@@ -72,6 +72,82 @@ def test_revalidation_accepts_non_weth_profit_token_gas_conversion():
     assert state["profit_after_costs_wei"] == "10000"
 
 
+def test_non_weth_without_exact_gas_conversion_cannot_authorize_after_cost():
+    opp = _opp(1_000_000, 1_020_000)
+    state = revalidate_profitability_state(
+        opp,
+        _cfg(),
+        stage="execution_preflight_gate",
+        source="test",
+        gas_cost_wei=10**12,
+        quoted_amount_out_wei=1_020_000,
+    )
+
+    assert state["revalidated"] is False
+    assert state["valid"] is False
+    assert state["authoritative"] is False
+    assert state["reason"] == "gas_cost_profit_token_unavailable"
+    assert state["gas_cost_conversion_available"] is False
+    assert state["gas_cost_profit_token_wei"] == ""
+    assert state["profit_after_costs_wei"] == ""
+    assert state["economic_profit_after_costs_wei"] == ""
+    # Repayment is a separate fact: output still covers principal plus the
+    # configured 90 bps fee, even though net profit is not measurable.
+    assert state["repayment_valid"] is True
+
+
+def test_native_gas_is_same_unit_only_for_exact_wrapped_native_borrow_token():
+    cfg = _cfg()
+    cfg.chain = SimpleNamespace(
+        weth="0x0000000000000000000000000000000000000002"
+    )
+    opp = _opp(1_000_000, 1_020_000)
+    state = revalidate_profitability_state(
+        opp,
+        cfg,
+        stage="scan_after_fee_revalidation",
+        source="test",
+        gas_cost_wei=1_000,
+        quoted_amount_out_wei=1_020_000,
+    )
+
+    assert state["gas_cost_conversion_available"] is True
+    assert state["gas_cost_profit_token_wei"] == "1000"
+    assert state["gas_cost_profit_token_address"] == "0x0000000000000000000000000000000000000002"
+    assert state["authoritative"] is True
+    assert state["profit_after_costs_wei"] == "10000"
+
+
+def test_cached_conversion_cannot_be_reused_after_profit_token_changes():
+    opp = _opp(1_000_000, 1_020_000)
+    cfg = _cfg()
+    first = revalidate_profitability_state(
+        opp,
+        cfg,
+        stage="scan_after_fee_revalidation",
+        source="test",
+        gas_cost_wei=10**12,
+        gas_cost_in_profit_token_wei=1_000,
+        quoted_amount_out_wei=1_020_000,
+    )
+    assert first["authoritative"] is True
+
+    opp.route.legs[0].token_in = "0x0000000000000000000000000000000000000003"
+    second = revalidate_profitability_state(
+        opp,
+        cfg,
+        stage="execution_preflight_gate",
+        source="test",
+        gas_cost_wei=10**12,
+        quoted_amount_out_wei=1_020_000,
+    )
+
+    assert second["authoritative"] is False
+    assert second["reason"] == "gas_cost_profit_token_unavailable"
+    assert second["gas_cost_conversion_available"] is False
+    assert second["profit_after_costs_wei"] == ""
+
+
 @pytest.mark.asyncio
 async def test_scan_revalidation_wires_converted_gas_into_profitability(monkeypatch):
     from victor_ai_bot.runtime_services import runtime_primary_scan_facade as scan_mod
