@@ -753,6 +753,19 @@ def _candidate_economic_after_cost_for_sizing(candidate: Any) -> int | None:
     return after_cost
 
 
+
+def _has_explicit_profit_token_gas_conversion(state: Dict[str, Any]) -> bool:
+    """Accept only a declared, non-negative conversion result—not native-wei fallback."""
+    if state.get("gas_cost_conversion_available") is not True:
+        return False
+    raw = state.get("gas_cost_profit_token_wei")
+    if raw in (None, ""):
+        return False
+    try:
+        return int(raw) >= 0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
 def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]:
     """Prefer verified executable positives, then best signed economic evidence."""
     meta = getattr(candidate, "meta", {}) or {}
@@ -771,8 +784,7 @@ def _candidate_sizing_sort_key(candidate: Any) -> tuple[int, int, int, int, str]
         and state.get("authoritative") is True
         and state.get("valid") is True
         and state.get("repayment_valid") is True
-        and state.get("gas_cost_conversion_available") is True
-        and state.get("gas_cost_profit_token_wei") not in (None, "")
+        and _has_explicit_profit_token_gas_conversion(state)
         and canonical_after_cost > 0
     )
     try:
@@ -882,14 +894,8 @@ def _size_economic_candidate_row(candidate: Opportunity) -> Dict[str, Any]:
     profitability = profitability if isinstance(profitability, dict) else {}
     legs, amount_in_value = _candidate_route_snapshot(candidate)
     fields = _candidate_economic_fields(candidate, meta, profitability, amount_in_value)
-    try:
-        gas_profit_token_value = int(fields["gas_cost_profit_token_wei"])
-    except (TypeError, ValueError, OverflowError):
-        gas_profit_token_value = -1
-    gas_conversion_available = bool(
-        profitability.get("gas_cost_conversion_available") is True
-        and profitability.get("gas_cost_profit_token_wei") not in (None, "")
-        and gas_profit_token_value >= 0
+    gas_conversion_available = _has_explicit_profit_token_gas_conversion(
+        profitability
     )
     economic_unknown = not gas_conversion_available
     row = {
@@ -1048,7 +1054,7 @@ def _size_matrix_selection(rows: List[Dict[str, Any]]) -> tuple[Dict[str, Any] |
             and row.get("authoritative") is True
             and row.get("valid") is True
             and row.get("repayment_valid") is True
-            and row.get("gas_cost_conversion_available") is True
+            and _has_explicit_profit_token_gas_conversion(row)
         ):
             continue
         try:
@@ -1430,8 +1436,7 @@ def _authoritative_positive_size_candidate(candidate: Any) -> bool:
             and state.get("authoritative") is True
             and state.get("valid") is True
             and state.get("repayment_valid") is True
-            and state.get("gas_cost_conversion_available") is True
-            and state.get("gas_cost_profit_token_wei") not in (None, "")
+            and _has_explicit_profit_token_gas_conversion(state)
             and int(state.get("profit_after_costs_wei") or 0) > 0
         )
     except (TypeError, ValueError, OverflowError):
@@ -1810,10 +1815,7 @@ def _merge_size_economic_matrices(
         except (TypeError, ValueError, OverflowError):
             after_cost = None
         economic = _economic_after_cost_profit(row)
-        gas_converted = bool(
-            row.get("gas_cost_conversion_available") is True
-            and row.get("gas_cost_profit_token_wei") not in (None, "")
-        )
+        gas_converted = _has_explicit_profit_token_gas_conversion(row)
         repayment_valid = row.get("repayment_valid") is True
         authoritative_valid = bool(
             row.get("revalidated") is True
