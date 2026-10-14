@@ -500,10 +500,14 @@ async def test_scan_probes_when_gross_candidates_are_not_after_cost_profitable(m
     assert matrix[0]["quote_successes"] == 1
     assert matrix[0]["quote_failures"] == 0
     assert matrix[0]["candidates"][0]["route_id"] == "route-a"
-    assert matrix[0]["candidates"][0]["after_cost_profit_wei"] == "0"
-    assert matrix[0]["selection_basis"] == "economic_optimum_diagnostic"
-    assert matrix[0]["economic_optimum_route_id"] == "route-a"
-    assert matrix[0]["economic_optimum_after_cost_profit_wei"] == "0"
+    # The fixture has no venue/leg gas evidence, so a numeric native-gas
+    # estimate cannot be treated as profit-token gas or a signed net result.
+    assert matrix[0]["candidates"][0]["after_cost_profit_wei"] == ""
+    assert matrix[0]["selection_basis"] == "gross_profit_upper_bound_only"
+    assert matrix[0]["economic_optimum_route_id"] == ""
+    assert matrix[0]["economic_optimum_after_cost_profit_wei"] == ""
+    assert matrix[0]["economic_optimum_status"] == "upper_bound_only_gas_conversion_unavailable"
+    assert matrix[0]["economic_upper_bound_route_id"] == "route-a"
     assert all(row["selection_basis"] in {"economic_optimum_diagnostic", "no_economic_evidence", "verified_after_cost_profit"} for row in matrix)
 
 
