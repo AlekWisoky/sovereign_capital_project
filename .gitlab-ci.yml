@@ -1,0 +1,25 @@
+# GitLab CI: isolated, non-deploying repository validation.
+# GitHub remains the canonical repository; this pipeline only performs static checks.
+# No production credentials, network integrations, or deployment jobs are used.
+
+image: python:3.11-slim
+
+stages:
+  - validate
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+static-validation:
+  stage: validate
+  interruptible: true
+  timeout: 20m
+  before_script:
+    - python -m pip install --disable-pip-version-check --upgrade pip
+    - pip install -c backend/constraints.txt -r backend/requirements-dev.txt
+  script:
+    - ruff check backend
+    - python -m compileall -q backend
+    - mypy $(tr '\n' ' ' < backend/mypy_omar_targets.txt)
