@@ -56,6 +56,7 @@
   "overrides": {
     "@walletconnect/sign-client": "2.23.8",
     "@walletconnect/universal-provider": "2.23.8",
-    "@xmldom/xmldom": "0.8.11"
+    "@xmldom/xmldom": "0.8.15",
+    "tar": "7.5.23"
   }
 }

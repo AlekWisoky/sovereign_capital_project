@@ -41,3 +41,6 @@ mobile/dist/
 mobile/web-build/
 *.swp
 *~
+
+# Mobile TypeScript CI build output
+mobile/.ci-build/
