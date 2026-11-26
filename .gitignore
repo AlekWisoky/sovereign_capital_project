@@ -41,3 +41,4 @@ mobile/dist/
 mobile/web-build/
 *.swp
 *~
+.ideavo/project
