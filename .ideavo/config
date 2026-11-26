@@ -1,0 +1,68 @@
+{
+  "systemSetup": [
+    {
+      "name": "Bootstrap pip",
+      "command": "curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && python3 /tmp/get-pip.py --user --break-system-packages"
+    }
+  ],
+  "templateName": "custom",
+  "projectDependencies": [
+    {
+      "name": "Install Backend Dependencies",
+      "command": "python3 -m pip install --user --break-system-packages -c backend/constraints.txt -r backend/requirements-dev.txt"
+    },
+    {
+      "name": "Install Mobile Dependencies",
+      "command": "npm install --prefix mobile --legacy-peer-deps --no-fund --no-audit"
+    }
+  ],
+  "codeChecks": [
+    {
+      "name": "Lint Backend",
+      "command": "python3 -m ruff check backend"
+    },
+    {
+      "name": "Compile Backend",
+      "command": "python3 -m compileall -q backend"
+    },
+    {
+      "name": "Typecheck Mobile",
+      "command": "npm run typecheck --prefix mobile"
+    }
+  ],
+  "buildSteps": [],
+  "runStep": [
+    {
+      "name": "Run Backend Server",
+      "command": "cd backend && VICTOR_CORS_ALLOW_ORIGINS=\"*\" python3 -m uvicorn victor_ai_bot.server:app --host 0.0.0.0 --port 4000 --forwarded-allow-ips=\"*\"",
+      "port": "4000"
+    }
+  ],
+  "deploySteps": [],
+  "cleanupFiles": [
+    ".venv",
+    "**/__pycache__",
+    "**/*.pyc",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".coverage",
+    "htmlcov",
+    "backend/data",
+    "mobile/node_modules",
+    "mobile/.expo",
+    "mobile/dist",
+    "mobile/.ci-build"
+  ],
+  "packageManager": "npm",
+  "envPaths": [
+    {
+      "name": "default",
+      "path": ".env"
+    },
+    {
+      "name": "mobile",
+      "path": "mobile/.env"
+    }
+  ]
+}
