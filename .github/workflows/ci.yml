@@ -124,10 +124,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: |
-          cd mobile
-          npm install --no-audit --no-fund
-          npm run ci:test
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+      - name: Whole-app TypeScript check
+        working-directory: mobile
+        run: npm run typecheck:full
+      - name: Mobile unit tests
+        working-directory: mobile
+        run: npm run ci:test
 
   contracts:
     runs-on: ubuntu-latest

@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "dev:web": "expo start --web",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:full": "tsc -p tsconfig.fullcheck.json --noEmit",
     "typecheck:ci": "tsc -p tsconfig.ci.json --outDir .ci-build",
     "test:unit": "node --test .ci-build/tests/amounts.test.js .ci-build/tests/launch-utils.test.js .ci-build/tests/launch-store.test.js .ci-build/tests/execution-summary.test.js .ci-build/tests/explain-summary.test.js .ci-build/tests/wealth-goal-summary.test.js .ci-build/tests/offramp-status.test.js .ci-build/tests/capital-truth-health.test.js .ci-build/tests/command-utils.test.js .ci-build/tests/fund-utils.test.js .ci-build/tests/projection-compatibility.test.js .ci-build/tests/mutation-guard.test.js .ci-build/tests/reconciliation.test.js .ci-build/tests/ws-summary.test.js .ci-build/tests/canonical-contracts.test.js",
     "ci:test": "npm run typecheck:ci && npm run test:unit",
