@@ -126,7 +126,7 @@ jobs:
           node-version: "20"
       - name: Install mobile dependencies
         working-directory: mobile
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
       - name: Whole-app TypeScript check
         working-directory: mobile
         run: npm run typecheck:full
